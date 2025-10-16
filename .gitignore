@@ -27,6 +27,19 @@ go.work.sum
 # env file
 .env
 
+# Ignore model files
+*.gguf
+*.bin
+*.pt
+*.safetensors
+
+# Ignore model directories
+.helix/
+helix/models/
+helix_data/
+models/
+
+
 # Editor/IDE
 # .idea/
 # .vscode/
