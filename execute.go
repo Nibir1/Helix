@@ -54,8 +54,64 @@ func IsCommandSafe(command string) bool {
 	return true
 }
 
+// ValidateAndCleanCommand ensures the command is safe and properly formatted
+func ValidateAndCleanCommand(command string) (string, error) {
+	command = strings.TrimSpace(command)
+
+	// Remove any remaining backticks or code block markers
+	command = strings.ReplaceAll(command, "`", "")
+	command = strings.ReplaceAll(command, "```", "")
+
+	// Remove any markdown formatting
+	command = strings.ReplaceAll(command, "**", "")
+	command = strings.ReplaceAll(command, "*", "")
+
+	// Remove leading/trailing quotes
+	command = strings.Trim(command, `"'`)
+
+	// Remove common AI prefixes
+	prefixes := []string{
+		"Command:", "Here's the command:", "The command is:",
+		"bash:", "shell:", "$", ">",
+	}
+
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(command, prefix) {
+			command = strings.TrimPrefix(command, prefix)
+			command = strings.TrimSpace(command)
+		}
+	}
+
+	// Check if command is empty after cleaning
+	if command == "" {
+		return "", fmt.Errorf("empty command after cleaning")
+	}
+
+	// Basic command structure validation
+	if strings.Contains(command, "\n") {
+		// Take only the first line for multi-line commands
+		lines := strings.Split(command, "\n")
+		command = strings.TrimSpace(lines[0])
+	}
+
+	// Safety validation
+	if err := ValidateCommand(command); err != nil {
+		return "", err
+	}
+
+	return command, nil
+}
+
 // ExecuteCommand runs a shell command with safety checks
 func ExecuteCommand(command string, config ExecuteConfig, env Env) error {
+	// Clean and validate the command first
+	cleanedCommand, err := ValidateAndCleanCommand(command)
+	if err != nil {
+		return fmt.Errorf("command validation failed: %w", err)
+	}
+
+	command = cleanedCommand
+
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return fmt.Errorf("empty command")
@@ -106,7 +162,7 @@ func ExecuteCommand(command string, config ExecuteConfig, env Env) error {
 	cmd.Stdin = os.Stdin
 
 	// Execute
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		return fmt.Errorf("command execution failed: %w", err)
 	}

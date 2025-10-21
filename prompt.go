@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -20,15 +21,18 @@ func NewPromptBuilder(env Env, online bool) *PromptBuilder {
 	}
 }
 
-// BuildCommandPrompt creates a prompt for command generation
+// Enhanced BuildCommandPrompt to get cleaner output
 func (pb *PromptBuilder) BuildCommandPrompt(userInput string) string {
 	return fmt.Sprintf(`You are Helix, an intelligent CLI assistant. Convert the user's natural language request into a single, safe shell command for %s (%s).
 
-Follow these rules:
-1. Output ONLY the command without explanations
-2. Make it safe and avoid destructive operations
-3. Use appropriate package managers for the OS
-4. Keep it concise and efficient
+CRITICAL RULES:
+1. Output ONLY the raw command without any explanations, backticks, or formatting
+2. Do NOT use markdown code blocks
+3. Do NOT include backticks
+4. Do NOT add any text before or after the command
+5. Make it safe and avoid destructive operations
+6. Use appropriate package managers for the OS
+7. Keep it concise and efficient
 
 User: %s
 
@@ -81,15 +85,44 @@ Command:`, verb, packageName, pb.env.OSName, pb.env.OSName)
 
 // ExtractCommand cleans AI output to get just the command
 func ExtractCommand(aiOutput string) string {
-	// Remove code blocks if present
+	// Remove all code blocks and backticks
 	aiOutput = strings.ReplaceAll(aiOutput, "```bash", "")
 	aiOutput = strings.ReplaceAll(aiOutput, "```sh", "")
 	aiOutput = strings.ReplaceAll(aiOutput, "```", "")
 
+	// Remove backticks from the entire output
+	aiOutput = strings.ReplaceAll(aiOutput, "`", "")
+
+	// Remove any markdown formatting
+	aiOutput = strings.ReplaceAll(aiOutput, "**", "")
+
 	// Take only the first line (in case AI adds explanations)
 	lines := strings.Split(aiOutput, "\n")
-	if len(lines) > 0 {
-		return strings.TrimSpace(lines[0])
+	var command string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "//") && !strings.HasPrefix(line, "#") {
+			command = line
+			break
+		}
 	}
-	return strings.TrimSpace(aiOutput)
+
+	// Remove any leading/trailing quotes
+	command = strings.Trim(command, `"'`)
+
+	// Final cleanup - remove any non-command text
+	// Look for the first occurrence of common command patterns
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`^[a-zA-Z0-9_\-\./]+\s+`), // Starts with command
+		regexp.MustCompile(`^[a-z]+\s+`),             // Starts with lowercase word
+	}
+
+	for _, pattern := range patterns {
+		if match := pattern.FindString(command); match != "" {
+			command = strings.TrimSpace(command)
+			break
+		}
+	}
+
+	return strings.TrimSpace(command)
 }

@@ -240,10 +240,25 @@ func handleCmdCommand(input string, mockMode bool) {
 
 	if command == "" {
 		color.Red("❌ AI didn't generate a valid command")
+		color.Yellow("Raw AI response: %s", aiResponse)
 		return
 	}
 
+	// Clean and validate the command
+	cleanedCommand, err := ValidateAndCleanCommand(command)
+	if err != nil {
+		color.Red("❌ Command validation failed: %v", err)
+		color.Yellow("Raw command: %s", command)
+		return
+	}
+	command = cleanedCommand
+
 	color.Cyan("💡 Generated command: %s", command)
+
+	// Show the cleaned command for transparency
+	if command != strings.TrimSpace(aiResponse) {
+		color.Yellow("🔧 Note: Command was cleaned for safety")
+	}
 
 	// Ask for explanation if the command looks complex
 	if shouldExplainCommand(command) && AskForConfirmation("Would you like an explanation of this command?") {
