@@ -99,3 +99,27 @@ func CloseModel() {
 func ModelIsLoaded() bool {
 	return model != nil
 }
+
+func TestModelWithSimplePrompt() (string, error) {
+	if model == nil {
+		return "", fmt.Errorf("model not loaded")
+	}
+
+	// Very simple, constrained prompt
+	prompt := "User: Say 'Hello world'\nAssistant: Hello world"
+
+	// Very restrictive parameters
+	opts := []llama.PredictOption{
+		llama.SetTemperature(0.1),
+		llama.SetTopP(0.5),
+		llama.SetTopK(10),
+		llama.SetTokens(10),
+	}
+
+	response, err := model.Predict(prompt, opts...)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(response), nil
+}

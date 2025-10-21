@@ -46,11 +46,34 @@ func (pb *PromptBuilder) BuildAskPrompt(userInput string) string {
 		status = "online"
 	}
 
-	return fmt.Sprintf(`You are Helix, a helpful CLI assistant. You are currently %s.
+	return fmt.Sprintf(`You are Helix, a helpful CLI assistant. The user is asking a question.
+
+IMPORTANT: Provide a direct, helpful response to the user's question. Do not ask questions back. Do not be meta. Just answer helpfully.
+
+Current status: %s
+User question: %s
+
+Provide a concise, helpful answer:`, status, userInput)
+}
+
+// BuildEnhancedAskPrompt for better responses
+func (pb *PromptBuilder) BuildEnhancedAskPrompt(userInput string) string {
+	status := "offline"
+	if pb.online {
+		status = "online"
+	}
+
+	return fmt.Sprintf(`You are Helix, an AI assistant in a command-line interface. Answer the user's question directly and helpfully.
+
+Context:
+- You are running in a CLI environment
+- Status: %s
+- User's shell: %s on %s
 
 User question: %s
 
-Provide a concise, helpful response. If you're offline, mention that your knowledge is limited and you cannot access real-time information.`, status, userInput)
+Provide a clear, direct answer. If you don't know something or are offline, be honest about limitations.`,
+		status, pb.env.Shell, pb.env.OSName, userInput)
 }
 
 // BuildExplainPrompt creates a prompt to explain commands

@@ -182,6 +182,8 @@ func runEnhancedCLI() {
 			showHelp()
 		case input == "/online":
 			checkOnlineStatus()
+		case input == "/test-ai":
+			testAIModel()
 		case strings.HasPrefix(input, "/cmd"):
 			handleCmdCommand(input, false)
 		case strings.HasPrefix(input, "/ask"):
@@ -203,7 +205,6 @@ func runEnhancedCLI() {
 }
 
 // Command handlers for the enhanced CLI
-
 func handleCmdCommand(input string, mockMode bool) {
 	commandText := strings.TrimSpace(strings.TrimPrefix(input, "/cmd"))
 	if commandText == "" {
@@ -286,9 +287,6 @@ func handleAskCommand(input string, mockMode bool) {
 		return
 	}
 
-	// Build the prompt for general questions
-	prompt := pb.BuildAskPrompt(promptText)
-
 	color.Blue("🤖 Thinking about: %s", promptText)
 
 	var response string
@@ -298,12 +296,19 @@ func handleAskCommand(input string, mockMode bool) {
 		// Mock AI response
 		response = generateMockResponse(promptText)
 	} else {
-		// Real AI processing with enhanced config for better responses
+		// Use a prompt that enforces English and concise responses
+		prompt := fmt.Sprintf(`Instruction: Answer the following question in English. Be concise and direct.
+
+Question: %s
+
+Answer:`, promptText)
+
+		// Use more restrictive parameters
 		config := ModelConfig{
-			Temperature: 0.8,
-			TopP:        0.9,
-			TopK:        50,
-			MaxTokens:   300,
+			Temperature: 0.3, // Lower for more deterministic responses
+			TopP:        0.7,
+			TopK:        20,
+			MaxTokens:   150, // Limit response length
 		}
 
 		start := time.Now()
@@ -313,6 +318,17 @@ func handleAskCommand(input string, mockMode bool) {
 			return
 		}
 		color.Green("✅ AI processed in %s", FormatDuration(time.Since(start)))
+
+		// Debug: Show raw response
+		color.Yellow("🔍 Raw AI response: '%s'", response)
+	}
+
+	// Basic cleaning
+	response = strings.TrimSpace(response)
+
+	if response == "" {
+		color.Red("❌ AI generated an empty response")
+		return
 	}
 
 	// Create UX manager for nice output
@@ -405,6 +421,24 @@ func showDebugInfo() {
 	// Check model status
 	if ModelIsLoaded() {
 		color.Green("Model Status: ✅ Loaded")
+
+		// Better model test - more specific and in English
+		color.Blue("🧪 Running model test...")
+		testResponse, err := RunModel("Answer with one word only: Hello")
+		if err != nil {
+			color.Red("Model Test: ❌ Failed - %v", err)
+		} else {
+			cleanResponse := strings.TrimSpace(testResponse)
+			color.Green("Model Test: ✅ Working - '%s'", cleanResponse)
+
+			// Check if response is reasonable
+			if len(cleanResponse) > 100 {
+				color.Yellow("⚠️  Model is generating verbose responses")
+			}
+			if !isMostlyEnglish(cleanResponse) {
+				color.Yellow("⚠️  Model is responding in non-English")
+			}
+		}
 	} else {
 		color.Red("Model Status: ❌ Not loaded")
 	}
@@ -449,7 +483,6 @@ func toggleDryRun() {
 }
 
 // Helper functions for mock mode
-
 func generateMockCommand(request string, env Env) string {
 	request = strings.ToLower(request)
 
@@ -487,14 +520,18 @@ func generateMockResponse(question string) string {
 	question = strings.ToLower(question)
 
 	switch {
+	case strings.Contains(question, "what can you do") || strings.Contains(question, "help"):
+		return "I can help you with:\n• Converting natural language to commands (/cmd)\n• Answering questions (/ask)\n• Explaining commands (/explain)\n• Managing packages (/install, /update, /remove)\n• And much more! Try /help for all commands."
+	case strings.Contains(question, "president") && strings.Contains(question, "usa"):
+		return "As an AI assistant running offline, I don't have real-time information about current political positions. You might want to check a reliable news source for the most up-to-date information."
+	case strings.Contains(question, "weather"):
+		return "I'm currently running in offline mode, so I can't access real-time weather data. You could try using online services or check your local weather app."
+	case strings.Contains(question, "time"):
+		return fmt.Sprintf("The current system time is: %s", time.Now().Format("Monday, January 2, 2006 at 3:04 PM"))
 	case strings.Contains(question, "hello") || strings.Contains(question, "hi"):
 		return "Hello! I'm Helix, your AI CLI assistant. How can I help you today?"
-	case strings.Contains(question, "weather"):
-		return "I'm currently running in offline mode, so I can't access real-time weather information. You could try using 'curl wttr.in' for a weather report."
-	case strings.Contains(question, "time"):
-		return fmt.Sprintf("The current time is: %s", time.Now().Format("3:04 PM"))
 	default:
-		return fmt.Sprintf("I understand you're asking about: '%s'. In a real scenario, I would provide a helpful response based on my training data.", question)
+		return fmt.Sprintf("I understand you're asking about: '%s'. This is a simulated response since we're in mock mode. In real mode, I would provide a helpful answer based on my training data.", question)
 	}
 }
 
@@ -530,4 +567,33 @@ func explainCommand(command string, mockMode bool) {
 
 	ux := NewUX()
 	ux.PrintAIResponse(explanation, !mockMode)
+}
+
+func testAIModel() {
+	color.Cyan("🧪 Testing AI model with different prompts...")
+
+	tests := []struct {
+		name   string
+		prompt string
+	}{
+		{"Simple Q&A", "Q: What is the sun?\nA:"},
+		{"Instruction", "Instruction: Answer in one sentence. What is the sun?\nAnswer:"},
+		{"Strict", "Answer the question in one word: Hello\nResponse:"},
+		{"Chat", "User: What is the sun?\nAssistant:"},
+	}
+
+	for _, test := range tests {
+		color.Blue("Testing: %s", test.name)
+		response, err := RunModel(test.prompt)
+		if err != nil {
+			color.Red("  ❌ Failed: %v", err)
+		} else {
+			clean := strings.TrimSpace(response)
+			color.Green("  ✅ Response: '%s'", clean)
+			if len(clean) > 50 {
+				color.Yellow("  ⚠️  Too verbose")
+			}
+		}
+		time.Sleep(1 * time.Second) // Don't overwhelm the model
+	}
 }

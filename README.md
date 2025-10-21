@@ -86,7 +86,7 @@ go install github.com/Nibir1/Helix@latest
 /ask "how do I check disk space on Linux?"
 
 # Generate and execute commands from English
-/cmd "show me all the text files in this directory"
+/cmd "list all the files in this directory"
 
 # Explain what a command does
 /explain "rm -rf node_modules"
@@ -99,6 +99,9 @@ go install github.com/Nibir1/Helix@latest
 
 # Remove packages
 /remove nodejs
+
+# Test the /ask AI feature
+/test-ai
 ```
 
 ### **Advanced Features**
@@ -134,6 +137,7 @@ go install github.com/Nibir1/Helix@latest
 | `/debug` | `/debug` | Show system information |
 | `/help` | `/help` | Display help message |
 | `/exit` | `/exit` | Exit the application |
+| `/test-ai` | `/test-ai` | Test the /ask AI feature |
 
 ---
 

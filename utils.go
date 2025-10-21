@@ -154,3 +154,55 @@ func TruncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen-3] + "..."
 }
+
+// cleanAIResponse cleans and formats AI responses
+func cleanAIResponse(response string) string {
+	response = strings.TrimSpace(response)
+
+	// If response is very short but not empty, accept it
+	if response == "" {
+		return response
+	}
+
+	// Remove common AI prefixes but be more lenient
+	prefixes := []string{
+		"Assistant:", "AI:", "Helix:", "Response:", "Answer:",
+	}
+
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(response, prefix) {
+			response = strings.TrimPrefix(response, prefix)
+			response = strings.TrimSpace(response)
+		}
+	}
+
+	// If response is just punctuation or very short nonsense, consider it empty
+	if len(response) < 3 {
+		// Check if it's just punctuation or whitespace
+		clean := strings.Trim(response, " .,!?;:\n\t")
+		if clean == "" {
+			return ""
+		}
+	}
+
+	return response
+}
+
+func isMostlyEnglish(text string) bool {
+	// Simple heuristic: count English vs non-English characters
+	if len(text) == 0 {
+		return true
+	}
+
+	englishChars := 0
+	totalChars := 0
+
+	for _, char := range text {
+		if char <= 127 { // ASCII range
+			englishChars++
+		}
+		totalChars++
+	}
+
+	return float64(englishChars)/float64(totalChars) > 0.8
+}
