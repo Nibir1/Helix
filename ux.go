@@ -125,6 +125,7 @@ func (ux *UX) ShowHelp() {
 
 	color.Yellow("⚙️  System Commands:")
 	fmt.Println("  /debug              - Show debug information")
+	fmt.Println("  /test-ai            - Test /ask AI feature")
 	fmt.Println("  /online             - Check internet connectivity")
 	fmt.Println("  /dry-run            - Toggle dry-run mode")
 	fmt.Println("  /help               - Show this help message")

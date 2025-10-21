@@ -93,6 +93,10 @@ func main() {
 	defer CloseModel()
 	color.Green("✅ AI model loaded successfully!")
 
+	// Create UX manager for nice output
+	ux := NewUX()
+	ux.ShowWelcomeBanner("0.2.0")
+
 	// Test the model with a simple prompt
 	color.Blue("🧪 Testing AI with simple prompt...")
 	testResponse, err := RunModel("Say 'Hello from Helix!' in one sentence:")
@@ -204,7 +208,11 @@ func runEnhancedCLI() {
 	}
 }
 
-// Command handlers for the enhanced CLI
+// --------------------------------------------------
+// *** Command handlers for the Enhanced CLI ***
+// --------------------------------------------------
+
+// Handle /cmd command
 func handleCmdCommand(input string, mockMode bool) {
 	commandText := strings.TrimSpace(strings.TrimPrefix(input, "/cmd"))
 	if commandText == "" {
@@ -279,6 +287,7 @@ func handleCmdCommand(input string, mockMode bool) {
 	}
 }
 
+// Handle /ask command
 func handleAskCommand(input string, mockMode bool) {
 	promptText := strings.TrimSpace(strings.TrimPrefix(input, "/ask"))
 	if promptText == "" {
@@ -336,6 +345,7 @@ Answer:`, promptText)
 	ux.PrintAIResponse(response, !mockMode)
 }
 
+// Handle /explain command
 func handleExplainCommand(input string, mockMode bool) {
 	commandText := strings.TrimSpace(strings.TrimPrefix(input, "/explain"))
 	if commandText == "" {
@@ -364,6 +374,7 @@ func handleExplainCommand(input string, mockMode bool) {
 	ux.PrintAIResponse(explanation, !mockMode)
 }
 
+// Handle /install command
 func handleInstallCommand(input string, mockMode bool) {
 	args := strings.Fields(input)
 	if len(args) < 2 {
@@ -378,6 +389,7 @@ func handleInstallCommand(input string, mockMode bool) {
 	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
 }
 
+// Handle /update command
 func handleUpdateCommand(input string, mockMode bool) {
 	args := strings.Fields(input)
 	if len(args) < 2 {
@@ -392,6 +404,7 @@ func handleUpdateCommand(input string, mockMode bool) {
 	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
 }
 
+// Handle /remove command
 func handleRemoveCommand(input string, mockMode bool) {
 	args := strings.Fields(input)
 	if len(args) < 2 {
@@ -406,6 +419,7 @@ func handleRemoveCommand(input string, mockMode bool) {
 	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
 }
 
+// Show debug information
 func showDebugInfo() {
 	color.Cyan("=== 🔧 HELIX DEBUG INFORMATION ===")
 	color.Cyan("Version: %s", HelixVersion)
@@ -458,11 +472,13 @@ func showDebugInfo() {
 	color.Cyan("=================================")
 }
 
+// Show help information
 func showHelp() {
 	ux := NewUX()
 	ux.ShowHelp()
 }
 
+// Check and display oinline status
 func checkOnlineStatus() {
 	color.Blue("🌐 Checking internet connectivity...")
 
@@ -473,6 +489,7 @@ func checkOnlineStatus() {
 	}
 }
 
+// Toggle dry-run mode
 func toggleDryRun() {
 	execConfig.DryRun = !execConfig.DryRun
 	if execConfig.DryRun {
@@ -516,6 +533,7 @@ func generateMockCommand(request string, env Env) string {
 	}
 }
 
+// Generate a mock response for a question
 func generateMockResponse(question string) string {
 	question = strings.ToLower(question)
 
@@ -535,10 +553,12 @@ func generateMockResponse(question string) string {
 	}
 }
 
+// Generate a mock explanation for a command
 func generateMockExplanation(command string) string {
 	return fmt.Sprintf("The command '%s' appears to be a system command. In mock mode, I can't provide detailed explanations, but in real mode I would explain what this command does, its common options, and any potential risks.", command)
 }
 
+// Function to determine if a command should be explained
 func shouldExplainCommand(command string) bool {
 	// Commands that might need explanation
 	complexCommands := []string{
@@ -549,6 +569,7 @@ func shouldExplainCommand(command string) bool {
 	return ContainsAny(strings.ToLower(command), complexCommands)
 }
 
+// Function to explain a command
 func explainCommand(command string, mockMode bool) {
 	color.Blue("📖 Getting explanation...")
 
@@ -569,6 +590,7 @@ func explainCommand(command string, mockMode bool) {
 	ux.PrintAIResponse(explanation, !mockMode)
 }
 
+// For testing the AI model with various prompts - /test-ai command
 func testAIModel() {
 	color.Cyan("🧪 Testing AI model with different prompts...")
 
