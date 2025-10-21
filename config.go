@@ -42,7 +42,7 @@ func (cfg *Config) EnsureModelDir() error {
 // Versioning and Model metadata
 const (
 	HelixVersion  = "0.1.0"
-	ModelName     = "Llama-3.2-3B-Instruct-Q4_K_M"
-	ModelURL      = "https://huggingface.co/hugging-quants/Llama-3.2-3B-Instruct-Q4_K_M-GGUF/resolve/main/llama-3.2-3b-instruct-q4_k_m.gguf"
-	ModelChecksum = "c55a83bfb6396799337853ca69918a0b9bbb2917621078c34570bc17d20fd7a1"
+	ModelName     = "llama-2-7b-chat.gguf"
+	ModelURL      = "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_0.gguf"
+	ModelChecksum = "9958ee9b670594147b750bbc7d0540b928fa12dcc5dd4c58cc56ed2eb85e371b"
 )

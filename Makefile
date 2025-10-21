@@ -1,18 +1,48 @@
-# To run the project.
+# Build configuration
+BINARY_NAME=helix
+DIST_DIR=dist
+
+# Default target
+all: current
+
+# Build targets using the build script
+current:
+	./build.sh current
+
+macos:
+	./build.sh macos
+
+linux:
+	./build.sh linux
+
+windows:
+	./build.sh windows
+
+# Build for all platforms
+build-all: all
+	./build.sh all
+
+# Clean build artifacts
+clean:
+	./build.sh clean
+
+# Development build (fast, for testing)
+dev: current
+	@echo "🚀 Running development build..."
+	./dist/helix
+
+# Run the built application
+run: dev
+
+# Show build info
+info:
+	@echo "📊 Build Information:"
+	@echo "Binary: $(BINARY_NAME)"
+	@echo "Dist dir: $(DIST_DIR)"
+	@echo "Available targets: current, macos, linux, windows, all, clean"
+
+# To run the project without building first
 start:
-	go run .
+	./run-helix.sh
 
-# Create a dist directory if it doesn't exist, then build the binary there.
-
-# Build for macOS/Linux
-macBuild:
-	mkdir -p dist
-	go build -o dist/helix
-
-# Build for Windows
-winBuild:
-	mkdir -p dist
-	go build -o dist/helix.exe
-
-
-.PHONY: start macBuild winBuild
+.PHONY: all current macos linux windows build-all clean dev run info start
