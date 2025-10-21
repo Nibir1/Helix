@@ -11,6 +11,15 @@ Helix is a revolutionary command-line interface that bridges the gap between hum
 
 ## ✨ Features
 
+## 🛠️ Deep Technical Integration
+
+Helix uses **direct llama.cpp bindings** - not high-level wrappers like Ollama or LM Studio. This allows:
+
+- ✅ **Raw performance** - No abstraction layers
+- ✅ **Memory efficiency** - Direct control over model loading
+- ✅ **Custom optimizations** - Tailored for CLI usage patterns
+- ✅ **Dependency-free** - No external AI services required
+
 ### 🧠 AI-Powered Intelligence
 - **Natural Language Processing** — Converts English instructions to shell commands  
 - **Local AI Model** — Privacy-focused, offline-capable inference using LLaMA 2  
