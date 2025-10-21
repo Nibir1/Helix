@@ -1,3 +1,4 @@
+// main.go
 package main
 
 import (
@@ -5,174 +6,513 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/fatih/color"
 )
 
-// package-level config so runCLI/runMockMode can access it
-var cfg *Config
+// Package-level variables
+var (
+	cfg        *Config
+	env        Env
+	pb         *PromptBuilder
+	online     bool
+	execConfig ExecuteConfig
+)
 
 func main() {
-	fmt.Printf("Helix v%s — An AI Driven CLI\n", HelixVersion)
+	// Initialize color output
+	color.Cyan("🚀 Helix v%s — AI-Powered CLI Assistant", HelixVersion)
+	color.Yellow("Repository: https://github.com/Nibir1/Helix")
 
 	// Load configuration
-	cfg, err := DefaultConfig()
+	var err error
+	cfg, err = DefaultConfig()
 	if err != nil {
-		fmt.Println("Error loading config:", err)
+		color.Red("Error loading config: %v", err)
 		return
 	}
 
+	// Detect environment
+	env = DetectEnvironment()
+	color.Blue("🌍 Detected: %s (%s shell)", strings.Title(env.OSName), env.Shell)
+
+	// Check internet connectivity
+	online = IsOnline(5 * time.Second)
+	if online {
+		color.Green("✅ Online mode - real-time capabilities available")
+	} else {
+		color.Yellow("⚠️  Offline mode - using local AI only")
+	}
+
+	// Initialize prompt builder
+	pb = NewPromptBuilder(env, online)
+
+	// Set execution config
+	execConfig = DefaultExecuteConfig()
+
 	// Ensure model directory exists
 	if err := cfg.EnsureModelDir(); err != nil {
-		fmt.Println("Error creating model directory:", err)
+		color.Red("Error creating model directory: %v", err)
 		return
 	}
 
 	// Download model if not present
 	if err := DownloadModel(cfg.ModelFile, ModelURL, ModelChecksum); err != nil {
-		fmt.Println("⚠️  Model download error:", err)
-		fmt.Println("Running in mock AI mode.")
-		runMockMode()
+		color.Yellow("⚠️  Model download error: %v", err)
+		color.Yellow("Running in enhanced mock mode.")
+		runEnhancedMockMode()
 		return
 	}
 
 	// Verify model file
 	fileInfo, err := os.Stat(cfg.ModelFile)
 	if err != nil {
-		fmt.Printf("⚠️  Model file not found: %v\n", err)
-		runMockMode()
+		color.Red("⚠️  Model file not found: %v", err)
+		runEnhancedMockMode()
 		return
 	}
-	fmt.Printf("✅ Model file exists: %s (Size: %.2f MB)\n",
+
+	color.Green("✅ Model file exists: %s (Size: %.2f MB)",
 		cfg.ModelFile,
 		float64(fileInfo.Size())/(1024*1024))
 
 	// Load LLaMA model
-	fmt.Println("🔧 Loading model...")
+	color.Blue("🔧 Loading AI model...")
 	if err := LoadModel(cfg.ModelFile); err != nil {
-		fmt.Printf("⚠️  Failed to load model: %v\n", err)
-		fmt.Println("This could indicate:")
-		fmt.Println("  - Corrupted model file")
-		fmt.Println("  - Incompatible model format")
-		fmt.Println("  - Insufficient RAM/VRAM")
-		fmt.Println("  - Model requires different llama.cpp version")
+		color.Red("⚠️  Failed to load model: %v", err)
+		color.Yellow("This could indicate:")
+		color.Yellow("  - Corrupted model file")
+		color.Yellow("  - Incompatible model format")
+		color.Yellow("  - Insufficient RAM/VRAM")
 
-		// Try to test with a simple prediction
-		fmt.Println("\n🧪 Attempting test prediction...")
-		if testErr := testModelPrediction(); testErr != nil {
-			fmt.Printf("❌ Test prediction failed: %v\n", testErr)
-		}
-
-		fmt.Println("\nRunning in mock AI mode.")
-		runMockMode()
+		runEnhancedMockMode()
 		return
 	}
 
 	defer CloseModel()
-	fmt.Println("✅ Model loaded successfully!")
+	color.Green("✅ AI model loaded successfully!")
 
-	// Test the model with a simple prediction
-	fmt.Println("🧪 Testing model with simple prompt...")
-	testResponse, err := RunModel("Say 'Hello' in one word:")
+	// Test the model with a simple prompt
+	color.Blue("🧪 Testing AI with simple prompt...")
+	testResponse, err := RunModel("Say 'Hello from Helix!' in one sentence:")
 	if err != nil {
-		fmt.Printf("⚠️  Model test failed: %v\n", err)
-		fmt.Println("Running in mock AI mode.")
-		runMockMode()
+		color.Red("⚠️  Model test failed: %v", err)
+		runEnhancedMockMode()
 		return
 	}
 
-	fmt.Printf("✅ Model test response: %s\n", testResponse)
-	fmt.Println("🎉 Helix is ready to use!")
+	color.Cyan("🤖 AI Test: %s", testResponse)
+	color.Green("🎉 Helix is ready! Type '/help' for available commands.")
 
-	// Start CLI loop
-	runCLI()
+	// Start enhanced CLI loop
+	runEnhancedCLI()
 }
 
-func testModelPrediction() error {
-	// Try to create a simple prediction to verify model works
-	testPrompt := "Hello"
-	response, err := RunModel(testPrompt)
-	if err != nil {
-		return fmt.Errorf("test prediction failed: %v", err)
-	}
-	fmt.Printf("✅ Test prediction successful: %s\n", response)
-	return nil
-}
+func runEnhancedMockMode() {
+	color.Yellow("\n🔧 ENHANCED MOCK MODE ACTIVATED")
+	color.Yellow("AI commands will be simulated with intelligent responses")
 
-func runMockMode() {
-	fmt.Println("\n🔧 MOCK MODE ACTIVATED")
-	fmt.Println("Commands will be simulated without AI processing")
+	execConfig.DryRun = true
+	env = DetectEnvironment()
+	pb = NewPromptBuilder(env, online)
 
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Print("[helix-mock]> ")
+		color.Cyan("[helix-mock]> ")
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
 		switch {
 		case input == "/exit":
-			fmt.Println("Exiting Helix. Goodbye!")
+			color.Green("Exiting Helix. Goodbye! 👋")
 			return
 		case input == "/debug":
-			fmt.Println("=== DEBUG INFO ===")
-			fmt.Printf("Model path: %s\n", cfg.ModelFile)
-			if _, err := os.Stat(cfg.ModelFile); err == nil {
-				fmt.Println("✅ Model file exists")
-			} else {
-				fmt.Println("❌ Model file missing")
-			}
+			showDebugInfo()
+		case input == "/help":
+			showHelp()
 		case strings.HasPrefix(input, "/cmd"):
-			command := strings.TrimSpace(strings.TrimPrefix(input, "/cmd"))
-			fmt.Printf("📝 [MOCK] Would execute: %s\n", command)
+			handleCmdCommand(input, true)
 		case strings.HasPrefix(input, "/ask"):
-			prompt := strings.TrimSpace(strings.TrimPrefix(input, "/ask"))
-			fmt.Printf("🤖 [MOCK AI] Thinking about: %s\n", prompt)
-			fmt.Println("🤖 [MOCK AI] → This is a simulated response since the AI model failed to load.")
+			handleAskCommand(input, true)
+		case strings.HasPrefix(input, "/explain"):
+			handleExplainCommand(input, true)
+		case strings.HasPrefix(input, "/install"):
+			handleInstallCommand(input, true)
+		case strings.HasPrefix(input, "/update"):
+			handleUpdateCommand(input, true)
+		case strings.HasPrefix(input, "/remove"):
+			handleRemoveCommand(input, true)
+		case strings.HasPrefix(input, "/dry-run"):
+			toggleDryRun()
+		case input == "/online":
+			checkOnlineStatus()
 		default:
-			fmt.Println("❓ Available commands: /ask, /cmd, /debug, /exit")
+			color.Yellow("❓ Unknown command. Type '/help' for available commands.")
 		}
 	}
 }
 
-func runCLI() {
+func runEnhancedCLI() {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("\n💫 Helix AI is ready! Type /ask followed by your question.")
+
+	// Load command history
+	history, _ := LoadHistory(cfg.HistoryPath)
+	if len(history) > 0 {
+		color.Blue("📚 Loaded %d commands from history", len(history))
+	}
 
 	for {
-		fmt.Print("[helix]> ")
+		color.Cyan("[helix]> ")
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
+		// Save to history
+		if input != "" && input != "/exit" {
+			AppendHistory(cfg.HistoryPath, input)
+		}
+
 		switch {
 		case input == "/exit":
-			fmt.Println("Exiting Helix. Goodbye!")
+			color.Green("Exiting Helix. Goodbye! 👋")
 			return
 		case input == "/debug":
-			fmt.Println("=== DEBUG INFO ===")
-			fmt.Printf("Model: %s\n", cfg.ModelFile)
-			fmt.Println("Status: ✅ Model loaded and working")
+			showDebugInfo()
+		case input == "/help":
+			showHelp()
+		case input == "/online":
+			checkOnlineStatus()
 		case strings.HasPrefix(input, "/cmd"):
-			command := strings.TrimSpace(strings.TrimPrefix(input, "/cmd"))
-			fmt.Printf("Executing: %s\n", command)
-			// TODO: implement actual command execution
+			handleCmdCommand(input, false)
 		case strings.HasPrefix(input, "/ask"):
-			prompt := strings.TrimSpace(strings.TrimPrefix(input, "/ask"))
-			if prompt == "" {
-				fmt.Println("⚠️  Please enter a question after /ask")
-				continue
-			}
-
-			fmt.Printf("🤖 Processing: %s\n", prompt)
-			response, err := RunModel(prompt)
-			if err != nil {
-				fmt.Printf("⚠️  AI error: %v\n", err)
-			} else {
-				fmt.Printf("🤖 [Helix AI] → %s\n", response)
-			}
+			handleAskCommand(input, false)
+		case strings.HasPrefix(input, "/explain"):
+			handleExplainCommand(input, false)
+		case strings.HasPrefix(input, "/install"):
+			handleInstallCommand(input, false)
+		case strings.HasPrefix(input, "/update"):
+			handleUpdateCommand(input, false)
+		case strings.HasPrefix(input, "/remove"):
+			handleRemoveCommand(input, false)
+		case strings.HasPrefix(input, "/dry-run"):
+			toggleDryRun()
 		default:
-			fmt.Println("❓ Available commands:")
-			fmt.Println("   /ask <question> - Ask the AI a question")
-			fmt.Println("   /cmd <command>  - Execute a system command")
-			fmt.Println("   /debug          - Show debug information")
-			fmt.Println("   /exit           - Exit Helix")
+			color.Yellow("💡 Tip: Start with '/ask' for questions or '/cmd' for command generation")
 		}
 	}
+}
+
+// Command handlers for the enhanced CLI
+
+func handleCmdCommand(input string, mockMode bool) {
+	commandText := strings.TrimSpace(strings.TrimPrefix(input, "/cmd"))
+	if commandText == "" {
+		color.Red("❌ Usage: /cmd <natural language command>")
+		color.Yellow("💡 Example: /cmd 'list all files in current directory'")
+		return
+	}
+
+	// Build the prompt for command generation
+	prompt := pb.BuildCommandPrompt(commandText)
+
+	color.Blue("🤖 Processing: %s", commandText)
+
+	var aiResponse string
+	var err error
+
+	if mockMode {
+		// Mock AI response
+		aiResponse = generateMockCommand(commandText, env)
+		color.Green("🤖 [Mock AI] → %s", aiResponse)
+	} else {
+		// Real AI processing
+		start := time.Now()
+		aiResponse, err = RunModel(prompt)
+		if err != nil {
+			color.Red("❌ AI error: %v", err)
+			return
+		}
+		color.Green("✅ AI processed in %s", FormatDuration(time.Since(start)))
+	}
+
+	// Extract the actual command from AI response
+	command := ExtractCommand(aiResponse)
+
+	if command == "" {
+		color.Red("❌ AI didn't generate a valid command")
+		return
+	}
+
+	color.Cyan("💡 Generated command: %s", command)
+
+	// Ask for explanation if the command looks complex
+	if shouldExplainCommand(command) && AskForConfirmation("Would you like an explanation of this command?") {
+		explainCommand(command, mockMode)
+	}
+
+	// Execute the command
+	if AskForConfirmation("Execute this command?") {
+		err := ExecuteCommand(command, execConfig, env)
+		if err != nil {
+			color.Red("❌ Command failed: %v", err)
+		} else {
+			color.Green("✅ Command executed successfully!")
+		}
+	} else {
+		color.Yellow("💡 Command ready to use: %s", command)
+	}
+}
+
+func handleAskCommand(input string, mockMode bool) {
+	promptText := strings.TrimSpace(strings.TrimPrefix(input, "/ask"))
+	if promptText == "" {
+		color.Red("❌ Usage: /ask <question>")
+		color.Yellow("💡 Example: /ask 'how do I check disk space?'")
+		return
+	}
+
+	// Build the prompt for general questions
+	prompt := pb.BuildAskPrompt(promptText)
+
+	color.Blue("🤖 Thinking about: %s", promptText)
+
+	var response string
+	var err error
+
+	if mockMode {
+		// Mock AI response
+		response = generateMockResponse(promptText)
+	} else {
+		// Real AI processing with enhanced config for better responses
+		config := ModelConfig{
+			Temperature: 0.8,
+			TopP:        0.9,
+			TopK:        50,
+			MaxTokens:   300,
+		}
+
+		start := time.Now()
+		response, err = RunModelWithConfig(prompt, config)
+		if err != nil {
+			color.Red("❌ AI error: %v", err)
+			return
+		}
+		color.Green("✅ AI processed in %s", FormatDuration(time.Since(start)))
+	}
+
+	// Create UX manager for nice output
+	ux := NewUX()
+	ux.PrintAIResponse(response, !mockMode)
+}
+
+func handleExplainCommand(input string, mockMode bool) {
+	commandText := strings.TrimSpace(strings.TrimPrefix(input, "/explain"))
+	if commandText == "" {
+		color.Red("❌ Usage: /explain <command>")
+		color.Yellow("💡 Example: /explain 'git push origin main'")
+		return
+	}
+
+	color.Blue("📚 Explaining command: %s", commandText)
+
+	var explanation string
+	var err error
+
+	if mockMode {
+		explanation = generateMockExplanation(commandText)
+	} else {
+		prompt := pb.BuildExplainPrompt(commandText)
+		explanation, err = RunModel(prompt)
+		if err != nil {
+			color.Red("❌ AI error: %v", err)
+			return
+		}
+	}
+
+	ux := NewUX()
+	ux.PrintAIResponse(explanation, !mockMode)
+}
+
+func handleInstallCommand(input string, mockMode bool) {
+	args := strings.Fields(input)
+	if len(args) < 2 {
+		color.Red("❌ Usage: /install <package-name>")
+		color.Yellow("💡 Example: /install git")
+		return
+	}
+
+	action := "install"
+	packageName := args[1]
+
+	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
+}
+
+func handleUpdateCommand(input string, mockMode bool) {
+	args := strings.Fields(input)
+	if len(args) < 2 {
+		color.Red("❌ Usage: /update <package-name>")
+		color.Yellow("💡 Example: /update git")
+		return
+	}
+
+	action := "update"
+	packageName := args[1]
+
+	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
+}
+
+func handleRemoveCommand(input string, mockMode bool) {
+	args := strings.Fields(input)
+	if len(args) < 2 {
+		color.Red("❌ Usage: /remove <package-name>")
+		color.Yellow("💡 Example: /remove git")
+		return
+	}
+
+	action := "remove"
+	packageName := args[1]
+
+	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
+}
+
+func showDebugInfo() {
+	color.Cyan("=== 🔧 HELIX DEBUG INFORMATION ===")
+	color.Cyan("Version: %s", HelixVersion)
+	color.Cyan("Model: %s", cfg.ModelFile)
+	color.Cyan("OS: %s", env.OSName)
+	color.Cyan("Shell: %s", env.Shell)
+	color.Cyan("User: %s", env.User)
+	color.Cyan("Home: %s", env.HomeDir)
+	color.Cyan("Online: %v", online)
+	color.Cyan("Dry Run: %v", execConfig.DryRun)
+	color.Cyan("Safe Mode: %v", execConfig.SafeMode)
+
+	// Check model status
+	if ModelIsLoaded() {
+		color.Green("Model Status: ✅ Loaded")
+	} else {
+		color.Red("Model Status: ❌ Not loaded")
+	}
+
+	// Check package manager
+	pkgMgr := DetectPackageManager(env)
+	if pkgMgr.Exists {
+		color.Green("Package Manager: %s", pkgMgr.Name)
+	} else {
+		color.Yellow("Package Manager: None detected")
+	}
+
+	// Check history
+	history, _ := LoadHistory(cfg.HistoryPath)
+	color.Cyan("Command History: %d entries", len(history))
+
+	color.Cyan("=================================")
+}
+
+func showHelp() {
+	ux := NewUX()
+	ux.ShowHelp()
+}
+
+func checkOnlineStatus() {
+	color.Blue("🌐 Checking internet connectivity...")
+
+	if IsOnline(3 * time.Second) {
+		color.Green("✅ Online - Real-time capabilities available")
+	} else {
+		color.Yellow("⚠️  Offline - Using local AI only")
+	}
+}
+
+func toggleDryRun() {
+	execConfig.DryRun = !execConfig.DryRun
+	if execConfig.DryRun {
+		color.Yellow("🔒 Dry-run mode ENABLED - commands will be shown but not executed")
+	} else {
+		color.Green("🚀 Dry-run mode DISABLED - commands will be executed")
+	}
+}
+
+// Helper functions for mock mode
+
+func generateMockCommand(request string, env Env) string {
+	request = strings.ToLower(request)
+
+	switch {
+	case strings.Contains(request, "list") && strings.Contains(request, "file"):
+		if env.IsUnixLike() {
+			return "ls -la"
+		} else {
+			return "dir"
+		}
+	case strings.Contains(request, "current directory"):
+		if env.IsUnixLike() {
+			return "pwd"
+		} else {
+			return "cd"
+		}
+	case strings.Contains(request, "disk space"):
+		if env.IsUnixLike() {
+			return "df -h"
+		} else {
+			return "wmic logicaldisk get size,freespace,caption"
+		}
+	case strings.Contains(request, "process"):
+		if env.IsUnixLike() {
+			return "ps aux"
+		} else {
+			return "tasklist"
+		}
+	default:
+		return "echo 'Mock command for: " + request + "'"
+	}
+}
+
+func generateMockResponse(question string) string {
+	question = strings.ToLower(question)
+
+	switch {
+	case strings.Contains(question, "hello") || strings.Contains(question, "hi"):
+		return "Hello! I'm Helix, your AI CLI assistant. How can I help you today?"
+	case strings.Contains(question, "weather"):
+		return "I'm currently running in offline mode, so I can't access real-time weather information. You could try using 'curl wttr.in' for a weather report."
+	case strings.Contains(question, "time"):
+		return fmt.Sprintf("The current time is: %s", time.Now().Format("3:04 PM"))
+	default:
+		return fmt.Sprintf("I understand you're asking about: '%s'. In a real scenario, I would provide a helpful response based on my training data.", question)
+	}
+}
+
+func generateMockExplanation(command string) string {
+	return fmt.Sprintf("The command '%s' appears to be a system command. In mock mode, I can't provide detailed explanations, but in real mode I would explain what this command does, its common options, and any potential risks.", command)
+}
+
+func shouldExplainCommand(command string) bool {
+	// Commands that might need explanation
+	complexCommands := []string{
+		"rm -", "chmod", "chown", "dd", "find", "grep", "sed", "awk",
+		"curl", "wget", "ssh", "scp", "rsync", "tar", "gzip",
+	}
+
+	return ContainsAny(strings.ToLower(command), complexCommands)
+}
+
+func explainCommand(command string, mockMode bool) {
+	color.Blue("📖 Getting explanation...")
+
+	var explanation string
+	var err error
+
+	if mockMode {
+		explanation = generateMockExplanation(command)
+	} else {
+		explanation, err = ExplainCommand(command)
+		if err != nil {
+			color.Red("❌ Explanation failed: %v", err)
+			return
+		}
+	}
+
+	ux := NewUX()
+	ux.PrintAIResponse(explanation, !mockMode)
 }
