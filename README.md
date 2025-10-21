@@ -13,7 +13,7 @@ Helix is a revolutionary command-line interface that bridges the gap between hum
 
 ## 🛠️ Deep Technical Integration
 
-Helix uses **direct llama.cpp bindings** - not high-level wrappers like Ollama or LM Studio. This allows:
+🔥 Helix uses **direct llama.cpp bindings** - not high-level wrappers like Ollama or LM Studio. This allows:
 
 - ✅ **Raw performance** - No abstraction layers
 - ✅ **Memory efficiency** - Direct control over model loading
