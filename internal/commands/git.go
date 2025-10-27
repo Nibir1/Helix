@@ -1,5 +1,4 @@
-// git.go
-package main
+package commands
 
 import (
 	"fmt"
@@ -8,19 +7,22 @@ import (
 	"path/filepath"
 	"strings"
 
+	"helix/internal/ai"
+	"helix/internal/shell"
+
 	"github.com/fatih/color"
 )
 
 // GitManager handles git-specific operations with AI assistance
 type GitManager struct {
-	env        Env
+	env        shell.Env
 	execConfig ExecuteConfig
 	workingDir string
 	sandbox    *DirectorySandbox
 }
 
 // NewGitManager creates a new Git manager
-func NewGitManager(env Env, execConfig ExecuteConfig, sandbox *DirectorySandbox) *GitManager {
+func NewGitManager(env shell.Env, execConfig ExecuteConfig, sandbox *DirectorySandbox) *GitManager {
 	wd, err := os.Getwd()
 	if err != nil {
 		wd = "."
@@ -467,12 +469,12 @@ Rules:
 Command:`, request, gm.workingDir, currentBranch)
 
 	color.Blue("🤖 Generating git command with AI...")
-	response, err := RunModel(prompt)
+	response, err := ai.RunModel(prompt)
 	if err != nil {
 		return fmt.Errorf("AI git command generation failed: %w", err)
 	}
 
-	command := ExtractCommand(response)
+	command := ai.ExtractCommand(response)
 	if command == "" {
 		return fmt.Errorf("AI didn't generate a valid git command")
 	}

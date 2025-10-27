@@ -1,10 +1,11 @@
-// pkgmanager.go
-package main
+package commands
 
 import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"helix/internal/shell"
 
 	"github.com/fatih/color"
 )
@@ -233,8 +234,8 @@ func (p PacmanManager) RemoveCommand(pkg string) string {
 }
 
 // PackageManagerFactory creates the appropriate package manager handler
-func PackageManagerFactory(env Env) PackageManagerHandler {
-	pkgMgr := DetectPackageManager(env)
+func PackageManagerFactory(env shell.Env) PackageManagerHandler {
+	pkgMgr := shell.DetectPackageManager(env)
 
 	switch pkgMgr.Name {
 	case "apt":
@@ -253,7 +254,7 @@ func PackageManagerFactory(env Env) PackageManagerHandler {
 }
 
 // CheckPackage checks if a package is installed and its status
-func CheckPackage(pkg string, env Env) (PackageInfo, error) {
+func CheckPackage(pkg string, env shell.Env) (PackageInfo, error) {
 	pm := PackageManagerFactory(env)
 	if pm == nil {
 		return PackageInfo{Name: pkg}, fmt.Errorf("no supported package manager found")
@@ -263,7 +264,7 @@ func CheckPackage(pkg string, env Env) (PackageInfo, error) {
 }
 
 // HandlePackageCommand processes package-related commands
-func HandlePackageCommand(args []string, env Env, mockMode bool, execConfig ExecuteConfig) {
+func HandlePackageCommand(args []string, env shell.Env, mockMode bool, execConfig ExecuteConfig) {
 	if len(args) < 2 {
 		color.Red("Usage: /install <package-name>")
 		color.Yellow("Also available: /update <package-name>, /remove <package-name>")
@@ -358,7 +359,7 @@ func requiresSudo(pmName string) bool {
 }
 
 // GetPackageManagerCommands returns available commands for the detected package manager
-func GetPackageManagerCommands(env Env) map[string]string {
+func GetPackageManagerCommands(env shell.Env) map[string]string {
 	pm := PackageManagerFactory(env)
 	if pm == nil {
 		return nil

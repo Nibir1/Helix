@@ -1,5 +1,4 @@
-// model.go
-package main
+package ai
 
 import (
 	"fmt"

@@ -8,6 +8,7 @@ ROOT_DIR=$(pwd)
 DIST_DIR="$ROOT_DIR/dist"
 LLAMA_WRAPPER_DIR="$ROOT_DIR/go-llama.cpp"
 LLAMA_CPP_DIR="$LLAMA_WRAPPER_DIR/llama.cpp"
+MAIN_PACKAGE="./cmd/helix"  # NEW: Path to main package
 
 # Default build target (current platform)
 TARGET=${1:-current}
@@ -96,7 +97,8 @@ build_current() {
     echo "CGO_LDFLAGS: $CGO_LDFLAGS"
     
     verify_libraries
-    go build -o "$OUTPUT" .
+    # CHANGED: Build from the main package path
+    go build -o "$OUTPUT" "$MAIN_PACKAGE"
     echo "✅ Build completed: $OUTPUT"
 }
 
@@ -110,8 +112,9 @@ build_macos() {
     echo "CGO_LDFLAGS: $CGO_LDFLAGS"
     
     verify_libraries
-    GOOS=darwin GOARCH=amd64 go build -o "$DIST_DIR/helix-macos-amd64" .
-    GOOS=darwin GOARCH=arm64 go build -o "$DIST_DIR/helix-macos-arm64" .
+    # CHANGED: Build from the main package path
+    GOOS=darwin GOARCH=amd64 go build -o "$DIST_DIR/helix-macos-amd64" "$MAIN_PACKAGE"
+    GOOS=darwin GOARCH=arm64 go build -o "$DIST_DIR/helix-macos-arm64" "$MAIN_PACKAGE"
     echo "✅ macOS builds completed:"
     echo "   - $DIST_DIR/helix-macos-amd64 (Intel)"
     echo "   - $DIST_DIR/helix-macos-arm64 (Apple Silicon)"
@@ -127,8 +130,9 @@ build_linux() {
     echo "CGO_LDFLAGS: $CGO_LDFLAGS"
     
     verify_libraries
-    GOOS=linux GOARCH=amd64 go build -o "$DIST_DIR/helix-linux-amd64" .
-    GOOS=linux GOARCH=arm64 go build -o "$DIST_DIR/helix-linux-arm64" .
+    # CHANGED: Build from the main package path
+    GOOS=linux GOARCH=amd64 go build -o "$DIST_DIR/helix-linux-amd64" "$MAIN_PACKAGE"
+    GOOS=linux GOARCH=arm64 go build -o "$DIST_DIR/helix-linux-arm64" "$MAIN_PACKAGE"
     echo "✅ Linux builds completed:"
     echo "   - $DIST_DIR/helix-linux-amd64 (64-bit)"
     echo "   - $DIST_DIR/helix-linux-arm64 (ARM64)"
@@ -144,7 +148,8 @@ build_windows() {
     echo "CGO_LDFLAGS: $CGO_LDFLAGS"
     
     verify_libraries
-    GOOS=windows GOARCH=amd64 go build -o "$DIST_DIR/helix-windows-amd64.exe" .
+    # CHANGED: Build from the main package path
+    GOOS=windows GOARCH=amd64 go build -o "$DIST_DIR/helix-windows-amd64.exe" "$MAIN_PACKAGE"
     echo "✅ Windows build completed: $DIST_DIR/helix-windows-amd64.exe"
 }
 

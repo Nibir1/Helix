@@ -1,5 +1,4 @@
-// ux.go
-package main
+package ux
 
 import (
 	"fmt"

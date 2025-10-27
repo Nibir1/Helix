@@ -1,5 +1,4 @@
-// utils.go
-package main
+package utils
 
 import (
 	"bufio"
@@ -155,8 +154,8 @@ func TruncateString(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-// cleanAIResponse cleans and formats AI responses
-func cleanAIResponse(response string) string {
+// CleanAIResponse cleans and formats AI responses
+func CleanAIResponse(response string) string {
 	response = strings.TrimSpace(response)
 
 	// If response is very short but not empty, accept it
@@ -187,8 +186,8 @@ func cleanAIResponse(response string) string {
 	return response
 }
 
-// isMostlyEnglish checks if the text is mostly English characters
-func isMostlyEnglish(text string) bool {
+// IsMostlyEnglish checks if the text is mostly English characters
+func IsMostlyEnglish(text string) bool {
 	// Simple heuristic: count English vs non-English characters
 	if len(text) == 0 {
 		return true
@@ -207,13 +206,13 @@ func isMostlyEnglish(text string) bool {
 	return float64(englishChars)/float64(totalChars) > 0.8
 }
 
-// hasBalancedQuotes checks if quotes are properly balanced
-func hasBalancedQuotes(text string) bool {
+// HasBalancedQuotes checks if quotes are properly balanced
+func HasBalancedQuotes(text string) bool {
 	return strings.Count(text, "'")%2 == 0 && strings.Count(text, `"`)%2 == 0
 }
 
-// fixUnmatchedQuotes attempts to fix common quote mismatches intelligently
-func fixUnmatchedQuotes(command string) string {
+// FixUnmatchedQuotes attempts to fix common quote mismatches intelligently
+func FixUnmatchedQuotes(command string) string {
 	// Count single and double quotes
 	singleQuotes := strings.Count(command, "'")
 	doubleQuotes := strings.Count(command, `"`)

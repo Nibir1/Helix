@@ -1,5 +1,4 @@
-// execute.go
-package main
+package commands
 
 import (
 	"fmt"
@@ -8,6 +7,10 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"helix/internal/ai"
+	"helix/internal/shell"
+	"helix/internal/utils"
 
 	"github.com/fatih/color"
 )
@@ -69,24 +72,11 @@ func ValidateAndCleanCommand(command string) (string, error) {
 	// Remove leading/trailing quotes
 	command = strings.Trim(command, `"'`)
 
-	// Remove common AI prefixes
-	prefixes := []string{
-		"Command:", "Here's the command:", "The command is:",
-		"bash:", "shell:", "$", ">",
-	}
-
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(command, prefix) {
-			command = strings.TrimPrefix(command, prefix)
-			command = strings.TrimSpace(command)
-		}
-	}
-
 	// NEW: Fix unmatched quotes
-	command = fixUnmatchedQuotes(command)
+	command = utils.FixUnmatchedQuotes(command)
 
 	// NEW: Validate quote balance
-	if !hasBalancedQuotes(command) {
+	if !utils.HasBalancedQuotes(command) {
 		return "", fmt.Errorf("command has unmatched quotes: %s", command)
 	}
 
@@ -103,7 +93,7 @@ func ValidateAndCleanCommand(command string) (string, error) {
 	}
 
 	// Safety validation
-	if err := ValidateCommand(command); err != nil {
+	if err := utils.ValidateCommand(command); err != nil {
 		return "", err
 	}
 
@@ -111,7 +101,7 @@ func ValidateAndCleanCommand(command string) (string, error) {
 }
 
 // ExecuteCommand runs a shell command with safety checks
-func ExecuteCommand(command string, config ExecuteConfig, env Env) error {
+func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 	// Light validation only - command should already be cleaned
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -221,13 +211,16 @@ func AskForConfirmation(prompt string) bool {
 
 // ExplainCommand uses AI to explain what a command does
 func ExplainCommand(command string) (string, error) {
-	promptBuilder := NewPromptBuilder(DetectEnvironment(), IsOnline(5*time.Second))
+	// Note: This function will need to be updated when we fix the prompt builder
+	// For now, we'll use a basic implementation
+	env := shell.DetectEnvironment()
+	promptBuilder := ai.NewPromptBuilder(env, utils.IsOnline(5*time.Second))
 	explainPrompt := promptBuilder.BuildExplainPrompt(command)
 
 	// Add debug output
 	// color.Yellow("🔍 Debug - Explain prompt: %s", explainPrompt)
 
-	response, err := RunModel(explainPrompt)
+	response, err := ai.RunModel(explainPrompt)
 	if err != nil {
 		return "", fmt.Errorf("AI explanation failed: %w", err)
 	}
@@ -236,8 +229,16 @@ func ExplainCommand(command string) (string, error) {
 	color.Yellow("🔍 Debug - Raw AI response: '%s'", response)
 
 	// Clean the response
-	cleaned := cleanAIResponse(response)
+	cleaned := utils.CleanAIResponse(response)
 	color.Yellow("🔍 Debug - Cleaned response: '%s'", cleaned)
 
 	return cleaned, nil
+}
+
+// Global syntax highlighter instance (will be set from main)
+var syntaxHighlighter *utils.SyntaxHighlighter
+
+// SetSyntaxHighlighter sets the global syntax highlighter instance
+func SetSyntaxHighlighter(sh *utils.SyntaxHighlighter) {
+	syntaxHighlighter = sh
 }

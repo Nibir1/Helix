@@ -1,20 +1,21 @@
-// prompt.go
-package main
+package ai
 
 import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"helix/internal/shell"
 )
 
 // PromptBuilder constructs optimized prompts for different modes
 type PromptBuilder struct {
-	env    Env
+	env    shell.Env
 	online bool
 }
 
 // NewPromptBuilder creates a new prompt builder
-func NewPromptBuilder(env Env, online bool) *PromptBuilder {
+func NewPromptBuilder(env shell.Env, online bool) *PromptBuilder {
 	return &PromptBuilder{
 		env:    env,
 		online: online,

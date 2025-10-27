@@ -1,5 +1,4 @@
-// syntax.go
-package main
+package utils
 
 import (
 	"fmt"

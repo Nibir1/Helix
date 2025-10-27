@@ -1,22 +1,24 @@
-// config.go
-package main
+package config
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"helix/internal/ai"
+	"helix/internal/commands"
 )
 
 // Config holds runtime configuration and paths for Helix
 type Config struct {
-	ModelDir      string        `json:"model_dir"`
-	ModelFile     string        `json:"model_file"`
-	HistoryPath   string        `json:"history_path"`
-	ConfigPath    string        `json:"config_path"`
-	UserPrefs     UserPrefs     `json:"user_preferences"`
-	ModelConfig   ModelConfig   `json:"model_config"`
-	ExecuteConfig ExecuteConfig `json:"execute_config"`
+	ModelDir      string                 `json:"model_dir"`
+	ModelFile     string                 `json:"model_file"`
+	HistoryPath   string                 `json:"history_path"`
+	ConfigPath    string                 `json:"config_path"`
+	UserPrefs     UserPrefs              `json:"user_preferences"`
+	ModelConfig   ai.ModelConfig         `json:"model_config"`
+	ExecuteConfig commands.ExecuteConfig `json:"execute_config"`
 }
 
 // UserPrefs holds user preferences
@@ -56,8 +58,8 @@ func DefaultConfig() (*Config, error) {
 			DefaultMode:  "ask",
 			SafeMode:     true,
 		},
-		ModelConfig:   DefaultModelConfig(),
-		ExecuteConfig: DefaultExecuteConfig(),
+		ModelConfig:   ai.DefaultModelConfig(),
+		ExecuteConfig: commands.DefaultExecuteConfig(),
 	}
 
 	// Load user preferences if config file exists
@@ -115,7 +117,7 @@ func (cfg *Config) SavePreferences() error {
 
 // Versioning and Model metadata
 const (
-	HelixVersion  = "0.2.0"
+	HelixVersion  = "0.3.0"
 	ModelName     = "llama-2-7b-chat.gguf"
 	ModelURL      = "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_0.gguf"
 	ModelChecksum = "9958ee9b670594147b750bbc7d0540b928fa12dcc5dd4c58cc56ed2eb85e371b"

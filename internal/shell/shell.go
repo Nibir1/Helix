@@ -1,5 +1,4 @@
-// shell.go
-package main
+package shell
 
 import (
 	"os"

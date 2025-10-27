@@ -1,4 +1,3 @@
-// main.go
 package main
 
 import (
@@ -9,60 +8,68 @@ import (
 	"strings"
 	"time"
 
+	"helix/internal/ai"
+	"helix/internal/commands"
+	"helix/internal/config"
+	"helix/internal/shell"
+	"helix/internal/utils"
+	"helix/internal/ux"
+
 	"github.com/fatih/color"
 )
 
 // Package-level variables
 var (
-	cfg               *Config
-	env               Env
-	pb                *PromptBuilder
+	cfg               *config.Config
+	env               shell.Env
+	pb                *ai.PromptBuilder
 	online            bool
-	execConfig        ExecuteConfig
-	gitManager        *GitManager
-	syntaxHighlighter *SyntaxHighlighter
-	sandbox           *DirectorySandbox
+	execConfig        commands.ExecuteConfig
+	gitManager        *commands.GitManager
+	syntaxHighlighter *utils.SyntaxHighlighter
+	sandbox           *commands.DirectorySandbox
 )
 
 func main() {
 	// Initialize color output
-	color.Cyan("🚀 Helix v%s — AI-Powered CLI Assistant", HelixVersion)
+	color.Cyan("🚀 Helix v%s — AI-Powered CLI Assistant", config.HelixVersion)
 	color.Yellow("Repository: https://github.com/Nibir1/Helix")
 
 	// Load configuration
 	var err error
-	cfg, err = DefaultConfig()
+	cfg, err = config.DefaultConfig()
 	if err != nil {
 		color.Red("Error loading config: %v", err)
 		return
 	}
 
 	// Detect environment
-	env = DetectEnvironment()
+	env = shell.DetectEnvironment()
 	color.Blue("🌍 Detected: %s (%s shell)", strings.Title(env.OSName), env.Shell)
 
 	// Check internet connectivity
-	online = IsOnline(5 * time.Second)
+	online = utils.IsOnline(5 * time.Second)
 	if online {
 		color.Green("✅ Online mode - real-time capabilities available")
 	} else {
 		color.Yellow("⚠️  Offline mode - using local AI only")
 	}
 
-	// Initialize Git manager
-	gitManager = NewGitManager(env, execConfig, sandbox)
-
-	// Initialize prompt builder
-	pb = NewPromptBuilder(env, online)
-
-	// Initialize syntax highlighter
-	syntaxHighlighter = NewSyntaxHighlighter()
-
 	// Initialize directory sandbox
-	sandbox = NewDirectorySandbox()
+	sandbox = commands.NewDirectorySandbox()
 
 	// Set execution config
-	execConfig = DefaultExecuteConfig()
+	execConfig = commands.DefaultExecuteConfig()
+
+	// Initialize Git manager
+	gitManager = commands.NewGitManager(env, execConfig, sandbox)
+
+	// Initialize prompt builder
+	pb = ai.NewPromptBuilder(env, online)
+
+	// Initialize syntax highlighter
+	syntaxHighlighter = utils.NewSyntaxHighlighter()
+	commands.SetSyntaxHighlighter(syntaxHighlighter)
 
 	// Ensure model directory exists
 	if err := cfg.EnsureModelDir(); err != nil {
@@ -71,7 +78,7 @@ func main() {
 	}
 
 	// Download model if not present
-	if err := DownloadModel(cfg.ModelFile, ModelURL, ModelChecksum); err != nil {
+	if err := ai.DownloadModel(cfg.ModelFile, config.ModelURL, config.ModelChecksum); err != nil {
 		color.Yellow("⚠️  Model download error: %v", err)
 		color.Yellow("Running in enhanced mock mode.")
 		runEnhancedMockMode()
@@ -92,7 +99,7 @@ func main() {
 
 	// Load LLaMA model
 	color.Blue("🔧 Loading AI model...")
-	if err := LoadModel(cfg.ModelFile); err != nil {
+	if err := ai.LoadModel(cfg.ModelFile); err != nil {
 		color.Red("⚠️  Failed to load model: %v", err)
 		color.Yellow("This could indicate:")
 		color.Yellow("  - Corrupted model file")
@@ -103,16 +110,16 @@ func main() {
 		return
 	}
 
-	defer CloseModel()
+	defer ai.CloseModel()
 	color.Green("✅ AI model loaded successfully!")
 
 	// Create UX manager for nice output
-	ux := NewUX()
+	ux := ux.NewUX()
 	ux.ShowWelcomeBanner("0.2.0")
 
 	// Test the model with a simple prompt
 	color.Blue("🧪 Testing AI with simple prompt...")
-	testResponse, err := RunModel("Say 'Hello from Helix!' in one sentence:")
+	testResponse, err := ai.RunModel("Say 'Hello from Helix!' in one sentence:")
 	if err != nil {
 		color.Red("⚠️  Model test failed: %v", err)
 		runEnhancedMockMode()
@@ -131,8 +138,8 @@ func runEnhancedMockMode() {
 	color.Yellow("AI commands will be simulated with intelligent responses")
 
 	execConfig.DryRun = true
-	env = DetectEnvironment()
-	pb = NewPromptBuilder(env, online)
+	env = shell.DetectEnvironment()
+	pb = ai.NewPromptBuilder(env, online)
 
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -174,7 +181,7 @@ func runEnhancedCLI() {
 	reader := bufio.NewReader(os.Stdin)
 
 	// Load command history
-	history, _ := LoadHistory(cfg.HistoryPath)
+	history, _ := utils.LoadHistory(cfg.HistoryPath)
 	if len(history) > 0 {
 		color.Blue("📚 Loaded %d commands from history", len(history))
 	}
@@ -186,7 +193,7 @@ func runEnhancedCLI() {
 
 		// Save to history
 		if input != "" && input != "/exit" {
-			AppendHistory(cfg.HistoryPath, input)
+			utils.AppendHistory(cfg.HistoryPath, input)
 		}
 
 		switch {
@@ -255,16 +262,16 @@ func handleCmdCommand(input string, mockMode bool) {
 	} else {
 		// Real AI processing
 		start := time.Now()
-		aiResponse, err = RunModel(prompt)
+		aiResponse, err = ai.RunModel(prompt)
 		if err != nil {
 			color.Red("❌ AI error: %v", err)
 			return
 		}
-		color.Green("✅ AI processed in %s", FormatDuration(time.Since(start)))
+		color.Green("✅ AI processed in %s", utils.FormatDuration(time.Since(start)))
 	}
 
 	// Extract the actual command from AI response
-	command := ExtractCommand(aiResponse)
+	command := ai.ExtractCommand(aiResponse)
 
 	if command == "" {
 		color.Red("❌ AI didn't generate a valid command")
@@ -323,7 +330,7 @@ func handleCmdCommand(input string, mockMode bool) {
 	}
 
 	// Clean and validate the command
-	cleanedCommand, err := ValidateAndCleanCommand(command)
+	cleanedCommand, err := commands.ValidateAndCleanCommand(command)
 	if err != nil {
 		color.Red("❌ Command validation failed: %v", err)
 		color.Yellow("Attempted command: %s", command)
@@ -332,10 +339,10 @@ func handleCmdCommand(input string, mockMode bool) {
 		if strings.Contains(err.Error(), "unmatched quotes") {
 			color.Yellow("💡 Quote balancing issue detected")
 			// Try one more fix attempt with enhanced repair
-			repairedCommand := fixUnmatchedQuotes(command)
+			repairedCommand := utils.FixUnmatchedQuotes(command)
 			if repairedCommand != command {
 				color.Blue("🔄 Retrying with enhanced quote repair...")
-				cleanedCommand, err = ValidateAndCleanCommand(repairedCommand)
+				cleanedCommand, err = commands.ValidateAndCleanCommand(repairedCommand)
 				if err == nil {
 					command = cleanedCommand
 					color.Green("✅ Quote repair successful: %s", command)
@@ -349,10 +356,10 @@ func handleCmdCommand(input string, mockMode bool) {
 			color.Red("❌ Command cannot be fixed: %v", err)
 
 			// NEW: Offer manual editing option
-			if AskForConfirmation("Would you like to manually edit the command?") {
+			if commands.AskForConfirmation("Would you like to manually edit the command?") {
 				manuallyEdited := manualCommandEdit(command)
 				if manuallyEdited != "" {
-					cleanedCommand, err = ValidateAndCleanCommand(manuallyEdited)
+					cleanedCommand, err = commands.ValidateAndCleanCommand(manuallyEdited)
 					if err == nil {
 						command = cleanedCommand
 						color.Green("✅ Manual edit successful: %s", command)
@@ -377,7 +384,7 @@ func handleCmdCommand(input string, mockMode bool) {
 	// NEW: Manual fix option for stubborn patterns
 	if strings.Contains(command, ".go") && !strings.Contains(command, "*.go") {
 		color.Yellow("⚠️  AI generated malformed file pattern")
-		if AskForConfirmation("Apply manual fix for file pattern?") {
+		if commands.AskForConfirmation("Apply manual fix for file pattern?") {
 			// Apply targeted fix
 			oldCommand := command
 			command = strings.ReplaceAll(command, ".go", "*.go")
@@ -402,7 +409,7 @@ func handleCmdCommand(input string, mockMode bool) {
 		if strings.HasSuffix(command, ")") {
 			color.Red("   ✗ Trailing parenthesis")
 		}
-		if !hasBalancedQuotes(command) {
+		if !utils.HasBalancedQuotes(command) {
 			color.Red("   ✗ Unbalanced quotes")
 		}
 
@@ -410,7 +417,7 @@ func handleCmdCommand(input string, mockMode bool) {
 	} else {
 		color.Green("✅ Command syntax validation passed")
 		// Optional command breakdown
-		if AskForConfirmation("Show command breakdown?") {
+		if commands.AskForConfirmation("Show command breakdown?") {
 			syntaxHighlighter.ExplainCommandComponents(command)
 			fmt.Println()
 		}
@@ -422,7 +429,7 @@ func handleCmdCommand(input string, mockMode bool) {
 	}
 
 	// Ask for explanation if the command looks complex
-	if shouldExplainCommand(command) && AskForConfirmation("Would you like an explanation of this command?") {
+	if shouldExplainCommand(command) && commands.AskForConfirmation("Would you like an explanation of this command?") {
 		explainCommand(command, mockMode)
 	}
 
@@ -434,7 +441,7 @@ func handleCmdCommand(input string, mockMode bool) {
 	if hasSyntaxErrors(command) {
 		color.Red("🚨 WARNING: Command has syntax errors that may cause failure")
 		color.Yellow("💡 Recommended: Cancel and try a different phrasing")
-		if !AskForConfirmation("Execute anyway? (likely to fail)") {
+		if !commands.AskForConfirmation("Execute anyway? (likely to fail)") {
 			color.Yellow("❌ Execution cancelled due to syntax errors")
 			return
 		}
@@ -446,7 +453,7 @@ func handleCmdCommand(input string, mockMode bool) {
 	color.Yellow("🔍 Final command to execute: '%s'", command)
 
 	// Execute the command
-	if AskForConfirmation("Execute this command?") {
+	if commands.AskForConfirmation("Execute this command?") {
 		err := sandbox.WrapCommand(command, execConfig, env)
 		if err != nil {
 			color.Red("❌ Command failed: %v", err)
@@ -541,7 +548,7 @@ func attemptCommandFix(command string) string {
 	}
 
 	// Fix 4: Fix unmatched quotes ONLY if it's a clear pattern
-	command = fixUnmatchedQuotes(command)
+	command = utils.FixUnmatchedQuotes(command)
 
 	// Fix 5: Remove duplicate "git" prefixes for non-git commands
 	if strings.HasPrefix(command, "git find") {
@@ -614,7 +621,7 @@ Question: %s
 Answer:`, promptText)
 
 		// Use more restrictive parameters
-		config := ModelConfig{
+		config := ai.ModelConfig{
 			Temperature: 0.3, // Lower for more deterministic responses
 			TopP:        0.7,
 			TopK:        20,
@@ -622,12 +629,12 @@ Answer:`, promptText)
 		}
 
 		start := time.Now()
-		response, err = RunModelWithConfig(prompt, config)
+		response, err = ai.RunModelWithConfig(prompt, config)
 		if err != nil {
 			color.Red("❌ AI error: %v", err)
 			return
 		}
-		color.Green("✅ AI processed in %s", FormatDuration(time.Since(start)))
+		color.Green("✅ AI processed in %s", utils.FormatDuration(time.Since(start)))
 
 		// Debug: Show raw response
 		color.Yellow("🔍 Raw AI response: '%s'", response)
@@ -642,7 +649,7 @@ Answer:`, promptText)
 	}
 
 	// Create UX manager for nice output
-	ux := NewUX()
+	ux := ux.NewUX()
 	ux.PrintAIResponse(response, !mockMode)
 }
 
@@ -664,14 +671,14 @@ func handleExplainCommand(input string, mockMode bool) {
 		explanation = generateMockExplanation(commandText)
 	} else {
 		prompt := pb.BuildExplainPrompt(commandText)
-		explanation, err = RunModel(prompt)
+		explanation, err = ai.RunModel(prompt)
 		if err != nil {
 			color.Red("❌ AI error: %v", err)
 			return
 		}
 	}
 
-	ux := NewUX()
+	ux := ux.NewUX()
 	ux.PrintAIResponse(explanation, !mockMode)
 }
 
@@ -687,7 +694,7 @@ func handleInstallCommand(input string, mockMode bool) {
 	action := "install"
 	packageName := args[1]
 
-	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
+	commands.HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
 }
 
 // Handle /update command
@@ -702,7 +709,7 @@ func handleUpdateCommand(input string, mockMode bool) {
 	action := "update"
 	packageName := args[1]
 
-	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
+	commands.HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
 }
 
 // Handle /remove command
@@ -717,7 +724,7 @@ func handleRemoveCommand(input string, mockMode bool) {
 	action := "remove"
 	packageName := args[1]
 
-	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
+	commands.HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
 }
 
 // Handle /sandbox command
@@ -738,11 +745,11 @@ func handleSandboxCommand(input string) {
 	mode := strings.ToLower(args[1])
 	switch mode {
 	case "off", "disable", "none":
-		sandbox.SetMode(SandboxDisabled)
+		sandbox.SetMode(commands.SandboxDisabled)
 	case "current", "dir", "normal":
-		sandbox.SetMode(SandboxCurrentDir)
+		sandbox.SetMode(commands.SandboxCurrentDir)
 	case "strict", "tight", "restricted":
-		sandbox.SetMode(SandboxStrict)
+		sandbox.SetMode(commands.SandboxStrict)
 	default:
 		color.Red("❌ Unknown sandbox mode: %s", mode)
 		color.Yellow("💡 Available modes: off, current, strict")
@@ -785,7 +792,7 @@ func handleGitCommand(input string) {
 // Show debug information
 func showDebugInfo() {
 	color.Cyan("=== 🔧 HELIX DEBUG INFORMATION ===")
-	color.Cyan("Version: %s", HelixVersion)
+	color.Cyan("Version: %s", config.HelixVersion)
 	color.Cyan("Model: %s", cfg.ModelFile)
 	color.Cyan("OS: %s", env.OSName)
 	color.Cyan("Shell: %s", env.Shell)
@@ -796,12 +803,12 @@ func showDebugInfo() {
 	color.Cyan("Safe Mode: %v", execConfig.SafeMode)
 
 	// Check model status
-	if ModelIsLoaded() {
+	if ai.ModelIsLoaded() {
 		color.Green("Model Status: ✅ Loaded")
 
 		// Better model test - more specific and in English
 		color.Blue("🧪 Running model test...")
-		testResponse, err := RunModel("Answer with one word only: Hello")
+		testResponse, err := ai.RunModel("Answer with one word only: Hello")
 		if err != nil {
 			color.Red("Model Test: ❌ Failed - %v", err)
 		} else {
@@ -812,7 +819,7 @@ func showDebugInfo() {
 			if len(cleanResponse) > 100 {
 				color.Yellow("⚠️  Model is generating verbose responses")
 			}
-			if !isMostlyEnglish(cleanResponse) {
+			if !utils.IsMostlyEnglish(cleanResponse) {
 				color.Yellow("⚠️  Model is responding in non-English")
 			}
 		}
@@ -821,7 +828,7 @@ func showDebugInfo() {
 	}
 
 	// Check package manager
-	pkgMgr := DetectPackageManager(env)
+	pkgMgr := shell.DetectPackageManager(env)
 	if pkgMgr.Exists {
 		color.Green("Package Manager: %s", pkgMgr.Name)
 	} else {
@@ -829,7 +836,7 @@ func showDebugInfo() {
 	}
 
 	// Check history
-	history, _ := LoadHistory(cfg.HistoryPath)
+	history, _ := utils.LoadHistory(cfg.HistoryPath)
 	color.Cyan("Command History: %d entries", len(history))
 
 	color.Cyan("=================================")
@@ -837,15 +844,15 @@ func showDebugInfo() {
 
 // Show help information
 func showHelp() {
-	ux := NewUX()
+	ux := ux.NewUX()
 	ux.ShowHelp()
 }
 
-// Check and display oinline status
+// Check and display online status
 func checkOnlineStatus() {
 	color.Blue("🌐 Checking internet connectivity...")
 
-	if IsOnline(3 * time.Second) {
+	if utils.IsOnline(3 * time.Second) {
 		color.Green("✅ Online - Real-time capabilities available")
 	} else {
 		color.Yellow("⚠️  Offline - Using local AI only")
@@ -863,7 +870,7 @@ func toggleDryRun() {
 }
 
 // Helper functions for mock mode
-func generateMockCommand(request string, env Env) string {
+func generateMockCommand(request string, env shell.Env) string {
 	request = strings.ToLower(request)
 
 	switch {
@@ -929,7 +936,7 @@ func shouldExplainCommand(command string) bool {
 		"curl", "wget", "ssh", "scp", "rsync", "tar", "gzip",
 	}
 
-	return ContainsAny(strings.ToLower(command), complexCommands)
+	return utils.ContainsAny(strings.ToLower(command), complexCommands)
 }
 
 // Function to explain a command
@@ -942,7 +949,7 @@ func explainCommand(command string, mockMode bool) {
 	if mockMode {
 		explanation = generateMockExplanation(command)
 	} else {
-		explanation, err = ExplainCommand(command)
+		explanation, err = commands.ExplainCommand(command)
 		if err != nil {
 			color.Red("❌ Explanation failed: %v", err)
 			return
@@ -955,7 +962,7 @@ func explainCommand(command string, mockMode bool) {
 		}
 	}
 
-	ux := NewUX()
+	ux := ux.NewUX()
 	ux.PrintAIResponse(explanation, !mockMode)
 }
 
@@ -1053,7 +1060,7 @@ func testAIModel() {
 
 	for _, test := range tests {
 		color.Blue("Testing: %s", test.name)
-		response, err := RunModel(test.prompt)
+		response, err := ai.RunModel(test.prompt)
 		if err != nil {
 			color.Red("  ❌ Failed: %v", err)
 		} else {

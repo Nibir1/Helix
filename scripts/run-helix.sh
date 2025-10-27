@@ -6,12 +6,14 @@ ROOT_DIR=$(pwd)
 LLAMA_WRAPPER_DIR="${ROOT_DIR}/go-llama.cpp"
 LLAMA_CPP_DIR="${LLAMA_WRAPPER_DIR}/llama.cpp"
 BUILD_JOBS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+MAIN_PACKAGE="./cmd/helix"  # NEW: Path to main package
 
 echo "🏗️  Building Helix AI CLI"
 echo "Root: $ROOT_DIR"
 echo "Llama wrapper dir: $LLAMA_WRAPPER_DIR"
 echo "Llama.cpp dir: $LLAMA_CPP_DIR"
 echo "Build jobs: $BUILD_JOBS"
+echo "Main package: $MAIN_PACKAGE"
 echo
 
 # --- Dependency Checks ---
@@ -79,4 +81,5 @@ echo
 
 # --- Run Helix CLI ---
 echo "🚀 Running Helix..."
-exec go run . "$@"
+# CHANGED: Run from the main package path instead of root directory
+exec go run "$MAIN_PACKAGE" "$@"

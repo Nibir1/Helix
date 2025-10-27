@@ -1,5 +1,4 @@
-// sandbox.go
-package main
+package commands
 
 import (
 	"fmt"
@@ -7,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"helix/internal/shell"
 
 	"github.com/fatih/color"
 )
@@ -300,7 +301,7 @@ func (ds *DirectorySandbox) ResetToOriginal() error {
 }
 
 // WrapCommand wraps a command with sandbox safety checks
-func (ds *DirectorySandbox) WrapCommand(command string, execConfig ExecuteConfig, env Env) error {
+func (ds *DirectorySandbox) WrapCommand(command string, execConfig ExecuteConfig, env shell.Env) error {
 	// Validate command against sandbox rules
 	if valid, reason := ds.ValidateCommand(command); !valid {
 		return fmt.Errorf("sandbox violation: %s", reason)
