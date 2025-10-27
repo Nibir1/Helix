@@ -18,6 +18,7 @@ var (
 	pb         *PromptBuilder
 	online     bool
 	execConfig ExecuteConfig
+	gitManager *GitManager
 )
 
 func main() {
@@ -44,6 +45,9 @@ func main() {
 	} else {
 		color.Yellow("⚠️  Offline mode - using local AI only")
 	}
+
+	// Initialize Git manager
+	gitManager = NewGitManager(env, execConfig)
 
 	// Initialize prompt builder
 	pb = NewPromptBuilder(env, online)
@@ -198,6 +202,8 @@ func runEnhancedCLI() {
 			handleInstallCommand(input, false)
 		case strings.HasPrefix(input, "/update"):
 			handleUpdateCommand(input, false)
+		case strings.HasPrefix(input, "/git"):
+			handleGitCommand(input)
 		case strings.HasPrefix(input, "/remove"):
 			handleRemoveCommand(input, false)
 		case strings.HasPrefix(input, "/dry-run"):
@@ -617,5 +623,23 @@ func testAIModel() {
 			}
 		}
 		time.Sleep(1 * time.Second) // Don't overwhelm the model
+	}
+}
+
+// Handle /git command
+func handleGitCommand(input string) {
+	commandText := strings.TrimSpace(strings.TrimPrefix(input, "/git"))
+	if commandText == "" {
+		color.Red("❌ Usage: /git <git operation>")
+		color.Yellow("💡 Examples:")
+		color.Yellow("  /git merge feature-branch with squash and accept all changes")
+		color.Yellow("  /git undo last commit")
+		color.Yellow("  /git clean untracked files")
+		color.Yellow("  /git status")
+		return
+	}
+
+	if err := gitManager.HandleGitRequest(commandText); err != nil {
+		color.Red("❌ Git operation failed: %v", err)
 	}
 }

@@ -114,6 +114,7 @@ func (ux *UX) ShowHelp() {
 	color.Yellow("🤖 AI Commands:")
 	fmt.Println("  /ask <question>     - Ask the AI a question")
 	fmt.Println("  /cmd <request>      - Generate and execute commands from natural language")
+	fmt.Println("  /git <request>      - Process natural language git requests")
 	fmt.Println("  /explain <command>  - Explain what a command does")
 	fmt.Println()
 
