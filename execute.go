@@ -82,6 +82,14 @@ func ValidateAndCleanCommand(command string) (string, error) {
 		}
 	}
 
+	// NEW: Fix unmatched quotes
+	command = fixUnmatchedQuotes(command)
+
+	// NEW: Validate quote balance
+	if !hasBalancedQuotes(command) {
+		return "", fmt.Errorf("command has unmatched quotes: %s", command)
+	}
+
 	// Check if command is empty after cleaning
 	if command == "" {
 		return "", fmt.Errorf("empty command after cleaning")
@@ -104,13 +112,23 @@ func ValidateAndCleanCommand(command string) (string, error) {
 
 // ExecuteCommand runs a shell command with safety checks
 func ExecuteCommand(command string, config ExecuteConfig, env Env) error {
-	// Clean and validate the command first
-	cleanedCommand, err := ValidateAndCleanCommand(command)
-	if err != nil {
-		return fmt.Errorf("command validation failed: %w", err)
+	// Light validation only - command should already be cleaned
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return fmt.Errorf("empty command")
 	}
 
-	command = cleanedCommand
+	// Safety check only - don't re-clean the command
+	if config.SafeMode && !IsCommandSafe(command) {
+		return fmt.Errorf("command blocked for safety: %s", command)
+	}
+
+	// Quick quote balance check without aggressive fixing
+	singleQuotes := strings.Count(command, "'")
+	doubleQuotes := strings.Count(command, `"`)
+	if (singleQuotes%2 != 0 && singleQuotes > 1) || (doubleQuotes%2 != 0 && doubleQuotes > 1) {
+		return fmt.Errorf("command has unbalanced quotes: %s", command)
+	}
 
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -121,15 +139,6 @@ func ExecuteCommand(command string, config ExecuteConfig, env Env) error {
 	if config.SafeMode && !IsCommandSafe(command) {
 		return fmt.Errorf("command blocked for safety: %s", command)
 	}
-
-	// Display the command
-	yellow := color.New(color.FgYellow).SprintFunc()
-	fmt.Printf("%s %s\n", yellow("🚀 Executing:"), command)
-
-	// if config.DryRun {
-	// 	fmt.Println("✅ Dry run - command not executed")
-	// 	return nil
-	// }
 
 	// NEW: Display the command with syntax highlighting
 	if config.DryRun {
@@ -177,8 +186,7 @@ func ExecuteCommand(command string, config ExecuteConfig, env Env) error {
 	cmd.Stdin = os.Stdin
 
 	// Execute
-	err = cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("command execution failed: %w", err)
 	}
 

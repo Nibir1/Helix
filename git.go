@@ -16,20 +16,21 @@ type GitManager struct {
 	env        Env
 	execConfig ExecuteConfig
 	workingDir string
+	sandbox    *DirectorySandbox
 }
 
 // NewGitManager creates a new Git manager
-func NewGitManager(env Env, execConfig ExecuteConfig) *GitManager {
-	// Get current working directory
+func NewGitManager(env Env, execConfig ExecuteConfig, sandbox *DirectorySandbox) *GitManager {
 	wd, err := os.Getwd()
 	if err != nil {
-		wd = "." // Fallback to current directory
+		wd = "."
 	}
 
 	return &GitManager{
 		env:        env,
 		execConfig: execConfig,
 		workingDir: wd,
+		sandbox:    sandbox, // Initialize sandbox
 	}
 }
 
@@ -252,7 +253,7 @@ func (gm *GitManager) executeGitOperation(operation *GitOperation) error {
 
 	// Execute the command
 	color.Green("✅ Executing git operation...")
-	return ExecuteCommand(finalCommand, gm.execConfig, gm.env)
+	return gm.sandbox.WrapCommand(finalCommand, gm.execConfig, gm.env)
 }
 
 // executeMultiCommandOperation handles complex git operations step by step
@@ -306,7 +307,7 @@ func (gm *GitManager) executeMultiCommandOperation(operation *GitOperation) erro
 			continue
 		}
 
-		if err := ExecuteCommand(command, gm.execConfig, gm.env); err != nil {
+		if err := gm.sandbox.WrapCommand(command, gm.execConfig, gm.env); err != nil {
 			color.Red("❌ Command failed at step %d: %v", i+1, err)
 			color.Yellow("💡 Operation incomplete. Check git status.")
 			return err
@@ -376,7 +377,7 @@ func (gm *GitManager) executeCommitWithMessage(targetBranch string, message stri
 
 	// Use the temp file for commit message
 	commitCmd := fmt.Sprintf("git commit -F %s", tempFile.Name())
-	return ExecuteCommand(commitCmd, gm.execConfig, gm.env)
+	return gm.sandbox.WrapCommand(commitCmd, gm.execConfig, gm.env)
 }
 
 // parseMultiCommands splits a multi-command string into individual commands
@@ -488,7 +489,7 @@ Command:`, request, gm.workingDir, currentBranch)
 
 	// Ask for confirmation
 	if AskForConfirmation("Execute this git command?") {
-		return ExecuteCommand(command, gm.execConfig, gm.env)
+		return gm.sandbox.WrapCommand(command, gm.execConfig, gm.env)
 	}
 
 	color.Yellow("💡 Command ready: %s", command)

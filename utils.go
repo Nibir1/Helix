@@ -187,6 +187,7 @@ func cleanAIResponse(response string) string {
 	return response
 }
 
+// isMostlyEnglish checks if the text is mostly English characters
 func isMostlyEnglish(text string) bool {
 	// Simple heuristic: count English vs non-English characters
 	if len(text) == 0 {
@@ -204,4 +205,47 @@ func isMostlyEnglish(text string) bool {
 	}
 
 	return float64(englishChars)/float64(totalChars) > 0.8
+}
+
+// hasBalancedQuotes checks if quotes are properly balanced
+func hasBalancedQuotes(text string) bool {
+	return strings.Count(text, "'")%2 == 0 && strings.Count(text, `"`)%2 == 0
+}
+
+// fixUnmatchedQuotes attempts to fix common quote mismatches intelligently
+func fixUnmatchedQuotes(command string) string {
+	// Count single and double quotes
+	singleQuotes := strings.Count(command, "'")
+	doubleQuotes := strings.Count(command, `"`)
+
+	// Don't fix if there are no quotes at all
+	if singleQuotes == 0 && doubleQuotes == 0 {
+		return command
+	}
+
+	// Only fix if we have clear imbalance (not just one quote that might be intentional)
+	if singleQuotes%2 != 0 && singleQuotes > 0 {
+		// Check if it's a common pattern like -name '*.go (missing closing quote)
+		if strings.Contains(command, "-name '") || strings.Contains(command, "-type '") {
+			// Add closing quote at a logical position
+			command += "'"
+		} else {
+			// For other cases, be conservative - don't auto-fix
+			return command
+		}
+	}
+
+	if doubleQuotes%2 != 0 && doubleQuotes > 0 {
+		// Check if it's a common pattern with file operations
+		if strings.Contains(command, `-name "`) || strings.Contains(command, `-type "`) ||
+			strings.Contains(command, `find "`) || strings.Contains(command, `grep "`) {
+			// Add closing quote at a logical position
+			command += `"`
+		} else {
+			// For other cases, be conservative - don't auto-fix
+			return command
+		}
+	}
+
+	return command
 }

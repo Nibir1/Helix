@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ var (
 	execConfig        ExecuteConfig
 	gitManager        *GitManager
 	syntaxHighlighter *SyntaxHighlighter
+	sandbox           *DirectorySandbox
 )
 
 func main() {
@@ -48,13 +50,16 @@ func main() {
 	}
 
 	// Initialize Git manager
-	gitManager = NewGitManager(env, execConfig)
+	gitManager = NewGitManager(env, execConfig, sandbox)
 
 	// Initialize prompt builder
 	pb = NewPromptBuilder(env, online)
 
 	// Initialize syntax highlighter
 	syntaxHighlighter = NewSyntaxHighlighter()
+
+	// Initialize directory sandbox
+	sandbox = NewDirectorySandbox()
 
 	// Set execution config
 	execConfig = DefaultExecuteConfig()
@@ -208,6 +213,10 @@ func runEnhancedCLI() {
 			handleUpdateCommand(input, false)
 		case strings.HasPrefix(input, "/git"):
 			handleGitCommand(input)
+		case strings.HasPrefix(input, "/sandbox"):
+			handleSandboxCommand(input)
+		case strings.HasPrefix(input, "/cd"):
+			handleChangeDirectory(input)
 		case strings.HasPrefix(input, "/remove"):
 			handleRemoveCommand(input, false)
 		case strings.HasPrefix(input, "/dry-run"):
@@ -263,24 +272,148 @@ func handleCmdCommand(input string, mockMode bool) {
 		return
 	}
 
+	// Show the raw command before cleaning for debugging
+	color.Yellow("🔍 Raw AI command: %s", command)
+
+	// NEW: Enhanced detailed analysis
+	color.Blue("🔬 Analyzing command structure:")
+	color.Blue("  - Single quotes: %d", strings.Count(command, "'"))
+	color.Blue("  - Double quotes: %d", strings.Count(command, `"`))
+	color.Blue("  - Has '*.go': %v", strings.Contains(command, "*.go"))
+	color.Blue("  - Has '.go': %v", strings.Contains(command, ".go") && !strings.Contains(command, "*.go"))
+	color.Blue("  - Has trailing ): %v", strings.HasSuffix(command, ")"))
+
+	// NEW: Show specific issues detected
+	if strings.Contains(command, ")") && !strings.Contains(command, "(") {
+		color.Red("⚠️  Detected invalid trailing parenthesis")
+	}
+	if strings.Contains(command, ".go") && !strings.Contains(command, "*.go") {
+		color.Red("⚠️  Detected malformed file pattern: '.go' should be '*.go'")
+	}
+	if strings.Count(command, "'")%2 != 0 || strings.Count(command, `"`)%2 != 0 {
+		color.Red("⚠️  Detected unbalanced quotes")
+	}
+
+	// NEW: Enhanced command fixing with detailed feedback
+	color.Blue("🛠️  Applying automatic fixes...")
+	fixedCommand := attemptCommandFix(command)
+
+	// NEW: Show what changed in detail
+	if fixedCommand != command {
+		color.Green("🔧 Fixed command:")
+		color.Green("   BEFORE: %s", command)
+		color.Green("   AFTER:  %s", fixedCommand)
+
+		// Show specific changes
+		if strings.Contains(command, ".go") && !strings.Contains(command, "*.go") &&
+			strings.Contains(fixedCommand, "*.go") {
+			color.Green("   ✓ Fixed file pattern: '.go' → '*.go'")
+		}
+		if strings.HasSuffix(command, ")") && !strings.HasSuffix(fixedCommand, ")") {
+			color.Green("   ✓ Removed trailing parenthesis")
+		}
+		if (strings.Count(command, "'")%2 != 0 && strings.Count(fixedCommand, "'")%2 == 0) ||
+			(strings.Count(command, `"`)%2 != 0 && strings.Count(fixedCommand, `"`)%2 == 0) {
+			color.Green("   ✓ Fixed unbalanced quotes")
+		}
+
+		command = fixedCommand
+	} else {
+		color.Yellow("🔧 No fixes applied")
+	}
+
 	// Clean and validate the command
 	cleanedCommand, err := ValidateAndCleanCommand(command)
 	if err != nil {
 		color.Red("❌ Command validation failed: %v", err)
-		color.Yellow("Raw command: %s", command)
-		return
+		color.Yellow("Attempted command: %s", command)
+
+		// NEW: Enhanced validation error handling
+		if strings.Contains(err.Error(), "unmatched quotes") {
+			color.Yellow("💡 Quote balancing issue detected")
+			// Try one more fix attempt with enhanced repair
+			repairedCommand := fixUnmatchedQuotes(command)
+			if repairedCommand != command {
+				color.Blue("🔄 Retrying with enhanced quote repair...")
+				cleanedCommand, err = ValidateAndCleanCommand(repairedCommand)
+				if err == nil {
+					command = cleanedCommand
+					color.Green("✅ Quote repair successful: %s", command)
+				} else {
+					color.Red("❌ Quote repair failed: %v", err)
+				}
+			}
+		}
+
+		if err != nil {
+			color.Red("❌ Command cannot be fixed: %v", err)
+
+			// NEW: Offer manual editing option
+			if AskForConfirmation("Would you like to manually edit the command?") {
+				manuallyEdited := manualCommandEdit(command)
+				if manuallyEdited != "" {
+					cleanedCommand, err = ValidateAndCleanCommand(manuallyEdited)
+					if err == nil {
+						command = cleanedCommand
+						color.Green("✅ Manual edit successful: %s", command)
+					} else {
+						color.Red("❌ Manual edit still invalid: %v", err)
+						return
+					}
+				} else {
+					color.Yellow("❌ Manual edit cancelled")
+					return
+				}
+			} else {
+				return
+			}
+		}
+	} else {
+		command = cleanedCommand
 	}
-	command = cleanedCommand
 
-	color.Cyan("💡 Generated command: %s", command)
+	color.Cyan("💡 Final command: %s", command)
 
-	// NEW: Show syntax-highlighted version
+	// NEW: Manual fix option for stubborn patterns
+	if strings.Contains(command, ".go") && !strings.Contains(command, "*.go") {
+		color.Yellow("⚠️  AI generated malformed file pattern")
+		if AskForConfirmation("Apply manual fix for file pattern?") {
+			// Apply targeted fix
+			oldCommand := command
+			command = strings.ReplaceAll(command, ".go", "*.go")
+			command = strings.ReplaceAll(command, "'.go", "'*.go")
+			command = strings.ReplaceAll(command, "\".go", "\"*.go")
+			color.Green("✅ Manually fixed: %s → %s", oldCommand, command)
+		}
+	}
+
+	// Show syntax-highlighted version
 	syntaxHighlighter.PrintHighlightedCommand("Generated command", command)
 
-	// NEW: Optional command breakdown
-	if AskForConfirmation("Show command breakdown?") {
-		syntaxHighlighter.ExplainCommandComponents(command)
-		fmt.Println()
+	// NEW: Enhanced validation with detailed feedback
+	color.Blue("🔍 Validating command syntax...")
+	if hasSyntaxErrors(command) {
+		color.Red("❌ Command has syntax errors")
+
+		// Show specific issues
+		if strings.Contains(command, ".go") && !strings.Contains(command, "*.go") {
+			color.Red("   ✗ Malformed file pattern: '.go' should be '*.go'")
+		}
+		if strings.HasSuffix(command, ")") {
+			color.Red("   ✗ Trailing parenthesis")
+		}
+		if !hasBalancedQuotes(command) {
+			color.Red("   ✗ Unbalanced quotes")
+		}
+
+		color.Yellow("💡 The generated command may not execute properly")
+	} else {
+		color.Green("✅ Command syntax validation passed")
+		// Optional command breakdown
+		if AskForConfirmation("Show command breakdown?") {
+			syntaxHighlighter.ExplainCommandComponents(command)
+			fmt.Println()
+		}
 	}
 
 	// Show the cleaned command for transparency
@@ -293,17 +426,166 @@ func handleCmdCommand(input string, mockMode bool) {
 		explainCommand(command, mockMode)
 	}
 
+	// NEW: Enhanced final validation before execution
+	color.Cyan("🎯 Ready to execute:")
+	syntaxHighlighter.PrintHighlightedCommand("", command)
+
+	// NEW: Comprehensive pre-execution check
+	if hasSyntaxErrors(command) {
+		color.Red("🚨 WARNING: Command has syntax errors that may cause failure")
+		color.Yellow("💡 Recommended: Cancel and try a different phrasing")
+		if !AskForConfirmation("Execute anyway? (likely to fail)") {
+			color.Yellow("❌ Execution cancelled due to syntax errors")
+			return
+		}
+	} else {
+		color.Green("✅ Command looks good to execute")
+	}
+
+	// Final confirmation before execution
+	color.Yellow("🔍 Final command to execute: '%s'", command)
+
 	// Execute the command
 	if AskForConfirmation("Execute this command?") {
-		err := ExecuteCommand(command, execConfig, env)
+		err := sandbox.WrapCommand(command, execConfig, env)
 		if err != nil {
 			color.Red("❌ Command failed: %v", err)
+
+			// Enhanced error suggestions
+			if strings.Contains(err.Error(), "command not found") {
+				color.Yellow("💡 The command or program may not be installed")
+			} else if strings.Contains(err.Error(), "No such file or directory") {
+				color.Yellow("💡 Check if the file or directory exists")
+			} else if strings.Contains(err.Error(), "Permission denied") {
+				color.Yellow("💡 You may need elevated privileges for this command")
+			} else if strings.Contains(err.Error(), "syntax error") {
+				color.Yellow("💡 The command has shell syntax errors")
+				color.Yellow("💡 Try rephrasing your request differently")
+			} else if strings.Contains(err.Error(), "unmatched") {
+				color.Yellow("💡 There are unmatched quotes or parentheses")
+			}
 		} else {
 			color.Green("✅ Command executed successfully!")
 		}
 	} else {
 		color.Yellow("💡 Command ready to use: %s", command)
 	}
+}
+
+// NEW: manualCommandEdit allows user to manually fix the command
+func manualCommandEdit(currentCommand string) string {
+	color.Cyan("✏️  Manual Command Editor")
+	color.Cyan("Current command: %s", currentCommand)
+	color.Cyan("Enter corrected command (or press Enter to cancel): ")
+
+	reader := bufio.NewReader(os.Stdin)
+	edited, _ := reader.ReadString('\n')
+	edited = strings.TrimSpace(edited)
+
+	if edited == "" {
+		return ""
+	}
+	return edited
+}
+
+// attemptCommandFix tries to fix common AI command generation issues
+func attemptCommandFix(command string) string {
+	originalCommand := command
+
+	// Fix 1: Fix file patterns with missing wildcards - be more intelligent
+	filePatterns := []struct {
+		wrong   string
+		correct string
+	}{
+		{"-name '.go'", "-name '*.go'"},
+		{"-name \".go\"", "-name \"*.go\""},
+		{"-name .go", "-name '*.go'"},
+		{"-name '.go", "-name '*.go'"},
+		{"-name \"*.go", "-name \"*.go\""},
+		{"-name '*.go", "-name '*.go'"},
+		{"-name '.py'", "-name '*.py'"},
+		{"-name '.js'", "-name '*.js'"},
+		{"-name '.md'", "-name '*.md'"},
+		{"-name '.txt'", "-name '*.txt'"},
+		{"-name '.java'", "-name '*.java'"},
+		{"-name '.cpp'", "-name '*.cpp'"},
+		{"-name '.c'", "-name '*.c'"},
+		{"-name '.html'", "-name '*.html'"},
+		{"-name '.css'", "-name '*.css'"},
+	}
+
+	for _, pattern := range filePatterns {
+		if strings.Contains(command, pattern.wrong) {
+			command = strings.Replace(command, pattern.wrong, pattern.correct, 1)
+		}
+	}
+
+	// Fix 2: Use regex for more robust pattern matching
+	// This catches patterns like: -name '.go (missing quote and wildcard)
+	patternRegex := regexp.MustCompile(`-name\s+['"]?(\.[a-zA-Z0-9]+)['"]?`)
+	if matches := patternRegex.FindStringSubmatch(command); len(matches) > 1 {
+		// Found a pattern like '.go' - replace it with '*.go'
+		wrongPattern := matches[0]
+		extension := matches[1]
+		correctPattern := strings.Replace(wrongPattern, extension, "*"+extension, 1)
+		command = strings.Replace(command, wrongPattern, correctPattern, 1)
+	}
+
+	// Fix 3: Remove trailing invalid characters (but be careful)
+	command = strings.TrimSpace(command)
+	if strings.HasSuffix(command, ");") {
+		command = strings.TrimSuffix(command, ");")
+	}
+	if strings.HasSuffix(command, ")") && !strings.Contains(command, "(") {
+		command = strings.TrimSuffix(command, ")")
+	}
+
+	// Fix 4: Fix unmatched quotes ONLY if it's a clear pattern
+	command = fixUnmatchedQuotes(command)
+
+	// Fix 5: Remove duplicate "git" prefixes for non-git commands
+	if strings.HasPrefix(command, "git find") {
+		command = strings.TrimPrefix(command, "git ")
+	}
+	command = strings.ReplaceAll(command, "git find", "find")
+
+	// Only return the fixed command if we actually made meaningful changes
+	if command != originalCommand {
+		return command
+	}
+	return originalCommand
+}
+
+// hasSyntaxErrors checks for obvious shell syntax errors
+func hasSyntaxErrors(command string) bool {
+	// Check for completely unbalanced quotes (be more tolerant)
+	singleQuotes := strings.Count(command, "'")
+	doubleQuotes := strings.Count(command, `"`)
+
+	// Only flag as error if we have clear, multiple unbalanced quotes
+	if (singleQuotes%2 != 0 && singleQuotes > 1) || (doubleQuotes%2 != 0 && doubleQuotes > 1) {
+		return true
+	}
+
+	// Check for trailing invalid characters that break execution
+	trimmed := strings.TrimSpace(command)
+	if strings.HasSuffix(trimmed, ")") && !strings.Contains(trimmed, "(") {
+		return true
+	}
+
+	// Check for obvious shell syntax errors
+	invalidPatterns := []string{
+		"&&)", "||)", "|)", ">)", ">>)", "<)",
+		"find .)", "grep )", "ls )",
+	}
+
+	for _, pattern := range invalidPatterns {
+		if strings.Contains(command, pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Handle /ask command
@@ -436,6 +718,68 @@ func handleRemoveCommand(input string, mockMode bool) {
 	packageName := args[1]
 
 	HandlePackageCommand([]string{action, packageName}, env, mockMode, execConfig)
+}
+
+// Handle /sandbox command
+func handleSandboxCommand(input string) {
+	args := strings.Fields(input)
+	if len(args) < 2 {
+		// Show current status
+		sandbox.PrintStatus()
+		color.Yellow("💡 Usage: /sandbox <mode>")
+		color.Yellow("Modes: off, current, strict")
+		color.Yellow("Examples:")
+		color.Yellow("  /sandbox current  - Restrict to current directory")
+		color.Yellow("  /sandbox off      - Disable restrictions")
+		color.Yellow("  /sandbox strict   - Strict mode (current + subdirs only)")
+		return
+	}
+
+	mode := strings.ToLower(args[1])
+	switch mode {
+	case "off", "disable", "none":
+		sandbox.SetMode(SandboxDisabled)
+	case "current", "dir", "normal":
+		sandbox.SetMode(SandboxCurrentDir)
+	case "strict", "tight", "restricted":
+		sandbox.SetMode(SandboxStrict)
+	default:
+		color.Red("❌ Unknown sandbox mode: %s", mode)
+		color.Yellow("💡 Available modes: off, current, strict")
+	}
+}
+
+// Handle /cd command
+func handleChangeDirectory(input string) {
+	targetDir := strings.TrimSpace(strings.TrimPrefix(input, "/cd"))
+	if targetDir == "" {
+		// Show current directory
+		currentDir, _ := os.Getwd()
+		color.Cyan("📁 Current directory: %s", currentDir)
+		return
+	}
+
+	if err := sandbox.ChangeDirectory(targetDir); err != nil {
+		color.Red("❌ Failed to change directory: %v", err)
+	}
+}
+
+// Handle /git command
+func handleGitCommand(input string) {
+	commandText := strings.TrimSpace(strings.TrimPrefix(input, "/git"))
+	if commandText == "" {
+		color.Red("❌ Usage: /git <git operation>")
+		color.Yellow("💡 Examples:")
+		color.Yellow("  /git merge feature-branch with squash and accept all changes")
+		color.Yellow("  /git undo last commit")
+		color.Yellow("  /git clean untracked files")
+		color.Yellow("  /git status")
+		return
+	}
+
+	if err := gitManager.HandleGitRequest(commandText); err != nil {
+		color.Red("❌ Git operation failed: %v", err)
+	}
 }
 
 // Show debug information
@@ -720,23 +1064,5 @@ func testAIModel() {
 			}
 		}
 		time.Sleep(1 * time.Second) // Don't overwhelm the model
-	}
-}
-
-// Handle /git command
-func handleGitCommand(input string) {
-	commandText := strings.TrimSpace(strings.TrimPrefix(input, "/git"))
-	if commandText == "" {
-		color.Red("❌ Usage: /git <git operation>")
-		color.Yellow("💡 Examples:")
-		color.Yellow("  /git merge feature-branch with squash and accept all changes")
-		color.Yellow("  /git undo last commit")
-		color.Yellow("  /git clean untracked files")
-		color.Yellow("  /git status")
-		return
-	}
-
-	if err := gitManager.HandleGitRequest(commandText); err != nil {
-		color.Red("❌ Git operation failed: %v", err)
 	}
 }

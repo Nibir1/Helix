@@ -25,7 +25,7 @@ func NewPromptBuilder(env Env, online bool) *PromptBuilder {
 func (pb *PromptBuilder) BuildCommandPrompt(userInput string) string {
 	return fmt.Sprintf(`You are Helix, an intelligent CLI assistant. Convert the user's natural language request into a single, safe shell command for %s (%s).
 
-CRITICAL RULES:
+CRITICAL RULES - READ CAREFULLY:
 1. Output ONLY the raw command without any explanations, backticks, or formatting
 2. Do NOT use markdown code blocks
 3. Do NOT include backticks
@@ -33,6 +33,12 @@ CRITICAL RULES:
 5. Make it safe and avoid destructive operations
 6. Use appropriate package managers for the OS
 7. Keep it concise and efficient
+8. ENSURE all quotes are properly matched and closed
+9. If using wildcards like *.go, make sure quotes are balanced
+10. NEVER add trailing parentheses, semicolons, or other invalid characters
+11. Test that the command would execute properly in a shell
+12. For file patterns, always use wildcards: '*.go' NOT '.go'
+13. Do NOT add any punctuation at the end of the command
 
 User: %s
 

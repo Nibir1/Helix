@@ -114,7 +114,6 @@ func (ux *UX) ShowHelp() {
 	color.Yellow("🤖 AI Commands:")
 	fmt.Println("  /ask <question>     - Ask the AI a question")
 	fmt.Println("  /cmd <request>      - Generate and execute commands from natural language")
-	fmt.Println("  /git <request>      - Process natural language git requests")
 	fmt.Println("  /explain <command>  - Explain what a command does")
 	fmt.Println()
 
@@ -124,11 +123,17 @@ func (ux *UX) ShowHelp() {
 	fmt.Println("  /remove <package>   - Remove a package")
 	fmt.Println()
 
+	color.Yellow("🔒 Security & Sandbox:")
+	fmt.Println("  /sandbox <mode>     - Set directory restrictions (off/current/strict)")
+	fmt.Println("  /cd <dir>           - Change directory (sandbox-aware)")
+	fmt.Println("  /dry-run            - Toggle dry-run mode")
+	fmt.Println()
+
 	color.Yellow("⚙️  System Commands:")
+	fmt.Println("  /git <operation>    - Git operations with AI assistance")
 	fmt.Println("  /debug              - Show debug information")
 	fmt.Println("  /test-ai            - Test /ask AI feature")
 	fmt.Println("  /online             - Check internet connectivity")
-	fmt.Println("  /dry-run            - Toggle dry-run mode")
 	fmt.Println("  /help               - Show this help message")
 	fmt.Println("  /exit               - Exit Helix")
 	fmt.Println()
@@ -136,8 +141,9 @@ func (ux *UX) ShowHelp() {
 	color.Green("💡 Examples:")
 	fmt.Println("  /ask 'how do I list files in a directory?'")
 	fmt.Println("  /cmd 'show me what's in the current folder'")
+	fmt.Println("  /sandbox current    - Enable directory restrictions")
+	fmt.Println("  /cd src             - Change to src directory safely")
 	fmt.Println("  /install git")
-	fmt.Println("  /explain 'rm -rf node_modules'")
 }
 
 // formatResponse cleans and formats AI responses
