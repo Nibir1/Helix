@@ -167,22 +167,21 @@ func cleanAIResponse(response string) string {
 	// Remove common AI prefixes but be more lenient
 	prefixes := []string{
 		"Assistant:", "AI:", "Helix:", "Response:", "Answer:",
+		"Explanation:", "The command", "This command",
 	}
 
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(response, prefix) {
 			response = strings.TrimPrefix(response, prefix)
 			response = strings.TrimSpace(response)
+			break // Only remove one prefix
 		}
 	}
 
-	// If response is just punctuation or very short nonsense, consider it empty
-	if len(response) < 3 {
-		// Check if it's just punctuation or whitespace
-		clean := strings.Trim(response, " .,!?;:\n\t")
-		if clean == "" {
-			return ""
-		}
+	// Don't be too aggressive with short responses
+	// Even a 2-word response might be valid
+	if len(response) < 2 {
+		return ""
 	}
 
 	return response

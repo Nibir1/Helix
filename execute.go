@@ -126,9 +126,24 @@ func ExecuteCommand(command string, config ExecuteConfig, env Env) error {
 	yellow := color.New(color.FgYellow).SprintFunc()
 	fmt.Printf("%s %s\n", yellow("🚀 Executing:"), command)
 
+	// if config.DryRun {
+	// 	fmt.Println("✅ Dry run - command not executed")
+	// 	return nil
+	// }
+
+	// NEW: Display the command with syntax highlighting
 	if config.DryRun {
-		fmt.Println("✅ Dry run - command not executed")
-		return nil
+		fmt.Printf("%s ", color.YellowString("🚀 Dry Run:"))
+	} else {
+		fmt.Printf("%s ", color.YellowString("🚀 Executing:"))
+	}
+
+	// Use syntax highlighter if available, otherwise fall back
+	if syntaxHighlighter != nil {
+		highlighted := syntaxHighlighter.HighlightCommand(command)
+		fmt.Println(highlighted)
+	} else {
+		fmt.Println(command)
 	}
 
 	// Ask for confirmation for potentially dangerous commands
@@ -201,5 +216,20 @@ func ExplainCommand(command string) (string, error) {
 	promptBuilder := NewPromptBuilder(DetectEnvironment(), IsOnline(5*time.Second))
 	explainPrompt := promptBuilder.BuildExplainPrompt(command)
 
-	return RunModel(explainPrompt)
+	// Add debug output
+	// color.Yellow("🔍 Debug - Explain prompt: %s", explainPrompt)
+
+	response, err := RunModel(explainPrompt)
+	if err != nil {
+		return "", fmt.Errorf("AI explanation failed: %w", err)
+	}
+
+	// Add debug output for raw response
+	color.Yellow("🔍 Debug - Raw AI response: '%s'", response)
+
+	// Clean the response
+	cleaned := cleanAIResponse(response)
+	color.Yellow("🔍 Debug - Cleaned response: '%s'", cleaned)
+
+	return cleaned, nil
 }

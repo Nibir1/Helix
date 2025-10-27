@@ -78,9 +78,17 @@ Provide a clear, direct answer. If you don't know something or are offline, be h
 
 // BuildExplainPrompt creates a prompt to explain commands
 func (pb *PromptBuilder) BuildExplainPrompt(command string) string {
-	return fmt.Sprintf(`Explain what this shell command does in simple terms: "%s"
+	return fmt.Sprintf(`Explain what this shell command does in simple, clear terms: "%s"
 
-Keep the explanation under 3 sentences and focus on the main purpose and potential risks.`, command)
+IMPORTANT RULES:
+1. Provide a clear explanation of what the command does
+2. Keep it under 3 sentences
+3. Focus on the main purpose and potential risks
+4. Do not ask questions back
+5. Do not be meta - just explain the command
+6. If you don't know, say you're not sure
+
+Explanation:`, command)
 }
 
 // BuildPackagePrompt creates a prompt for package management

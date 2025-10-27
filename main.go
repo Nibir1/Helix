@@ -13,12 +13,13 @@ import (
 
 // Package-level variables
 var (
-	cfg        *Config
-	env        Env
-	pb         *PromptBuilder
-	online     bool
-	execConfig ExecuteConfig
-	gitManager *GitManager
+	cfg               *Config
+	env               Env
+	pb                *PromptBuilder
+	online            bool
+	execConfig        ExecuteConfig
+	gitManager        *GitManager
+	syntaxHighlighter *SyntaxHighlighter
 )
 
 func main() {
@@ -51,6 +52,9 @@ func main() {
 
 	// Initialize prompt builder
 	pb = NewPromptBuilder(env, online)
+
+	// Initialize syntax highlighter
+	syntaxHighlighter = NewSyntaxHighlighter()
 
 	// Set execution config
 	execConfig = DefaultExecuteConfig()
@@ -269,6 +273,15 @@ func handleCmdCommand(input string, mockMode bool) {
 	command = cleanedCommand
 
 	color.Cyan("💡 Generated command: %s", command)
+
+	// NEW: Show syntax-highlighted version
+	syntaxHighlighter.PrintHighlightedCommand("Generated command", command)
+
+	// NEW: Optional command breakdown
+	if AskForConfirmation("Show command breakdown?") {
+		syntaxHighlighter.ExplainCommandComponents(command)
+		fmt.Println()
+	}
 
 	// Show the cleaned command for transparency
 	if command != strings.TrimSpace(aiResponse) {
@@ -590,10 +603,94 @@ func explainCommand(command string, mockMode bool) {
 			color.Red("❌ Explanation failed: %v", err)
 			return
 		}
+
+		// FALLBACK MECHANISM: If AI returns empty, use fallback
+		if strings.TrimSpace(explanation) == "" {
+			color.Yellow("⚠️  AI returned empty explanation, using fallback")
+			explanation = generateFallbackExplanation(command)
+		}
 	}
 
 	ux := NewUX()
 	ux.PrintAIResponse(explanation, !mockMode)
+}
+
+// generateFallbackExplanation provides a basic explanation if AI fails
+func generateFallbackExplanation(command string) string {
+	command = strings.ToLower(command)
+
+	// Simple rule-based fallback explanations for common commands
+	switch {
+	case strings.Contains(command, "find") && strings.Contains(command, "-exec"):
+		return "This find command searches for files and executes another command on each result. Powerful but can be slow on large directories."
+
+	case strings.Contains(command, "grep"):
+		return "Searches for text patterns in files. Essential for code analysis and log inspection."
+
+	case strings.Contains(command, "curl") || strings.Contains(command, "wget"):
+		return "Downloads or transfers data from networks. Commonly used for API testing and file downloads."
+
+	case strings.Contains(command, "git merge"):
+		return "Combines changes from different branches. Can modify commit history - use carefully."
+
+	case strings.Contains(command, "docker") || strings.Contains(command, "podman"):
+		return "Container management command. Handles isolated application environments."
+
+	case strings.Contains(command, "chmod"):
+		return "Changes file permissions. Affects security and access controls."
+
+	case strings.Contains(command, "chown"):
+		return "Changes file ownership. Requires appropriate privileges."
+
+	case strings.Contains(command, "rm "):
+		return "Removes files or directories. Can cause data loss - double-check paths."
+
+	case strings.Contains(command, "mv "):
+		return "Moves or renames files. Overwrites existing files without warning."
+
+	case strings.Contains(command, "cp "):
+		return "Copies files or directories. Preserves originals but can overwrite destinations."
+
+	case strings.Contains(command, "ssh "):
+		return "Secure shell connection to remote servers. Provides encrypted terminal access."
+
+	case strings.Contains(command, "scp "):
+		return "Securely copies files between systems over SSH."
+
+	case strings.Contains(command, "rsync"):
+		return "Efficient file synchronization between locations. Great for backups."
+
+	case strings.Contains(command, "tar "):
+		return "Archives files into a single package. Commonly used for compression and distribution."
+
+	case strings.Contains(command, "sed "):
+		return "Stream editor for text transformation. Powerful for batch file editing."
+
+	case strings.Contains(command, "awk "):
+		return "Pattern scanning and processing language. Excellent for data extraction and reporting."
+
+	case strings.Contains(command, "xargs"):
+		return "Converts input into command arguments. Useful for processing large file lists."
+
+	case strings.Contains(command, "|"):
+		return "Uses pipes to chain multiple commands together. Output of one becomes input to the next."
+
+	case strings.Contains(command, ">"):
+		return "Redirects output to a file, overwriting existing content."
+
+	case strings.Contains(command, ">>"):
+		return "Redirects output to a file, appending to existing content."
+
+	default:
+		// Generic fallback based on the first word
+		parts := strings.Fields(command)
+		if len(parts) > 0 {
+			mainCommand := parts[0]
+			return fmt.Sprintf("This appears to be a '%s' command. For detailed information, try 'man %s' or '%s --help'.",
+				mainCommand, mainCommand, mainCommand)
+		}
+		return "This command performs a system operation. Use manual pages (man) for detailed information."
+	}
 }
 
 // For testing the AI model with various prompts - /test-ai command
