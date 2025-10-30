@@ -6,12 +6,13 @@ import (
 	"helix/internal/shell"
 	"helix/internal/utils"
 	"helix/internal/ux"
+	"os/exec"
 	"strings"
 
 	"github.com/fatih/color"
 )
 
-// Show debug information
+// UPDATED: Enhanced debug info to include RAG status
 func showDebugInfo() {
 	color.Cyan("=== 🔧 HELIX DEBUG INFORMATION ===")
 	color.Cyan("Version: %s", config.HelixVersion)
@@ -23,6 +24,20 @@ func showDebugInfo() {
 	color.Cyan("Online: %v", online)
 	color.Cyan("Dry Run: %v", execConfig.DryRun)
 	color.Cyan("Safe Mode: %v", execConfig.SafeMode)
+
+	// NEW: RAG system status
+	if ragSystem != nil {
+		stats := ragSystem.GetSystemStats()
+		color.Cyan("RAG System: %v", stats["initialized"])
+		color.Cyan("MAN Pages Indexed: %v", stats["indexed_pages"])
+		if stats["initialized"].(bool) {
+			color.Green("RAG: ✅ ACTIVE")
+		} else {
+			color.Yellow("RAG: 🔄 INDEXING")
+		}
+	} else {
+		color.Red("RAG: ❌ NOT INITIALIZED")
+	}
 
 	// Check model status
 	if ai.ModelIsLoaded() {
@@ -36,14 +51,6 @@ func showDebugInfo() {
 		} else {
 			cleanResponse := strings.TrimSpace(testResponse)
 			color.Green("Model Test: ✅ Working - '%s'", cleanResponse)
-
-			// Check if response is reasonable
-			if len(cleanResponse) > 100 {
-				color.Yellow("⚠️  Model is generating verbose responses")
-			}
-			if !utils.IsMostlyEnglish(cleanResponse) {
-				color.Yellow("⚠️  Model is responding in non-English")
-			}
 		}
 	} else {
 		color.Red("Model Status: ❌ Not loaded")
@@ -68,4 +75,51 @@ func showDebugInfo() {
 func showHelp() {
 	ux := ux.NewUX()
 	ux.ShowHelp()
+}
+
+// Add this function to debug RAG issues
+func debugRAGSystem() {
+	color.Cyan("🔧 Debugging RAG System...")
+
+	if ragSystem == nil {
+		color.Red("❌ RAG system is nil")
+		return
+	}
+
+	stats := ragSystem.GetSystemStats()
+	color.Cyan("RAG Stats: %+v", stats)
+
+	// Test MAN page access directly
+	color.Blue("🧪 Testing MAN page access...")
+	cmd := exec.Command("man", "ls")
+	if err := cmd.Run(); err != nil {
+		color.Red("❌ 'man ls' command failed: %v", err)
+		color.Yellow("💡 MAN pages may not be available on this system")
+	} else {
+		color.Green("✅ MAN pages are accessible")
+	}
+}
+
+// Debug RAG initialization issues
+func debugRAGInitialization() {
+	color.Red("🔧 DEBUG: RAG System State")
+
+	// Test if MAN command works
+	cmd := exec.Command("which", "man")
+	output, err := cmd.Output()
+	if err != nil {
+		color.Red("❌ 'man' command not found on system")
+	} else {
+		color.Green("✅ 'man' found at: %s", strings.TrimSpace(string(output)))
+	}
+
+	// Test basic MAN page access
+	cmd = exec.Command("man", "-k", "ls")
+	err = cmd.Run()
+	if err != nil {
+		color.Red("❌ 'man -k ls' failed: %v", err)
+		color.Yellow("💡 MAN database might need updating: run 'mandb'")
+	} else {
+		color.Green("✅ MAN pages are accessible")
+	}
 }

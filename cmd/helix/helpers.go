@@ -337,3 +337,87 @@ func testAIModel() {
 		time.Sleep(1 * time.Second) // Don't overwhelm the model
 	}
 }
+
+// isCommandReasonable checks if the command matches the request intent
+func isCommandReasonable(request, command string) bool {
+	request = strings.ToLower(request)
+	command = strings.ToLower(command)
+
+	// Check if command type matches request type
+	if strings.Contains(request, "file") || strings.Contains(request, "list") || strings.Contains(request, "show") {
+		// File operations should use ls, find, etc. not git
+		if strings.Contains(command, "git") && !strings.Contains(request, "git") {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isNaturalLanguage checks if the input is natural language
+func isNaturalLanguage(text string) bool {
+	// If it starts with a question word or is too long, it's probably natural language
+	questionWords := []string{"what", "how", "why", "when", "where", "which", "who"}
+	text = strings.ToLower(text)
+
+	if len(text) > 100 {
+		return true
+	}
+
+	for _, word := range questionWords {
+		if strings.HasPrefix(text, word) {
+			return true
+		}
+	}
+
+	// If it contains multiple spaces and no command-like structure
+	if strings.Count(text, " ") > 5 && !strings.ContainsAny(text, "-./*$") {
+		return true
+	}
+
+	return false
+}
+
+// buildEnhancedAskPrompt builds the enhanced ask prompt
+func generateFallbackCommand(request string, env shell.Env) string {
+	request = strings.ToLower(request)
+
+	switch {
+	case strings.Contains(request, "file") || strings.Contains(request, "list") || strings.Contains(request, "show"):
+		if env.IsUnixLike() {
+			return "ls -la"
+		} else {
+			return "dir"
+		}
+	case strings.Contains(request, "directory") || strings.Contains(request, "folder"):
+		if env.IsUnixLike() {
+			return "pwd"
+		} else {
+			return "cd"
+		}
+	case strings.Contains(request, "go file") || strings.Contains(request, ".go"):
+		return "find . -name \"*.go\" -type f"
+	default:
+		return "" // No good fallback
+	}
+}
+
+// checkRAGProgress checks and displays RAG indexing progress
+func checkRAGProgress() {
+	if ragSystem == nil || pb.IsRAGAvailable() {
+		return
+	}
+
+	stats := ragSystem.GetSystemStats()
+	if pages, ok := stats["indexed_pages"]; ok {
+		if pageCount, ok := pages.(int); ok && pageCount > 0 {
+			status := ragSystem.GetIndexingStatus()
+			color.Magenta("🧠 RAG Progress: %d pages (%s)", pageCount, status)
+
+			// Show when RAG becomes available
+			if ragSystem.IsInitialized() {
+				color.Green("🎉 RAG system is now ACTIVE! Enhanced commands available.")
+			}
+		}
+	}
+}

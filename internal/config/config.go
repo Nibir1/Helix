@@ -117,8 +117,13 @@ func (cfg *Config) SavePreferences() error {
 
 // Versioning and Model metadata
 const (
-	HelixVersion  = "0.3.0"
-	ModelName     = "llama-2-7b-chat.gguf"
-	ModelURL      = "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_0.gguf"
-	ModelChecksum = "9958ee9b670594147b750bbc7d0540b928fa12dcc5dd4c58cc56ed2eb85e371b"
+	HelixVersion = "0.3.0"
+
+	// ModelName     = "llama-2-7b-chat.gguf"
+	// ModelURL      = "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_0.gguf"
+	// ModelChecksum = "9958ee9b670594147b750bbc7d0540b928fa12dcc5dd4c58cc56ed2eb85e371b"
+
+	ModelName     = "TinyLlama-1.1B-Chat-v1.0-GGUF"
+	ModelURL      = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf"
+	ModelChecksum = "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556"
 )

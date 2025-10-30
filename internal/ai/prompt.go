@@ -5,16 +5,21 @@ import (
 	"regexp"
 	"strings"
 
+	"helix/internal/rag"
 	"helix/internal/shell"
+
+	"github.com/fatih/color"
 )
 
-// PromptBuilder constructs optimized prompts for different modes
+// PromptBuilder integrates RAG capabilities with prompt generation
 type PromptBuilder struct {
 	env    shell.Env
 	online bool
+	rag    *rag.RAGSystem
+	// REMOVED: useRAG bool - now we check dynamically
 }
 
-// NewPromptBuilder creates a new prompt builder
+// NewPromptBuilder creates a new prompt builder with RAG capabilities
 func NewPromptBuilder(env shell.Env, online bool) *PromptBuilder {
 	return &PromptBuilder{
 		env:    env,
@@ -22,48 +27,79 @@ func NewPromptBuilder(env shell.Env, online bool) *PromptBuilder {
 	}
 }
 
-// Enhanced BuildCommandPrompt to get cleaner output
-func (pb *PromptBuilder) BuildCommandPrompt(userInput string) string {
-	return fmt.Sprintf(`You are Helix, an intelligent CLI assistant. Convert the user's natural language request into a single, safe shell command for %s (%s).
-
-CRITICAL RULES - READ CAREFULLY:
-1. Output ONLY the raw command without any explanations, backticks, or formatting
-2. Do NOT use markdown code blocks
-3. Do NOT include backticks
-4. Do NOT add any text before or after the command
-5. Make it safe and avoid destructive operations
-6. Use appropriate package managers for the OS
-7. Keep it concise and efficient
-8. ENSURE all quotes are properly matched and closed
-9. If using wildcards like *.go, make sure quotes are balanced
-10. NEVER add trailing parentheses, semicolons, or other invalid characters
-11. Test that the command would execute properly in a shell
-12. For file patterns, always use wildcards: '*.go' NOT '.go'
-13. Do NOT add any punctuation at the end of the command
-
-User: %s
-
-Command:`, pb.env.OSName, pb.env.Shell, userInput)
+// NewEnhancedPromptBuilder creates a prompt builder with RAG integration
+func NewEnhancedPromptBuilder(env shell.Env, online bool, ragSystem *rag.RAGSystem) *PromptBuilder {
+	return &PromptBuilder{
+		env:    env,
+		online: online,
+		rag:    ragSystem,
+		// REMOVED: useRAG field - we check dynamically via IsRAGAvailable()
+	}
 }
 
-// BuildAskPrompt creates a prompt for general questions
-func (pb *PromptBuilder) BuildAskPrompt(userInput string) string {
-	status := "offline"
-	if pb.online {
-		status = "online"
+// IsRAGAvailable dynamically checks if RAG system is available and initialized
+func (pb *PromptBuilder) IsRAGAvailable() bool {
+	return pb.rag != nil && pb.rag.IsInitialized()
+}
+
+// BuildCommandPrompt creates a command prompt - With optional RAG context
+func (pb *PromptBuilder) BuildCommandPrompt(userInput string) string {
+	originalPrompt := pb.buildOriginalCommandPrompt(userInput)
+
+	// ADD DEBUG OUTPUT
+	color.Yellow("🔍 DEBUG: RAG available: %v, RAG initialized: %v", pb.rag != nil, pb.rag != nil && pb.rag.IsInitialized())
+
+	// Use dynamic checking instead of static flag
+	if !pb.IsRAGAvailable() {
+		color.Yellow("🔍 DEBUG: Using standard prompt (RAG not enabled)")
+		return originalPrompt
 	}
 
-	return fmt.Sprintf(`You are Helix, a helpful CLI assistant. The user is asking a question.
+	enhancedPrompt := pb.rag.EnhancePrompt(userInput, originalPrompt)
 
-IMPORTANT: Provide a direct, helpful response to the user's question. Do not ask questions back. Do not be meta. Just answer helpfully.
+	// NEW: Check if RAG actually provided useful context
+	if enhancedPrompt != originalPrompt {
+		// Count how many commands were actually added
+		ragSection := strings.Split(enhancedPrompt, "ORIGINAL PROMPT:")[0]
+		commandCount := strings.Count(ragSection, "COMMAND ")
 
-Current status: %s
-User question: %s
-
-Provide a concise, helpful answer:`, status, userInput)
+		if commandCount > 0 {
+			color.Cyan("🎯 RAG-enhanced prompt generated with %d relevant commands", commandCount)
+			color.Yellow("🔍 DEBUG: Enhanced prompt length: %d chars", len(enhancedPrompt))
+			return enhancedPrompt
+		} else {
+			color.Yellow("💡 RAG found no relevant commands, using standard prompt")
+			return originalPrompt
+		}
+	} else {
+		color.Yellow("💡 No relevant command context found, using standard prompt")
+		return originalPrompt
+	}
 }
 
-// BuildEnhancedAskPrompt for better responses
+// BuildAskPrompt creates an ask prompt with optional RAG context
+func (pb *PromptBuilder) BuildAskPrompt(userInput string) string {
+	originalPrompt := pb.buildOriginalAskPrompt(userInput)
+
+	// Use dynamic checking
+	if !pb.IsRAGAvailable() {
+		return originalPrompt
+	}
+
+	// Only enhance if the question is about commands
+	if pb.isCommandRelatedQuestion(userInput) {
+		enhancedPrompt := pb.rag.EnhancePrompt(userInput, originalPrompt)
+
+		if enhancedPrompt != originalPrompt {
+			color.Cyan("🎯 RAG-enhanced Q&A with command documentation")
+			return enhancedPrompt
+		}
+	}
+
+	return originalPrompt
+}
+
+// BuildEnhancedAskPrompt creates an enhanced ask prompt (compatibility)
 func (pb *PromptBuilder) BuildEnhancedAskPrompt(userInput string) string {
 	status := "offline"
 	if pb.online {
@@ -83,22 +119,27 @@ Provide a clear, direct answer. If you don't know something or are offline, be h
 		status, pb.env.Shell, pb.env.OSName, userInput)
 }
 
-// BuildExplainPrompt creates a prompt to explain commands
+// BuildExplainPrompt creates an explain prompt with RAG context when available
 func (pb *PromptBuilder) BuildExplainPrompt(command string) string {
-	return fmt.Sprintf(`Explain what this shell command does in simple, clear terms: "%s"
+	originalPrompt := pb.buildOriginalExplainPrompt(command)
 
-IMPORTANT RULES:
-1. Provide a clear explanation of what the command does
-2. Keep it under 3 sentences
-3. Focus on the main purpose and potential risks
-4. Do not ask questions back
-5. Do not be meta - just explain the command
-6. If you don't know, say you're not sure
+	// Use dynamic checking
+	if !pb.IsRAGAvailable() {
+		return originalPrompt
+	}
 
-Explanation:`, command)
+	// Try to get RAG-based explanation first
+	if ragExplanation, err := pb.rag.ExplainCommand(command); err == nil {
+		color.Cyan("🎯 Using RAG-powered command explanation")
+		return ragExplanation
+	}
+
+	// Fall back to AI explanation
+	color.Yellow("💡 No RAG data for command, using AI explanation")
+	return originalPrompt
 }
 
-// BuildPackagePrompt creates a prompt for package management
+// BuildPackagePrompt creates package management prompts (unchanged)
 func (pb *PromptBuilder) BuildPackagePrompt(packageName, action string) string {
 	actions := map[string]string{
 		"install": "install",
@@ -119,6 +160,101 @@ Rules:
 - Include sudo if typically required
 
 Command:`, verb, packageName, pb.env.OSName, pb.env.OSName)
+}
+
+// GetCommandSuggestions gets RAG-based command suggestions (new method)
+func (pb *PromptBuilder) GetCommandSuggestions(userInput string) ([]rag.CommandSuggestion, error) {
+	// Use dynamic checking
+	if !pb.IsRAGAvailable() {
+		return []rag.CommandSuggestion{}, nil
+	}
+
+	return pb.rag.GetCommandSuggestions(userInput)
+}
+
+// EnableRAG enables RAG functionality (kept for compatibility, but now does nothing special)
+func (pb *PromptBuilder) EnableRAG(ragSystem *rag.RAGSystem) {
+	pb.rag = ragSystem
+	// No need to set useRAG flag anymore since we check dynamically
+}
+
+// ========== ORIGINAL PROMPT BUILDERS (PRIVATE) ==========
+
+// buildOriginalCommandPrompt is the original command prompt builder
+func (pb *PromptBuilder) buildOriginalCommandPrompt(userInput string) string {
+	return fmt.Sprintf(`You are Helix, an advanced CLI assistant. Convert the user's natural language request into a single, safe, fully executable shell command for %s (%s).
+
+STRICT RULES – FOLLOW EXACTLY:
+1. Output ONLY the raw shell command with no explanations, notes, or formatting
+2. Never include backticks, code blocks, or extra punctuation
+3. Do NOT prepend or append any text
+4. Always produce a safe command; avoid destructive operations like rm -rf or anything that modifies critical system files
+5. Use the correct package manager or system tool for the OS
+6. Keep the command concise, efficient, and fully executable
+7. Ensure all quotes are properly matched and escaped, including within wildcards
+8. Use quotes for all file patterns and paths (e.g., '*.go' or '/path/to/file')
+9. Do NOT use unquoted wildcards that could expand unexpectedly
+10. Never add trailing semicolons, parentheses, or invalid characters
+11. If multiple commands are needed, combine them safely with && only
+12. Ensure the command works correctly in a real shell before outputting
+
+User request: %s
+
+Command:`, pb.env.OSName, pb.env.Shell, userInput)
+}
+
+// buildOriginalAskPrompt is the original ask prompt builder
+func (pb *PromptBuilder) buildOriginalAskPrompt(userInput string) string {
+	status := "offline"
+	if pb.online {
+		status = "online"
+	}
+
+	return fmt.Sprintf(`You are Helix, a helpful CLI assistant. The user is asking a question.
+
+IMPORTANT: Provide a direct, helpful response to the user's question. Do not ask questions back. Do not be meta. Just answer helpfully.
+
+Current status: %s
+User question: %s
+
+Provide a concise, helpful answer:`, status, userInput)
+}
+
+// buildOriginalExplainPrompt is the original explain prompt builder
+func (pb *PromptBuilder) buildOriginalExplainPrompt(command string) string {
+	return fmt.Sprintf(`Explain what this shell command does in simple, clear terms: "%s"
+
+IMPORTANT RULES:
+1. Provide a clear explanation of what the command does
+2. Keep it under 3 sentences
+3. Focus on the main purpose and potential risks
+4. Do not ask questions back
+5. Do not be meta - just explain the command
+6. If you don't know, say you're not sure
+
+Explanation:`, command)
+}
+
+// ========== HELPER METHODS ==========
+
+// isCommandRelatedQuestion checks if a question is about commands
+func (pb *PromptBuilder) isCommandRelatedQuestion(question string) bool {
+	question = strings.ToLower(question)
+
+	commandKeywords := []string{
+		"command", "how to", "what is", "what does", "explain", "meaning of",
+		"usage of", "how do i", "how can i", "what's the", "what are",
+		"difference between", "vs ", " versus ", "alternative to", "replace",
+		"equivalent of", "similar to",
+	}
+
+	for _, keyword := range commandKeywords {
+		if strings.Contains(question, keyword) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ExtractCommand cleans AI output to get just the command

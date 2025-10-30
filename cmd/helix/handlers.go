@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,6 +27,12 @@ func handleCmdCommand(input string, mockMode bool) {
 	// Build the prompt for command generation
 	prompt := pb.BuildCommandPrompt(commandText)
 
+	// ADD THIS DEBUG
+	color.Yellow("🔍 DEBUG: Final prompt being sent to AI (%d chars):", len(prompt))
+	color.Yellow("--- PROMPT START ---")
+	color.Yellow("%s", prompt)
+	color.Yellow("--- PROMPT END ---")
+
 	color.Blue("🤖 Processing: %s", commandText)
 
 	var aiResponse string
@@ -44,6 +51,36 @@ func handleCmdCommand(input string, mockMode bool) {
 			return
 		}
 		color.Green("✅ AI processed in %s", utils.FormatDuration(time.Since(start)))
+	}
+
+	// NEW: Check for empty response and provide fallback
+	if strings.TrimSpace(aiResponse) == "" {
+		color.Red("❌ AI returned empty response")
+		color.Yellow("💡 This might be due to:")
+		color.Yellow("  - Model not understanding the prompt")
+		color.Yellow("  - RAG context being confusing")
+		color.Yellow("  - Model needing different parameters")
+
+		// Try fallback with simpler prompt
+		color.Blue("🔄 Trying fallback with simpler prompt...")
+		simplePrompt := fmt.Sprintf("Command to %s:", commandText)
+		fallbackResponse, fallbackErr := ai.RunModel(simplePrompt)
+
+		if fallbackErr != nil {
+			color.Red("❌ Fallback also failed: %v", fallbackErr)
+			return
+		}
+
+		if strings.TrimSpace(fallbackResponse) != "" {
+			color.Green("✅ Fallback successful!")
+			aiResponse = fallbackResponse
+		} else {
+			color.Red("❌ Fallback also returned empty")
+			// Final fallback to mock command
+			color.Blue("🔄 Using mock command as final fallback...")
+			aiResponse = generateMockCommand(commandText, env)
+			color.Green("🤖 [Fallback] → %s", aiResponse)
+		}
 	}
 
 	// Extract the actual command from AI response
@@ -161,7 +198,7 @@ func handleCmdCommand(input string, mockMode bool) {
 	if strings.Contains(command, ".go") && !strings.Contains(command, "*.go") {
 		color.Yellow("⚠️  AI generated malformed file pattern")
 		if commands.AskForConfirmation("Apply manual fix for file pattern?") {
-			// Apply targeted fix
+			// Apply targeted fix - PRESERVE WILDCARD!
 			oldCommand := command
 			command = strings.ReplaceAll(command, ".go", "*.go")
 			command = strings.ReplaceAll(command, "'.go", "'*.go")
@@ -330,8 +367,8 @@ func handleExplainCommand(input string, mockMode bool) {
 	if mockMode {
 		explanation = generateMockExplanation(commandText)
 	} else {
-		prompt := pb.BuildExplainPrompt(commandText)
-		explanation, err = ai.RunModel(prompt)
+		// Uses RAG-enhanced explanation automatically
+		explanation, err = ai.RunModel(pb.BuildExplainPrompt(commandText))
 		if err != nil {
 			color.Red("❌ AI error: %v", err)
 			return
@@ -449,6 +486,60 @@ func handleGitCommand(input string) {
 	}
 }
 
+// Handle /rag-status command
+func handleRAGStatus() {
+	color.Cyan("🧠 RAG System Status:")
+
+	if ragSystem == nil {
+		color.Red("  ❌ RAG system not initialized")
+		return
+	}
+
+	stats := ragSystem.GetSystemStats()
+	indexingStatus := "UNKNOWN"
+
+	// Use reflection to get the indexing status if available
+	if rs, ok := interface{}(ragSystem).(interface{ GetIndexingStatus() string }); ok {
+		indexingStatus = rs.GetIndexingStatus()
+	}
+
+	color.Cyan("  📊 Statistics:")
+	color.Cyan("    • Initialized: %v", stats["initialized"])
+	color.Cyan("    • Indexed MAN Pages: %v", stats["indexed_pages"])
+	color.Cyan("    • Indexing Status: %s", indexingStatus)
+
+	if stats["initialized"].(bool) {
+		color.Green("  ✅ RAG system is ACTIVE")
+		color.Cyan("    • Vector Documents: %v", stats["total_documents"])
+		color.Cyan("    • Unique Commands: %v", stats["unique_commands"])
+	} else {
+		color.Yellow("  🔄 RAG system is %s...", indexingStatus)
+
+		// Show estimated time based on typical indexing
+		if stats["indexed_pages"].(int) > 0 {
+			color.Cyan("    • Progress: %d pages indexed", stats["indexed_pages"])
+		}
+	}
+}
+
+// Handle /rag-reindex command
+func handleRAGReindex() {
+	color.Blue("🔄 Manual RAG reindexing...")
+
+	if ragSystem == nil {
+		color.Red("❌ RAG system not initialized")
+		return
+	}
+
+	// Force reindex by removing state
+	homeDir, _ := os.UserHomeDir()
+	stateFile := filepath.Join(homeDir, ".helix", "rag_index", "rag_state.json")
+	os.Remove(stateFile)
+
+	go ragSystem.IndexAvailableManPages()
+	color.Green("✅ RAG reindexing started in background")
+}
+
 // Toggle dry-run mode
 func toggleDryRun() {
 	execConfig.DryRun = !execConfig.DryRun
@@ -468,4 +559,56 @@ func checkOnlineStatus() {
 	} else {
 		color.Yellow("⚠️  Offline - Using local AI only")
 	}
+}
+
+// Add to handlers.go
+func handleRAGReset() {
+	color.Blue("🔄 Resetting RAG system...")
+
+	if ragSystem == nil {
+		color.Red("❌ RAG system not initialized")
+		return
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	ragDir := filepath.Join(homeDir, ".helix", "rag_index")
+
+	if err := os.RemoveAll(ragDir); err != nil {
+		color.Red("❌ Failed to reset RAG: %v", err)
+		return
+	}
+
+	color.Green("✅ RAG system reset. Will reindex on next startup.")
+}
+
+// Add this function to handlers.go
+func testBasicAI() {
+	color.Cyan("🧪 Testing basic AI functionality...")
+
+	// Test 1: Very simple prompt
+	simplePrompt := "Say 'hello world'"
+	response, err := ai.RunModel(simplePrompt)
+	if err != nil {
+		color.Red("❌ Basic AI test failed: %v", err)
+		return
+	}
+	color.Green("✅ Basic AI response: '%s'", strings.TrimSpace(response))
+
+	// Test 2: Simple command prompt
+	commandPrompt := "Command to list files:"
+	response2, err := ai.RunModel(commandPrompt)
+	if err != nil {
+		color.Red("❌ Command AI test failed: %v", err)
+		return
+	}
+	color.Green("✅ Command AI response: '%s'", strings.TrimSpace(response2))
+
+	// Test 3: Current command prompt style
+	currentPrompt := pb.BuildCommandPrompt("list files")
+	response3, err := ai.RunModel(currentPrompt)
+	if err != nil {
+		color.Red("❌ Current prompt test failed: %v", err)
+		return
+	}
+	color.Green("✅ Current prompt response: '%s'", strings.TrimSpace(response3))
 }

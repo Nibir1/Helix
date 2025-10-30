@@ -60,18 +60,19 @@ func RunModelWithConfig(prompt string, config ModelConfig) (string, error) {
 		return "", fmt.Errorf("model not loaded")
 	}
 
-	// Clean and prepare the prompt
+	// Enhanced cleaning
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", fmt.Errorf("empty prompt")
 	}
 
-	// Use enhanced prediction with parameters
+	// ACTUALLY USE the config parameter instead of hardcoded values
 	opts := []llama.PredictOption{
-		llama.SetTemperature(config.Temperature),
-		llama.SetTopP(config.TopP),
-		llama.SetTopK(config.TopK),
-		llama.SetTokens(config.MaxTokens),
+		llama.SetTemperature(config.Temperature), // USE CONFIG
+		llama.SetTopP(config.TopP),               // USE CONFIG
+		llama.SetTopK(config.TopK),               // USE CONFIG
+		llama.SetTokens(config.MaxTokens),        // USE CONFIG
+		llama.SetStopWords("\n", "```", "`"),
 	}
 
 	out, err := model.Predict(prompt, opts...)
@@ -79,10 +80,25 @@ func RunModelWithConfig(prompt string, config ModelConfig) (string, error) {
 		return "", fmt.Errorf("prediction failed: %w", err)
 	}
 
-	// Clean the output
+	// Less aggressive cleaning - preserve meaningful responses
 	out = strings.TrimSpace(out)
-	out = strings.TrimPrefix(out, "Assistant:")
-	out = strings.TrimSpace(out)
+
+	// Only take first line if response is very long
+	if len(out) > 200 {
+		lines := strings.Split(out, "\n")
+		if len(lines) > 0 {
+			out = strings.TrimSpace(lines[0])
+		}
+	}
+
+	// Remove common prefixes but be more lenient
+	prefixes := []string{"Assistant:", "AI:", "Response:"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(out, prefix) {
+			out = strings.TrimPrefix(out, prefix)
+			out = strings.TrimSpace(out)
+		}
+	}
 
 	return out, nil
 }

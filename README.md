@@ -1,309 +1,170 @@
-# Helix 🤖  
-**An Intelligent, AI-Powered CLI Assistant That Understands Natural Language**
+# Helix 🤖
+**An Intelligent, AI-Powered CLI Assistant That Understands Natural Language & System Documentation**
 
-[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://golang.org)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/Nibir1/Helix)
+![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 
-Helix is a revolutionary command-line interface that bridges the gap between human language and shell commands. Using **local AI inference**, it understands your intent and executes commands safely and efficiently.
+Helix is a revolutionary **AI-powered command-line assistant** that bridges the gap between human language and system commands. Built for developers, sysadmins, and IT enthusiasts, it combines **local AI inference, RAG intelligence, and deep system knowledge** to execute commands safely, efficiently, and intelligently.
 
 ---
 
-## ✨ Features
+## 🚀 Why Helix Matters
+Helix is more than a CLI tool — it's a showcase of **modern AI systems engineering**:  
+- **RAG-Enhanced Intelligence**: Semantic search across 900+ system command docs  
+- **Direct llama.cpp Bindings**: Maximum performance with local AI inference  
+- **Cross-Platform Mastery**: Works on Windows, Linux, macOS with smart package management  
+- **Safety-First Execution**: Multi-layer validation, sandboxing, dry-run modes  
 
-## 🛠️ Deep Technical Integration
+Helix demonstrates skills in **Go**, **AI model integration**, **vector databases**, and **CLI UX design** — exactly the expertise IT recruiters want to see in a portfolio project.
 
-🔥 Helix uses **direct llama.cpp bindings** - not high-level wrappers like Ollama or LM Studio. This allows:
+---
 
-- ✅ **Raw performance** - No abstraction layers
-- ✅ **Memory efficiency** - Direct control over model loading
-- ✅ **Custom optimizations** - Tailored for CLI usage patterns
-- ✅ **Dependency-free** - No external AI services required
+## ✨ Technical Highlights
 
-### 🧠 AI-Powered Intelligence
-- **Natural Language Processing** — Converts English instructions to shell commands  
-- **Local AI Model** — Privacy-focused, offline-capable inference using LLaMA 2  
-- **Smart Context Awareness** — Understands your OS, shell, and environment  
-- **Command Explanations** — Learn what commands do before executing them  
+### 🧠 AI & RAG
+- **Natural Language to Shell Commands** — `/cmd "find large files older than 30 days"`  
+- **Smart Explanations** — `/explain <command>` gives detailed usage with examples  
+- **Q&A Intelligence** — `/ask` for system, programming, and DevOps questions  
+- **Local Inference Only** — privacy-focused, fully offline using optimized LLaMA models  
+- **RAG System** — builds vector store from 450+ commands for semantic retrieval  
 
-### 🛡️ Safety First
-- **Dangerous Command Detection** — Blocks potentially harmful operations  
-- **Confirmation Prompts** — Asks before executing risky commands  
-- **Dry-Run Mode** — Preview commands without execution  
-- **Command Validation** — Sanitizes and validates AI output  
+### 🔥 llama.cpp Integration
+- Direct bindings for **raw performance**  
+- Memory-efficient F16 & 4-bit GGUF model loading  
+- No external AI dependencies — fully offline capable  
 
-### 📦 Package Management
-- **Cross-Platform Support** — Works with `apt`, `brew`, `choco`, `winget`, `pacman`  
-- **Smart Installation** — Automatically uses the right package manager  
-- **Version Checking** — Verifies installed packages and suggests updates  
-- **Batch Operations** — Install, update, and remove packages effortlessly  
+### 🛡️ Safety & Reliability
+- **Directory Sandbox**: Restrict execution to safe paths  
+- **Dangerous Command Blocking**: Detects 20+ harmful patterns  
+- **Dry-Run Mode**: Preview commands before execution  
+- **Automatic Quote & Syntax Fixing**: Corrects malformed AI-generated commands  
 
-### 🌐 Connectivity
-- **Online/Offline Modes** — Adapts based on internet availability  
-- **Model Auto-Download** — Automatically downloads AI model on first run  
-- **Fallback Modes** — Graceful degradation when the model is unavailable  
+### ⚡ Git & Package Management
+- **Natural Language Git Operations** — `/git "merge feature-branch with squash"`  
+- **Cross-Platform Package Support** — apt, brew, choco, winget, pacman, yum, dnf, snap  
+- **Batch Operations & Smart Detection** — automates updates and installs  
 
-### 🎨 Enhanced UX
-- **Beautiful Terminal UI** — Colorized output with emojis and formatting  
-- **Typing Effects** — Animated AI responses for better experience  
-- **Command History** — Persistent history across sessions  
-- **Progress Indicators** — Visual feedback for long operations  
+### 🎨 Professional Terminal UX
+- Color-coded syntax highlighting  
+- Animated typing effects  
+- Command breakdowns & interactive progress indicators  
+
+---
+
+## 🏗️ Architecture Overview
+```
+Helix/
+├── 🧠 RAG System/          # Command indexing, vector store & semantic search
+├── 🤖 AI Core/             # llama.cpp integration & prompt engineering
+├── ⚡ Command System/      # Safe command execution, Git, package management
+├── 🎨 User Experience/     # Terminal enhancements, syntax highlighting
+└── 🔧 Utilities/           # Shell detection, configuration, validation
+```
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Go 1.25+**
-- **4 GB+ RAM** (for AI inference)
-- **2 GB+ Disk Space** (for model storage)
+- Go 1.25+  
+- 4 GB+ RAM for AI inference  
+- 2 GB+ Disk for model storage  
+- macOS/Linux/Windows shell  
 
-### 🧩 Installation
+### Installation
 
-#### **Method 1: Download Pre-built Binary**
 ```bash
-# Download from GitHub Releases
-# Extract and run directly
-./helix
-```
-
-#### **Method 2: Build from Source**
-```bash
-# Clone the repository
 git clone https://github.com/Nibir1/Helix.git
 cd Helix
-
-# Build for your platform
-make current
-
-# Or build for all platforms
-make build-all
+make current        # Recommended build
+./dist/helix
 ```
 
-#### **Method 3: Using Go**
+Or development build:
 ```bash
-go install github.com/Nibir1/Helix@latest
+make start
 ```
 
 ---
 
-## 🎯 Usage
-
-### **Basic Commands**
+## 🎯 Example Usage
 ```bash
-# Ask natural language questions
-/ask "how do I check disk space on Linux?"
+# Convert English to shell commands
+/cmd "list all files sorted by size"
 
-# Generate and execute commands from English
-/cmd "list all the files in this directory"
+/explain "git merge --squash feature-branch"
 
-# Explain what a command does
-/explain "rm -rf node_modules"
+/ask "how do I set up a reverse proxy with nginx?"  
 
-# Install packages intelligently
+# Package Management
 /install git
-
-# Update existing packages
 /update python
-
-# Remove packages
 /remove nodejs
 
-# Test the /ask AI feature
-/test-ai
-```
-
-### **Advanced Features**
-```bash
-# Toggle dry-run mode (preview commands without execution)
-/dry-run
-
-# Check internet connectivity
-/online
-
-# View debug information
-/debug
-
-# Show help
-/help
-
-# Exit Helix
-/exit
+# Git Operations
+/git "undo last commit but keep changes"
+/git "clean all untracked files"
 ```
 
 ---
 
-## 🛠️ Command Reference
-
-| Command | Syntax | Description |
-|----------|---------|-------------|
-| `/ask` | `/ask <question>` | Ask general questions |
-| `/cmd` | `/cmd <instruction>` | Convert natural language to commands |
-| `/explain` | `/explain <command>` | Explain shell commands |
-| `/install` | `/install <package>` | Install software packages |
-| `/update` | `/update <package>` | Update installed packages |
-| `/remove` | `/remove <package>` | Remove packages |
-| `/debug` | `/debug` | Show system information |
-| `/help` | `/help` | Display help message |
-| `/exit` | `/exit` | Exit the application |
-| `/test-ai` | `/test-ai` | Test the /ask AI feature |
+## 🛡️ Safety Features
+- Multi-layer validation pipeline  
+- Sandbox & restricted directories  
+- Dangerous command detection & dry-run previews  
+- Automatic syntax & quote correction  
 
 ---
 
-## 🔧 Configuration
-
-Helix automatically configures itself on first run:
-
-```
-Model Directory: ~/.helix/models/
-Configuration:   ~/.helix/config.json
-History File:    ~/.helix_history
-```
-
-### **Environment Variables**
-```bash
-# Custom model directory
-export HELIX_MODEL_DIR="/path/to/your/models"
-
-# Disable colored output
-export NO_COLOR=1
-```
-
----
-
-## 🧩 Supported Platforms & Package Managers
-
+## 🧩 Supported Platforms
 | Platform | Shells | Package Managers |
 |-----------|---------|------------------|
-| **Windows** | PowerShell, CMD, Git Bash | Chocolatey, Winget, Scoop |
-| **Linux** | Bash, Zsh, Fish | apt, yum, dnf, pacman, snap |
-| **macOS** | Bash, Zsh, Fish | Homebrew, MacPorts |
+| Windows   | PowerShell, CMD, Git Bash | Chocolatey, Winget, Scoop |
+| Linux     | Bash, Zsh, Fish           | apt, yum, dnf, pacman, snap |
+| macOS     | Bash, Zsh, Fish           | Homebrew, MacPorts |
 
 ---
 
-## 🧠 AI Model Information
-
-Helix uses the **LLaMA 2 7B Chat GGUF** model:
-
-- **Model**: `llama-2-7b-chat.Q4_0.gguf`  
-- **Size**: ~4 GB (quantized)  
-- **Source**: [TheBloke/Llama-2-7B-Chat-GGUF](https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF)  
-- **License**: Custom (see model card)
-
-The model is automatically downloaded on first run and stored locally for offline use.
-
----
-
-## 🏗️ Architecture
-```
-Helix/
-├── main.go              # CLI entry point & handlers
-├── model.go             # AI model integration (llama.cpp)
-├── shell.go             # OS & shell detection
-├── prompt.go            # AI prompt engineering
-├── execute.go           # Command execution & safety
-├── pkgmanager.go        # Package management
-├── download.go          # Model download with progress
-├── history.go           # Command history persistence
-├── ux.go                # User experience enhancements
-├── utils.go             # Utility functions
-├── config.go            # Configuration management
-└── go.mod               # Dependencies
-```
-
----
-
-## 🚨 Safety Features
-
-Helix includes multiple layers of protection:
-
-- **Command Sanitization** — Removes dangerous characters and patterns  
-- **Pattern Blocking** — Detects and blocks known dangerous commands  
-- **User Confirmation** — Prompts before executing potentially risky operations  
-- **Dry-Run Mode** — Preview mode for command verification  
-- **Execution Limits** — Restricted to safe system operations  
-
----
-
-## 🐛 Troubleshooting
-
-### **Model Download Fails**
-```bash
-# Check internet connection
-/online
-
-# Manual download from:
-# https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF
-```
-
-### **Command Not Executing**
-- Enable dry-run mode to see what would be executed  
-- Check command explanations for understanding  
-- Verify you have necessary permissions  
-
-### **Performance Issues**
-- Ensure sufficient RAM (4 GB+ recommended)  
-- Close other memory-intensive applications  
-- Use simpler prompts for faster responses  
-
-### **Getting Help**
-- Check debug information: `/debug`  
-- Review this README for usage instructions  
-- Check existing GitHub issues  
-- Create a new issue with debug output  
+## 🧠 AI Model Info
+- **Default**: TinyLlama-1.1B-Chat GGUF (~700MB, fast)  
+- **Optional**: LLaMA-2-7B-Chat GGUF (~4GB, high-quality)  
+- **Local Inference**: Offline, privacy-friendly  
+- **Automatic Download**: First-run model retrieval  
 
 ---
 
 ## 🤝 Contributing
-
-We welcome contributions!  
-Please see our **Contributing Guide** for details.
-
-### **Development Setup**
-```bash
-git clone https://github.com/Nibir1/Helix.git
-cd Helix
-go mod download
-make dev
-```
-
-### **Building**
-```bash
-# Development build
-make dev
-
-# Platform-specific builds
-make macos
-make linux
-make windows
-
-# Build all platforms
-make build-all
-```
+- Clone repo & run `make dev`  
+- Test features via `/test-ai`  
+- Build platform-specific: `make macos/linux/windows`  
 
 ---
 
 ## 📄 License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.  
-> **Note:** The LLaMA 2 model is subject to its own license terms.  
-> Please review the model license at the [Hugging Face repository](https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF).
+MIT License — see LICENSE  
+*Note: LLaMA models have separate licenses*  
 
 ---
 
 ## 🙏 Acknowledgments
+- [go-llama.cpp](https://github.com/go-skynet/go-llama.cpp) — High-performance Go bindings  
+- [TheBloke](https://huggingface.co/TheBloke) — Quantized GGUF models  
+- Meta AI — LLaMA foundation models  
+- Contributors helping CLI accessibility ❤️  
 
-- [**go-llama.cpp**](https://github.com/go-skynet/go-llama.cpp) — Go bindings for llama.cpp  
-- [**TheBloke**](https://huggingface.co/TheBloke) — Quantized GGUF models  
-- **Meta AI** — LLaMA 2 model  
-- All contributors and testers ❤️  
+---
+
+## 💡 Developer Spotlight
+**Nahasat Nibir** — Passionate about building intelligent, high-performance developer tools and AI-powered systems in **Go**, **Python**, and modern system stacks.  
+- Portfolio: [GitHub](https://github.com/Nibir1)  
+- LinkedIn: [LinkedIn](https://www.linkedin.com/in/nibir-1/)  
+- ArtStation: [ArtStation](https://www.artstation.com/nibir) 
 
 ---
 
 <div align="center">
+**Helix — Making the command line accessible and intelligent through AI.**  
 
-**Helix — Making the command line accessible to everyone through AI.**
-
-[🐞 Report Bug](https://github.com/Nibir1/Helix/issues) · [💡 Request Feature](https://github.com/Nibir1/Helix/issues)
-
+[🐞 Report Bug](https://github.com/Nibir1/Helix/issues) · [💡 Request Feature](https://github.com/Nibir1/Helix/issues) · ⭐ Star the Project
 </div>

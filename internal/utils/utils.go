@@ -206,9 +206,29 @@ func IsMostlyEnglish(text string) bool {
 	return float64(englishChars)/float64(totalChars) > 0.8
 }
 
-// HasBalancedQuotes checks if quotes are properly balanced
+// HasBalancedQuotes checks if quotes are properly balanced - DEBUG VERSION
 func HasBalancedQuotes(text string) bool {
-	return strings.Count(text, "'")%2 == 0 && strings.Count(text, `"`)%2 == 0
+	singleQuotes := strings.Count(text, "'")
+	doubleQuotes := strings.Count(text, `"`)
+
+	// ADD DEBUG
+	color.Yellow("🔍 DEBUG Quote Check: text='%s'", text)
+	color.Yellow("🔍 DEBUG: singleQuotes=%d, doubleQuotes=%d", singleQuotes, doubleQuotes)
+	color.Yellow("🔍 DEBUG: single balanced=%v, double balanced=%v",
+		singleQuotes%2 == 0, doubleQuotes%2 == 0)
+
+	balanced := singleQuotes%2 == 0 && doubleQuotes%2 == 0
+
+	color.Yellow("🔍 DEBUG: Final balanced result=%v", balanced)
+	return balanced
+}
+
+// Add this debug function temporarily
+func DebugStringBytes(s string) {
+	color.Yellow("🔍 DEBUG String bytes:")
+	for i, char := range s {
+		color.Yellow("  [%d] %q (U+%04X)", i, char, char)
+	}
 }
 
 // FixUnmatchedQuotes attempts to fix common quote mismatches intelligently
@@ -217,34 +237,31 @@ func FixUnmatchedQuotes(command string) string {
 	singleQuotes := strings.Count(command, "'")
 	doubleQuotes := strings.Count(command, `"`)
 
-	// Don't fix if there are no quotes at all
-	if singleQuotes == 0 && doubleQuotes == 0 {
+	// If quotes are already balanced, return immediately
+	if singleQuotes%2 == 0 && doubleQuotes%2 == 0 {
 		return command
 	}
 
-	// Only fix if we have clear imbalance (not just one quote that might be intentional)
-	if singleQuotes%2 != 0 && singleQuotes > 0 {
-		// Check if it's a common pattern like -name '*.go (missing closing quote)
-		if strings.Contains(command, "-name '") || strings.Contains(command, "-type '") {
-			// Add closing quote at a logical position
-			command += "'"
-		} else {
-			// For other cases, be conservative - don't auto-fix
-			return command
+	color.Yellow("🔍 DEBUG FixUnmatchedQuotes: Found unbalanced quotes")
+	color.Yellow("🔍 DEBUG: singleQuotes=%d, doubleQuotes=%d", singleQuotes, doubleQuotes)
+
+	// Only fix specific patterns we're sure about
+	if doubleQuotes%2 != 0 {
+		// Check for common file pattern with missing closing quote
+		if strings.Contains(command, `"*.`) {
+			color.Yellow("🔍 DEBUG: Adding missing double quote for file pattern")
+			return command + `"`
 		}
 	}
 
-	if doubleQuotes%2 != 0 && doubleQuotes > 0 {
-		// Check if it's a common pattern with file operations
-		if strings.Contains(command, `-name "`) || strings.Contains(command, `-type "`) ||
-			strings.Contains(command, `find "`) || strings.Contains(command, `grep "`) {
-			// Add closing quote at a logical position
-			command += `"`
-		} else {
-			// For other cases, be conservative - don't auto-fix
-			return command
+	if singleQuotes%2 != 0 {
+		// Check for common file pattern with missing closing quote
+		if strings.Contains(command, `'*.`) {
+			color.Yellow("🔍 DEBUG: Adding missing single quote for file pattern")
+			return command + `'`
 		}
 	}
 
+	// If we can't confidently fix it, return original
 	return command
 }

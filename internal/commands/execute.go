@@ -61,6 +61,12 @@ func IsCommandSafe(command string) bool {
 func ValidateAndCleanCommand(command string) (string, error) {
 	command = strings.TrimSpace(command)
 
+	// ADD DEBUG
+	color.Yellow("🔍 DEBUG ValidateAndCleanCommand input: '%s'", command)
+
+	// DEBUG: Check the actual bytes
+	utils.DebugStringBytes(command)
+
 	// Remove any remaining backticks or code block markers
 	command = strings.ReplaceAll(command, "`", "")
 	command = strings.ReplaceAll(command, "```", "")
@@ -72,10 +78,11 @@ func ValidateAndCleanCommand(command string) (string, error) {
 	// Remove leading/trailing quotes
 	command = strings.Trim(command, `"'`)
 
-	// NEW: Fix unmatched quotes
+	// FIXED: Use utils package
 	command = utils.FixUnmatchedQuotes(command)
 
-	// NEW: Validate quote balance
+	// FIXED: Use utils package
+	color.Yellow("🔍 DEBUG: Before HasBalancedQuotes check: '%s'", command)
 	if !utils.HasBalancedQuotes(command) {
 		return "", fmt.Errorf("command has unmatched quotes: %s", command)
 	}
