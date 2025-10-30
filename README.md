@@ -134,6 +134,49 @@ make start
 
 ---
 
+## 🔥 List of Features & Functionalities of Helix CLI
+1. RAG-enhanced command generation using 450+ indexed system commands
+2. Automatic MAN page indexing with semantic search across 900+ vector documents
+3. Smart command suggestions before user even asks
+4. Natural language to shell command conversion (/cmd)
+5. Cross-platform package management (apt, brew, choco, winget, pacman)
+6. Complex Git workflows from English descriptions
+7. Directory sandbox safety with configurable security modes
+8. Multi-layer command validation and syntax checking
+9. Automatic quote fixing for AI-generated commands
+10. Dangerous command detection blocking 20+ harmful patterns
+11. Real-time risk assessment for complex operations
+12. Professional syntax highlighting with 10 semantic token types
+13. Command explanations with usage, options, and examples (/explain)
+14. Q&A intelligence for system administration (/ask)
+15. Background RAG indexing without blocking CLI usage
+16. Dry-run mode for command preview without execution
+17. Persistent command history across sessions
+18. Animated typing effects for AI responses
+19. Auto OS/shell detection (Windows, Linux, macOS)
+20. Progress indicators for long operations
+21. Local AI inference with LLaMA models (completely offline)
+22. Automatic model download on first run
+23. Memory-efficient Metal framework acceleration on macOS
+24. Parallel processing with 6 concurrent workers
+25. Persistent vector stores for instant startup
+26. Configurable security modes (off/current/strict)
+27. Git merge with squash and accept all incoming changes
+28. Git undo last commit but keep changes
+29. Git clean untracked files and directories
+30. Git stash all changes including untracked
+31. Multi-step operation handling with safety confirmations
+32. Command breakdown explanations for learning
+33. Internet connectivity detection and offline fallback
+34. Professional terminal UI with colors and emojis
+35. Enterprise-grade safety with multiple protection layers
+36. Cross-platform shell integration (PowerShell, CMD, bash, zsh, fish)
+37. Smart branch management for Git operations
+38. Package status checking and version verification
+39. Batch package operations (install, update, remove)
+40. Graceful degradation to mock mode when model unavailable
+---
+
 ## 🤝 Contributing
 - Clone repo & run `make dev`  
 - Test features via `/test-ai`  
