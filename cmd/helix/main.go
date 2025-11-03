@@ -32,7 +32,7 @@ var (
 
 func main() {
 	// Initialize color output
-	color.Cyan("🚀 Helix v%s — AI-Powered CLI Assistant", config.HelixVersion)
+	color.Cyan("🚀 Helix v%s — AI & RAG-powered CLI Assistant", config.HelixVersion)
 	color.Yellow("Repository: https://github.com/Nibir1/Helix")
 
 	// Load configuration

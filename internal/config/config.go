@@ -44,7 +44,8 @@ func DefaultConfig() (*Config, error) {
 	}
 
 	configDir := filepath.Join(home, ".helix")
-	modelFile := filepath.Join(modelDir, "llama-2-7b-chat.Q4_0.gguf")
+	// modelFile := filepath.Join(modelDir, "llama-2-7b-chat.Q4_0.gguf")
+	modelFile := filepath.Join(modelDir, "tinyllama-1.1b-chat-v1.0.Q4_0.gguf")
 
 	cfg := &Config{
 		ModelDir:    modelDir,
