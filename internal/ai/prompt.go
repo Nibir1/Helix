@@ -16,10 +16,9 @@ type PromptBuilder struct {
 	env    shell.Env
 	online bool
 	rag    *rag.RAGSystem
-	// REMOVED: useRAG bool - now we check dynamically
 }
 
-// NewPromptBuilder creates a new prompt builder with RAG capabilities
+// NewPromptBuilder creates a new prompt builder with RAG capabilities (no RAG system wired)
 func NewPromptBuilder(env shell.Env, online bool) *PromptBuilder {
 	return &PromptBuilder{
 		env:    env,
@@ -33,7 +32,6 @@ func NewEnhancedPromptBuilder(env shell.Env, online bool, ragSystem *rag.RAGSyst
 		env:    env,
 		online: online,
 		rag:    ragSystem,
-		// REMOVED: useRAG field - we check dynamically via IsRAGAvailable()
 	}
 }
 
@@ -42,6 +40,10 @@ func (pb *PromptBuilder) IsRAGAvailable() bool {
 	return pb.rag != nil && pb.rag.IsInitialized()
 }
 
+// =========================
+// COMMAND GENERATION
+// =========================
+
 // BuildCommandPrompt creates a command prompt - With optional RAG context
 func (pb *PromptBuilder) BuildCommandPrompt(userInput string) string {
 	originalPrompt := pb.buildOriginalCommandPrompt(userInput)
@@ -49,7 +51,6 @@ func (pb *PromptBuilder) BuildCommandPrompt(userInput string) string {
 	// ADD DEBUG OUTPUT
 	color.Yellow("🔍 DEBUG: RAG available: %v, RAG initialized: %v", pb.rag != nil, pb.rag != nil && pb.rag.IsInitialized())
 
-	// Use dynamic checking instead of static flag
 	if !pb.IsRAGAvailable() {
 		color.Yellow("🔍 DEBUG: Using standard prompt (RAG not enabled)")
 		return originalPrompt
@@ -57,7 +58,7 @@ func (pb *PromptBuilder) BuildCommandPrompt(userInput string) string {
 
 	enhancedPrompt := pb.rag.EnhancePrompt(userInput, originalPrompt)
 
-	// NEW: Check if RAG actually provided useful context
+	// Check if RAG actually provided useful context
 	if enhancedPrompt != originalPrompt {
 		// Count how many commands were actually added
 		ragSection := strings.Split(enhancedPrompt, "ORIGINAL PROMPT:")[0]
@@ -67,21 +68,24 @@ func (pb *PromptBuilder) BuildCommandPrompt(userInput string) string {
 			color.Cyan("🎯 RAG-enhanced prompt generated with %d relevant commands", commandCount)
 			color.Yellow("🔍 DEBUG: Enhanced prompt length: %d chars", len(enhancedPrompt))
 			return enhancedPrompt
-		} else {
-			color.Yellow("💡 RAG found no relevant commands, using standard prompt")
-			return originalPrompt
 		}
-	} else {
-		color.Yellow("💡 No relevant command context found, using standard prompt")
+
+		color.Yellow("💡 RAG found no relevant commands, using standard prompt")
 		return originalPrompt
 	}
+
+	color.Yellow("💡 No relevant command context found, using standard prompt")
+	return originalPrompt
 }
+
+// =========================
+// ASK / Q&A
+// =========================
 
 // BuildAskPrompt creates an ask prompt with optional RAG context
 func (pb *PromptBuilder) BuildAskPrompt(userInput string) string {
 	originalPrompt := pb.buildOriginalAskPrompt(userInput)
 
-	// Use dynamic checking
 	if !pb.IsRAGAvailable() {
 		return originalPrompt
 	}
@@ -119,11 +123,14 @@ Provide a clear, direct answer. If you don't know something or are offline, be h
 		status, pb.env.Shell, pb.env.OSName, userInput)
 }
 
+// =========================
+// EXPLAIN
+// =========================
+
 // BuildExplainPrompt creates an explain prompt with RAG context when available
 func (pb *PromptBuilder) BuildExplainPrompt(command string) string {
 	originalPrompt := pb.buildOriginalExplainPrompt(command)
 
-	// Use dynamic checking
 	if !pb.IsRAGAvailable() {
 		return originalPrompt
 	}
@@ -139,7 +146,11 @@ func (pb *PromptBuilder) BuildExplainPrompt(command string) string {
 	return originalPrompt
 }
 
-// BuildPackagePrompt creates package management prompts (unchanged)
+// =========================
+// PACKAGE MANAGEMENT
+// =========================
+
+// BuildPackagePrompt creates package management prompts
 func (pb *PromptBuilder) BuildPackagePrompt(packageName, action string) string {
 	actions := map[string]string{
 		"install": "install",
@@ -162,9 +173,12 @@ Rules:
 Command:`, verb, packageName, pb.env.OSName, pb.env.OSName)
 }
 
-// GetCommandSuggestions gets RAG-based command suggestions (new method)
+// =========================
+// RAG UTILITIES
+// =========================
+
+// GetCommandSuggestions gets RAG-based command suggestions
 func (pb *PromptBuilder) GetCommandSuggestions(userInput string) ([]rag.CommandSuggestion, error) {
-	// Use dynamic checking
 	if !pb.IsRAGAvailable() {
 		return []rag.CommandSuggestion{}, nil
 	}
@@ -172,15 +186,15 @@ func (pb *PromptBuilder) GetCommandSuggestions(userInput string) ([]rag.CommandS
 	return pb.rag.GetCommandSuggestions(userInput)
 }
 
-// EnableRAG enables RAG functionality (kept for compatibility, but now does nothing special)
+// EnableRAG enables RAG functionality (kept for compatibility)
 func (pb *PromptBuilder) EnableRAG(ragSystem *rag.RAGSystem) {
 	pb.rag = ragSystem
-	// No need to set useRAG flag anymore since we check dynamically
 }
 
-// ========== ORIGINAL PROMPT BUILDERS (PRIVATE) ==========
+// =========================
+// ORIGINAL PROMPT BUILDERS
+// =========================
 
-// buildOriginalCommandPrompt is the original command prompt builder
 func (pb *PromptBuilder) buildOriginalCommandPrompt(userInput string) string {
 	return fmt.Sprintf(`You are Helix, an advanced CLI assistant. Convert the user's natural language request into a single, safe, fully executable shell command for %s (%s).
 
@@ -203,7 +217,6 @@ User request: %s
 Command:`, pb.env.OSName, pb.env.Shell, userInput)
 }
 
-// buildOriginalAskPrompt is the original ask prompt builder
 func (pb *PromptBuilder) buildOriginalAskPrompt(userInput string) string {
 	status := "offline"
 	if pb.online {
@@ -220,7 +233,6 @@ User question: %s
 Provide a concise, helpful answer:`, status, userInput)
 }
 
-// buildOriginalExplainPrompt is the original explain prompt builder
 func (pb *PromptBuilder) buildOriginalExplainPrompt(command string) string {
 	return fmt.Sprintf(`Explain what this shell command does in simple, clear terms: "%s"
 
@@ -235,7 +247,9 @@ IMPORTANT RULES:
 Explanation:`, command)
 }
 
-// ========== HELPER METHODS ==========
+// =========================
+// HELPER METHODS
+// =========================
 
 // isCommandRelatedQuestion checks if a question is about commands
 func (pb *PromptBuilder) isCommandRelatedQuestion(question string) bool {
@@ -270,7 +284,7 @@ func ExtractCommand(aiOutput string) string {
 	// Remove any markdown formatting
 	aiOutput = strings.ReplaceAll(aiOutput, "**", "")
 
-	// Take only the first line (in case AI adds explanations)
+	// Take only the first non-comment, non-empty line
 	lines := strings.Split(aiOutput, "\n")
 	var command string
 	for _, line := range lines {
@@ -281,11 +295,10 @@ func ExtractCommand(aiOutput string) string {
 		}
 	}
 
-	// Remove any leading/trailing quotes
+	// Remove leading/trailing quotes
 	command = strings.Trim(command, `"'`)
 
-	// Final cleanup - remove any non-command text
-	// Look for the first occurrence of common command patterns
+	// Look for typical command patterns (best-effort)
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`^[a-zA-Z0-9_\-\./]+\s+`), // Starts with command
 		regexp.MustCompile(`^[a-z]+\s+`),             // Starts with lowercase word
@@ -301,109 +314,151 @@ func ExtractCommand(aiOutput string) string {
 	return strings.TrimSpace(command)
 }
 
-// BuildPlannerPrompt generates the strict JSON-only planning prompt
-// used when a user enters a natural-language instruction.
-// The LLM MUST output a PlannerResult JSON object.
-//
-// This is the core entry point for Helix Agent Mode.
+// =========================
+// AGENT PLANNER PROMPT
+// =========================
+
+// BuildPlannerPrompt generates the planning prompt for the agent.
+// This is used when the user enters a message without a slash command.
+// The LLM MUST output a JSON plan with intent + steps matching PlannerResult / PlannerStep.
 func (pb *PromptBuilder) BuildPlannerPrompt(userInput string) string {
 	status := "offline"
 	if pb.online {
 		status = "online"
 	}
 
+	ragLine := "You also have background knowledge of system commands and manual pages (RAG)."
+	if !pb.IsRAGAvailable() {
+		ragLine = "RAG command docs may not be available yet; still plan as best you can."
+	}
+
 	return fmt.Sprintf(`
-You are **Helix-Agent**, an autonomous command-line automation planner.
+You are Helix-Agent, an intelligent CLI automation planner inside a terminal.
 
-Your ONLY job is to produce a machine-readable execution plan.
-You do NOT execute commands. You only output a plan in valid JSON.
+Your ONLY job is to create a machine-readable plan describing what to do.
+You DO NOT execute commands yourself — another component will do that.
 
-=====================================================
+===========================================
 SYSTEM CONTEXT
 - OS: %s
 - Shell: %s
 - Connectivity: %s
-=====================================================
+- %s
+===========================================
 
 IMPORTANT RULES
-1. **Output MUST be valid JSON only.** No markdown, no explanations.
-2. JSON MUST match this schema exactly:
+1. Output MUST be VALID JSON ONLY — no markdown, no prose, no comments.
+2. The top-level JSON object MUST match this schema exactly:
 
 {
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
       "tool": "response" | "shell" | "git" | "package",
-      "message": "...",         // for tool = response
-      "command": "...",         // for tool = shell
-      "action": "...",          // for tool = git or package
-      "args": {...},            // optional arguments
-      "name": "..."             // for package operations
+      "command": string,            // required for tool="shell"
+      "action": string,             // required for tool="git" or "package"
+      "name": string,               // package name, tag name, etc. (for tool="package" or git tags)
+      "args": { ... },              // optional structured arguments, e.g. {"message": "...", "target": "HEAD~1"}
+      "message": string             // required for tool="response"
     }
   ]
 }
 
-3. Use **intent = "chat"** ONLY if the user’s message is purely informational
-   (e.g., “why is the sky blue?”, “what is docker?”, “explain git stash”).
-4. For ANY actionable request (run, install, show, create, modify, update, commit),
-   select **intent = "shell"**, **"git"**, **"package"**, or **"multi_step"**.
-5. If multiple operations are required, ALWAYS use **"multi_step"**.
-6. Shell commands MUST be safe. NEVER output destructive operations.
-7. Git steps MUST use explicit actions: reset_soft, merge_squash, commit, tag, etc.
-8. Package steps MUST use explicit actions: install, update, remove.
-9. For every step that produces messages to the user, use:
-   {"tool": "response", "message": "text here"}
+3. TOOL semantics:
+   - tool="response": executor will print "message" as plain text to the user.
+   - tool="shell": executor will run "command" in the user's shell (with safety checks).
+   - tool="git": executor will call a git helper with "action" and optional "args".
+   - tool="package": executor will call a package manager helper with "action" and "name".
+4. Choose "intent":
+   - "chat": purely conversational, no tools, just a response step.
+   - "shell": one or more shell commands (e.g. list files, move files, search logs).
+   - "git": git-specific operations (commit, add, reset, stash, etc.).
+   - "package": install/update/remove packages.
+   - "multi_step": any workflow that needs multiple actions or mixed tools.
+5. For "multi_step", decompose the user request into a small sequence of safe steps.
+6. NEVER invent obviously destructive commands (like "rm -rf /").
+7. Prefer simple, robust commands over clever one-liners.
+8. When unsure if you should respond with text or commands, prefer using tools if they can achieve what the user asked.
 
-=====================================================
 EXAMPLES
 
-Example A — Pure chat:
+Example 1 (Chat)
 User: "why is the sky blue?"
 {
   "intent": "chat",
   "steps": [
-    {"tool": "response", "message": "Rayleigh scattering causes..."}
+    {
+      "tool": "response",
+      "message": "The sky appears blue because of Rayleigh scattering: shorter blue wavelengths are scattered more strongly by air molecules than other colors."
+    }
   ]
 }
 
-Example B — Simple shell:
-User: "list all log files"
+Example 2 (Shell, single-step)
+User: "list all .txt files"
 {
   "intent": "shell",
   "steps": [
-    {"tool": "shell", "command": "ls -1 *.log"}
+    {
+      "tool": "shell",
+      "command": "ls -1 *.txt"
+    }
   ]
 }
 
-Example C — Git:
+Example 3 (Git, single-step)
 User: "undo last commit but keep changes"
 {
   "intent": "git",
   "steps": [
-    {"tool": "git", "action": "reset_soft", "args": {"target": "HEAD~1"}}
+    {
+      "tool": "git",
+      "action": "reset_soft",
+      "args": { "target": "HEAD~1" }
+    }
   ]
 }
 
-Example D — Multi-step:
-User: "bump version to 2.1.0 and commit it"
+Example 4 (Multi-step, mixed tools)
+User: "bump version to 2.1.0 in README and commit it with a tag"
 {
   "intent": "multi_step",
   "steps": [
-    {"tool": "shell", "command": "sed -i '' 's/version = .*/version = \"2.1.0\"/' README.md"},
-    {"tool": "git", "action": "commit", "args": {"message": "Bump version to 2.1.0"}},
-    {"tool": "git", "action": "tag", "args": {"name": "v2.1.0"}}
+    {
+      "tool": "shell",
+      "command": "sed -i '' 's/version = .*/version = \"2.1.0\"/' README.md"
+    },
+    {
+      "tool": "git",
+      "action": "commit",
+      "args": { "message": "Bump README version to 2.1.0" }
+    },
+    {
+      "tool": "git",
+      "action": "tag",
+      "args": { "name": "v2.1.0" }
+    }
   ]
 }
 
-=====================================================
+Example 5 (Package)
+User: "install git"
+{
+  "intent": "package",
+  "steps": [
+    {
+      "tool": "package",
+      "action": "install",
+      "name": "git"
+    }
+  ]
+}
 
+===========================================
 USER MESSAGE:
 "%s"
 
-Return the JSON plan ONLY. No markdown. No commentary.`,
-		pb.env.OSName,
-		pb.env.Shell,
-		status,
-		userInput,
-	)
+Now plan the best possible intent and steps.
+Return ONLY a single JSON object that matches the schema above. No markdown, no backticks, no extra text.`,
+		pb.env.OSName, pb.env.Shell, status, ragLine, userInput)
 }

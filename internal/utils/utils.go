@@ -292,9 +292,10 @@ func WriteSecretFile(path, value string) error {
 func BracesBalanced(s string) bool {
 	count := 0
 	for _, r := range s {
-		if r == '{' {
+		switch r {
+		case '{':
 			count++
-		} else if r == '}' {
+		case '}':
 			count--
 			if count < 0 {
 				return false
@@ -304,12 +305,49 @@ func BracesBalanced(s string) bool {
 	return count == 0
 }
 
-// Typewriter prints text with a small typing delay.
-// Safe: does not print too slowly or block for large text.
+// Typewriter prints text with a smooth, natural typing animation.
+// - Automatically speeds up for long text
+// - Slightly slower after punctuation (more human-like)
+// - Safe for multiline and large output
 func Typewriter(text string) {
-	for _, c := range text {
-		fmt.Printf("%c", c)
-		time.Sleep(10 * time.Millisecond)
+	runes := []rune(text)
+	n := len(runes)
+
+	// Base typing speed
+	baseDelay := 14 * time.Millisecond
+
+	// If text is long, speed it up proportionally
+	if n > 300 {
+		baseDelay = 6 * time.Millisecond
+	} else if n > 150 {
+		baseDelay = 10 * time.Millisecond
 	}
+
+	for i, c := range runes {
+		fmt.Printf("%c", c)
+
+		// Newline? small pause
+		if c == '\n' {
+			time.Sleep(baseDelay * 3)
+			continue
+		}
+
+		// Slow down after punctuation for realism
+		if strings.ContainsRune(".?!,", c) {
+			time.Sleep(baseDelay * 5)
+			continue
+		}
+
+		// Small natural variation (±20%)
+		delay := baseDelay
+		if i%7 == 0 {
+			delay = baseDelay + 3*time.Millisecond
+		} else if i%5 == 0 {
+			delay = baseDelay - 2*time.Millisecond
+		}
+
+		time.Sleep(delay)
+	}
+
 	fmt.Println()
 }

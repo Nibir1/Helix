@@ -13,7 +13,9 @@ import (
 	"github.com/fatih/color"
 )
 
-// Agent is the executor that interprets planner results and performs tasks.
+// Agent is the core "Agent Mode" orchestrator.
+// It uses the planner (LLM) to turn a user request into a structured plan,
+// then executes each step with the appropriate tools.
 type Agent struct {
 	env          shell.Env
 	pb           *ai.PromptBuilder
@@ -24,47 +26,71 @@ type Agent struct {
 	gitManager   *commands.GitManager
 }
 
-// NewAgent creates the Agent (Executor).
+// NewAgent creates a new Agent instance.
+// Note: We create our own GitManager here so main.go doesn't have to pass it in.
 func NewAgent(
 	env shell.Env,
 	pb *ai.PromptBuilder,
-	rag *rag.RAGSystem,
+	ragSystem *rag.RAGSystem,
 	sandbox *commands.DirectorySandbox,
 	execConfig commands.ExecuteConfig,
 	typingEffect bool,
 ) *Agent {
+	gm := commands.NewGitManager(env, execConfig, sandbox)
+
 	return &Agent{
 		env:          env,
 		pb:           pb,
-		rag:          rag,
+		rag:          ragSystem,
 		sandbox:      sandbox,
 		execConfig:   execConfig,
 		typingEffect: typingEffect,
-		gitManager:   commands.NewGitManager(env, execConfig, sandbox),
+		gitManager:   gm,
 	}
 }
 
-// HandleInput is called when user types a *non-slash* message.
+// HandleInput is the main entry point for Agent Mode.
+// It takes raw user text (no slash prefix), asks the planner LLM for a JSON plan,
+// then executes the resulting steps.
 func (a *Agent) HandleInput(userInput string) {
-
-	// Build planner prompt
-	plannerPrompt := a.pb.BuildPlannerPrompt(userInput)
-
-	// Get structured plan from LLM
-	plan, err := PlanFromLLM(plannerPrompt)
-	if err != nil {
-		color.Red("❌ Planner error: %v", err)
+	userInput = strings.TrimSpace(userInput)
+	if userInput == "" {
 		return
 	}
 
-	color.Cyan("🤖 Agent Intent: %s", plan.Intent)
-	if len(plan.Steps) > 1 {
-		color.Cyan("🔧 Steps: %d", len(plan.Steps))
+	// 1) Ask the planner LLM to build a JSON plan
+	plannerPrompt := a.pb.BuildPlannerPrompt(userInput)
+
+	raw, err := ai.RunModel(plannerPrompt)
+	if err != nil {
+		color.Red("❌ Planner model error: %v", err)
+		return
 	}
 
-	// Execute steps
+	// 2) Decode planner JSON into a PlannerResult
+	plan, err := decodePlannerResult(raw)
+	if err != nil {
+		color.Red("❌ Failed to parse planner output: %v", err)
+		color.Yellow("🔍 Raw planner output:\n%s", strings.TrimSpace(raw))
+		return
+	}
+
+	// 3) Execute the plan
+	a.executePlan(userInput, plan)
+}
+
+// executePlan runs each step in the planner result.
+func (a *Agent) executePlan(userInput string, plan *PlannerResult) {
+	if plan == nil {
+		color.Red("❌ No plan returned from planner")
+		return
+	}
+
+	color.Cyan("🤖 Agent Intent: %s", string(plan.Intent))
+	color.Cyan("🔧 Steps: %d\n", len(plan.Steps))
+
 	for i, step := range plan.Steps {
-		color.Yellow("\n--- Step %d ---", i+1)
+		color.Cyan("\n--- Step %d ---", i+1)
 		if err := a.executeStep(step); err != nil {
 			color.Red("❌ Step failed: %v", err)
 			break
@@ -74,103 +100,117 @@ func (a *Agent) HandleInput(userInput string) {
 	color.Green("\n🎉 Done.")
 }
 
-// =========================================================
-// EXECUTOR — HANDLES EACH STEP
-// =========================================================
-
+// executeStep dispatches a single planner step to the appropriate tool.
 func (a *Agent) executeStep(step PlannerStep) error {
-
 	switch step.Tool {
-	// -----------------------------------------------------
-	// 1) RESPONSE / CHAT
-	// -----------------------------------------------------
 	case "response":
-		msg := strings.TrimSpace(step.Message)
-		if msg == "" {
-			return fmt.Errorf("empty response message")
-		}
+		return a.handleResponseStep(step)
 
-		color.Cyan("💬 %s", msg)
-		return nil
-
-	// -----------------------------------------------------
-	// 2) SHELL
-	// -----------------------------------------------------
 	case "shell":
-		command := strings.TrimSpace(step.Command)
-		if command == "" {
-			return fmt.Errorf("planner shell step missing command")
-		}
+		return a.handleShellStep(step)
 
-		color.Blue("🖥️ Shell: %s", command)
-
-		// Validate & clean
-		valid, err := commands.ValidateAndCleanCommand(command)
-		if err != nil {
-			return fmt.Errorf("shell command invalid: %v", err)
-		}
-
-		// Sandbox enforced
-		return a.sandbox.WrapCommand(valid, a.execConfig, a.env)
-
-	// -----------------------------------------------------
-	// 3) GIT
-	// -----------------------------------------------------
 	case "git":
-		action := strings.TrimSpace(step.Action)
-		if action == "" {
-			return fmt.Errorf("planner git step missing action")
-		}
+		return a.handleGitStep(step)
 
-		color.Blue("🌿 Git: action=%s", action)
-
-		// GitManager already supports natural-language handling
-		return a.gitManager.HandleGitRequest(action)
-
-	// -----------------------------------------------------
-	// 4) PACKAGE MANAGER
-	// -----------------------------------------------------
 	case "package":
-		if step.Name == "" {
-			return fmt.Errorf("package step missing name")
-		}
-		if step.Action == "" {
-			return fmt.Errorf("package step missing action")
-		}
-
-		color.Blue("📦 Package: %s %s", step.Action, step.Name)
-
-		// Pass args as if user typed a slash command
-		commands.HandlePackageCommand(
-			[]string{step.Action, step.Name},
-			a.env,
-			false,
-			a.execConfig,
-		)
-
-		return nil
-
-	// -----------------------------------------------------
-	// 5) MULTI-STEP (planner already provided array of steps)
-	// -----------------------------------------------------
-	case "multi_step":
-		// Should not occur here; multi-step is handled in HandleInput
-		return nil
+		return a.handlePackageStep(step)
 
 	default:
-		return fmt.Errorf("unknown tool type: %s", step.Tool)
+		// Unknown tool → fallback to a simple message so the user is not left hanging
+		msg := strings.TrimSpace(step.Message)
+		if msg == "" {
+			msg = "I don't know how to handle this step."
+		}
+		fmt.Println(msg)
+		return nil
 	}
 }
 
-// =========================================================
-// UTILITY HELPERS
-// =========================================================
+// ----------------------
+// Tool Handlers
+// ----------------------
 
-// PrintTypingEffect prints text with a typewriter effect (if enabled)
-func (a *Agent) PrintTypingEffect(text string) {
-	if !a.typingEffect {
-		fmt.Println(text)
-		return
+// handleResponseStep simply outputs the message to the user.
+func (a *Agent) handleResponseStep(step PlannerStep) error {
+	msg := strings.TrimSpace(step.Message)
+	if msg == "" {
+		return nil
 	}
-	utils.Typewriter(text)
+
+	if a.typingEffect {
+		utils.Typewriter(msg)
+	} else {
+		fmt.Println(msg)
+	}
+
+	return nil
+}
+
+// handleShellStep validates and runs a shell command step.
+func (a *Agent) handleShellStep(step PlannerStep) error {
+	cmd := strings.TrimSpace(step.Command)
+	if cmd == "" {
+		return fmt.Errorf("empty shell command in plan")
+	}
+
+	color.Cyan("🖥️ Shell: %s", cmd)
+
+	// Use the existing validation + safety pipeline
+	valid, err := commands.ValidateAndCleanCommand(cmd)
+	if err != nil {
+		return fmt.Errorf("invalid shell command: %w", err)
+	}
+
+	// Respect sandbox & execConfig
+	if err := a.sandbox.WrapCommand(valid, a.execConfig, a.env); err != nil {
+		return fmt.Errorf("command execution failed: %w", err)
+	}
+
+	return nil
+}
+
+// handleGitStep processes a git action step.
+func (a *Agent) handleGitStep(step PlannerStep) error {
+	action := strings.TrimSpace(step.Action)
+	if action == "" {
+		return fmt.Errorf("missing git action in plan")
+	}
+
+	color.Cyan("🌿 Git: action=%s", action)
+
+	// For now we convert structured git intent back into a natural language
+	// description that GitManager already knows how to handle.
+	request := action
+
+	// If we have structured args (like a commit message), inject that into the request
+	if len(step.Args) > 0 {
+		if msg, ok := step.Args["message"].(string); ok && msg != "" {
+			request = fmt.Sprintf("%s with message %q", action, msg)
+		}
+		if target, ok := step.Args["target"].(string); ok && target != "" {
+			request = fmt.Sprintf("%s %s", request, target)
+		}
+	}
+
+	return a.gitManager.HandleGitRequest(request)
+}
+
+// handlePackageStep processes a package management step.
+func (a *Agent) handlePackageStep(step PlannerStep) error {
+	action := strings.TrimSpace(step.Action)
+	name := strings.TrimSpace(step.Name)
+	if action == "" || name == "" {
+		return fmt.Errorf("package step requires both action and name")
+	}
+
+	color.Cyan("📦 Package: %s %s", action, name)
+
+	// Reuse existing package manager handler:
+	// HandlePackageCommand(args []string, env shell.Env, mockMode bool, execConfig ExecuteConfig)
+	args := []string{action, name}
+	commands.HandlePackageCommand(args, a.env, false, a.execConfig)
+
+	// HandlePackageCommand itself prints and optionally executes the command;
+	// we don't need to return error unless we want deep plumbing. For now, assume success.
+	return nil
 }
