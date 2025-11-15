@@ -8,7 +8,7 @@ import (
 	"helix/internal/commands"
 	"helix/internal/rag"
 	"helix/internal/shell"
-	"helix/internal/utils"
+	"helix/internal/ux"
 
 	"github.com/fatih/color"
 )
@@ -24,6 +24,7 @@ type Agent struct {
 	execConfig   commands.ExecuteConfig
 	typingEffect bool
 	gitManager   *commands.GitManager
+	ux           *ux.UX
 }
 
 // NewAgent creates a new Agent instance.
@@ -46,6 +47,7 @@ func NewAgent(
 		execConfig:   execConfig,
 		typingEffect: typingEffect,
 		gitManager:   gm,
+		ux:           ux.NewUX(),
 	}
 }
 
@@ -115,6 +117,9 @@ func (a *Agent) executeStep(step PlannerStep) error {
 	case "package":
 		return a.handlePackageStep(step)
 
+	case "rag":
+		return a.handleRAGStep(step)
+
 	default:
 		// Unknown tool → fallback to a simple message so the user is not left hanging
 		msg := strings.TrimSpace(step.Message)
@@ -138,7 +143,7 @@ func (a *Agent) handleResponseStep(step PlannerStep) error {
 	}
 
 	if a.typingEffect {
-		utils.Typewriter(msg)
+		a.ux.Typewriter(msg)
 	} else {
 		fmt.Println(msg)
 	}
@@ -212,5 +217,54 @@ func (a *Agent) handlePackageStep(step PlannerStep) error {
 
 	// HandlePackageCommand itself prints and optionally executes the command;
 	// we don't need to return error unless we want deep plumbing. For now, assume success.
+	return nil
+}
+
+// handleRAGStep processes a RAG (Retrieval-Augmented Generation) step.
+func (a *Agent) handleRAGStep(step PlannerStep) error {
+	if a.rag == nil || !a.rag.IsInitialized() {
+		a.ux.PrintWarning("RAG system is not initialized yet — falling back to normal answer.")
+		// Optionally: turn this into a plain chat answer instead.
+		return nil
+	}
+
+	query := step.Query
+	if query == "" {
+		// Graceful fallback: use message or command if planner messed up
+		if step.Message != "" {
+			query = step.Message
+		} else if step.Command != "" {
+			query = step.Command
+		}
+	}
+	if query == "" {
+		return fmt.Errorf("rag step has no query")
+	}
+
+	// Use RAG retrieval
+	result, err := a.rag.Retrieve(query)
+	if err != nil {
+		a.ux.PrintError(fmt.Sprintf("RAG lookup failed: %v", err))
+		return nil
+	}
+
+	a.ux.PrintRAGRetrievalInfo(query, len(result.Commands), result.RetrievalTime)
+
+	if len(result.Commands) == 0 {
+		a.ux.PrintInfo("No command documentation found for this query.")
+		return nil
+	}
+
+	// For each relevant command, show a detailed explanation
+	for _, cmd := range result.Commands {
+		expl, err := a.rag.ExplainCommand(cmd.Name)
+		if err != nil {
+			// Fallback: show just name + description
+			a.ux.ShowCommandExplanation(cmd.Name, cmd.Description)
+			continue
+		}
+		a.ux.ShowCommandExplanation(cmd.Name, expl)
+	}
+
 	return nil
 }

@@ -27,6 +27,7 @@ type PlannerStep struct {
 	Name    string                 `json:"name,omitempty"`    // package name, tag name, etc.
 	Args    map[string]interface{} `json:"args,omitempty"`    // extra structured args (commit message, etc.)
 	Message string                 `json:"message,omitempty"` // for tool="response"
+	Query   string                 `json:"query,omitempty"`   // rag tool query
 }
 
 // PlannerResult is the full JSON object the planner LLM must output.
