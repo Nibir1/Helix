@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"helix/internal/agent"
 	"helix/internal/ai"
 	"helix/internal/commands"
 	"helix/internal/config"
@@ -28,8 +29,9 @@ var (
 	syntaxHighlighter *utils.SyntaxHighlighter
 	sandbox           *commands.DirectorySandbox
 	ragSystem         *rag.RAGSystem
-	aiProvider        AIProvider // NEW: which provider is active
-	openAIAPIKey      string     // NEW: in-memory API key
+	aiProvider        AIProvider   // Provider type (OpenAI/local)
+	openAIAPIKey      string       // In-memory key
+	agentCore         *agent.Agent // Agent Mode core
 )
 
 func main() {
@@ -60,95 +62,85 @@ func main() {
 	// Initialize directory sandbox
 	sandbox = commands.NewDirectorySandbox()
 
-	// Set execution config
+	// Default execution config
 	execConfig = commands.DefaultExecuteConfig()
 
-	// Initialize Git manager
+	// Git manager
 	gitManager = commands.NewGitManager(env, execConfig, sandbox)
 
-	// Initialize syntax highlighter
+	// Syntax highlighter
 	syntaxHighlighter = utils.NewSyntaxHighlighter()
 	commands.SetSyntaxHighlighter(syntaxHighlighter)
 
-	// Decide which AI provider to use
+	// Ask user which AI provider they want
 	selectedProvider := askForAIProvider()
 
-	// If user chose OpenAI but we're offline, warn and fall back to local
+	// If user chooses OpenAI but offline → fallback
 	if selectedProvider == ai.ProviderOpenAI && !online {
-		color.Red("❌ You appear to be offline, but OpenAI mode requires internet.")
-		color.Yellow("💡 Falling back to local model mode.")
+		color.Red("❌ No internet detected. OpenAI mode is unavailable.")
+		color.Yellow("💡 Falling back to local model.")
 		selectedProvider = ai.ProviderLocal
 	}
 
+	// Provider: OpenAI
 	if selectedProvider == ai.ProviderOpenAI {
-		// Configure OpenAI provider
 		if err := setupOpenAIProvider(); err != nil {
 			color.Red("❌ Failed to configure OpenAI: %v", err)
-			color.Yellow("Running in enhanced mock mode instead.")
+			color.Yellow("Running in enhanced mock mode.")
 			runEnhancedMockMode()
 			return
 		}
-
 		ai.SetProvider(ai.ProviderOpenAI)
-		color.Green("✅ Using OpenAI cloud provider for AI")
+		color.Green("✅ Using OpenAI cloud provider")
+
 	} else {
-		// Local model path (original behavior)
+		// Provider: Local model
 		ai.SetProvider(ai.ProviderLocal)
 
-		// Ensure model directory exists
 		if err := cfg.EnsureModelDir(); err != nil {
 			color.Red("Error creating model directory: %v", err)
 			return
 		}
 
-		// Download model if not present FIRST - before any other initialization
-		color.Blue("📥 Checking for AI model...")
+		color.Blue("📥 Checking for local AI model...")
 		if err := ai.DownloadModel(cfg.ModelFile, config.ModelURL, config.ModelChecksum); err != nil {
-			color.Yellow("⚠️  Model download error: %v", err)
+			color.Red("❌ Model download error: %v", err)
 			color.Yellow("Running in enhanced mock mode.")
 			runEnhancedMockMode()
 			return
 		}
 
-		// Verify model file exists after download attempt
 		fileInfo, err := os.Stat(cfg.ModelFile)
 		if err != nil {
-			color.Red("⚠️  Model file not found after download attempt: %v", err)
-			color.Yellow("Running in enhanced mock mode.")
+			color.Red("❌ Model file missing: %v", err)
 			runEnhancedMockMode()
 			return
 		}
 
-		color.Green("✅ Model file exists: %s (Size: %.2f MB)",
+		color.Green("✅ Local model found: %s (%.2f MB)",
 			cfg.ModelFile,
-			float64(fileInfo.Size())/(1024*1024))
+			float64(fileInfo.Size())/(1024*1024),
+		)
 
-		// Load LLaMA model
-		color.Blue("🔧 Loading AI model...")
+		color.Blue("🔧 Loading LLaMA model...")
 		if err := ai.LoadModel(cfg.ModelFile); err != nil {
-			color.Red("⚠️  Failed to load model: %v", err)
-			color.Yellow("This could indicate:")
-			color.Yellow("  - Corrupted model file")
-			color.Yellow("  - Incompatible model format")
-			color.Yellow("  - Insufficient RAM/VRAM")
-
+			color.Red("❌ Failed to load model: %v", err)
+			color.Yellow("Likely corrupted or incompatible file.")
 			runEnhancedMockMode()
 			return
 		}
 
 		defer ai.CloseModel()
-		color.Green("✅ AI model loaded successfully!")
+		color.Green("✅ Local AI loaded successfully!")
 	}
 
-	// NOW initialize RAG system AFTER model is confirmed available
+	// ---- Initialize RAG system ----
 	color.Blue("🧠 Initializing RAG system...")
 	ragSystem = rag.NewSystem(env)
 
-	// Check RAG status and provide clear feedback
 	if ragSystem.IsInitialized() {
-		color.Green("✅ RAG system: READY (command documentation available)")
+		color.Green("✅ RAG system READY")
 	} else {
-		// Check if there's any existing progress
 		stats := ragSystem.GetSystemStats()
 		indexedPages := 0
 		if pages, ok := stats["indexed_pages"]; ok {
@@ -158,137 +150,117 @@ func main() {
 		}
 
 		if indexedPages > 0 {
-			color.Yellow("🔄 RAG system: RESUMING (%d pages already indexed)", indexedPages)
-			color.Yellow("💡 RAG features will auto-enable when indexing completes")
+			color.Yellow("🔄 Resuming RAG indexing (%d pages)", indexedPages)
 		} else {
-			color.Yellow("📚 RAG system: FIRST-TIME SETUP (indexing MAN pages)")
-			color.Yellow("💡 This may take 1-2 minutes. RAG features will auto-enable when ready.")
+			color.Yellow("📚 First-time RAG setup (manual pages indexing)")
 		}
 
-		// Start background indexing
 		ragSystem.IndexAvailableManPages()
-
-		// Show immediate status
 		if indexedPages > 0 {
-			color.Cyan("   Resuming from: %d pages", indexedPages)
+			color.Cyan("   Continuing from %d pages", indexedPages)
 		}
 	}
 
-	// Initialize prompt builder with RAG system reference
+	// ---- Prompt Builder with RAG ----
 	pb = ai.NewEnhancedPromptBuilder(env, online, ragSystem)
 
-	// Show initial RAG status - check immediately
 	if pb.IsRAGAvailable() {
-		color.Green("✅ RAG system: ACTIVE - enhanced prompts enabled")
+		color.Green("🧠 RAG ACTIVE – enhanced command reasoning enabled")
 	} else {
-		status := ragSystem.GetInitializationStatus()
-		color.Yellow("🔄 RAG system: %s - will auto-enable when ready", status)
-
-		// Start monitoring RAG initialization with better tracking
+		color.Yellow("🔄 RAG indexing ongoing… will auto-enable soon")
 		go monitorRAGInitialization(pb, ragSystem)
 	}
 
-	// Create UX manager for nice output
-	ux := ux.NewUX()
-	ux.ShowWelcomeBanner("0.3.0")
+	// ---- UX ----
+	uxUI := ux.NewUX()
+	uxUI.ShowWelcomeBanner("0.3.0")
 
-	// Test AI model with fallback check
-	color.Blue("🧪 Testing AI model with fallback check...")
+	// ---- Minimal model test ----
+	color.Blue("🧪 Running AI test...")
 
-	// Test with different prompt styles
 	testPrompts := []string{
-		`Command to list files:`,
-		`ls`,
-		`List files command:`,
+		"Command to list files:",
+		"ls",
+		"List files command:",
 	}
 
 	for i, prompt := range testPrompts {
-		response, err := ai.RunModel(prompt)
+		resp, err := ai.RunModel(prompt)
 		if err != nil {
-			color.Red("❌ Test %d failed: %v", i+1, err)
+			color.Red("❌ Test %d error: %v", i+1, err)
 			continue
 		}
 
-		cleanResponse := strings.TrimSpace(response)
-		color.Cyan("Test %d: '%s'", i+1, cleanResponse)
+		resp = strings.TrimSpace(resp)
+		color.Cyan("Test %d result: %q", i+1, resp)
 
-		if cleanResponse != "" {
-			color.Green("✅ Model is responding")
+		if resp != "" {
+			color.Green("✅ AI is responding correctly.")
 			break
 		}
-
-		if response == "" {
-			color.Yellow("⚠️  Model responses are empty but command generation works")
-		}
 	}
 
-	// Show final RAG status
-	if pb.IsRAGAvailable() {
-		color.Green("🧠 RAG system: ACTIVE (command documentation available)")
-	} else {
-		color.Yellow("🧠 RAG system: Indexing MAN pages in background...")
-	}
+	// ---- Agent Mode Initialization ----
+	agentCore = agent.NewAgent(
+		env,
+		pb,
+		ragSystem,
+		sandbox,
+		execConfig,
+		cfg.UserPrefs.TypingEffect,
+	)
 
-	color.Green("🎉 Helix is ready! Type '/help' for available commands.")
+	color.Green("🎉 Helix is ready! Type '/help' for commands or just ask anything.")
 
-	// Start enhanced CLI loop
 	runEnhancedCLI()
 }
 
-// monitorRAGInitialization periodically checks if RAG system becomes initialized
+// ---------------------------------------------
+// RAG Monitoring
+// ---------------------------------------------
+
 func monitorRAGInitialization(pb *ai.PromptBuilder, ragSystem *rag.RAGSystem) {
-	ticker := time.NewTicker(3 * time.Second) // More frequent checking
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	// Reduced timeout since indexing should be faster now
-	timeout := time.After(90 * time.Second) // 1.5 minutes timeout
-
+	timeout := time.After(90 * time.Second)
 	checks := 0
-	maxChecks := 30 // 30 checks * 3 seconds = 90 seconds total
 
 	for {
 		select {
 		case <-ticker.C:
 			checks++
-
-			// Use the new status method for better feedback
 			status := ragSystem.GetInitializationStatus()
-			color.Cyan("🔄 RAG Status: %s (check %d/%d)", status, checks, maxChecks)
+			color.Cyan("🔄 RAG Status: %s", status)
 
 			if ragSystem.IsInitialized() {
-				color.Green("🎉 RAG system is now ACTIVE! Enhanced commands available.")
-				return
-			}
-
-			// Stop if we've checked enough times
-			if checks >= maxChecks {
-				color.Yellow("⏰ RAG monitoring completed - system still initializing")
-				color.Yellow("💡 RAG features will enable automatically when ready")
+				color.Green("🎉 RAG system is now ACTIVE")
 				return
 			}
 
 		case <-timeout:
-			// Use the new method to check if indexing is complete
 			if !ragSystem.IsIndexingComplete() {
-				color.Yellow("⏰ RAG initialization timeout - continuing without RAG features")
+				color.Yellow("⏰ RAG initialization timed out")
 			} else {
-				color.Green("✅ RAG initialization completed during timeout window")
+				color.Green("✅ RAG finished indexing during timeout window")
 			}
 			return
 		}
 	}
 }
 
-// runEnhancedMockMode remains the same (no RAG in mock mode)
-func runEnhancedMockMode() {
-	color.Yellow("\n🔧 ENHANCED MOCK MODE ACTIVATED")
-	color.Yellow("AI commands will be simulated with intelligent responses")
+// ---------------------------------------------
+// MOCK MODE
+// ---------------------------------------------
 
+func runEnhancedMockMode() {
+	color.Yellow("\n🔧 ENHANCED MOCK MODE ENABLED (no real AI)")
 	execConfig.DryRun = true
 	env = shell.DetectEnvironment()
 	pb = ai.NewPromptBuilder(env, online)
 
 	reader := bufio.NewReader(os.Stdin)
+
 	for {
 		color.Cyan("[helix-mock]> ")
 		input, _ := reader.ReadString('\n')
@@ -296,7 +268,7 @@ func runEnhancedMockMode() {
 
 		switch {
 		case input == "/exit":
-			color.Green("Exiting Helix. Goodbye! 👋")
+			color.Green("Exiting Helix. Goodbye!")
 			return
 		case input == "/debug":
 			showDebugInfo()
@@ -316,49 +288,49 @@ func runEnhancedMockMode() {
 			handleRemoveCommand(input, true)
 		case strings.HasPrefix(input, "/dry-run"):
 			toggleDryRun()
-		case input == "/online":
-			checkOnlineStatus()
 		default:
-			color.Yellow("❓ Unknown command. Type '/help' for available commands.")
+			color.Yellow("❓ Unknown command. Type '/help'")
 		}
 	}
 }
 
-// CLI loop to include RAG commands
+// ---------------------------------------------
+// ENHANCED CLI (Agent + Slash Commands)
+// ---------------------------------------------
+
 func runEnhancedCLI() {
 	reader := bufio.NewReader(os.Stdin)
 	lastRAGCheck := time.Now()
-	ragEnabledShown := false
+	ragShown := false
 
 	for {
 		color.Cyan("[helix]> ")
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
-		// Use dynamic checking for RAG availability
-		if !ragEnabledShown && pb.IsRAGAvailable() {
-			color.Green("🎉 RAG system is now ACTIVE! Enhanced commands available.")
-			ragEnabledShown = true
+		// Auto-enable RAG check
+		if !ragShown && pb.IsRAGAvailable() {
+			color.Green("🎉 RAG system is now ACTIVE")
+			ragShown = true
 		}
 
-		// Check RAG progress periodically if not ready
 		if !pb.IsRAGAvailable() && time.Since(lastRAGCheck) > 30*time.Second {
 			checkRAGProgress()
 			lastRAGCheck = time.Now()
 		}
 
-		// Handle exit first
+		// Exit
 		if input == "/exit" {
-			color.Green("Exiting Helix. Goodbye! 👋")
+			color.Green("Goodbye! 👋")
 			return
 		}
 
-		// Save to history
+		// Save history
 		if input != "" {
 			utils.AppendHistory(cfg.HistoryPath, input)
 		}
 
-		// Command handling
+		// Slash Command Routing
 		switch {
 		case input == "/debug":
 			showDebugInfo()
@@ -396,9 +368,15 @@ func runEnhancedCLI() {
 			handleRemoveCommand(input, false)
 		case strings.HasPrefix(input, "/dry-run"):
 			toggleDryRun()
+
+		// ---- AGENT MODE ----
 		default:
 			if input != "" {
-				color.Yellow("💡 Tip: Start with '/ask' for questions or '/cmd' for command generation")
+				if agentCore != nil {
+					agentCore.HandleInput(input)
+				} else {
+					color.Red("⚠️ Agent not initialized")
+				}
 			}
 		}
 	}

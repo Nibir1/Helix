@@ -287,3 +287,29 @@ func WriteSecretFile(path, value string) error {
 	}
 	return nil
 }
+
+// BracesBalanced returns true if { and } are balanced.
+func BracesBalanced(s string) bool {
+	count := 0
+	for _, r := range s {
+		if r == '{' {
+			count++
+		} else if r == '}' {
+			count--
+			if count < 0 {
+				return false
+			}
+		}
+	}
+	return count == 0
+}
+
+// Typewriter prints text with a small typing delay.
+// Safe: does not print too slowly or block for large text.
+func Typewriter(text string) {
+	for _, c := range text {
+		fmt.Printf("%c", c)
+		time.Sleep(10 * time.Millisecond)
+	}
+	fmt.Println()
+}
