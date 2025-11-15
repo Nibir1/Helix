@@ -358,27 +358,33 @@ func (gm *GitManager) executeCommitStep(targetBranch string) error {
 	}
 }
 
-// executeCommitWithMessage executes git commit without shell escaping issues
+// executeCommitWithMessage executes git commit using a relative commit-message file
+// to avoid absolute paths (which are blocked by the sandbox).
 func (gm *GitManager) executeCommitWithMessage(targetBranch string, message string) error {
 	color.Blue("📝 Committing with message: %s", message)
 
-	// Use a temporary file for the commit message to avoid shell escaping entirely
-	tempFile, err := os.CreateTemp("", "helix-commit-*.txt")
+	// Safety: skip commit if nothing is staged
+	hasChanges, err := gm.hasStagedChanges()
 	if err != nil {
-		color.Yellow("⚠️  Could not create temp file, using git editor instead")
+		color.Yellow("⚠️  Could not detect staged changes: %v", err)
+	} else if !hasChanges {
+		color.Yellow("ℹ️ No staged changes detected; skipping git commit.")
+		return nil
+	}
+
+	// Create a commit message file INSIDE the repo, using a RELATIVE path for the command.
+	// This keeps the sandbox happy (no absolute path traversal in the command string).
+	relPath := ".helix-commit-msg.txt"
+	absPath := filepath.Join(gm.workingDir, relPath)
+
+	if err := os.WriteFile(absPath, []byte(message), 0o600); err != nil {
+		color.Yellow("⚠️  Could not write commit message file, using git editor instead")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
 	}
-	defer os.Remove(tempFile.Name())
+	defer os.Remove(absPath)
 
-	// Write message to temp file
-	if _, err := tempFile.WriteString(message); err != nil {
-		color.Yellow("⚠️  Could not write to temp file, using git editor instead")
-		return ExecuteCommand("git commit", gm.execConfig, gm.env)
-	}
-	tempFile.Close()
-
-	// Use the temp file for commit message
-	commitCmd := fmt.Sprintf("git commit -F %s", tempFile.Name())
+	// Use the relative path in the command so there is no absolute path for the sandbox to reject.
+	commitCmd := fmt.Sprintf("git commit -F %s", relPath)
 	return gm.sandbox.WrapCommand(commitCmd, gm.execConfig, gm.env)
 }
 
@@ -511,4 +517,82 @@ func (gm *GitManager) CommonGitOperations() map[string]string {
 		"log":                     "Show commit history",
 		"diff":                    "Show changes",
 	}
+}
+
+// ExecutePlannedAction executes a git action coming from the planner
+// without asking AI again or generating raw shell commands.
+func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string) error {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if args == nil {
+		args = map[string]string{}
+	}
+
+	switch action {
+	case "commit":
+		msg := strings.TrimSpace(args["message"])
+		if msg == "" {
+			msg = "Helix: automated commit"
+		}
+		color.Blue("📝 Git commit (planner): %s", msg)
+		return gm.executeCommitWithMessage("<planner>", msg)
+
+	case "tag":
+		name := strings.TrimSpace(args["name"])
+		if name == "" {
+			return fmt.Errorf("git tag action missing 'name'")
+		}
+		color.Blue("🏷️  Git tag (planner): %s", name)
+		cmd := fmt.Sprintf("git tag %s", name)
+		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+
+	case "add":
+		paths := strings.TrimSpace(args["paths"])
+		if paths == "" {
+			return fmt.Errorf("git add action missing 'paths'")
+		}
+		color.Blue("➕ Git add (planner): %s", paths)
+		cmd := fmt.Sprintf("git add %s", paths)
+		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+
+	case "checkout":
+		branch := strings.TrimSpace(args["branch"])
+		if branch == "" {
+			return fmt.Errorf("git checkout action missing 'branch'")
+		}
+		color.Blue("🌿 Git checkout (planner): %s", branch)
+		cmd := fmt.Sprintf("git checkout %s", branch)
+		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+
+	case "create-branch":
+		branch := strings.TrimSpace(args["branch"])
+		if branch == "" {
+			return fmt.Errorf("create-branch action missing 'branch'")
+		}
+		color.Blue("🌿 Git create branch (planner): %s", branch)
+		cmd := fmt.Sprintf("git checkout -b %s", branch)
+		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+
+	default:
+		return fmt.Errorf("unsupported git planner action: %s", action)
+	}
+}
+
+// hasStagedChanges returns true if there are staged changes.
+func (gm *GitManager) hasStagedChanges() (bool, error) {
+	cmd := exec.Command("git", "diff", "--cached", "--quiet")
+	cmd.Dir = gm.workingDir
+	err := cmd.Run()
+	if err == nil {
+		// exit code 0: no staged changes
+		return false, nil
+	}
+
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr.ExitCode() == 1 {
+			// exit code 1: there are staged changes
+			return true, nil
+		}
+	}
+
+	return false, err
 }
