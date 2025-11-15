@@ -12,6 +12,12 @@ import (
 	"github.com/fatih/color"
 )
 
+//
+// ──────────────────────────────────────────────────────────────
+// 📌 BASIC I/O HELPERS
+// ──────────────────────────────────────────────────────────────
+//
+
 // ReadLine reads a line from stdin with prompt
 func ReadLine(prompt string) (string, error) {
 	color.Cyan(prompt)
@@ -42,6 +48,12 @@ func AskYesNo(prompt string) (bool, error) {
 	}
 }
 
+//
+// ──────────────────────────────────────────────────────────────
+// 📡 CONNECTIVITY
+// ──────────────────────────────────────────────────────────────
+//
+
 // IsOnline performs a lightweight GET to detect internet connectivity
 func IsOnline(timeout time.Duration) bool {
 	client := http.Client{
@@ -51,7 +63,6 @@ func IsOnline(timeout time.Duration) bool {
 		},
 	}
 
-	// Try multiple endpoints for reliability
 	endpoints := []string{
 		"https://clients3.google.com/generate_204",
 		"https://connectivitycheck.gstatic.com/generate_204",
@@ -71,18 +82,28 @@ func IsOnline(timeout time.Duration) bool {
 	return false
 }
 
+//
+// ──────────────────────────────────────────────────────────────
+// 🧹 STRING SANITIZATION
+// ──────────────────────────────────────────────────────────────
+//
+
 // SafeTrim removes dangerous characters/newlines from AI output before executing
 func SafeTrim(s string) string {
-	// Basic sanitation: trim, remove trailing semicolons/newlines
 	s = strings.TrimSpace(s)
 	s = strings.TrimRight(s, ";\n")
 
-	// Remove multiple spaces
 	space := regexp.MustCompile(`\s+`)
 	s = space.ReplaceAllString(s, " ")
 
 	return s
 }
+
+//
+// ──────────────────────────────────────────────────────────────
+// 🔐 COMMAND SAFETY
+// ──────────────────────────────────────────────────────────────
+//
 
 // ValidateCommand performs basic command validation
 func ValidateCommand(command string) error {
@@ -90,7 +111,7 @@ func ValidateCommand(command string) error {
 		return fmt.Errorf("empty command")
 	}
 
-	// Check for obviously malicious patterns
+	// Basic malicious pattern checks
 	maliciousPatterns := []*regexp.Regexp{
 		regexp.MustCompile(`(?i)rm\s+-rf\s+/\s*`),
 		regexp.MustCompile(`(?i)format\s+[c-z]:`),
@@ -107,9 +128,14 @@ func ValidateCommand(command string) error {
 	return nil
 }
 
+//
+// ──────────────────────────────────────────────────────────────
+// 📦 PACKAGE NAME EXTRACTION
+// ──────────────────────────────────────────────────────────────
+//
+
 // ExtractPackageName extracts package name from command
 func ExtractPackageName(command string) string {
-	// Simple heuristic to extract package names from common commands
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`(?:install|remove|update|search)\s+([a-zA-Z0-9._-]+)`),
 		regexp.MustCompile(`(?:apt|brew|choco|winget|pacman|yum|dnf)\s+(?:install|remove|update)\s+([a-zA-Z0-9._-]+)`),
@@ -125,6 +151,12 @@ func ExtractPackageName(command string) string {
 	return ""
 }
 
+//
+// ──────────────────────────────────────────────────────────────
+// 🕒 TIME UTILS
+// ──────────────────────────────────────────────────────────────
+//
+
 // FormatDuration formats a duration for human readability
 func FormatDuration(d time.Duration) string {
 	if d < time.Second {
@@ -135,6 +167,12 @@ func FormatDuration(d time.Duration) string {
 	}
 	return d.String()
 }
+
+//
+// ──────────────────────────────────────────────────────────────
+// 🔍 STRING HELPERS
+// ──────────────────────────────────────────────────────────────
+//
 
 // ContainsAny checks if a string contains any of the given substrings
 func ContainsAny(s string, substrings []string) bool {
@@ -152,6 +190,136 @@ func TruncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// IsMostlyEnglish checks if the text is mostly English characters
+func IsMostlyEnglish(text string) bool {
+	if len(text) == 0 {
+		return true
+	}
+
+	english := 0
+	for _, char := range text {
+		if char <= 127 {
+			english++
+		}
+	}
+
+	return float64(english)/float64(len(text)) > 0.8
+}
+
+//
+// ──────────────────────────────────────────────────────────────
+// 🧠 QUOTE / BRACE VALIDATION
+// ──────────────────────────────────────────────────────────────
+//
+
+// HasBalancedQuotes — strict validator (used in ValidateAndCleanCommand)
+func HasBalancedQuotes(text string) bool {
+	var inSingle, inDouble bool
+
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+
+		// Skip escaped quotes like '\''
+		if ch == '\\' && i+1 < len(text) && (text[i+1] == '"' || text[i+1] == '\'') {
+			i++
+			continue
+		}
+
+		if ch == '"' {
+			inDouble = !inDouble
+		}
+		if ch == '\'' {
+			inSingle = !inSingle
+		}
+	}
+
+	return !inSingle && !inDouble
+}
+
+// HasUnbalancedQuotesQuick — light heuristic (used in ExecuteCommand)
+func HasUnbalancedQuotesQuick(text string) bool {
+	// Only detect obvious mistakes
+	s := strings.Count(text, "'")
+	d := strings.Count(text, `"`)
+
+	// allow regex patterns like '^\.' which include escaped characters
+	// allow odd number when inside pipes | grep 'regex'
+	if strings.Contains(text, "grep") || strings.Contains(text, "sed") {
+		return false
+	}
+
+	return s%2 != 0 || d%2 != 0
+}
+
+// DebugStringBytes prints each rune + codepoint
+func DebugStringBytes(s string) {
+	color.Yellow("🔍 DEBUG String bytes:")
+	for i, char := range s {
+		color.Yellow("  [%d] %q (U+%04X)", i, char, char)
+	}
+}
+
+// FixUnmatchedQuotes intelligently repairs simple unmatched quote cases
+func FixUnmatchedQuotes(cmd string) string {
+	// Already safe → return
+	if HasBalancedQuotes(cmd) {
+		return cmd
+	}
+
+	// Missing end quote for patterns like:
+	//   "*.txt
+	if strings.Count(cmd, `"`) == 1 {
+		return cmd + `"`
+	}
+	if strings.Count(cmd, `'`) == 1 {
+		return cmd + `'`
+	}
+
+	// Fallback: no fix
+	return cmd
+}
+
+//
+// ──────────────────────────────────────────────────────────────
+// 📁 FILE UTILS
+// ──────────────────────────────────────────────────────────────
+//
+
+func ReadFileSafe(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func WriteSecretFile(path, value string) error {
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o600); err != nil {
+		return err
+	}
+	return nil
+}
+
+// BracesBalanced returns true if { and } are balanced.
+func BracesBalanced(s string) bool {
+	count := 0
+	for _, r := range s {
+		switch r {
+		case '{':
+			count++
+		case '}':
+			count--
+			if count < 0 {
+				return false
+			}
+		}
+	}
+	return count == 0
 }
 
 // CleanAIResponse cleans and formats AI responses
@@ -184,123 +352,4 @@ func CleanAIResponse(response string) string {
 	}
 
 	return response
-}
-
-// IsMostlyEnglish checks if the text is mostly English characters
-func IsMostlyEnglish(text string) bool {
-	// Simple heuristic: count English vs non-English characters
-	if len(text) == 0 {
-		return true
-	}
-
-	englishChars := 0
-	totalChars := 0
-
-	for _, char := range text {
-		if char <= 127 { // ASCII range
-			englishChars++
-		}
-		totalChars++
-	}
-
-	return float64(englishChars)/float64(totalChars) > 0.8
-}
-
-// HasBalancedQuotes checks if quotes are properly balanced - DEBUG VERSION
-func HasBalancedQuotes(text string) bool {
-	var inSingle, inDouble bool
-
-	for i := 0; i < len(text); i++ {
-		char := text[i]
-
-		// Skip escaped quotes
-		if char == '\\' && i+1 < len(text) && (text[i+1] == '"' || text[i+1] == '\'') {
-			i++
-			continue
-		}
-
-		if char == '"' {
-			inDouble = !inDouble
-		}
-		if char == '\'' {
-			inSingle = !inSingle
-		}
-	}
-
-	return !inSingle && !inDouble
-}
-
-// Add this debug function temporarily
-func DebugStringBytes(s string) {
-	color.Yellow("🔍 DEBUG String bytes:")
-	for i, char := range s {
-		color.Yellow("  [%d] %q (U+%04X)", i, char, char)
-	}
-}
-
-// FixUnmatchedQuotes attempts to fix common quote mismatches intelligently
-func FixUnmatchedQuotes(command string) string {
-	// If already balanced → return immediately
-	if HasBalancedQuotes(command) {
-		return command
-	}
-
-	// Try to fix only well-known patterns
-	if strings.Contains(command, `"*.`) && !strings.HasSuffix(command, `"`) {
-		return command + `"`
-	}
-	if strings.Contains(command, `'*.`) && !strings.HasSuffix(command, `'`) {
-		return command + `'`
-	}
-
-	// Last resort: if only one extra opening quote exists, close it
-	singleQuotes := strings.Count(command, "'")
-	doubleQuotes := strings.Count(command, `"`)
-
-	if doubleQuotes%2 != 0 {
-		return command + `"`
-	}
-	if singleQuotes%2 != 0 {
-		return command + `'`
-	}
-
-	// Cannot fix confidently
-	return command
-}
-
-// ReadFileSafe reads a file and returns its trimmed content; returns "" if file doesn't exist.
-func ReadFileSafe(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
-}
-
-// WriteSecretFile writes a secret (like an API key) to a file with 0600 permissions.
-func WriteSecretFile(path, value string) error {
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o600); err != nil {
-		return err
-	}
-	return nil
-}
-
-// BracesBalanced returns true if { and } are balanced.
-func BracesBalanced(s string) bool {
-	count := 0
-	for _, r := range s {
-		switch r {
-		case '{':
-			count++
-		case '}':
-			count--
-			if count < 0 {
-				return false
-			}
-		}
-	}
-	return count == 0
 }
