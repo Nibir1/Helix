@@ -16,6 +16,7 @@ type Config struct {
 	ModelFile     string                 `json:"model_file"`
 	HistoryPath   string                 `json:"history_path"`
 	ConfigPath    string                 `json:"config_path"`
+	OpenAIKeyPath string                 `json:"openai_key_path"` // NEW
 	UserPrefs     UserPrefs              `json:"user_preferences"`
 	ModelConfig   ai.ModelConfig         `json:"model_config"`
 	ExecuteConfig commands.ExecuteConfig `json:"execute_config"`
@@ -44,14 +45,17 @@ func DefaultConfig() (*Config, error) {
 	}
 
 	configDir := filepath.Join(home, ".helix")
+	openAIKeyPath := filepath.Join(configDir, "openai_api_key") // hidden file inside ~/.helix
+
 	// modelFile := filepath.Join(modelDir, "llama-2-7b-chat.Q4_0.gguf")
 	modelFile := filepath.Join(modelDir, "tinyllama-1.1b-chat-v1.0.Q4_0.gguf")
 
 	cfg := &Config{
-		ModelDir:    modelDir,
-		ModelFile:   modelFile,
-		HistoryPath: filepath.Join(home, ".helix_history"),
-		ConfigPath:  filepath.Join(configDir, "config.json"),
+		ModelDir:      modelDir,
+		ModelFile:     modelFile,
+		HistoryPath:   filepath.Join(home, ".helix_history"),
+		ConfigPath:    filepath.Join(configDir, "config.json"),
+		OpenAIKeyPath: openAIKeyPath, // NEW
 		UserPrefs: UserPrefs{
 			AutoConfirm:  false,
 			ColorMode:    "auto",

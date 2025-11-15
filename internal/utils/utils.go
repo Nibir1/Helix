@@ -208,19 +208,26 @@ func IsMostlyEnglish(text string) bool {
 
 // HasBalancedQuotes checks if quotes are properly balanced - DEBUG VERSION
 func HasBalancedQuotes(text string) bool {
-	singleQuotes := strings.Count(text, "'")
-	doubleQuotes := strings.Count(text, `"`)
+	var inSingle, inDouble bool
 
-	// ADD DEBUG
-	color.Yellow("🔍 DEBUG Quote Check: text='%s'", text)
-	color.Yellow("🔍 DEBUG: singleQuotes=%d, doubleQuotes=%d", singleQuotes, doubleQuotes)
-	color.Yellow("🔍 DEBUG: single balanced=%v, double balanced=%v",
-		singleQuotes%2 == 0, doubleQuotes%2 == 0)
+	for i := 0; i < len(text); i++ {
+		char := text[i]
 
-	balanced := singleQuotes%2 == 0 && doubleQuotes%2 == 0
+		// Skip escaped quotes
+		if char == '\\' && i+1 < len(text) && (text[i+1] == '"' || text[i+1] == '\'') {
+			i++
+			continue
+		}
 
-	color.Yellow("🔍 DEBUG: Final balanced result=%v", balanced)
-	return balanced
+		if char == '"' {
+			inDouble = !inDouble
+		}
+		if char == '\'' {
+			inSingle = !inSingle
+		}
+	}
+
+	return !inSingle && !inDouble
 }
 
 // Add this debug function temporarily
@@ -233,35 +240,50 @@ func DebugStringBytes(s string) {
 
 // FixUnmatchedQuotes attempts to fix common quote mismatches intelligently
 func FixUnmatchedQuotes(command string) string {
-	// Count single and double quotes
-	singleQuotes := strings.Count(command, "'")
-	doubleQuotes := strings.Count(command, `"`)
-
-	// If quotes are already balanced, return immediately
-	if singleQuotes%2 == 0 && doubleQuotes%2 == 0 {
+	// If already balanced → return immediately
+	if HasBalancedQuotes(command) {
 		return command
 	}
 
-	color.Yellow("🔍 DEBUG FixUnmatchedQuotes: Found unbalanced quotes")
-	color.Yellow("🔍 DEBUG: singleQuotes=%d, doubleQuotes=%d", singleQuotes, doubleQuotes)
+	// Try to fix only well-known patterns
+	if strings.Contains(command, `"*.`) && !strings.HasSuffix(command, `"`) {
+		return command + `"`
+	}
+	if strings.Contains(command, `'*.`) && !strings.HasSuffix(command, `'`) {
+		return command + `'`
+	}
 
-	// Only fix specific patterns we're sure about
+	// Last resort: if only one extra opening quote exists, close it
+	singleQuotes := strings.Count(command, "'")
+	doubleQuotes := strings.Count(command, `"`)
+
 	if doubleQuotes%2 != 0 {
-		// Check for common file pattern with missing closing quote
-		if strings.Contains(command, `"*.`) {
-			color.Yellow("🔍 DEBUG: Adding missing double quote for file pattern")
-			return command + `"`
-		}
+		return command + `"`
 	}
-
 	if singleQuotes%2 != 0 {
-		// Check for common file pattern with missing closing quote
-		if strings.Contains(command, `'*.`) {
-			color.Yellow("🔍 DEBUG: Adding missing single quote for file pattern")
-			return command + `'`
-		}
+		return command + `'`
 	}
 
-	// If we can't confidently fix it, return original
+	// Cannot fix confidently
 	return command
+}
+
+// ReadFileSafe reads a file and returns its trimmed content; returns "" if file doesn't exist.
+func ReadFileSafe(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// WriteSecretFile writes a secret (like an API key) to a file with 0600 permissions.
+func WriteSecretFile(path, value string) error {
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(value)+"\n"), 0o600); err != nil {
+		return err
+	}
+	return nil
 }

@@ -28,6 +28,8 @@ var (
 	syntaxHighlighter *utils.SyntaxHighlighter
 	sandbox           *commands.DirectorySandbox
 	ragSystem         *rag.RAGSystem
+	aiProvider        AIProvider // NEW: which provider is active
+	openAIAPIKey      string     // NEW: in-memory API key
 )
 
 func main() {
@@ -68,49 +70,75 @@ func main() {
 	syntaxHighlighter = utils.NewSyntaxHighlighter()
 	commands.SetSyntaxHighlighter(syntaxHighlighter)
 
-	// Ensure model directory exists
-	if err := cfg.EnsureModelDir(); err != nil {
-		color.Red("Error creating model directory: %v", err)
-		return
+	// Decide which AI provider to use
+	selectedProvider := askForAIProvider()
+
+	// If user chose OpenAI but we're offline, warn and fall back to local
+	if selectedProvider == ai.ProviderOpenAI && !online {
+		color.Red("❌ You appear to be offline, but OpenAI mode requires internet.")
+		color.Yellow("💡 Falling back to local model mode.")
+		selectedProvider = ai.ProviderLocal
 	}
 
-	// Download model if not present FIRST - before any other initialization
-	color.Blue("📥 Checking for AI model...")
-	if err := ai.DownloadModel(cfg.ModelFile, config.ModelURL, config.ModelChecksum); err != nil {
-		color.Yellow("⚠️  Model download error: %v", err)
-		color.Yellow("Running in enhanced mock mode.")
-		runEnhancedMockMode()
-		return
+	if selectedProvider == ai.ProviderOpenAI {
+		// Configure OpenAI provider
+		if err := setupOpenAIProvider(); err != nil {
+			color.Red("❌ Failed to configure OpenAI: %v", err)
+			color.Yellow("Running in enhanced mock mode instead.")
+			runEnhancedMockMode()
+			return
+		}
+
+		ai.SetProvider(ai.ProviderOpenAI)
+		color.Green("✅ Using OpenAI cloud provider for AI")
+	} else {
+		// Local model path (original behavior)
+		ai.SetProvider(ai.ProviderLocal)
+
+		// Ensure model directory exists
+		if err := cfg.EnsureModelDir(); err != nil {
+			color.Red("Error creating model directory: %v", err)
+			return
+		}
+
+		// Download model if not present FIRST - before any other initialization
+		color.Blue("📥 Checking for AI model...")
+		if err := ai.DownloadModel(cfg.ModelFile, config.ModelURL, config.ModelChecksum); err != nil {
+			color.Yellow("⚠️  Model download error: %v", err)
+			color.Yellow("Running in enhanced mock mode.")
+			runEnhancedMockMode()
+			return
+		}
+
+		// Verify model file exists after download attempt
+		fileInfo, err := os.Stat(cfg.ModelFile)
+		if err != nil {
+			color.Red("⚠️  Model file not found after download attempt: %v", err)
+			color.Yellow("Running in enhanced mock mode.")
+			runEnhancedMockMode()
+			return
+		}
+
+		color.Green("✅ Model file exists: %s (Size: %.2f MB)",
+			cfg.ModelFile,
+			float64(fileInfo.Size())/(1024*1024))
+
+		// Load LLaMA model
+		color.Blue("🔧 Loading AI model...")
+		if err := ai.LoadModel(cfg.ModelFile); err != nil {
+			color.Red("⚠️  Failed to load model: %v", err)
+			color.Yellow("This could indicate:")
+			color.Yellow("  - Corrupted model file")
+			color.Yellow("  - Incompatible model format")
+			color.Yellow("  - Insufficient RAM/VRAM")
+
+			runEnhancedMockMode()
+			return
+		}
+
+		defer ai.CloseModel()
+		color.Green("✅ AI model loaded successfully!")
 	}
-
-	// Verify model file exists after download attempt
-	fileInfo, err := os.Stat(cfg.ModelFile)
-	if err != nil {
-		color.Red("⚠️  Model file not found after download attempt: %v", err)
-		color.Yellow("Running in enhanced mock mode.")
-		runEnhancedMockMode()
-		return
-	}
-
-	color.Green("✅ Model file exists: %s (Size: %.2f MB)",
-		cfg.ModelFile,
-		float64(fileInfo.Size())/(1024*1024))
-
-	// Load LLaMA model
-	color.Blue("🔧 Loading AI model...")
-	if err := ai.LoadModel(cfg.ModelFile); err != nil {
-		color.Red("⚠️  Failed to load model: %v", err)
-		color.Yellow("This could indicate:")
-		color.Yellow("  - Corrupted model file")
-		color.Yellow("  - Incompatible model format")
-		color.Yellow("  - Insufficient RAM/VRAM")
-
-		runEnhancedMockMode()
-		return
-	}
-
-	defer ai.CloseModel()
-	color.Green("✅ AI model loaded successfully!")
 
 	// NOW initialize RAG system AFTER model is confirmed available
 	color.Blue("🧠 Initializing RAG system...")

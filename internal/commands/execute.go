@@ -57,53 +57,67 @@ func IsCommandSafe(command string) bool {
 	return true
 }
 
-// ValidateAndCleanCommand ensures the command is safe and properly formatted
+// ValidateAndCleanCommand ensures the command is safe, well-formed, and properly quoted.
 func ValidateAndCleanCommand(command string) (string, error) {
+	// --- Initial cleanup ---
 	command = strings.TrimSpace(command)
 
-	// ADD DEBUG
 	color.Yellow("🔍 DEBUG ValidateAndCleanCommand input: '%s'", command)
-
-	// DEBUG: Check the actual bytes
 	utils.DebugStringBytes(command)
 
-	// Remove any remaining backticks or code block markers
+	// Remove markdown/code markers
 	command = strings.ReplaceAll(command, "`", "")
 	command = strings.ReplaceAll(command, "```", "")
-
-	// Remove any markdown formatting
 	command = strings.ReplaceAll(command, "**", "")
 	command = strings.ReplaceAll(command, "*", "")
 
-	// Remove leading/trailing quotes
+	// Remove accidental wrapping quotes (common LLM error)
 	command = strings.Trim(command, `"'`)
 
-	// FIXED: Use utils package
-	command = utils.FixUnmatchedQuotes(command)
+	// ---------------------------------------------------------
+	// 1) AUTO-FIX QUOTES BEFORE ANY VALIDATION
+	// ---------------------------------------------------------
+	fixed := utils.FixUnmatchedQuotes(command)
 
-	// FIXED: Use utils package
-	color.Yellow("🔍 DEBUG: Before HasBalancedQuotes check: '%s'", command)
-	if !utils.HasBalancedQuotes(command) {
-		return "", fmt.Errorf("command has unmatched quotes: %s", command)
+	color.Yellow("🔍 DEBUG: After FixUnmatchedQuotes: '%s'", fixed)
+
+	// ---------------------------------------------------------
+	// 2) VALIDATE THE *FIXED* COMMAND, NOT the original
+	// ---------------------------------------------------------
+	if !utils.HasBalancedQuotes(fixed) {
+		// DO NOT fall back to original — original is irrelevant now
+		color.Red("❌ Quotes still unbalanced even after auto-fix")
+		return "", fmt.Errorf("command has unmatched quotes: %s", fixed)
 	}
 
-	// Check if command is empty after cleaning
+	// Update command after passing validation
+	command = fixed
+
+	// ---------------------------------------------------------
+	// 3) Additional sanity checks
+	// ---------------------------------------------------------
+
 	if command == "" {
 		return "", fmt.Errorf("empty command after cleaning")
 	}
 
-	// Basic command structure validation
+	// If multi-line, only take first command (prevent multi-step injection)
 	if strings.Contains(command, "\n") {
-		// Take only the first line for multi-line commands
 		lines := strings.Split(command, "\n")
 		command = strings.TrimSpace(lines[0])
 	}
 
-	// Safety validation
+	// ---------------------------------------------------------
+	// 4) SECURITY VALIDATION
+	// ---------------------------------------------------------
 	if err := utils.ValidateCommand(command); err != nil {
 		return "", err
 	}
 
+	// ---------------------------------------------------------
+	// 5) Final output
+	// ---------------------------------------------------------
+	color.Green("🔍 DEBUG: Final validated command: '%s'", command)
 	return command, nil
 }
 

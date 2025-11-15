@@ -56,22 +56,28 @@ func RunModel(prompt string) (string, error) {
 
 // RunModelWithConfig runs the model with custom parameters
 func RunModelWithConfig(prompt string, config ModelConfig) (string, error) {
-	if model == nil {
-		return "", fmt.Errorf("model not loaded")
-	}
-
-	// Enhanced cleaning
+	// Clean prompt once, for both local & OpenAI
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", fmt.Errorf("empty prompt")
 	}
 
+	// If we're using OpenAI, route there instead of local llama.cpp
+	if GetProvider() == ProviderOpenAI {
+		return runWithOpenAI(prompt, config)
+	}
+
+	// Local model path (llama.cpp)
+	if model == nil {
+		return "", fmt.Errorf("model not loaded")
+	}
+
 	// ACTUALLY USE the config parameter instead of hardcoded values
 	opts := []llama.PredictOption{
-		llama.SetTemperature(config.Temperature), // USE CONFIG
-		llama.SetTopP(config.TopP),               // USE CONFIG
-		llama.SetTopK(config.TopK),               // USE CONFIG
-		llama.SetTokens(config.MaxTokens),        // USE CONFIG
+		llama.SetTemperature(config.Temperature),
+		llama.SetTopP(config.TopP),
+		llama.SetTopK(config.TopK),
+		llama.SetTokens(config.MaxTokens),
 		llama.SetStopWords("\n", "```", "`"),
 	}
 
@@ -116,6 +122,12 @@ func ModelIsLoaded() bool {
 }
 
 func TestModelWithSimplePrompt() (string, error) {
+	// If using OpenAI, just send a tiny prompt
+	if GetProvider() == ProviderOpenAI {
+		prompt := "Say 'Hello world' in one short sentence."
+		return runWithOpenAI(prompt, DefaultModelConfig())
+	}
+
 	if model == nil {
 		return "", fmt.Errorf("model not loaded")
 	}

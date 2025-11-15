@@ -17,6 +17,13 @@ import (
 	"github.com/fatih/color"
 )
 
+type AIProvider string
+
+const (
+	ProviderLocal  AIProvider = "local"
+	ProviderOpenAI AIProvider = "openai"
+)
+
 // Helper functions for mock mode
 func generateMockCommand(request string, env shell.Env) string {
 	request = strings.ToLower(request)
@@ -419,5 +426,86 @@ func checkRAGProgress() {
 				color.Green("🎉 RAG system is now ACTIVE! Enhanced commands available.")
 			}
 		}
+	}
+}
+
+// askForAIProvider asks the user whether to use OpenAI or local model
+func askForAIProvider() ai.ProviderType {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		color.Cyan("\nChoose AI mode:")
+		color.Cyan("  [1] OpenAI Cloud (uses your OpenAI API key, no local model download)")
+		color.Cyan("  [2] Local Model (download TinyLlama GGUF, runs fully offline)")
+		color.Cyan("Enter 1 or 2: ")
+
+		choiceRaw, _ := reader.ReadString('\n')
+		choice := strings.TrimSpace(choiceRaw)
+
+		switch choice {
+		case "1":
+			return ai.ProviderOpenAI
+		case "2":
+			return ai.ProviderLocal
+		default:
+			color.Yellow("Please type 1 or 2.")
+		}
+	}
+}
+
+// setupOpenAIProvider configures OpenAI API key (load existing or ask for new)
+func setupOpenAIProvider() error {
+	reader := bufio.NewReader(os.Stdin)
+
+	existingKey, err := ai.LoadOpenAIKeyFromDisk()
+	if err != nil {
+		color.Yellow("⚠️  Could not load stored OpenAI key: %v", err)
+	}
+
+	if strings.TrimSpace(existingKey) != "" {
+		color.Green("✅ Found a saved OpenAI API key at: %s", ai.GetOpenAIKeyPath())
+
+		for {
+			color.Cyan("Use the saved key or paste a new one?")
+			color.Cyan("  [1] Use saved key")
+			color.Cyan("  [2] Paste new key (overwrite)")
+			color.Cyan("Enter 1 or 2: ")
+
+			choiceRaw, _ := reader.ReadString('\n')
+			choice := strings.TrimSpace(choiceRaw)
+
+			if choice == "1" {
+				ai.ConfigureOpenAIKey(existingKey)
+				color.Green("✅ Using saved OpenAI API key")
+				return nil
+			}
+			if choice == "2" {
+				break
+			}
+			color.Yellow("Please type 1 or 2.")
+		}
+	} else {
+		color.Yellow("No OpenAI API key found yet.")
+	}
+
+	// Ask user to paste a new key
+	for {
+		color.Cyan("Paste your OpenAI API key (it will be stored securely on this machine):")
+		keyRaw, _ := reader.ReadString('\n')
+		key := strings.TrimSpace(keyRaw)
+
+		if key == "" {
+			color.Yellow("API key cannot be empty. Please try again.")
+			continue
+		}
+
+		if err := ai.SaveOpenAIKeyToDisk(key); err != nil {
+			color.Red("❌ Failed to save OpenAI API key: %v", err)
+			return err
+		}
+
+		ai.ConfigureOpenAIKey(key)
+		color.Green("✅ OpenAI API key saved to %s", ai.GetOpenAIKeyPath())
+		return nil
 	}
 }
