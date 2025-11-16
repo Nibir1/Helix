@@ -440,7 +440,6 @@ Indexing runs in the background so the CLI stays responsive.
 * Natural language → Git automation
 * Safe Git actions: commit, add, tag, checkout, create-branch
 * High-risk Git actions requiring typed confirmations:
-
   * push --force
   * reset --hard
   * clean -fdx
