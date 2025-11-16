@@ -32,7 +32,7 @@ func NewGitManager(env shell.Env, execConfig ExecuteConfig, sandbox *DirectorySa
 		env:        env,
 		execConfig: execConfig,
 		workingDir: wd,
-		sandbox:    sandbox, // Initialize sandbox
+		sandbox:    sandbox,
 	}
 }
 
@@ -42,6 +42,15 @@ type GitOperation struct {
 	Command      string
 	Confirmation string
 	Risks        []string
+}
+
+// allowedPlannerGitActions defines safe git actions for planner execution
+var allowedPlannerGitActions = map[string]bool{
+	"commit":        true,
+	"tag":           true,
+	"checkout":      true,
+	"create-branch": true,
+	"add":           true,
 }
 
 // HandleGitRequest processes natural language git requests
@@ -130,7 +139,6 @@ func (gm *GitManager) detectComplexGitOperation(request string) *GitOperation {
 				"Uses default commit message - edit if needed",
 			},
 		}
-
 	}
 
 	// Merge with squash only
@@ -385,6 +393,7 @@ func (gm *GitManager) executeCommitWithMessage(targetBranch string, message stri
 
 	// Use the relative path in the command so there is no absolute path for the sandbox to reject.
 	commitCmd := fmt.Sprintf("git commit -F %s", relPath)
+	color.Blue("🚀 Executing: %s", commitCmd)
 	return gm.sandbox.WrapCommand(commitCmd, gm.execConfig, gm.env)
 }
 
@@ -523,8 +532,20 @@ func (gm *GitManager) CommonGitOperations() map[string]string {
 // without asking AI again or generating raw shell commands.
 func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string) error {
 	action = strings.ToLower(strings.TrimSpace(action))
+
+	// 0) Allowlist of planner actions
+	if !allowedPlannerGitActions[action] {
+		return fmt.Errorf("unsupported git planner action: %s", action)
+	}
+
 	if args == nil {
 		args = map[string]string{}
+	}
+
+	// 1) Safety check BEFORE any execution
+	if err := isPlannerGitActionSafe(action, args); err != nil {
+		color.Red("❌ Git safety violation: %v", err)
+		return err
 	}
 
 	switch action {
@@ -537,9 +558,10 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		return gm.executeCommitWithMessage("<planner>", msg)
 
 	case "tag":
-		name := strings.TrimSpace(args["name"])
-		if name == "" {
-			return fmt.Errorf("git tag action missing 'name'")
+		rawName := strings.TrimSpace(args["name"])
+		name, err := sanitizeGitName(rawName)
+		if err != nil {
+			return err
 		}
 		color.Blue("🏷️  Git tag (planner): %s", name)
 		cmd := fmt.Sprintf("git tag %s", name)
@@ -555,44 +577,86 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
 	case "checkout":
-		branch := strings.TrimSpace(args["branch"])
-		if branch == "" {
-			return fmt.Errorf("git checkout action missing 'branch'")
+		rawBranch := strings.TrimSpace(args["branch"])
+		branch, err := sanitizeGitName(rawBranch)
+		if err != nil {
+			return err
 		}
 		color.Blue("🌿 Git checkout (planner): %s", branch)
 		cmd := fmt.Sprintf("git checkout %s", branch)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
 	case "create-branch":
-		branch := strings.TrimSpace(args["branch"])
-		if branch == "" {
-			return fmt.Errorf("create-branch action missing 'branch'")
+		rawBranch := strings.TrimSpace(args["branch"])
+		branch, err := sanitizeGitName(rawBranch)
+		if err != nil {
+			return err
 		}
 		color.Blue("🌿 Git create branch (planner): %s", branch)
 		cmd := fmt.Sprintf("git checkout -b %s", branch)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
 	default:
+		// Should never hit because of allowlist, but keep as a safeguard
 		return fmt.Errorf("unsupported git planner action: %s", action)
 	}
 }
 
 // hasStagedChanges returns true if there are staged changes.
 func (gm *GitManager) hasStagedChanges() (bool, error) {
-	cmd := exec.Command("git", "diff", "--cached", "--quiet")
+	cmd := exec.Command("git", "diff", "--cached", "--name-only")
 	cmd.Dir = gm.workingDir
-	err := cmd.Run()
-	if err == nil {
-		// exit code 0: no staged changes
-		return false, nil
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// isPlannerGitActionSafe validates planner→git actions.
+func isPlannerGitActionSafe(action string, args map[string]string) error {
+	action = strings.ToLower(strings.TrimSpace(action))
+
+	// 1. Block destructive actions outright
+	disallowedActions := []string{
+		"push", "push-force", "push --force", "push -f",
+		"reset", "reset-hard", "reset --hard",
+		"clean", "clean -fd",
+		"branch-delete", "branch -d", "branch -D",
+		"rebase", "rebase -i",
+		"checkout-file",
 	}
 
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		if exitErr.ExitCode() == 1 {
-			// exit code 1: there are staged changes
-			return true, nil
+	for _, bad := range disallowedActions {
+		if strings.Contains(action, bad) {
+			return fmt.Errorf("planner git action '%s' is unsafe", action)
 		}
 	}
 
-	return false, err
+	// 2. Validate arguments (no absolute paths, no shell metacharacters)
+	for k, v := range args {
+		_ = k // key isn't used specifically yet, but keep for future logic
+
+		// No absolute paths
+		if strings.HasPrefix(v, "/") {
+			return fmt.Errorf("unsafe git argument '%s': absolute paths not allowed", v)
+		}
+		// No shell meta characters in branch/tag names or other args
+		if strings.ContainsAny(v, ";|&><`$") {
+			return fmt.Errorf("unsafe characters in git argument '%s'", v)
+		}
+	}
+
+	return nil
+}
+
+// sanitizeGitName ensures git branch/tag names are safe
+func sanitizeGitName(name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("empty git name")
+	}
+	if strings.ContainsAny(name, " /\\:*?\"<>|;&$`") {
+		return "", fmt.Errorf("illegal characters in git name: %s", name)
+	}
+	return name, nil
 }
