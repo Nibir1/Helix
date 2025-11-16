@@ -57,60 +57,6 @@ func IsCommandSafe(command string) bool {
 	return true
 }
 
-// ValidateAndCleanCommand ensures the command is safe, well-formed, and properly quoted.
-func ValidateAndCleanCommand(command string) (string, error) {
-	// --- Initial cleanup ---
-	command = strings.TrimSpace(command)
-
-	color.Yellow("🔍 DEBUG ValidateAndCleanCommand input: '%s'", command)
-	utils.DebugStringBytes(command)
-
-	// Remove markdown/code markers
-	command = strings.ReplaceAll(command, "`", "")
-	command = strings.ReplaceAll(command, "```", "")
-	command = strings.ReplaceAll(command, "**", "")
-	command = strings.ReplaceAll(command, "*", "")
-
-	// Remove accidental wrapping quotes (common LLM error)
-	command = strings.Trim(command, `"'`)
-
-	// ---------------------------------------------------------
-	// 1) AUTO-FIX QUOTES BEFORE ANY VALIDATION
-	// ---------------------------------------------------------
-	fixed := utils.FixUnmatchedQuotes(command)
-
-	color.Yellow("🔍 DEBUG: After FixUnmatchedQuotes: '%s'", fixed)
-
-	// ---------------------------------------------------------
-	// 2) VALIDATE THE *FIXED* COMMAND, NOT the original
-	// ---------------------------------------------------------
-	if !utils.HasBalancedQuotes(fixed) {
-		color.Red("❌ Quotes still unbalanced even after auto-fix")
-		return "", fmt.Errorf("command has unmatched quotes: %s", fixed)
-	}
-
-	// Update command after passing validation
-	command = fixed
-
-	if command == "" {
-		return "", fmt.Errorf("empty command after cleaning")
-	}
-
-	// Prevent multi-line execution
-	if strings.Contains(command, "\n") {
-		lines := strings.Split(command, "\n")
-		command = strings.TrimSpace(lines[0])
-	}
-
-	// Security validation
-	if err := utils.ValidateCommand(command); err != nil {
-		return "", err
-	}
-
-	color.Green("🔍 DEBUG: Final validated command: '%s'", command)
-	return command, nil
-}
-
 // -------------------------------------------------------
 // ✨ NEW: Smart Exit Code Handling (grep, diff, find)
 // -------------------------------------------------------

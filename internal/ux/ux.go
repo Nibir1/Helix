@@ -172,56 +172,70 @@ func (ux *UX) ShowWelcomeBanner(version string) {
 
 // ShowHelp displays the help information
 func (ux *UX) ShowHelp() {
-	color.Cyan("📖 Helix Commands:")
+	color.Cyan("📖 Helix — Command Overview")
 	fmt.Println()
 
-	color.Yellow("🤖 AI Commands:")
-	fmt.Println("  /ask <question>     - Ask the AI a question")
-	fmt.Println("  /cmd <request>      - Generate and execute commands from natural language")
-	fmt.Println("  /explain <command>  - Explain what a command does")
+	// ============================================================
+	// NATURAL LANGUAGE MODE (DEFAULT)
+	// ============================================================
+	color.Green("🤖 Natural Language Mode (Default)")
+	fmt.Println("  Just type your request and Helix will:")
+	fmt.Println("   • Understand your intent")
+	fmt.Println("   • Plan steps")
+	fmt.Println("   • Call tools automatically (shell / git / file ops)")
+	fmt.Println("   • Execute actions when appropriate")
+	fmt.Println()
+	fmt.Println("  Examples:")
+	fmt.Println("   • \"why is the sky blue?\"")
+	fmt.Println("   • \"list all files in this folder\"")
+	fmt.Println("   • \"update the version in the readme and commit it\"")
+	fmt.Println("   • \"create a new branch, edit config, and push it\"")
 	fmt.Println()
 
-	color.Yellow("📦 Package Management:")
-	fmt.Println("  /install <package>  - Install a package")
-	fmt.Println("  /update <package>   - Update a package")
-	fmt.Println("  /remove <package>   - Remove a package")
+	// ============================================================
+	// LEGACY SHORTCUT COMMANDS
+	// (Optional – kept for power users)
+	// ============================================================
+	color.Yellow("⚡ Legacy Shortcuts (Optional)")
+	fmt.Println("  /ask <question>       - Force classic AI chat")
+	fmt.Println("  /cmd <request>        - Force command generation")
+	fmt.Println("  /explain <command>    - Explain what a command does")
+	fmt.Println("  /install <package>    - Install a package")
+	fmt.Println("  /update <package>     - Update a package")
+	fmt.Println("  /remove <package>     - Remove a package")
+	fmt.Println("  /git <operation>      - Git helper (legacy)")
 	fmt.Println()
 
-	color.Yellow("🧠 RAG System (Command Documentation):")
-	fmt.Println("  /rag-status         - Show RAG system status")
-	fmt.Println("  /rag-reindex        - Force reindex MAN pages")
-	fmt.Println("  /rag-reset          - Reset RAG system completely")
-	fmt.Println("  /test-basic-ai      - Test basic AI functionality")
+	// ============================================================
+	// SYSTEM / ADMIN COMMANDS
+	// (Teacher requirement: only these use slash)
+	// ============================================================
+	color.Cyan("⚙️  System Commands (Program Control)")
+	fmt.Println("  /help                 - Show this help screen")
+	fmt.Println("  /exit                 - Quit Helix")
+	fmt.Println("  /debug                - Show debug information")
+	fmt.Println("  /online               - Check internet status")
+	fmt.Println("  /sandbox <mode>       - Control directory restrictions")
+	fmt.Println("  /cd <dir>             - Change directory (sandbox-aware)")
 	fmt.Println()
 
-	color.Yellow("🔒 Security & Sandbox:")
-	fmt.Println("  /sandbox <mode>     - Set directory restrictions (off/current/strict)")
-	fmt.Println("  /cd <dir>           - Change directory (sandbox-aware)")
-	fmt.Println("  /dry-run            - Toggle dry-run mode")
+	color.Magenta("🧠 RAG System Controls")
+	fmt.Println("  /rag-status           - Show RAG initialization status")
+	fmt.Println("  /rag-reindex          - Force rebuild RAG MAN page index")
+	fmt.Println("  /rag-reset            - Reset RAG database completely")
 	fmt.Println()
 
-	color.Yellow("⚙️  System Commands:")
-	fmt.Println("  /git <operation>    - Git operations with AI assistance")
-	fmt.Println("  /debug              - Show debug information")
-	fmt.Println("  /test-ai            - Test /ask AI feature")
-	fmt.Println("  /online             - Check internet connectivity")
-	fmt.Println("  /help               - Show this help message")
-	fmt.Println("  /exit               - Exit Helix")
+	// ============================================================
+	// TIPS
+	// ============================================================
+	color.Green("💡 Tips:")
+	fmt.Println("  • NoSlash = full natural-language automation")
+	fmt.Println("  • SlashCommands = system control only (teacher requirement)")
+	fmt.Println("  • Helix auto-detects when to run shell, git, reasoning, etc.")
 	fmt.Println()
 
-	color.Green("💡 Examples:")
-	fmt.Println("  /ask 'how do I list files in a directory?'")
-	fmt.Println("  /cmd 'show me what's in the current folder'")
-	fmt.Println("  /rag-status         - Check command documentation status")
-	fmt.Println("  /sandbox current    - Enable directory restrictions")
-	fmt.Println("  /install git")
-	fmt.Println()
-
-	color.Magenta("🧠 RAG Features:")
-	fmt.Println("  • Command suggestions before AI processing")
-	fmt.Println("  • Enhanced prompts with MAN page context")
-	fmt.Println("  • Accurate command explanations")
-	fmt.Println("  • Automatic command documentation")
+	color.Magenta("🎉 Helix Agent Mode is now your default interface.")
+	fmt.Println("   Ask for anything — it will plan, reason, and execute.")
 }
 
 // ShowRAGStatus displays RAG system status information
