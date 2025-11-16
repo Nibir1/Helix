@@ -44,16 +44,7 @@ type GitOperation struct {
 	Risks        []string
 }
 
-// allowedPlannerGitActions defines safe git actions for planner execution
-var allowedPlannerGitActions = map[string]bool{
-	"commit":        true,
-	"tag":           true,
-	"checkout":      true,
-	"create-branch": true,
-	"add":           true,
-}
-
-// HandleGitRequest processes natural language git requests
+// HandleGitRequest processes natural language git requests from /git
 func (gm *GitManager) HandleGitRequest(request string) error {
 	request = strings.ToLower(strings.TrimSpace(request))
 
@@ -67,12 +58,12 @@ func (gm *GitManager) HandleGitRequest(request string) error {
 		return fmt.Errorf("not a git repository")
 	}
 
-	// Check for common complex git operations
+	// Check for common complex git operations with hand-crafted flows
 	if operation := gm.detectComplexGitOperation(request); operation != nil {
 		return gm.executeGitOperation(operation)
 	}
 
-	// Fall back to AI for other git requests
+	// Fall back to AI for other git requests (shell-style git commands)
 	return gm.handleAIGitRequest(request)
 }
 
@@ -124,19 +115,20 @@ func (gm *GitManager) getAvailableBranches() ([]string, error) {
 	return branches, nil
 }
 
-// detectComplexGitOperation identifies common complex git workflows
+// detectComplexGitOperation identifies common complex git workflows for /git
 func (gm *GitManager) detectComplexGitOperation(request string) *GitOperation {
-	// Your specific use case: merge with squash and accept all incoming
+	// Merge with squash and accept all incoming
 	if strings.Contains(request, "merge") && strings.Contains(request, "squash") &&
 		(strings.Contains(request, "accept all") || strings.Contains(request, "incoming")) {
 		return &GitOperation{
-			Description:  "Merge branch with squash and accept all incoming changes",
-			Command:      "git merge --squash ${BRANCH}; git checkout --theirs .; git add .; ${COMMIT_CMD}",
-			Confirmation: "This will:\n• Squash all commits from the branch into one\n• Accept ALL incoming changes (overwrite local conflicts)\n• Create a new commit with default message",
+			Description: "Merge branch with squash and accept all incoming changes",
+			Command:     "git merge --squash ${BRANCH}; git checkout --theirs .; git add .; ${COMMIT_CMD}",
+			Confirmation: "This will:\n• Squash all commits from the branch into one\n" +
+				"• Accept ALL incoming changes (overwrite local conflicts)\n" +
+				"• Create a new commit with a single message",
 			Risks: []string{
 				"Permanently overwrites local changes in case of conflicts",
 				"Loses individual commit history from the merged branch",
-				"Uses default commit message - edit if needed",
 			},
 		}
 	}
@@ -380,8 +372,6 @@ func (gm *GitManager) executeCommitWithMessage(targetBranch string, message stri
 		return nil
 	}
 
-	// Create a commit message file INSIDE the repo, using a RELATIVE path for the command.
-	// This keeps the sandbox happy (no absolute path traversal in the command string).
 	relPath := ".helix-commit-msg.txt"
 	absPath := filepath.Join(gm.workingDir, relPath)
 
@@ -393,7 +383,6 @@ func (gm *GitManager) executeCommitWithMessage(targetBranch string, message stri
 
 	// Use the relative path in the command so there is no absolute path for the sandbox to reject.
 	commitCmd := fmt.Sprintf("git commit -F %s", relPath)
-	color.Blue("🚀 Executing: %s", commitCmd)
 	return gm.sandbox.WrapCommand(commitCmd, gm.execConfig, gm.env)
 }
 
@@ -445,12 +434,13 @@ func (gm *GitManager) getTargetBranch() (string, error) {
 	return branch, nil
 }
 
-// isDestructiveOperation checks if an operation is potentially destructive
+// isDestructiveOperation checks if an operation is potentially destructive (for /git flows)
 func (gm *GitManager) isDestructiveOperation(operation *GitOperation) bool {
 	dangerousPatterns := []string{
 		"checkout --theirs",
 		"reset --hard",
 		"clean -fd",
+		"clean -fdx",
 		"push --force",
 		"branch -D",
 		"reset --soft",
@@ -464,7 +454,7 @@ func (gm *GitManager) isDestructiveOperation(operation *GitOperation) bool {
 	return false
 }
 
-// handleAIGitRequest uses AI for other git operations
+// handleAIGitRequest uses AI for other git operations in /git mode
 func (gm *GitManager) handleAIGitRequest(request string) error {
 	// Get current branch info for context
 	currentBranch, _ := gm.getCurrentBranch()
@@ -530,25 +520,25 @@ func (gm *GitManager) CommonGitOperations() map[string]string {
 
 // ExecutePlannedAction executes a git action coming from the planner
 // without asking AI again or generating raw shell commands.
+//
+// This is the critical path for Agent Mode. It supports both safe
+// and dangerous actions. Dangerous actions require typed confirmation.
 func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string) error {
 	action = strings.ToLower(strings.TrimSpace(action))
-
-	// 0) Allowlist of planner actions
-	if !allowedPlannerGitActions[action] {
-		return fmt.Errorf("unsupported git planner action: %s", action)
-	}
-
 	if args == nil {
 		args = map[string]string{}
 	}
 
-	// 1) Safety check BEFORE any execution
+	// 1) Structural safety check (no shell injection via args)
 	if err := isPlannerGitActionSafe(action, args); err != nil {
 		color.Red("❌ Git safety violation: %v", err)
 		return err
 	}
 
 	switch action {
+
+	// -------- SAFE ACTIONS --------
+
 	case "commit":
 		msg := strings.TrimSpace(args["message"])
 		if msg == "" {
@@ -558,10 +548,10 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		return gm.executeCommitWithMessage("<planner>", msg)
 
 	case "tag":
-		rawName := strings.TrimSpace(args["name"])
-		name, err := sanitizeGitName(rawName)
+		nameRaw := strings.TrimSpace(args["name"])
+		name, err := sanitizeGitName(nameRaw)
 		if err != nil {
-			return err
+			return fmt.Errorf("invalid tag name %q: %w", nameRaw, err)
 		}
 		color.Blue("🏷️  Git tag (planner): %s", name)
 		cmd := fmt.Sprintf("git tag %s", name)
@@ -577,81 +567,228 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
 	case "checkout":
-		rawBranch := strings.TrimSpace(args["branch"])
-		branch, err := sanitizeGitName(rawBranch)
+		branchRaw := strings.TrimSpace(args["branch"])
+		if branchRaw == "" {
+			return fmt.Errorf("git checkout action missing 'branch'")
+		}
+		branch, err := sanitizeGitName(branchRaw)
 		if err != nil {
-			return err
+			return fmt.Errorf("invalid branch name %q: %w", branchRaw, err)
 		}
 		color.Blue("🌿 Git checkout (planner): %s", branch)
 		cmd := fmt.Sprintf("git checkout %s", branch)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
 	case "create-branch":
-		rawBranch := strings.TrimSpace(args["branch"])
-		branch, err := sanitizeGitName(rawBranch)
+		branchRaw := strings.TrimSpace(args["branch"])
+		if branchRaw == "" {
+			return fmt.Errorf("create-branch action missing 'branch'")
+		}
+		branch, err := sanitizeGitName(branchRaw)
 		if err != nil {
-			return err
+			return fmt.Errorf("invalid branch name %q: %w", branchRaw, err)
 		}
 		color.Blue("🌿 Git create branch (planner): %s", branch)
 		cmd := fmt.Sprintf("git checkout -b %s", branch)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
+	// -------- DANGEROUS ACTIONS (Mode C) --------
+
+	case "push":
+		return gm.executePlannerPush(args)
+
+	case "reset-hard":
+		return gm.executePlannerResetHard(args)
+
+	case "clean":
+		return gm.executePlannerClean(args)
+
+	case "delete-branch":
+		return gm.executePlannerDeleteBranch(args)
+
 	default:
-		// Should never hit because of allowlist, but keep as a safeguard
 		return fmt.Errorf("unsupported git planner action: %s", action)
 	}
 }
 
-// hasStagedChanges returns true if there are staged changes.
-func (gm *GitManager) hasStagedChanges() (bool, error) {
-	cmd := exec.Command("git", "diff", "--cached", "--name-only")
-	cmd.Dir = gm.workingDir
-	out, err := cmd.Output()
-	if err != nil {
-		return false, err
+// executePlannerPush handles both normal push and force push.
+func (gm *GitManager) executePlannerPush(args map[string]string) error {
+	remote := strings.TrimSpace(args["remote"])
+	if remote == "" {
+		remote = "origin"
 	}
-	return strings.TrimSpace(string(out)) != "", nil
+
+	branch := strings.TrimSpace(args["branch"])
+	if branch == "" {
+		// fallback to current branch
+		if cur, err := gm.getCurrentBranch(); err == nil && cur != "" {
+			branch = cur
+		}
+	}
+	if branch == "" {
+		return fmt.Errorf("git push action missing 'branch' and could not detect current branch")
+	}
+
+	force := strings.EqualFold(args["force"], "true") ||
+		strings.EqualFold(args["force"], "yes") ||
+		args["force"] == "--force" ||
+		args["force"] == "-f"
+
+	// Normal push
+	if !force {
+		color.Blue("📤 Git push (planner): %s %s", remote, branch)
+		if !AskForConfirmation(fmt.Sprintf("Push branch %q to remote %q?", branch, remote)) {
+			color.Yellow("❌ Push cancelled")
+			return nil
+		}
+		cmd := fmt.Sprintf("git push %s %s", remote, branch)
+		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+	}
+
+	// Force push — HIGH DANGER
+	color.Red("🚨 FORCE PUSH REQUESTED")
+	color.Red("Remote: %s", remote)
+	color.Red("Branch: %s", branch)
+	color.Yellow("This will overwrite history on the remote branch and can cause data loss for others.")
+
+	if !confirmDangerousAction("force push", "YES, FORCE PUSH") {
+		return fmt.Errorf("force push cancelled by user")
+	}
+
+	cmd := fmt.Sprintf("git push %s %s --force", remote, branch)
+	return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 }
 
-// isPlannerGitActionSafe validates planner→git actions.
+// executePlannerResetHard handles "reset-hard" action.
+func (gm *GitManager) executePlannerResetHard(args map[string]string) error {
+	target := strings.TrimSpace(args["target"])
+	if target == "" {
+		target = "HEAD"
+	}
+
+	color.Red("🚨 HARD RESET REQUESTED")
+	color.Red("Target: %s", target)
+	color.Yellow("This will discard local changes and reset the branch to the specified target.")
+
+	if !confirmDangerousAction("reset --hard", "YES, RESET HARD") {
+		return fmt.Errorf("reset --hard cancelled by user")
+	}
+
+	cmd := fmt.Sprintf("git reset --hard %s", target)
+	return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+}
+
+// executePlannerClean handles "clean" action (e.g. -fd or -fdx).
+func (gm *GitManager) executePlannerClean(args map[string]string) error {
+	mode := strings.ToLower(strings.TrimSpace(args["mode"]))
+	flags := "-fd"
+	description := "remove untracked files and directories"
+
+	if mode == "all" || mode == "force-all" || strings.EqualFold(args["x"], "true") {
+		flags = "-fdx"
+		description = "remove untracked files, directories, and ignored files"
+	}
+
+	color.Red("🚨 GIT CLEAN REQUESTED")
+	color.Red("Mode: git clean %s", flags)
+	color.Yellow("This will %s. Deleted files cannot be recovered from git.", description)
+
+	if !confirmDangerousAction("git clean", "YES, CLEAN WORKTREE") {
+		return fmt.Errorf("git clean cancelled by user")
+	}
+
+	cmd := fmt.Sprintf("git clean %s", flags)
+	return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+}
+
+// executePlannerDeleteBranch handles "delete-branch" action.
+func (gm *GitManager) executePlannerDeleteBranch(args map[string]string) error {
+	branchRaw := strings.TrimSpace(args["branch"])
+	if branchRaw == "" {
+		return fmt.Errorf("delete-branch action missing 'branch'")
+	}
+	branch, err := sanitizeGitName(branchRaw)
+	if err != nil {
+		return fmt.Errorf("invalid branch name %q: %w", branchRaw, err)
+	}
+
+	// Do not allow deleting current branch
+	if cur, err := gm.getCurrentBranch(); err == nil && cur != "" && cur == branch {
+		return fmt.Errorf("refusing to delete the currently checked-out branch %q", branch)
+	}
+
+	// Optional: protect super-common mains
+	if branch == "main" || branch == "master" {
+		color.Red("🚨 Attempt to delete primary branch %q", branch)
+		if !confirmDangerousAction("delete main branch", "YES, DELETE MAIN") {
+			return fmt.Errorf("deletion of main branch cancelled")
+		}
+	} else {
+		color.Red("🚨 GIT BRANCH DELETE REQUESTED")
+		color.Red("Branch: %s", branch)
+		if !confirmDangerousAction("delete branch", "YES, DELETE BRANCH") {
+			return fmt.Errorf("git branch delete cancelled by user")
+		}
+	}
+
+	cmd := fmt.Sprintf("git branch -D %s", branch)
+	return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+}
+
+// hasStagedChanges returns true if there are staged changes.
+func (gm *GitManager) hasStagedChanges() (bool, error) {
+	cmd := exec.Command("git", "diff", "--cached", "--quiet")
+	cmd.Dir = gm.workingDir
+	err := cmd.Run()
+	if err == nil {
+		// exit code 0: no staged changes
+		return false, nil
+	}
+
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr.ExitCode() == 1 {
+			// exit code 1: there are staged changes
+			return true, nil
+		}
+	}
+
+	return false, err
+}
+
+// isPlannerGitActionSafe validates planner→git actions structurally.
+// It does NOT block actions by type (Mode C), but prevents obvious injection.
 func isPlannerGitActionSafe(action string, args map[string]string) error {
 	action = strings.ToLower(strings.TrimSpace(action))
 
-	// 1. Block destructive actions outright
-	disallowedActions := []string{
-		"push", "push-force", "push --force", "push -f",
-		"reset", "reset-hard", "reset --hard",
-		"clean", "clean -fd",
-		"branch-delete", "branch -d", "branch -D",
-		"rebase", "rebase -i",
-		"checkout-file",
+	if action == "" {
+		return fmt.Errorf("empty git action")
 	}
 
-	for _, bad := range disallowedActions {
-		if strings.Contains(action, bad) {
-			return fmt.Errorf("planner git action '%s' is unsafe", action)
-		}
-	}
-
-	// 2. Validate arguments (no absolute paths, no shell metacharacters)
 	for k, v := range args {
-		_ = k // key isn't used specifically yet, but keep for future logic
-
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
 		// No absolute paths
 		if strings.HasPrefix(v, "/") {
-			return fmt.Errorf("unsafe git argument '%s': absolute paths not allowed", v)
+			return fmt.Errorf("unsafe git argument for %s: %q is an absolute path", k, v)
 		}
-		// No shell meta characters in branch/tag names or other args
+		// No shell meta characters in names
 		if strings.ContainsAny(v, ";|&><`$") {
-			return fmt.Errorf("unsafe characters in git argument '%s'", v)
+			return fmt.Errorf("unsafe characters in git argument %s=%q", k, v)
+		}
+		// Very basic path traversal guard
+		if strings.Contains(v, "..") {
+			return fmt.Errorf("unsafe git argument %s=%q: contains '..'", k, v)
 		}
 	}
 
 	return nil
 }
 
-// sanitizeGitName ensures git branch/tag names are safe
+// sanitizeGitName ensures git branch/tag names are safe identifiers.
 func sanitizeGitName(name string) (string, error) {
+	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", fmt.Errorf("empty git name")
 	}
@@ -659,4 +796,22 @@ func sanitizeGitName(name string) (string, error) {
 		return "", fmt.Errorf("illegal characters in git name: %s", name)
 	}
 	return name, nil
+}
+
+// confirmDangerousAction asks the user to type an exact phrase to proceed.
+func confirmDangerousAction(label, requiredPhrase string) bool {
+	color.Red("❗ This is a HIGH-RISK git operation: %s", label)
+	color.Yellow("Type %q to confirm:", requiredPhrase)
+
+	var input string
+	fmt.Scanln(&input)
+	input = strings.TrimSpace(input)
+
+	if input != requiredPhrase {
+		color.Yellow("❌ Dangerous operation cancelled (phrase did not match)")
+		return false
+	}
+
+	color.Green("✅ Dangerous operation confirmed")
+	return true
 }
