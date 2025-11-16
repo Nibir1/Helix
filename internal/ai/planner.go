@@ -56,6 +56,128 @@ var (
 	jsonObjectRegex = regexp.MustCompile(`(?s)\{.*\}`)
 )
 
+### ABSOLUTE OUTPUT RULES (CRITICAL — DO NOT BREAK)
+- Output ONLY a SINGLE valid JSON object.
+- NO markdown fences. (NO +""+ or +"json"+)
+- NO commentary, no explanations, no surrounding text.
+- NO backticks anywhere.
+- The FIRST character MUST be '{'.
+- The LAST character MUST be '}'.
+- JSON MUST be 100%% syntactically valid.
+- NEVER truncate JSON.
+- NEVER output partial fields, partial strings, or unclosed braces/brackets.
+
+If unsure, output the smallest correct JSON plan.
+
+### STRING SAFETY RULES (NEW — REQUIRED)
+To ensure valid JSON, YOU MUST follow these rules for ALL strings:
+
+1. **NO SINGLE QUOTES (') ANYWHERE inside JSON strings.**
+   - This prevents model truncation and escaping failures.
+   - ALL strings MUST use ONLY double quotes.
+
+2. **NO nested quoting inside shell commands.**
+   - Shell commands MUST be simple, flat strings.
+   - DO NOT use: sed -i '' 's/x/y/'
+   - Instead use safe alternatives like:
+       perl -pi -e "s/OLD/NEW/g" FILE
+
+3. **NO multiline strings. ALL strings must be single-line.**
+
+4. **NO trailing commas.**
+
+5. **NO escaping inside arguments. Keep everything simple.**
+
+6. **KEEP JSON COMPACT - avoid unnecessary whitespace to prevent truncation.**
+
+### REQUIRED JSON SCHEMA
+{
+  "intent": "chat" | "shell" | "git" | "package" | "multi_step",
+  "steps": [
+    {
+      "tool": "response" | "shell" | "git" | "package",
+      "message": "...",     // for response
+      "command": "...",     // for shell
+      "action": "...",      // for git/package
+      "args": { "key": "value" }
+    }
+  ]
+}
+
+"steps" MUST be a non-empty array.
+
+### RESPONSE TOOL RULES
+- Only "message".
+- No "command", "action", or "args".
+
+### SHELL TOOL RULES (UPDATED — NO NESTED QUOTES)
+- ONLY "command".
+- MUST NOT output:
+    apt, apt-get, yum, dnf, pacman, zypper,
+    brew, pip, pip3, npm, yarn, pnpm, gem, cargo
+- NO destructive commands.
+- NO single quotes.
+- NO nested quotes.
+- Commands MUST be simple and flat.
+- Prefer:
+    perl -pi -e "s/OLD/NEW/g" FILE
+  instead of sed with nested quoting.
+
+### PACKAGE TOOL RULES
+- tool = "package"
+- action = install | update | remove
+- args.name MUST be present
+- NEVER output shell install commands.
+- NEVER include "command".
+
+### GIT TOOL RULES (SAFE + DANGEROUS OPTION C)
+SAFE:
+- commit → args.message
+- tag → args.name (REQUIRED: must be full string like "v1.1.0")
+- add → args.paths
+- checkout → args.branch
+- create-branch → args.branch
+
+DANGEROUS (allowed, agent requires confirmation):
+- push → args.remote, args.branch, args.force
+- reset-hard → args.target
+- clean → args.mode, args.x
+- delete-branch → args.branch
+
+FORBIDDEN:
+- pull, merge, rebase, cherry-pick, fetch, clone, init, remote add, etc.
+
+### MULTI-STEP RULES
+- intent MUST be "multi_step" if 2+ steps exist.
+- Steps may mix ANY tools.
+- JSON MUST NOT be truncated.
+- ALL steps MUST be complete and valid.
+- KEEP steps minimal to avoid truncation.
+
+### TRUNCATION PREVENTION RULES (NEW - CRITICAL)
+- KEEP JSON COMPACT - minimize whitespace
+- If you have many steps, consider combining them
+- ALWAYS ensure complete JSON structure
+- CHECK that all braces and brackets are closed
+- For the current request, here's the expected complete structure:
+
+Example for version update:
+{"intent":"multi_step","steps":[{"tool":"shell","command":"perl -pi -e \"s/1.0.0/1.1.0/g\" README.md"},{"tool":"git","action":"add","args":{"paths":["README.md"]}},{"tool":"git","action":"commit","args":{"message":"Update version in README to 1.1.0"}},{"tool":"git","action":"tag","args":{"name":"v1.1.0"}}]}
+
+### FINAL HARD REQUIREMENT
+Return ONLY the COMPLETE JSON object.
+NO text before.
+NO text after.
+NO markdown.
+NO backticks.
+NO truncation.
+
+### CURRENT REQUEST
+User Input: %s
+
+Environment: %s
+
+NOW OUTPUT THE COMPLETE JSON:
 //
 // ──────────────────────────────────────────────────────────────
 // 🧠 PLANNER PROMPT (UPDATED FOR OPTION C)
