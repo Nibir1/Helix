@@ -201,7 +201,7 @@ func (gm *GitManager) detectComplexGitOperation(request string) *GitOperation {
 	return nil
 }
 
-// executeGitOperation safely executes a git operation with confirmation
+// executeGitOperation safely executes a git operation with confirmation (for /git)
 func (gm *GitManager) executeGitOperation(operation *GitOperation) error {
 	color.Cyan("\n📋 Operation: %s", operation.Description)
 	color.Yellow("🚀 Command: %s", operation.Command)
@@ -260,7 +260,6 @@ func (gm *GitManager) executeGitOperation(operation *GitOperation) error {
 
 // executeMultiCommandOperation handles complex git operations step by step
 func (gm *GitManager) executeMultiCommandOperation(operation *GitOperation) error {
-	// Parse the multi-command operation
 	commands := gm.parseMultiCommands(operation.Command)
 
 	if len(commands) == 0 {
@@ -592,7 +591,7 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		cmd := fmt.Sprintf("git checkout -b %s", branch)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
-	// -------- DANGEROUS ACTIONS (Mode C) --------
+	// -------- DANGEROUS ACTIONS (Option C) --------
 
 	case "push":
 		return gm.executePlannerPush(args)
@@ -756,7 +755,7 @@ func (gm *GitManager) hasStagedChanges() (bool, error) {
 }
 
 // isPlannerGitActionSafe validates planner→git actions structurally.
-// It does NOT block actions by type (Mode C), but prevents obvious injection.
+// It does NOT block actions by type (Option C); it only prevents obvious injection.
 func isPlannerGitActionSafe(action string, args map[string]string) error {
 	action = strings.ToLower(strings.TrimSpace(action))
 

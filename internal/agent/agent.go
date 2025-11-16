@@ -13,9 +13,7 @@ import (
 	"github.com/fatih/color"
 )
 
-// Agent is the core "Agent Mode" orchestrator.
-// It calls the planner LLM, runs the safety layer, then executes
-// each step with the appropriate tools.
+// Agent is the core Agent Mode orchestrator.
 type Agent struct {
 	env          shell.Env
 	sandbox      *commands.DirectorySandbox
@@ -28,8 +26,8 @@ type Agent struct {
 // NewAgent creates a new Agent instance.
 func NewAgent(
 	env shell.Env,
-	_ *ai.PromptBuilder, // kept for backwards compatibility, not used directly
-	_ interface{}, // ragSystem placeholder to match your existing signature
+	_ *ai.PromptBuilder,
+	_ interface{},
 	sandbox *commands.DirectorySandbox,
 	execConfig commands.ExecuteConfig,
 	typingEffect bool,
@@ -53,7 +51,6 @@ func (a *Agent) HandleInput(userInput string) {
 		return
 	}
 
-	// 1) Build planner prompt with environment context
 	envDesc := fmt.Sprintf(
 		"OS: %s, Shell: %s, CWD: %s",
 		a.env.OSName,
@@ -63,11 +60,10 @@ func (a *Agent) HandleInput(userInput string) {
 
 	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc)
 
-	// 2) Call planner model
+	// 1) Call planner model
 	rawPlanOutput, err := ai.RunModel(plannerPrompt)
 	if err != nil {
 		color.Red("❌ Planner model error: %v", err)
-		// Fallback: simple chat
 		resp, chatErr := ai.RunModel(userInput)
 		if chatErr != nil {
 			color.Red("❌ Chat fallback failed: %v", chatErr)
@@ -79,25 +75,26 @@ func (a *Agent) HandleInput(userInput string) {
 
 	rawPlanOutput = strings.TrimSpace(rawPlanOutput)
 
-	// 3) Parse and validate planner output
+	// 2) Parse / validate plan
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
 	if err != nil {
-		color.Yellow("⚠️  Planner parse error: %v", err)
-		// Fallback: treat as plain chat
+		color.Yellow("⚠️ Planner parse error: %v", err)
+
 		resp, chatErr := ai.RunModel(userInput)
 		if chatErr != nil {
 			color.Red("❌ Chat fallback failed: %v", chatErr)
 			return
 		}
+
 		fmt.Println(strings.TrimSpace(resp))
 		return
 	}
 
-	// 4) Run safety layer to sanitize and augment plan
+	// 3) Safety layer enhancement
 	safePlan, err := a.prepareSafePlan(userInput, plan)
 	if err != nil {
-		color.Yellow("⚠️  Safety layer error: %v", err)
-		color.Yellow("⚠️  Proceeding with original planner plan.")
+		color.Yellow("⚠️ Safety layer error: %v", err)
+		color.Yellow("⚠️ Proceeding with original plan anyway.")
 	} else {
 		plan = safePlan
 	}
@@ -105,11 +102,12 @@ func (a *Agent) HandleInput(userInput string) {
 	color.Cyan("🤖 Agent Intent: %s", plan.Intent)
 	color.Cyan("🔧 Steps: %d", len(plan.Steps))
 
-	// 5) Execute each step
+	// 4) Execute each step
 	for i, step := range plan.Steps {
 		color.Cyan("\n--- Step %d ---", i+1)
 
 		switch step.Tool {
+
 		case "response":
 			a.handleResponseStep(step)
 
@@ -132,21 +130,19 @@ func (a *Agent) HandleInput(userInput string) {
 			}
 
 		default:
-			color.Yellow("⚠️  Unknown tool in step: %s", step.Tool)
+			color.Yellow("⚠️ Unknown tool: %s", step.Tool)
 		}
 	}
 
 	color.Green("\n🎉 Done.")
 }
 
-// --------------------------------------------------------
-// Safety layer
-// --------------------------------------------------------
+//
+// ──────────────────────────────────────────────────────────────
+// 🧼 SAFETY LAYER
+// ──────────────────────────────────────────────────────────────
+//
 
-// prepareSafePlan returns a sanitized / augmented copy of the plan.
-// - Replaces version placeholders in shell/tag using the version found in the user input
-// - Detects file-mutating shell steps and records target files
-// - Inserts a git add step before git commit when needed
 func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("nil plan")
@@ -155,9 +151,7 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 	// Deep copy
 	safe := *plan
 	safe.Steps = make([]ai.PlanStep, len(plan.Steps))
-	for i, s := range plan.Steps {
-		safe.Steps[i] = s
-	}
+	copy(safe.Steps, plan.Steps)
 
 	requestedVersion := extractSemanticVersion(userInput)
 
@@ -165,34 +159,31 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 	hasGitCommit := false
 	hasGitAdd := false
 
+	// Scan + modify commands
 	for i, s := range safe.Steps {
-		switch strings.ToLower(s.Tool) {
+		switch s.Tool {
+
 		case "shell":
 			cmd := strings.TrimSpace(s.Command)
 
-			// Replace obvious placeholders with the user-requested version
+			// Replace version placeholders
 			if requestedVersion != "" {
 				for _, ph := range []string{"NEW_VERSION", "new_version", "VERSION_HERE"} {
-					if strings.Contains(cmd, ph) {
-						cmd = strings.ReplaceAll(cmd, ph, requestedVersion)
-					}
+					cmd = strings.ReplaceAll(cmd, ph, requestedVersion)
 				}
 			}
 
 			s.Command = cmd
 			safe.Steps[i] = s
 
-			// Detect file-mutating shell commands and record common targets
 			if isFileMutatingShell(cmd) {
 				if strings.Contains(cmd, "README.md") {
-					mutatedPaths = append(mutatedPaths, "README.md")
-				} else if strings.Contains(cmd, "README") {
 					mutatedPaths = append(mutatedPaths, "README.md")
 				}
 			}
 
 		case "git":
-			action := strings.ToLower(strings.TrimSpace(s.Action))
+			action := strings.ToLower(s.Action)
 			if action == "commit" {
 				hasGitCommit = true
 			}
@@ -202,16 +193,16 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 
 			if action == "tag" && requestedVersion != "" {
 				name := strings.TrimSpace(s.Args["name"])
-				if name == "" || name == "NEW_VERSION" || name == "new_version" || name == "VERSION_HERE" {
-					if s.Args == nil {
-						s.Args = map[string]string{}
-					}
+				if name == "" ||
+					name == "NEW_VERSION" ||
+					name == "new_version" ||
+					name == "VERSION_HERE" {
 
-					// Prefer vX.Y.Z if user mentioned it that way, otherwise just X.Y.Z
 					tag := requestedVersion
 					if strings.Contains(userInput, "v"+requestedVersion) {
 						tag = "v" + requestedVersion
 					}
+
 					s.Args["name"] = tag
 					safe.Steps[i] = s
 				}
@@ -221,88 +212,69 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 
 	mutatedPaths = uniqueStrings(mutatedPaths)
 
-	// Insert git add if:
-	// - we have a commit
-	// - we have mutated files
-	// - we don't already have a git add action
+	// Auto-insert git add
 	if hasGitCommit && len(mutatedPaths) > 0 && !hasGitAdd {
 		addStep := ai.PlanStep{
 			Tool:   "git",
 			Action: "add",
-			Args: map[string]string{
-				"paths": strings.Join(mutatedPaths, " "),
-			},
+			Args:   map[string]string{"paths": strings.Join(mutatedPaths, " ")},
 		}
 
-		// Insert before the first commit step
-		insertIdx := len(safe.Steps)
-		for i, s := range safe.Steps {
-			if strings.ToLower(s.Tool) == "git" &&
-				strings.ToLower(strings.TrimSpace(s.Action)) == "commit" {
-				insertIdx = i
+		insertIndex := len(safe.Steps)
+		for i, st := range safe.Steps {
+			if st.Tool == "git" && st.Action == "commit" {
+				insertIndex = i
 				break
 			}
 		}
 
-		steps := append(safe.Steps, ai.PlanStep{})
-		copy(steps[insertIdx+1:], steps[insertIdx:])
-		steps[insertIdx] = addStep
-		safe.Steps = steps
+		safe.Steps = append(safe.Steps, ai.PlanStep{})
+		copy(safe.Steps[insertIndex+1:], safe.Steps[insertIndex:])
+		safe.Steps[insertIndex] = addStep
 
-		color.Green("✅ Safety layer: inserted git add for paths: %s", strings.Join(mutatedPaths, " "))
+		color.Green("✅ Safety layer inserted git add for: %s", strings.Join(mutatedPaths, " "))
 	}
 
 	return &safe, nil
 }
 
-// extractSemanticVersion finds the first semantic version like 1.2.3 in the text.
 func extractSemanticVersion(text string) string {
 	re := regexp.MustCompile(`\b\d+\.\d+\.\d+\b`)
 	return re.FindString(text)
 }
 
-// isFileMutatingShell does a simple heuristic check for commands that likely modify files.
 func isFileMutatingShell(cmd string) bool {
-	cmd = strings.ToLower(cmd)
-	if strings.Contains(cmd, "sed ") || strings.Contains(cmd, "sed\t") {
-		return true
-	}
-	if strings.Contains(cmd, " -i ") || strings.Contains(cmd, " -i''") || strings.Contains(cmd, " -i ''") {
-		return true
-	}
-	if strings.Contains(cmd, ">>") || strings.Contains(cmd, " > ") {
-		return true
-	}
-	if strings.Contains(cmd, " tee ") {
-		return true
-	}
-	return false
+	lc := strings.ToLower(cmd)
+	return strings.Contains(lc, "sed ") ||
+		strings.Contains(lc, " -i ") ||
+		strings.Contains(lc, ">>") ||
+		strings.Contains(lc, " > ") ||
+		strings.Contains(lc, " tee ")
 }
 
 func uniqueStrings(in []string) []string {
-	seen := make(map[string]bool)
+	seen := map[string]bool{}
 	var out []string
-	for _, s := range in {
-		if s == "" || seen[s] {
-			continue
+	for _, v := range in {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
 		}
-		seen[s] = true
-		out = append(out, s)
 	}
 	return out
 }
 
-// --------------------------------------------------------
-// Tool handlers
-// --------------------------------------------------------
+//
+// ──────────────────────────────────────────────────────────────
+// 🔧 TOOL HANDLERS
+// ──────────────────────────────────────────────────────────────
+//
 
-// handleResponseStep outputs the response message to the user.
 func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	msg := strings.TrimSpace(step.Message)
 	if msg == "" {
 		return
 	}
-
 	if a.typingEffect {
 		a.ux.Typewriter(msg)
 	} else {
@@ -310,95 +282,83 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	}
 }
 
-// handleShellStep validates and executes a shell command step.
-// Phase 3.5: adds an interactive risk gate for medium-risk commands.
+// SHELL — includes risk scoring (Phase 3.5)
 func (a *Agent) handleShellStep(step ai.PlanStep) error {
 	cmd := strings.TrimSpace(step.Command)
 	if cmd == "" {
-		return fmt.Errorf("empty shell command in plan")
+		return fmt.Errorf("empty shell command")
 	}
 
 	color.Cyan("🖥️ Shell: %s", cmd)
 
-	// 1) Validate & normalize (hard safety gate)
-	valid, err := commands.ValidateAndCleanCommand(cmd)
+	// Hard safety validation
+	validCmd, err := commands.ValidateAndCleanCommand(cmd)
 	if err != nil {
 		return fmt.Errorf("invalid shell command: %w", err)
 	}
 
-	// 2) Risk analysis (soft, interactive safety layer)
-	risk, reasons := commands.AnalyzeShellRisk(valid)
-
+	// Soft risk layer
+	risk, reasons := commands.AnalyzeShellRisk(validCmd)
 	switch risk {
+
 	case commands.ShellRiskLow:
-		// No extra UX, just run.
+		// execute directly
 
 	case commands.ShellRiskMedium:
-		color.Yellow("⚠️  This command may be risky:")
-
+		color.Yellow("⚠️ Medium risk shell command:")
 		for _, r := range reasons {
 			color.Yellow("   • %s", r)
 		}
-
-		if !commands.AskForConfirmation("Execute this command anyway?") {
-			color.Yellow("❌ Shell command skipped by user.")
+		if !commands.AskForConfirmation("Execute anyway?") {
+			color.Yellow("❌ Command skipped")
 			return nil
 		}
 
 	case commands.ShellRiskHigh:
-		// At the moment, HIGH risk commands should already be blocked
-		// by ValidateAndCleanCommand, but we keep this branch for future use.
-		color.Red("🚨 This command has been classified as HIGH RISK and will not be executed.")
+		color.Red("🚨 HIGH RISK — blocked")
 		for _, r := range reasons {
 			color.Red("   • %s", r)
 		}
-		return fmt.Errorf("shell command blocked by risk policy")
+		return fmt.Errorf("high-risk shell command blocked")
 	}
 
-	// 3) Execute via sandbox (final guard on actual filesystem / process)
-	return a.sandbox.WrapCommand(valid, a.execConfig, a.env)
+	return a.sandbox.WrapCommand(validCmd, a.execConfig, a.env)
 }
 
-// handleGitStep validates and executes a git action step.
+// GIT — supports safe + dangerous (Option C)
 func (a *Agent) handleGitStep(step ai.PlanStep) error {
 	action := strings.TrimSpace(step.Action)
 	if action == "" {
-		return fmt.Errorf("missing git action in plan")
+		return fmt.Errorf("missing git action")
 	}
 
 	color.Cyan("🌿 Git: action=%s", action)
 	return a.gitManager.ExecutePlannedAction(action, step.Args)
 }
 
-// handlePackageStep validates and executes a package manager action step.
+// PACKAGE MANAGER
 func (a *Agent) handlePackageStep(step ai.PlanStep) error {
-	// ---- 1. Validate action ----
 	action := strings.ToLower(strings.TrimSpace(step.Action))
 	if action == "" {
-		return fmt.Errorf("package step missing action (install/update/remove)")
+		return fmt.Errorf("package step missing action")
 	}
 
 	switch action {
 	case "install", "update", "remove":
-		// OK
 	default:
-		return fmt.Errorf("unsupported or unsafe package action: %s", action)
+		return fmt.Errorf("unsupported package action: %s", action)
 	}
 
-	// ---- 2. Extract args.name safely ----
 	rawName := step.Args["name"]
 	name := strings.TrimSpace(rawName)
-
 	if name == "" {
 		return fmt.Errorf("package step missing args.name")
 	}
 
-	// ---- 3. Package steps must NOT contain command ----
 	if strings.TrimSpace(step.Command) != "" {
-		return fmt.Errorf("invalid package step: must not include shell command (got: %s)", step.Command)
+		return fmt.Errorf("invalid package step: must not have 'command'")
 	}
 
-	// ---- 4. OS-aware safety gate ----
 	if err := commands.IsPackageActionSafe(action, name, a.env); err != nil {
 		color.Red("❌ Package safety violation: %v", err)
 		return err
@@ -406,12 +366,11 @@ func (a *Agent) handlePackageStep(step ai.PlanStep) error {
 
 	color.Cyan("📦 Package: %s %s", action, name)
 
-	// ---- 5. Delegate to package manager ----
 	commands.HandlePackageCommand(
 		[]string{action, name},
 		a.env,
-		false,        // not mock mode
-		a.execConfig, // executes via sandbox
+		false,
+		a.execConfig,
 	)
 
 	return nil

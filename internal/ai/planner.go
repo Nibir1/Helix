@@ -15,35 +15,30 @@ import (
 // ──────────────────────────────────────────────────────────────
 //
 
-// IntentType enumerates the known intents the planner can emit.
 type IntentType string
 
 const (
 	IntentChat      IntentType = "chat"
 	IntentShell     IntentType = "shell"
 	IntentGit       IntentType = "git"
-	IntentPackage   IntentType = "package" // top-level intent for pure package operations
+	IntentPackage   IntentType = "package"
 	IntentMultiStep IntentType = "multi_step"
 )
 
-// Plan is the top-level planner output.
 type Plan struct {
 	Intent IntentType `json:"intent"`
 	Steps  []PlanStep `json:"steps"`
-	Raw    string     `json:"-"` // For debugging/logging the original text
+	Raw    string     `json:"-"`
 }
 
-// PlanStep is a single tool invocation.
 type PlanStep struct {
-	Tool    string            `json:"tool"`              // "response", "shell", "git", "package"
-	Message string            `json:"message,omitempty"` // for response
-	Command string            `json:"command,omitempty"` // for shell
-	Action  string            `json:"action,omitempty"`  // for git & package
-	Args    map[string]string `json:"args,omitempty"`    // git/package args (e.g. name/message/branch)
+	Tool    string            `json:"tool"`
+	Message string            `json:"message,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Action  string            `json:"action,omitempty"`
+	Args    map[string]string `json:"args,omitempty"`
 }
 
-// rawPlan/rawPlanStep are used only internally to safely parse
-// planner output where args may be non-string (bool, number, etc.).
 type rawPlan struct {
 	Intent IntentType    `json:"intent"`
 	Steps  []rawPlanStep `json:"steps"`
@@ -58,19 +53,18 @@ type rawPlanStep struct {
 }
 
 var (
-	// Extract the first JSON object from messy model output.
 	jsonObjectRegex = regexp.MustCompile(`(?s)\{.*\}`)
 )
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🧠 PLANNER PROMPT (STRICT RULES)
+// 🧠 PLANNER PROMPT (UPDATED FOR OPTION C)
 // ──────────────────────────────────────────────────────────────
 //
 
 func BuildPlannerPrompt(userInput string, envDescription string) string {
 	return fmt.Sprintf(`
-You are Helix's planning module. Your job is to output a JSON plan ONLY.
+You are Helix's planning module. Output ONLY valid JSON.
 
 User input:
 "%s"
@@ -79,143 +73,57 @@ Environment:
 %s
 
 Rules:
-- Output ONLY valid JSON (no markdown, no comments, no prose)
-- Top-level object shape:
+- Output ONLY JSON
+- Follow the exact schema:
   {
     "intent": "chat" | "shell" | "git" | "package" | "multi_step",
-    "steps": [
-      {
-        "tool": "response" | "shell" | "git" | "package",
-        "message": "<for response tool>",
-        "command": "<for shell tool>",
-        "action": "<for git or package tool>",
-        "args": { "key": "value", ... }
-      }
-    ]
+    "steps": [...]
   }
-- "steps" MUST be a non-empty array.
 
-### RESPONSE RULES
-- For tool="response": include ONLY "message".
-- Never include "command", "action", or "args".
+### RESPONSE TOOL RULES
+- "tool": "response"
+- ONLY include "message"
 
-### SHELL COMMAND RULES
-- For tool="shell": include ONLY "command".
-- NEVER output package-management shell commands such as:
-  apt, apt-get, yum, dnf, pacman, zypper, brew, pip, pip3, npm, yarn, pnpm.
-- Helix handles package management internally through the "package" tool.
-- Shell steps are for generic CLI commands (ls, sed, find, go, etc.), NOT package managers.
+### SHELL TOOL RULES
+- "tool": "shell"
+- ONLY include "command"
+- NEVER output any package manager command (brew, apt, yum, npm, pip, etc.)
 
-### GIT RULES (SAFE SUBSET ONLY)
-- For tool="git": include "action" and "args".
-- ALLOWED git actions:
-  - "commit"        → args.message
-  - "tag"           → args.name
-  - "add"           → args.paths   (space-separated or relative paths)
-  - "checkout"      → args.branch
-  - "create-branch" → args.branch
-- DO NOT output other git actions such as:
-  "push", "pull", "reset", "clean", "rebase", "merge", "cherry-pick", etc.
-- DO NOT output raw shell git commands in tool="git".
-- DO NOT output "command" for git steps.
+### PACKAGE TOOL RULES
+- "tool": "package"
+- action: install | update | remove
+- args.name must be the package name
+- NEVER output shell commands for package tasks
 
-### PACKAGE MANAGEMENT RULES (IMPORTANT)
-When the user wants to install, update/upgrade, remove, uninstall, or delete a package,
-you MUST use the "package" tool, NOT "shell" and NOT "git".
+### GIT TOOL RULES (NOW INCLUDING OPTION C)
+ALLOWED git actions:
+  SAFE:
+    - "commit"        → args.message
+    - "tag"           → args.name
+    - "add"           → args.paths
+    - "checkout"      → args.branch
+    - "create-branch" → args.branch
 
-Package steps look like:
-  "tool": "package",
-  "action": "install" | "update" | "remove",
-  "args": { "name": "<package-name>" }
+  DANGEROUS (Option C):
+    - "push"          → args.remote, args.branch, args.force
+    - "reset-hard"    → args.target
+    - "clean"         → args.mode, args.x
+    - "delete-branch" → args.branch
 
-STRICT RULES:
-- ALWAYS treat requests like:
-    "install X"
-    "update X"
-    "upgrade X"
-    "remove X"
-    "uninstall X"
-    "delete X"
-  as **package management**, even when X is a CLI tool or dev tool such as:
-    git, node, npm, curl, wget, python, go, docker, kubectl, terraform, etc.
-- For example:
-  - "update git" MUST be a package step, **not** a git "pull".
-  - "update node" MUST be a package step.
-  - "install curl" MUST be a package step.
-- NEVER emit shell commands for package management (no "apt-get install", "brew install", etc.).
-- NEVER emit package operations under tool="git".
-- ONLY use args.name for the package name. Do NOT use "Name" or "package_name".
-- NEVER include a "command" field in a package step.
-
-Examples:
-
-User: "install git"
-Output:
-{
-  "intent": "package",
-  "steps": [
-    {
-      "tool": "package",
-      "action": "install",
-      "args": { "name": "git" }
-    }
-  ]
-}
-
-User: "remove docker"
-Output:
-{
-  "intent": "package",
-  "steps": [
-    {
-      "tool": "package",
-      "action": "remove",
-      "args": { "name": "docker" }
-    }
-  ]
-}
-
-User: "update node"
-Output:
-{
-  "intent": "package",
-  "steps": [
-    {
-      "tool": "package",
-      "action": "update",
-      "args": { "name": "node" }
-    }
-  ]
-}
-
-User: "update git"
-Output:
-{
-  "intent": "package",
-  "steps": [
-    {
-      "tool": "package",
-      "action": "update",
-      "args": { "name": "git" }
-    }
-  ]
-}
+NOT ALLOWED:
+  pull, merge, rebase, cherry-pick, fetch, clone, etc.
 
 ### MULTI-STEP RULES
-- intent "multi_step" must include 2 or more steps.
-- Steps may mix tools: response, shell, git, package.
-- Example: edit file with shell, then commit/tag with git, then send a response.
+- Must contain 2+ steps
+- Steps can mix tools
 
-### FINAL HARD RULE
-- DO NOT explain yourself.
-- DO NOT wrap the JSON in backticks.
-- JSON ONLY.
+### JSON ONLY — NO MARKDOWN, NO TEXT
 `, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
 }
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🧼 PLAN PARSING & VALIDATION
+// 🧼 PARSE PLAN
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -227,7 +135,6 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 		return nil, fmt.Errorf("empty planner output")
 	}
 
-	// Try to extract first JSON object if there is extra text.
 	jsonText := raw
 	if !strings.HasPrefix(raw, "{") {
 		if match := jsonObjectRegex.FindString(raw); match != "" {
@@ -235,13 +142,11 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 		}
 	}
 
-	// 1) Unmarshal into tolerant rawPlan (Args = map[string]interface{})
 	var rp rawPlan
 	if err := json.Unmarshal([]byte(jsonText), &rp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal planner JSON: %w", err)
 	}
 
-	// 2) Convert rawPlan → Plan with map[string]string Args
 	plan := &Plan{
 		Intent: rp.Intent,
 		Steps:  make([]PlanStep, 0, len(rp.Steps)),
@@ -254,21 +159,18 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 			Message: rs.Message,
 			Command: rs.Command,
 			Action:  rs.Action,
-			Args:    make(map[string]string),
+			Args:    map[string]string{},
 		}
 
 		for k, v := range rs.Args {
-			// Coerce non-string values to string via fmt.Sprint
-			if v == nil {
-				continue
+			if v != nil {
+				ps.Args[k] = strings.TrimSpace(fmt.Sprint(v))
 			}
-			ps.Args[k] = strings.TrimSpace(fmt.Sprint(v))
 		}
 
 		plan.Steps = append(plan.Steps, ps)
 	}
 
-	// 3) Normalize & validate
 	fixPlan(plan)
 
 	if err := validatePlan(plan); err != nil {
@@ -280,12 +182,11 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🔧 PLAN NORMALIZATION
+// 🧽 NORMALIZATION
 // ──────────────────────────────────────────────────────────────
 //
 
 func fixPlan(p *Plan) {
-	// Normalize intent
 	intent := strings.ToLower(strings.TrimSpace(string(p.Intent)))
 	switch intent {
 	case "", "chat":
@@ -299,64 +200,48 @@ func fixPlan(p *Plan) {
 	case "multi_step":
 		p.Intent = IntentMultiStep
 	default:
-		// Unknown -> multi_step fallback
 		p.Intent = IntentMultiStep
 	}
 
-	// Normalize steps
 	for i := range p.Steps {
-		step := &p.Steps[i]
+		s := &p.Steps[i]
 
-		step.Tool = strings.ToLower(strings.TrimSpace(step.Tool))
-		step.Action = strings.ToLower(strings.TrimSpace(step.Action))
-		step.Command = strings.TrimSpace(step.Command)
-		step.Message = strings.TrimSpace(step.Message)
+		s.Tool = strings.ToLower(strings.TrimSpace(s.Tool))
+		s.Action = strings.ToLower(strings.TrimSpace(s.Action))
+		s.Command = strings.TrimSpace(s.Command)
+		s.Message = strings.TrimSpace(s.Message)
 
-		// Normalize args map
-		if step.Args == nil {
-			step.Args = make(map[string]string)
-		} else {
-			for k, v := range step.Args {
-				step.Args[k] = strings.TrimSpace(v)
-			}
+		for k, v := range s.Args {
+			s.Args[k] = strings.TrimSpace(v)
 		}
 
-		// 1) Package action synonyms
-		if step.Tool == "package" {
-			switch step.Action {
+		// package synonyms
+		if s.Tool == "package" {
+			switch s.Action {
 			case "upgrade":
-				step.Action = "update"
-			case "install", "update", "remove":
-				// ok
-			default:
-				// leave as-is; validator may drop it
+				s.Action = "update"
 			}
-		}
-
-		// 2) Clean up known bad arg keys from LLM patterns
-		if step.Tool == "package" {
-			// Prefer "name" only; drop noisy variants
-			if nameAlt, ok := step.Args["package_name"]; ok && step.Args["name"] == "" {
-				step.Args["name"] = nameAlt
+			if alt, ok := s.Args["package_name"]; ok && s.Args["name"] == "" {
+				s.Args["name"] = alt
 			}
-			if nameAlt, ok := step.Args["Name"]; ok && step.Args["name"] == "" {
-				step.Args["name"] = nameAlt
+			if alt, ok := s.Args["Name"]; ok && s.Args["name"] == "" {
+				s.Args["name"] = alt
 			}
-			delete(step.Args, "package_name")
-			delete(step.Args, "Name")
+			delete(s.Args, "package_name")
+			delete(s.Args, "Name")
 		}
 	}
 
-	// If intent is empty but all steps are package, set IntentPackage
-	if p.Intent == IntentChat { // defaulted earlier
-		allPackage := true
+	// auto intent
+	if p.Intent == IntentChat {
+		allPkg := true
 		for _, s := range p.Steps {
 			if s.Tool != "package" {
-				allPackage = false
+				allPkg = false
 				break
 			}
 		}
-		if allPackage {
+		if allPkg {
 			p.Intent = IntentPackage
 		}
 	}
@@ -364,7 +249,7 @@ func fixPlan(p *Plan) {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🛡️ PLAN VALIDATION
+// 🛡️ VALIDATION (UPDATED WITH OPTION C)
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -380,118 +265,119 @@ func validatePlan(p *Plan) error {
 		"package":  true,
 	}
 
-	var validSteps []PlanStep
+	var out []PlanStep
 
 	for _, step := range p.Steps {
-		tool := step.Tool
-
-		// Unknown tool → drop
-		if !validTools[tool] {
-			color.Yellow("⚠️  Dropping step with unknown tool: %s", tool)
+		if !validTools[step.Tool] {
+			color.Yellow("⚠️ Dropping step with unknown tool: %s", step.Tool)
 			continue
 		}
 
-		switch tool {
+		switch step.Tool {
 
+		// -------------------------------
+		// RESPONSE TOOL
+		// -------------------------------
 		case "response":
 			if step.Message == "" {
-				color.Yellow("⚠️  Dropping response step with empty message")
+				color.Yellow("⚠️ Dropping empty response step")
 				continue
 			}
-			// Response steps must not carry other fields
 			step.Command = ""
 			step.Action = ""
 			step.Args = map[string]string{}
 
+		// -------------------------------
+		// SHELL TOOL
+		// -------------------------------
 		case "shell":
 			if step.Command == "" {
-				color.Yellow("⚠️  Dropping shell step with empty command")
+				color.Yellow("⚠️ Dropping shell step with empty command")
 				continue
 			}
-			// Shell steps must not be used for package managers
 			lc := strings.ToLower(step.Command)
 			if containsAny(lc, []string{
 				"apt ", "apt-get ", "yum ", "dnf ", "pacman ", "zypper ",
 				"brew ", "pip ", "pip3 ", "npm ", "yarn ", "pnpm ",
 			}) {
-				color.Yellow("⚠️  Dropping shell step that appears to be package management: %s", step.Command)
+				color.Yellow("⚠️ Dropping package-manager shell command: %s", step.Command)
 				continue
 			}
-			// Shell step must not carry git/package metadata
 			step.Action = ""
 			step.Args = map[string]string{}
 
-		case "git":
-			if step.Action == "" {
-				color.Yellow("⚠️  Dropping git step with empty action")
-				continue
-			}
-
-			// Only allow safe subset of git actions
-			switch step.Action {
-			case "commit", "tag", "add", "checkout", "create-branch":
-				// ok
-			default:
-				color.Yellow("⚠️  Dropping git step with unsupported/unsafe action: %s", step.Action)
-				continue
-			}
-
-			// Git step must not use raw "command"
-			step.Command = ""
-
-			// Clean empty args
-			cleanArgs := make(map[string]string)
-			for k, v := range step.Args {
-				if strings.TrimSpace(v) != "" {
-					cleanArgs[k] = v
-				}
-			}
-			step.Args = cleanArgs
-
+		// -------------------------------
+		// PACKAGE TOOL
+		// -------------------------------
 		case "package":
 			if step.Action == "" {
-				color.Yellow("⚠️  Dropping package step with empty action")
+				color.Yellow("⚠️ Dropping package step without action")
 				continue
 			}
-
-			// Only allow install/update/remove for safety
 			switch step.Action {
 			case "install", "update", "remove":
-				// ok
 			default:
-				color.Yellow("⚠️  Dropping package step with unsupported action: %s", step.Action)
+				color.Yellow("⚠️ Dropping unsupported package action: %s", step.Action)
 				continue
 			}
 
 			name := strings.TrimSpace(step.Args["name"])
 			if name == "" {
-				color.Yellow("⚠️  Dropping package step missing args.name")
+				color.Yellow("⚠️ Dropping package step without name")
+				continue
+			}
+			step.Command = ""
+			step.Args = map[string]string{"name": name}
+
+		// -------------------------------
+		// GIT TOOL (NOW ALLOWING OPTION C)
+		// -------------------------------
+		case "git":
+			if step.Action == "" {
+				color.Yellow("⚠️ Dropping git step without action")
 				continue
 			}
 
-			// Package steps must not have "command"
+			switch step.Action {
+			// SAFE
+			case "commit", "tag", "add", "checkout", "create-branch":
+				// ok
+
+			// NEW FOR OPTION C
+			case "push", "reset-hard", "clean", "delete-branch":
+				// allowed — dangerous actions handled in agent/git.go
+
+			default:
+				color.Yellow("⚠️ Dropping unsupported git action: %s", step.Action)
+				continue
+			}
+
 			step.Command = ""
 
-			// Strip other noisy args; keep only "name"
-			step.Args = map[string]string{
-				"name": name,
+			// clean args
+			clean := map[string]string{}
+			for k, v := range step.Args {
+				if strings.TrimSpace(v) != "" {
+					clean[k] = v
+				}
 			}
+			step.Args = clean
 		}
 
-		validSteps = append(validSteps, step)
+		out = append(out, step)
 	}
 
-	if len(validSteps) == 0 {
+	if len(out) == 0 {
 		return fmt.Errorf("no valid steps after validation")
 	}
 
-	p.Steps = validSteps
+	p.Steps = out
 	return nil
 }
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🔎 SMALL HELPERS
+// 🔎 HELPERS
 // ──────────────────────────────────────────────────────────────
 //
 
