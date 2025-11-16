@@ -353,3 +353,31 @@ func CleanAIResponse(response string) string {
 
 	return response
 }
+
+// ──────────────────────────────────────────────────────────────
+// 🐞 DEBUG HELPERS
+// ──────────────────────────────────────────────────────────────
+// Before running Helix (only when needed):
+// export HELIX_DEBUG=1
+// Disable later:
+// unset HELIX_DEBUG
+// This ensures we don't spam users with byte-level debug logs by default.
+
+// DebugPrintStringBytes prints each byte/Unicode rune of a string
+// including index, char, and codepoint. Only prints when DEBUG mode is enabled.
+func DebugPrintStringBytes(s string) {
+	// Optional: only print when HELIX_DEBUG=1
+	if !IsDebugMode() {
+		return
+	}
+
+	fmt.Println("🔍 DEBUG String bytes:")
+	for i, r := range s {
+		fmt.Printf("  [%d] '%c' (U+%04X)\n", i, r, r)
+	}
+}
+
+// IsDebugMode checks if HELIX_DEBUG=1 is set
+func IsDebugMode() bool {
+	return strings.TrimSpace(os.Getenv("HELIX_DEBUG")) == "1"
+}

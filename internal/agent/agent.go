@@ -47,8 +47,6 @@ func NewAgent(
 }
 
 // HandleInput is the main entry point for Agent Mode.
-// It takes raw user text (no slash prefix), asks the planner LLM for a JSON plan,
-// runs the safety layer, then executes the resulting steps.
 func (a *Agent) HandleInput(userInput string) {
 	userInput = strings.TrimSpace(userInput)
 	if userInput == "" {
@@ -313,6 +311,7 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 }
 
 // handleShellStep validates and executes a shell command step.
+// Phase 3.5: adds an interactive risk gate for medium-risk commands.
 func (a *Agent) handleShellStep(step ai.PlanStep) error {
 	cmd := strings.TrimSpace(step.Command)
 	if cmd == "" {
@@ -321,12 +320,42 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 
 	color.Cyan("🖥️ Shell: %s", cmd)
 
-	// Validate and clean inside existing pipeline (includes safety checks)
+	// 1) Validate & normalize (hard safety gate)
 	valid, err := commands.ValidateAndCleanCommand(cmd)
 	if err != nil {
 		return fmt.Errorf("invalid shell command: %w", err)
 	}
 
+	// 2) Risk analysis (soft, interactive safety layer)
+	risk, reasons := commands.AnalyzeShellRisk(valid)
+
+	switch risk {
+	case commands.ShellRiskLow:
+		// No extra UX, just run.
+
+	case commands.ShellRiskMedium:
+		color.Yellow("⚠️  This command may be risky:")
+
+		for _, r := range reasons {
+			color.Yellow("   • %s", r)
+		}
+
+		if !commands.AskForConfirmation("Execute this command anyway?") {
+			color.Yellow("❌ Shell command skipped by user.")
+			return nil
+		}
+
+	case commands.ShellRiskHigh:
+		// At the moment, HIGH risk commands should already be blocked
+		// by ValidateAndCleanCommand, but we keep this branch for future use.
+		color.Red("🚨 This command has been classified as HIGH RISK and will not be executed.")
+		for _, r := range reasons {
+			color.Red("   • %s", r)
+		}
+		return fmt.Errorf("shell command blocked by risk policy")
+	}
+
+	// 3) Execute via sandbox (final guard on actual filesystem / process)
 	return a.sandbox.WrapCommand(valid, a.execConfig, a.env)
 }
 
