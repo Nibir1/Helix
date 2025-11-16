@@ -91,7 +91,7 @@ Supported tools:
 {
   "intent": "multi_step",
   "steps": [
-    { "tool": "shell", "command": "perl -pi -e "s/1.0.0/1.1.0/g" README.md" },
+    { "tool": "shell", "command": "perl -pi -e "s/1.2.0/1.1.0/g" README.md" },
     { "tool": "git",   "action": "add",    "args": { "paths": ["README.md"] } },
     { "tool": "git",   "action": "commit", "args": { "message": "Update version in README to 1.1.0" } },
     { "tool": "git",   "action": "tag",    "args": { "name": "v1.1.0" } }
