@@ -39,6 +39,7 @@ type PlanStep struct {
 	Args    map[string]string `json:"args,omitempty"`
 }
 
+// Raw intermediate representation
 type rawPlan struct {
 	Intent IntentType    `json:"intent"`
 	Steps  []rawPlanStep `json:"steps"`
@@ -56,7 +57,16 @@ var (
 	jsonObjectRegex = regexp.MustCompile(`(?s)\{.*\}`)
 )
 
+// ──────────────────────────────────────────────────────────────
+// 🧠 BuildPlannerPrompt — ULTRA-STRICT Version
+// ──────────────────────────────────────────────────────────────
+func BuildPlannerPrompt(userInput string, envDescription string) string {
+	return fmt.Sprintf(`
+You are Helix's planning module.
+
+====================================================================
 ### ABSOLUTE OUTPUT RULES (CRITICAL — DO NOT BREAK)
+====================================================================
 - Output ONLY a SINGLE valid JSON object.
 - NO markdown fences. (NO +""+ or +"json"+)
 - NO commentary, no explanations, no surrounding text.
@@ -69,7 +79,9 @@ var (
 
 If unsure, output the smallest correct JSON plan.
 
+====================================================================
 ### STRING SAFETY RULES (NEW — REQUIRED)
+====================================================================
 To ensure valid JSON, YOU MUST follow these rules for ALL strings:
 
 1. **NO SINGLE QUOTES (') ANYWHERE inside JSON strings.**
@@ -90,7 +102,9 @@ To ensure valid JSON, YOU MUST follow these rules for ALL strings:
 
 6. **KEEP JSON COMPACT - avoid unnecessary whitespace to prevent truncation.**
 
+====================================================================
 ### REQUIRED JSON SCHEMA
+====================================================================
 {
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
@@ -106,11 +120,15 @@ To ensure valid JSON, YOU MUST follow these rules for ALL strings:
 
 "steps" MUST be a non-empty array.
 
+====================================================================
 ### RESPONSE TOOL RULES
+====================================================================
 - Only "message".
 - No "command", "action", or "args".
 
+====================================================================
 ### SHELL TOOL RULES (UPDATED — NO NESTED QUOTES)
+====================================================================
 - ONLY "command".
 - MUST NOT output:
     apt, apt-get, yum, dnf, pacman, zypper,
@@ -123,14 +141,18 @@ To ensure valid JSON, YOU MUST follow these rules for ALL strings:
     perl -pi -e "s/OLD/NEW/g" FILE
   instead of sed with nested quoting.
 
+====================================================================
 ### PACKAGE TOOL RULES
+====================================================================
 - tool = "package"
 - action = install | update | remove
 - args.name MUST be present
 - NEVER output shell install commands.
 - NEVER include "command".
 
+====================================================================
 ### GIT TOOL RULES (SAFE + DANGEROUS OPTION C)
+====================================================================
 SAFE:
 - commit → args.message
 - tag → args.name (REQUIRED: must be full string like "v1.1.0")
@@ -147,14 +169,18 @@ DANGEROUS (allowed, agent requires confirmation):
 FORBIDDEN:
 - pull, merge, rebase, cherry-pick, fetch, clone, init, remote add, etc.
 
+====================================================================
 ### MULTI-STEP RULES
+====================================================================
 - intent MUST be "multi_step" if 2+ steps exist.
 - Steps may mix ANY tools.
 - JSON MUST NOT be truncated.
 - ALL steps MUST be complete and valid.
 - KEEP steps minimal to avoid truncation.
 
+====================================================================
 ### TRUNCATION PREVENTION RULES (NEW - CRITICAL)
+====================================================================
 - KEEP JSON COMPACT - minimize whitespace
 - If you have many steps, consider combining them
 - ALWAYS ensure complete JSON structure
@@ -164,7 +190,9 @@ FORBIDDEN:
 Example for version update:
 {"intent":"multi_step","steps":[{"tool":"shell","command":"perl -pi -e \"s/1.0.0/1.1.0/g\" README.md"},{"tool":"git","action":"add","args":{"paths":["README.md"]}},{"tool":"git","action":"commit","args":{"message":"Update version in README to 1.1.0"}},{"tool":"git","action":"tag","args":{"name":"v1.1.0"}}]}
 
+====================================================================
 ### FINAL HARD REQUIREMENT
+====================================================================
 Return ONLY the COMPLETE JSON object.
 NO text before.
 NO text after.
@@ -172,80 +200,20 @@ NO markdown.
 NO backticks.
 NO truncation.
 
+====================================================================
 ### CURRENT REQUEST
+====================================================================
 User Input: %s
 
 Environment: %s
 
 NOW OUTPUT THE COMPLETE JSON:
-//
-// ──────────────────────────────────────────────────────────────
-// 🧠 PLANNER PROMPT (UPDATED FOR OPTION C)
-// ──────────────────────────────────────────────────────────────
-//
-
-func BuildPlannerPrompt(userInput string, envDescription string) string {
-	return fmt.Sprintf(`
-You are Helix's planning module. Output ONLY valid JSON.
-
-User input:
-"%s"
-
-Environment:
-%s
-
-Rules:
-- Output ONLY JSON
-- Follow the exact schema:
-  {
-    "intent": "chat" | "shell" | "git" | "package" | "multi_step",
-    "steps": [...]
-  }
-
-### RESPONSE TOOL RULES
-- "tool": "response"
-- ONLY include "message"
-
-### SHELL TOOL RULES
-- "tool": "shell"
-- ONLY include "command"
-- NEVER output any package manager command (brew, apt, yum, npm, pip, etc.)
-
-### PACKAGE TOOL RULES
-- "tool": "package"
-- action: install | update | remove
-- args.name must be the package name
-- NEVER output shell commands for package tasks
-
-### GIT TOOL RULES (NOW INCLUDING OPTION C)
-ALLOWED git actions:
-  SAFE:
-    - "commit"        → args.message
-    - "tag"           → args.name
-    - "add"           → args.paths
-    - "checkout"      → args.branch
-    - "create-branch" → args.branch
-
-  DANGEROUS (Option C):
-    - "push"          → args.remote, args.branch, args.force
-    - "reset-hard"    → args.target
-    - "clean"         → args.mode, args.x
-    - "delete-branch" → args.branch
-
-NOT ALLOWED:
-  pull, merge, rebase, cherry-pick, fetch, clone, etc.
-
-### MULTI-STEP RULES
-- Must contain 2+ steps
-- Steps can mix tools
-
-### JSON ONLY — NO MARKDOWN, NO TEXT
 `, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
 }
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🧼 PARSE PLAN
+// 🧼 ParsePlanFromModelOutput
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -257,6 +225,14 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 		return nil, fmt.Errorf("empty planner output")
 	}
 
+	// Strip illegal markdown fences
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```JSON")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+
+	// Extract JSON
 	jsonText := raw
 	if !strings.HasPrefix(raw, "{") {
 		if match := jsonObjectRegex.FindString(raw); match != "" {
@@ -264,6 +240,7 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 		}
 	}
 
+	// Decode
 	var rp rawPlan
 	if err := json.Unmarshal([]byte(jsonText), &rp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal planner JSON: %w", err)
@@ -275,7 +252,9 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 		Raw:    raw,
 	}
 
+	// Convert steps, normalize lists
 	for _, rs := range rp.Steps {
+
 		ps := PlanStep{
 			Tool:    rs.Tool,
 			Message: rs.Message,
@@ -284,8 +263,26 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 			Args:    map[string]string{},
 		}
 
+		// Normalize args
 		for k, v := range rs.Args {
-			if v != nil {
+			if v == nil {
+				continue
+			}
+
+			switch vv := v.(type) {
+
+			case []interface{}: // list → string
+				if len(vv) == 1 {
+					ps.Args[k] = strings.TrimSpace(fmt.Sprint(vv[0]))
+				} else {
+					parts := make([]string, 0, len(vv))
+					for _, item := range vv {
+						parts = append(parts, strings.TrimSpace(fmt.Sprint(item)))
+					}
+					ps.Args[k] = strings.Join(parts, " ")
+				}
+
+			default:
 				ps.Args[k] = strings.TrimSpace(fmt.Sprint(v))
 			}
 		}
@@ -293,6 +290,7 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 		plan.Steps = append(plan.Steps, ps)
 	}
 
+	// Normalize & validate
 	fixPlan(plan)
 
 	if err := validatePlan(plan); err != nil {
@@ -327,7 +325,6 @@ func fixPlan(p *Plan) {
 
 	for i := range p.Steps {
 		s := &p.Steps[i]
-
 		s.Tool = strings.ToLower(strings.TrimSpace(s.Tool))
 		s.Action = strings.ToLower(strings.TrimSpace(s.Action))
 		s.Command = strings.TrimSpace(s.Command)
@@ -337,24 +334,19 @@ func fixPlan(p *Plan) {
 			s.Args[k] = strings.TrimSpace(v)
 		}
 
-		// package synonyms
+		// Package name normalization
 		if s.Tool == "package" {
-			switch s.Action {
-			case "upgrade":
+			if s.Action == "upgrade" {
 				s.Action = "update"
 			}
 			if alt, ok := s.Args["package_name"]; ok && s.Args["name"] == "" {
 				s.Args["name"] = alt
 			}
-			if alt, ok := s.Args["Name"]; ok && s.Args["name"] == "" {
-				s.Args["name"] = alt
-			}
 			delete(s.Args, "package_name")
-			delete(s.Args, "Name")
 		}
 	}
 
-	// auto intent
+	// Auto-intent correction
 	if p.Intent == IntentChat {
 		allPkg := true
 		for _, s := range p.Steps {
@@ -371,7 +363,7 @@ func fixPlan(p *Plan) {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🛡️ VALIDATION (UPDATED WITH OPTION C)
+// 🛡️ VALIDATION (SAFE + DANGEROUS GIT ACTIONS)
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -387,34 +379,27 @@ func validatePlan(p *Plan) error {
 		"package":  true,
 	}
 
-	var out []PlanStep
+	var filtered []PlanStep
 
 	for _, step := range p.Steps {
+
 		if !validTools[step.Tool] {
-			color.Yellow("⚠️ Dropping step with unknown tool: %s", step.Tool)
+			color.Yellow("⚠️ Dropping unknown tool: %s", step.Tool)
 			continue
 		}
 
 		switch step.Tool {
 
-		// -------------------------------
-		// RESPONSE TOOL
-		// -------------------------------
 		case "response":
 			if step.Message == "" {
-				color.Yellow("⚠️ Dropping empty response step")
 				continue
 			}
 			step.Command = ""
 			step.Action = ""
 			step.Args = map[string]string{}
 
-		// -------------------------------
-		// SHELL TOOL
-		// -------------------------------
 		case "shell":
 			if step.Command == "" {
-				color.Yellow("⚠️ Dropping shell step with empty command")
 				continue
 			}
 			lc := strings.ToLower(step.Command)
@@ -422,18 +407,14 @@ func validatePlan(p *Plan) error {
 				"apt ", "apt-get ", "yum ", "dnf ", "pacman ", "zypper ",
 				"brew ", "pip ", "pip3 ", "npm ", "yarn ", "pnpm ",
 			}) {
-				color.Yellow("⚠️ Dropping package-manager shell command: %s", step.Command)
+				color.Yellow("⚠️ Dropping package-manager command: %s", step.Command)
 				continue
 			}
 			step.Action = ""
 			step.Args = map[string]string{}
 
-		// -------------------------------
-		// PACKAGE TOOL
-		// -------------------------------
 		case "package":
 			if step.Action == "" {
-				color.Yellow("⚠️ Dropping package step without action")
 				continue
 			}
 			switch step.Action {
@@ -442,33 +423,21 @@ func validatePlan(p *Plan) error {
 				color.Yellow("⚠️ Dropping unsupported package action: %s", step.Action)
 				continue
 			}
-
 			name := strings.TrimSpace(step.Args["name"])
 			if name == "" {
-				color.Yellow("⚠️ Dropping package step without name")
 				continue
 			}
 			step.Command = ""
 			step.Args = map[string]string{"name": name}
 
-		// -------------------------------
-		// GIT TOOL (NOW ALLOWING OPTION C)
-		// -------------------------------
 		case "git":
 			if step.Action == "" {
-				color.Yellow("⚠️ Dropping git step without action")
 				continue
 			}
 
 			switch step.Action {
-			// SAFE
 			case "commit", "tag", "add", "checkout", "create-branch":
-				// ok
-
-			// NEW FOR OPTION C
 			case "push", "reset-hard", "clean", "delete-branch":
-				// allowed — dangerous actions handled in agent/git.go
-
 			default:
 				color.Yellow("⚠️ Dropping unsupported git action: %s", step.Action)
 				continue
@@ -476,24 +445,24 @@ func validatePlan(p *Plan) error {
 
 			step.Command = ""
 
-			// clean args
-			clean := map[string]string{}
+			cleanArgs := map[string]string{}
 			for k, v := range step.Args {
-				if strings.TrimSpace(v) != "" {
-					clean[k] = v
+				val := strings.TrimSpace(v)
+				if val != "" {
+					cleanArgs[k] = val
 				}
 			}
-			step.Args = clean
+			step.Args = cleanArgs
 		}
 
-		out = append(out, step)
+		filtered = append(filtered, step)
 	}
 
-	if len(out) == 0 {
+	if len(filtered) == 0 {
 		return fmt.Errorf("no valid steps after validation")
 	}
 
-	p.Steps = out
+	p.Steps = filtered
 	return nil
 }
 
