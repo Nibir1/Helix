@@ -102,32 +102,50 @@ Rules:
 ### SHELL COMMAND RULES
 - For tool="shell": include ONLY "command".
 - NEVER output package-management shell commands such as:
-  apt, apt-get, yum, brew, dnf, pacman, zypper, pip, pip3, npm, yarn, pnpm.
+  apt, apt-get, yum, dnf, pacman, zypper, brew, pip, pip3, npm, yarn, pnpm.
 - Helix handles package management internally through the "package" tool.
+- Shell steps are for generic CLI commands (ls, sed, find, go, etc.), NOT package managers.
 
-### GIT RULES
+### GIT RULES (SAFE SUBSET ONLY)
 - For tool="git": include "action" and "args".
-  - commit       → args.message
-  - tag          → args.name
-  - checkout     → args.branch
-  - create-branch→ args.branch
-  - add          → args.paths  (space-separated or relative path expression)
+- ALLOWED git actions:
+  - "commit"        → args.message
+  - "tag"           → args.name
+  - "add"           → args.paths   (space-separated or relative paths)
+  - "checkout"      → args.branch
+  - "create-branch" → args.branch
+- DO NOT output other git actions such as:
+  "push", "pull", "reset", "clean", "rebase", "merge", "cherry-pick", etc.
 - DO NOT output raw shell git commands in tool="git".
 - DO NOT output "command" for git steps.
 
-### PACKAGE MANAGEMENT RULES
-When the user wants to install, update/upgrade, remove, uninstall, or delete a package:
-You MUST output a step with:
+### PACKAGE MANAGEMENT RULES (IMPORTANT)
+When the user wants to install, update/upgrade, remove, uninstall, or delete a package,
+you MUST use the "package" tool, NOT "shell" and NOT "git".
+
+Package steps look like:
   "tool": "package",
   "action": "install" | "update" | "remove",
   "args": { "name": "<package-name>" }
 
 STRICT RULES:
-- NEVER output "Name" or "package_name". Only args.name is allowed.
-- NEVER output shell commands for package management. (e.g., "apt-get install git")
-- NEVER output extra fields such as "command" for package steps.
-- NEVER wrap the package name in quotes inside args; it must be a plain JSON string.
-- For multi-step package operations, include multiple "package" steps.
+- ALWAYS treat requests like:
+    "install X"
+    "update X"
+    "upgrade X"
+    "remove X"
+    "uninstall X"
+    "delete X"
+  as **package management**, even when X is a CLI tool or dev tool such as:
+    git, node, npm, curl, wget, python, go, docker, kubectl, terraform, etc.
+- For example:
+  - "update git" MUST be a package step, **not** a git "pull".
+  - "update node" MUST be a package step.
+  - "install curl" MUST be a package step.
+- NEVER emit shell commands for package management (no "apt-get install", "brew install", etc.).
+- NEVER emit package operations under tool="git".
+- ONLY use args.name for the package name. Do NOT use "Name" or "package_name".
+- NEVER include a "command" field in a package step.
 
 Examples:
 
@@ -170,9 +188,23 @@ Output:
   ]
 }
 
+User: "update git"
+Output:
+{
+  "intent": "package",
+  "steps": [
+    {
+      "tool": "package",
+      "action": "update",
+      "args": { "name": "git" }
+    }
+  ]
+}
+
 ### MULTI-STEP RULES
 - intent "multi_step" must include 2 or more steps.
 - Steps may mix tools: response, shell, git, package.
+- Example: edit file with shell, then commit/tag with git, then send a response.
 
 ### FINAL HARD RULE
 - DO NOT explain yourself.
@@ -289,8 +321,6 @@ func fixPlan(p *Plan) {
 			}
 		}
 
-		// Small semantic fixes:
-
 		// 1) Package action synonyms
 		if step.Tool == "package" {
 			switch step.Action {
@@ -396,6 +426,16 @@ func validatePlan(p *Plan) error {
 				color.Yellow("⚠️  Dropping git step with empty action")
 				continue
 			}
+
+			// Only allow safe subset of git actions
+			switch step.Action {
+			case "commit", "tag", "add", "checkout", "create-branch":
+				// ok
+			default:
+				color.Yellow("⚠️  Dropping git step with unsupported/unsafe action: %s", step.Action)
+				continue
+			}
+
 			// Git step must not use raw "command"
 			step.Command = ""
 

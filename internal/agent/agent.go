@@ -80,7 +80,6 @@ func (a *Agent) HandleInput(userInput string) {
 	}
 
 	rawPlanOutput = strings.TrimSpace(rawPlanOutput)
-	color.Yellow("🔍 Planner raw output: %s", rawPlanOutput)
 
 	// 3) Parse and validate planner output
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
@@ -344,39 +343,46 @@ func (a *Agent) handleGitStep(step ai.PlanStep) error {
 
 // handlePackageStep validates and executes a package manager action step.
 func (a *Agent) handlePackageStep(step ai.PlanStep) error {
-	// Validate action
-	action := strings.TrimSpace(step.Action)
+	// ---- 1. Validate action ----
+	action := strings.ToLower(strings.TrimSpace(step.Action))
 	if action == "" {
 		return fmt.Errorf("package step missing action (install/update/remove)")
 	}
 
-	// Extract name from args
-	name := strings.TrimSpace(step.Args["name"])
-	if name == "" {
-		return fmt.Errorf("package step missing args.name")
-	}
-
-	// Validate allowed actions (safety guarantee)
 	switch action {
 	case "install", "update", "remove":
 		// OK
 	default:
-		return fmt.Errorf("unsupported package action: %s", action)
+		return fmt.Errorf("unsupported or unsafe package action: %s", action)
 	}
 
-	// Safety: package steps must NOT include command
-	if step.Command != "" {
+	// ---- 2. Extract args.name safely ----
+	rawName := step.Args["name"]
+	name := strings.TrimSpace(rawName)
+
+	if name == "" {
+		return fmt.Errorf("package step missing args.name")
+	}
+
+	// ---- 3. Package steps must NOT contain command ----
+	if strings.TrimSpace(step.Command) != "" {
 		return fmt.Errorf("invalid package step: must not include shell command (got: %s)", step.Command)
+	}
+
+	// ---- 4. OS-aware safety gate ----
+	if err := commands.IsPackageActionSafe(action, name, a.env); err != nil {
+		color.Red("❌ Package safety violation: %v", err)
+		return err
 	}
 
 	color.Cyan("📦 Package: %s %s", action, name)
 
-	// Delegate to package manager
+	// ---- 5. Delegate to package manager ----
 	commands.HandlePackageCommand(
 		[]string{action, name},
 		a.env,
 		false,        // not mock mode
-		a.execConfig, // executes through sandbox
+		a.execConfig, // executes via sandbox
 	)
 
 	return nil
