@@ -23,7 +23,8 @@ const (
 
 // Default OpenAI model for Helix
 // You can change this if you want a different model later.
-const defaultOpenAIModel = "gpt-4o-mini"
+// const defaultOpenAIModel = "gpt-4o-mini"
+const defaultOpenAIModel = "gpt-4o"
 
 var (
 	currentProvider ProviderType = ProviderLocal
