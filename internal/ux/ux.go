@@ -223,6 +223,7 @@ func (ux *UX) ShowHelp() {
 	fmt.Println("  /rag-status           - Show RAG initialization status")
 	fmt.Println("  /rag-reindex          - Force rebuild RAG MAN page index")
 	fmt.Println("  /rag-reset            - Reset RAG database completely")
+	fmt.Println("  /rag-rebuild          - Rebuild RAG index from scratch")
 	fmt.Println()
 
 	// ============================================================

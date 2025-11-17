@@ -381,3 +381,46 @@ func DebugPrintStringBytes(s string) {
 func IsDebugMode() bool {
 	return strings.TrimSpace(os.Getenv("HELIX_DEBUG")) == "1"
 }
+
+// ExtractCommand cleans AI output to get just the command
+func ExtractCommand(aiOutput string) string {
+	// Remove all code blocks and backticks
+	aiOutput = strings.ReplaceAll(aiOutput, "```bash", "")
+	aiOutput = strings.ReplaceAll(aiOutput, "```sh", "")
+	aiOutput = strings.ReplaceAll(aiOutput, "```", "")
+
+	// Remove backticks from the entire output
+	aiOutput = strings.ReplaceAll(aiOutput, "`", "")
+
+	// Remove any markdown formatting
+	aiOutput = strings.ReplaceAll(aiOutput, "**", "")
+
+	// Take only the first non-comment, non-empty line
+	lines := strings.Split(aiOutput, "\n")
+	var command string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "//") && !strings.HasPrefix(line, "#") {
+			command = line
+			break
+		}
+	}
+
+	// Remove leading/trailing quotes
+	command = strings.Trim(command, `"'`)
+
+	// Look for typical command patterns (best-effort)
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`^[a-zA-Z0-9_\-\./]+\s+`), // Starts with command
+		regexp.MustCompile(`^[a-z]+\s+`),             // Starts with lowercase word
+	}
+
+	for _, pattern := range patterns {
+		if match := pattern.FindString(command); match != "" {
+			command = strings.TrimSpace(command)
+			break
+		}
+	}
+
+	return strings.TrimSpace(command)
+}

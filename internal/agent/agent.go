@@ -26,7 +26,6 @@ type Agent struct {
 // NewAgent creates a new Agent instance.
 func NewAgent(
 	env shell.Env,
-	_ *ai.PromptBuilder,
 	_ interface{},
 	sandbox *commands.DirectorySandbox,
 	execConfig commands.ExecuteConfig,

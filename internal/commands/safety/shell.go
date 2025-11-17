@@ -25,7 +25,7 @@ func ValidateAndCleanShellCommand(raw string) (string, error) {
 	color.Yellow("🔍 DEBUG ValidateAndCleanCommand input: %q", raw)
 
 	// Extra byte-level debug for weird issues (Phase 3.5+)
-	utils.DebugPrintStringBytes(raw)
+	// utils.DebugPrintStringBytes(raw)
 
 	// 1) Basic trim / normalization
 	cmd := utils.SafeTrim(raw)

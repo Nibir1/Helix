@@ -122,7 +122,7 @@ func (cfg *Config) SavePreferences() error {
 
 // Versioning and Model metadata
 const (
-	HelixVersion = "0.3.0"
+	HelixVersion = "0.4.0"
 
 	// ModelName     = "llama-2-7b-chat.gguf"
 	// ModelURL      = "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_0.gguf"

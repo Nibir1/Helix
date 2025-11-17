@@ -1,6 +1,9 @@
+// cmd/helix/handlers.go
+
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,20 +91,43 @@ func handleRAGStatus() {
 
 	if ragSystem == nil {
 		color.Red("  ❌ RAG system not initialized")
+		color.Yellow("  💡 RAG will be set up automatically on next start.")
 		return
 	}
 
 	stats := ragSystem.GetSystemStats()
-	color.Cyan("  📊 Statistics:")
-	color.Cyan("    • Initialized: %v", stats["initialized"])
-	color.Cyan("    • Indexed MAN Pages: %v", stats["indexed_pages"])
+	statusText := ragSystem.GetInitializationStatus()
 
-	if stats["initialized"].(bool) {
-		color.Green("  ✅ RAG system ACTIVE")
-		color.Cyan("    • Vector Documents: %v", stats["total_documents"])
-		color.Cyan("    • Unique Commands: %v", stats["unique_commands"])
+	initialized, _ := stats["initialized"].(bool)
+	indexedPages := stats["indexed_pages"]
+
+	color.Cyan("  📊 Statistics:")
+	color.Cyan("    • Status: %v", statusText)
+	color.Cyan("    • Initialized: %v", initialized)
+	color.Cyan("    • Indexed MAN Pages: %v", indexedPages)
+
+	if initialized {
+		// Vector store details (if present)
+		if totalDocs, ok := stats["total_documents"]; ok {
+			color.Cyan("    • Vector Documents: %v", totalDocs)
+		}
+		if unique, ok := stats["unique_commands"]; ok {
+			color.Cyan("    • Unique Commands: %v", unique)
+		}
+		color.Green("  ✅ RAG system ACTIVE and ready for retrieval")
 	} else {
-		color.Yellow("  🔄 RAG indexing in progress…")
+		// Not initialized — decide whether we're actually indexing or just empty
+		switch v := indexedPages.(type) {
+		case int:
+			if v > 0 {
+				color.Yellow("  🔄 RAG indexing in progress or partially completed…")
+				color.Yellow("     Some context may be available but system is not fully ready.")
+				return
+			}
+		}
+
+		color.Yellow("  💤 RAG not initialized yet (no MAN pages indexed).")
+		color.Yellow("  💡 It will automatically index MAN pages when Helix initializes.")
 	}
 }
 
@@ -110,6 +136,11 @@ func handleRAGStatus() {
 //	/rag-reindex
 //
 // -------------------------------------------------------
+//
+// Force a full reindex in the background:
+//   - Deletes the on-disk RAG index directory
+//   - Keeps the current process running
+//   - Starts a background Initialize() which will rebuild everything
 func handleRAGReindex() {
 	if ragSystem == nil {
 		color.Red("❌ RAG system not initialized")
@@ -119,11 +150,29 @@ func handleRAGReindex() {
 	color.Blue("🔄 Forcing full RAG reindex…")
 
 	home, _ := os.UserHomeDir()
-	stateFile := filepath.Join(home, ".helix", "rag_index", "rag_state.json")
-	_ = os.Remove(stateFile)
+	ragDir := filepath.Join(home, ".helix", "rag_index")
 
-	go ragSystem.IndexAvailableManPages()
-	color.Green("✅ RAG reindex started in background")
+	// Remove the entire index directory so Initialize() is forced to rebuild
+	if err := os.RemoveAll(ragDir); err != nil {
+		color.Red("❌ Failed to clear existing RAG index: %v", err)
+		return
+	}
+
+	color.Green("✅ Existing RAG index removed. Starting background rebuild…")
+
+	// Kick off a background re-initialize
+	go func() {
+		color.Blue("🔄 Background RAG reindex started...")
+		if err := ragSystem.Initialize(); err != nil {
+			color.Yellow("⚠️  Background RAG reindex completed with issues: %v", err)
+		} else if ragSystem.IsInitialized() {
+			color.Green("✅ Background RAG reindex completed successfully")
+		} else {
+			color.Yellow("⚠️  Background RAG reindex completed but system not fully initialized")
+		}
+	}()
+
+	color.Green("✅ RAG reindex requested (running in background)")
 }
 
 // -------------------------------------------------------
@@ -131,6 +180,9 @@ func handleRAGReindex() {
 //	/rag-reset
 //
 // -------------------------------------------------------
+//
+// Full reset of on-disk RAG data, but DOES NOT reindex immediately.
+// The user is expected to restart Helix or call /rag-reindex or /rag-rebuild.
 func handleRAGReset() {
 	if ragSystem == nil {
 		color.Red("❌ RAG system not initialized")
@@ -143,11 +195,74 @@ func handleRAGReset() {
 	ragDir := filepath.Join(home, ".helix", "rag_index")
 
 	if err := os.RemoveAll(ragDir); err != nil {
-		color.Red("❌ Failed to reset: %v", err)
+		color.Red("❌ Failed to reset RAG data: %v", err)
 		return
 	}
 
-	color.Green("✅ RAG reset completed. Will reindex on next start.")
+	color.Green("✅ RAG reset completed.")
+	color.Yellow("💡 Restart Helix or run /rag-reindex or /rag-rebuild to regenerate the index.")
+}
+
+// -------------------------------------------------------
+//
+//	/rag-rebuild
+//
+// -------------------------------------------------------
+//
+// Force a full synchronous rebuild of the RAG index.
+//   - Deletes all RAG index files
+//   - Runs Initialize() in the foreground (with progress logs)
+//   - Best for “nuke and rebuild now” scenarios
+func handleRAGRebuild() {
+	if ragSystem == nil {
+		color.Red("❌ RAG system not initialized")
+		color.Yellow("💡 Start Helix normally first so the RAG system is created, then run /rag-rebuild.")
+		return
+	}
+
+	color.Yellow("⚠️ Full RAG REBUILD will:")
+	color.Yellow("   • Delete all cached MAN page embeddings")
+	color.Yellow("   • Re-scan MAN pages and rebuild the vector index")
+	color.Yellow("   • This may take several minutes on first run")
+	fmt.Print("Proceed with full rebuild now? [y/N]: ")
+
+	var answer string
+	if _, err := fmt.Scanln(&answer); err != nil {
+		// If user just hits enter, treat as "no"
+		answer = ""
+	}
+
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer != "y" && answer != "yes" {
+		color.Yellow("❌ RAG rebuild cancelled by user")
+		return
+	}
+
+	color.Blue("🧨 Clearing existing RAG index…")
+
+	home, _ := os.UserHomeDir()
+	ragDir := filepath.Join(home, ".helix", "rag_index")
+
+	if err := os.RemoveAll(ragDir); err != nil {
+		color.Red("❌ Failed to remove RAG index directory: %v", err)
+		return
+	}
+
+	color.Green("✅ RAG index directory cleared.")
+	color.Blue("🚀 Starting full RAG rebuild (this may take a while)...")
+
+	// Synchronous rebuild using same Initialize() logic as startup
+	if err := ragSystem.Initialize(); err != nil {
+		color.Red("❌ RAG rebuild failed: %v", err)
+		return
+	}
+
+	if ragSystem.IsInitialized() {
+		color.Green("🎉 RAG rebuild completed successfully and is now ACTIVE.")
+	} else {
+		color.Yellow("⚠️ RAG rebuild finished but system reported as not fully initialized.")
+		color.Yellow("   You may want to check /rag-status for details.")
+	}
 }
 
 // -------------------------------------------------------

@@ -1,3 +1,5 @@
+// cmd/helix/main.go
+
 package main
 
 import (
@@ -121,15 +123,20 @@ func main() {
 	}
 
 	// --------------------------
-	// Initialize RAG (Phase 3)
+	// Initialize RAG (blocking on first run)
 	// --------------------------
 	color.Blue("🧠 Initializing RAG system...")
 	ragSystem = rag.NewSystem(env)
-	go func() {
-		if !ragSystem.IsInitialized() {
-			ragSystem.IndexAvailableManPages()
-		}
-	}()
+
+	// On first run: full blocking initialization (with progress bar).
+	// On subsequent runs: returns quickly if state + index already exist.
+	if err := ragSystem.InitializeBlocking(); err != nil {
+		color.Red("❌ RAG initialization failed: %v", err)
+	} else if ragSystem.IsInitialized() {
+		color.Green("🧠 RAG system fully initialized")
+	} else {
+		color.Yellow("⚠️ RAG system did not fully initialize; Helix will run without RAG.")
+	}
 
 	// --------------------------
 	// Show banner
@@ -152,8 +159,7 @@ func main() {
 	// --------------------------
 	agentCore = agent.NewAgent(
 		env,
-		nil,       // PromptBuilder no longer used in planner path
-		ragSystem, // for future phase 3
+		ragSystem, // Phase 3: RAG-enhanced behaviour
 		sandbox,
 		execConfig,
 		cfg.UserPrefs.TypingEffect,
@@ -208,6 +214,8 @@ func runAgentCLI() {
 				handleRAGReindex()
 			case strings.HasPrefix(input, "/rag-reset"):
 				handleRAGReset()
+			case strings.HasPrefix(input, "/rag-rebuild"):
+				handleRAGRebuild()
 
 			case strings.HasPrefix(input, "/sandbox"):
 				handleSandboxCommand(input)

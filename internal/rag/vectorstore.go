@@ -14,16 +14,18 @@ import (
 	"github.com/fatih/color"
 )
 
-// VectorDocument represents a document with its vector embedding
+// -----------------------------------------------------------------------------
+// STRUCTS
+// -----------------------------------------------------------------------------
+
 type VectorDocument struct {
 	ID         string    `json:"id"`
 	Content    string    `json:"content"`
-	Embedding  []float32 `json:"embedding"`
+	Embedding  []float32 `json:"embedding"` // reserved for future LLM embeddings
 	Metadata   Metadata  `json:"metadata"`
 	Similarity float32   `json:"similarity,omitempty"`
 }
 
-// Metadata contains document metadata
 type Metadata struct {
 	Command     string   `json:"command"`
 	Section     string   `json:"section"`
@@ -32,73 +34,54 @@ type Metadata struct {
 	Examples    []string `json:"examples"`
 }
 
-// VectorStore manages document embeddings and similarity search
+// VectorStore contains usable vector index and inverted index
 type VectorStore struct {
 	indexDir    string
 	documents   map[string]VectorDocument
-	index       map[string][]string // word -> document IDs
+	index       map[string][]string // inverted index: word → docIDs
 	mu          sync.RWMutex
 	initialized bool
 }
 
-// NewVectorStore creates a new vector store
+// Constructor
 func NewVectorStore(env shell.Env) *VectorStore {
-	homeDir, err := os.UserHomeDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		homeDir = "/tmp"
+		home = "/tmp"
 	}
 
-	indexDir := filepath.Join(homeDir, ".helix", "vector_index")
-
 	return &VectorStore{
-		indexDir:  indexDir,
+		indexDir:  filepath.Join(home, ".helix", "vector_index"),
 		documents: make(map[string]VectorDocument),
 		index:     make(map[string][]string),
 	}
 }
 
-// IndexMANPages indexes MAN pages in the vector store
+// -----------------------------------------------------------------------------
+// INDEXING
+// -----------------------------------------------------------------------------
+
+// IndexMANPages is the ONLY method called by RAG system to index MAN pages.
 func (vs *VectorStore) IndexMANPages(pages []MANPage) error {
 	color.Blue("🔧 Indexing %d MAN pages in vector store...", len(pages))
 
 	if len(pages) == 0 {
-		color.Red("❌ No MAN pages to index!")
-		return fmt.Errorf("no MAN pages provided")
-	}
-
-	// Validate pages have content
-	validPages := 0
-	for i, page := range pages {
-		if page.Name == "" || page.Description == "" {
-			color.Yellow("⚠️  Page %d has empty content: %+v", i, page)
-			continue
-		}
-		validPages++
-	}
-
-	color.Cyan("🔍 DEBUG: %d valid pages out of %d total", validPages, len(pages))
-
-	if validPages == 0 {
-		color.Red("❌ No valid MAN pages to index!")
-		return fmt.Errorf("no valid MAN pages")
+		return fmt.Errorf("no MAN pages to index")
 	}
 
 	var wg sync.WaitGroup
-	docChan := make(chan VectorDocument, len(pages))
+	docChan := make(chan VectorDocument, len(pages)*3)
 
-	// Process pages in parallel
 	for _, page := range pages {
 		wg.Add(1)
-		go vs.processMANPage(page, &wg, docChan)
+		go vs.processPage(page, &wg, docChan)
 	}
 
-	// Collect documents
 	go func() {
 		wg.Wait()
 		close(docChan)
 	}()
 
-	// Index documents
 	count := 0
 	for doc := range docChan {
 		vs.mu.Lock()
@@ -106,45 +89,41 @@ func (vs *VectorStore) IndexMANPages(pages []MANPage) error {
 		vs.addToIndex(doc)
 		vs.mu.Unlock()
 		count++
-
-		if count%50 == 0 {
-			color.Green("✅ Vector indexed %d documents...", count)
-		}
 	}
 
 	vs.initialized = true
-	color.Green("🎉 Vector indexing completed! %d documents indexed", count)
+	color.Green("🎉 Vector indexing completed. Documents: %d", count)
 
 	return vs.saveVectorIndex()
 }
 
-// processMANPage converts a MAN page to vector documents
-func (vs *VectorStore) processMANPage(page MANPage, wg *sync.WaitGroup, docChan chan<- VectorDocument) {
+// processPage → creates multiple docs from each MAN page
+func (vs *VectorStore) processPage(page MANPage, wg *sync.WaitGroup, out chan<- VectorDocument) {
 	defer wg.Done()
 
-	// Create multiple documents from different sections of the MAN page
-	documents := []VectorDocument{
-		vs.createCommandDocument(page),
-		vs.createDescriptionDocument(page),
-		vs.createOptionsDocument(page),
-		vs.createExamplesDocument(page),
-		vs.createSynopsisDocument(page),
+	docs := []VectorDocument{
+		vs.docFromCommand(page),
+		vs.docFromDescription(page),
+		vs.docFromSynopsis(page),
+		vs.docFromOptions(page),
+		vs.docFromExamples(page),
 	}
 
-	for _, doc := range documents {
-		if doc.Content != "" {
-			docChan <- doc
+	for _, d := range docs {
+		if d.Content != "" {
+			out <- d
 		}
 	}
 }
 
-// createCommandDocument creates a document for command name and basic info
-func (vs *VectorStore) createCommandDocument(page MANPage) VectorDocument {
-	content := fmt.Sprintf("command %s: %s", page.Name, page.Description)
+// -----------------------------------------------------------------------------
+// DOC BUILDERS
+// -----------------------------------------------------------------------------
 
+func (vs *VectorStore) docFromCommand(page MANPage) VectorDocument {
 	return VectorDocument{
 		ID:      fmt.Sprintf("%s-command", page.Name),
-		Content: content,
+		Content: fmt.Sprintf("command %s: %s", page.Name, page.Description),
 		Metadata: Metadata{
 			Command:     page.Name,
 			Section:     "command",
@@ -153,12 +132,10 @@ func (vs *VectorStore) createCommandDocument(page MANPage) VectorDocument {
 	}
 }
 
-// createDescriptionDocument creates a document from the description
-func (vs *VectorStore) createDescriptionDocument(page MANPage) VectorDocument {
+func (vs *VectorStore) docFromDescription(page MANPage) VectorDocument {
 	if page.Description == "" {
 		return VectorDocument{}
 	}
-
 	return VectorDocument{
 		ID:      fmt.Sprintf("%s-description", page.Name),
 		Content: page.Description,
@@ -169,52 +146,10 @@ func (vs *VectorStore) createDescriptionDocument(page MANPage) VectorDocument {
 	}
 }
 
-// createOptionsDocument creates a document from command options
-func (vs *VectorStore) createOptionsDocument(page MANPage) VectorDocument {
-	if len(page.Options) == 0 {
-		return VectorDocument{}
-	}
-
-	optionsText := strings.Join(page.Options, " | ")
-	content := fmt.Sprintf("options for %s: %s", page.Name, optionsText)
-
-	return VectorDocument{
-		ID:      fmt.Sprintf("%s-options", page.Name),
-		Content: content,
-		Metadata: Metadata{
-			Command: page.Name,
-			Section: "options",
-			Options: page.Options,
-		},
-	}
-}
-
-// createExamplesDocument creates a document from examples
-func (vs *VectorStore) createExamplesDocument(page MANPage) VectorDocument {
-	if len(page.Examples) == 0 {
-		return VectorDocument{}
-	}
-
-	examplesText := strings.Join(page.Examples, " | ")
-	content := fmt.Sprintf("examples for %s: %s", page.Name, examplesText)
-
-	return VectorDocument{
-		ID:      fmt.Sprintf("%s-examples", page.Name),
-		Content: content,
-		Metadata: Metadata{
-			Command:  page.Name,
-			Section:  "examples",
-			Examples: page.Examples,
-		},
-	}
-}
-
-// createSynopsisDocument creates a document from synopsis
-func (vs *VectorStore) createSynopsisDocument(page MANPage) VectorDocument {
+func (vs *VectorStore) docFromSynopsis(page MANPage) VectorDocument {
 	if page.Synopsis == "" {
 		return VectorDocument{}
 	}
-
 	return VectorDocument{
 		ID:      fmt.Sprintf("%s-synopsis", page.Name),
 		Content: page.Synopsis,
@@ -225,250 +160,143 @@ func (vs *VectorStore) createSynopsisDocument(page MANPage) VectorDocument {
 	}
 }
 
-// addToIndex adds a document to the inverted index
-func (vs *VectorStore) addToIndex(doc VectorDocument) {
-	words := vs.tokenize(doc.Content)
-
-	for _, word := range words {
-		vs.index[word] = append(vs.index[word], doc.ID)
+func (vs *VectorStore) docFromOptions(page MANPage) VectorDocument {
+	if len(page.Options) == 0 {
+		return VectorDocument{}
+	}
+	text := strings.Join(page.Options, " | ")
+	return VectorDocument{
+		ID:      fmt.Sprintf("%s-options", page.Name),
+		Content: fmt.Sprintf("options for %s: %s", page.Name, text),
+		Metadata: Metadata{
+			Command: page.Name,
+			Section: "options",
+			Options: page.Options,
+		},
 	}
 }
 
-// tokenize splits text into words for indexing
+func (vs *VectorStore) docFromExamples(page MANPage) VectorDocument {
+	if len(page.Examples) == 0 {
+		return VectorDocument{}
+	}
+	text := strings.Join(page.Examples, " | ")
+	return VectorDocument{
+		ID:      fmt.Sprintf("%s-examples", page.Name),
+		Content: fmt.Sprintf("examples for %s: %s", page.Name, text),
+		Metadata: Metadata{
+			Command:  page.Name,
+			Section:  "examples",
+			Examples: page.Examples,
+		},
+	}
+}
+
+// -----------------------------------------------------------------------------
+// INVERTED INDEX
+// -----------------------------------------------------------------------------
+
+func (vs *VectorStore) addToIndex(doc VectorDocument) {
+	words := vs.tokenize(doc.Content)
+	for _, w := range words {
+		vs.index[w] = append(vs.index[w], doc.ID)
+	}
+}
+
 func (vs *VectorStore) tokenize(text string) []string {
-	// Convert to lowercase and split
 	text = strings.ToLower(text)
 	words := strings.Fields(text)
 
-	// Simple stemming and filtering
-	var tokens []string
-	for _, word := range words {
-		// Remove common punctuation
-		word = strings.Trim(word, ".,!?;:\"'()[]{}")
-
-		// Filter out very short words and common stop words
-		if len(word) > 2 && !vs.isStopWord(word) {
-			tokens = append(tokens, word)
+	var out []string
+	for _, w := range words {
+		w = strings.Trim(w, `.,!?;:"'()[]{}<>`)
+		if len(w) > 2 && !vs.isStopWord(w) {
+			out = append(out, w)
 		}
 	}
 
-	return tokens
+	return out
 }
 
-// isStopWord checks if a word is a common stop word
-func (vs *VectorStore) isStopWord(word string) bool {
-	stopWords := map[string]bool{
-		"the": true, "and": true, "for": true, "with": true, "this": true,
-		"that": true, "from": true, "are": true, "was": true, "were": true,
-		"have": true, "has": true, "had": true, "will": true, "would": true,
-		"could": true, "should": true, "can": true, "may": true, "might": true,
-		"which": true, "what": true, "when": true, "where": true, "why": true,
-		"how": true, "who": true, "whom": true, "whose": true,
+func (vs *VectorStore) isStopWord(w string) bool {
+	stop := map[string]bool{
+		"the": true, "and": true, "for": true, "with": true,
+		"this": true, "that": true, "from": true, "are": true,
+		"was": true, "were": true, "you": true, "your": true,
 	}
-
-	return stopWords[word]
+	return stop[w]
 }
 
-// Search performs semantic search on the vector store
+// -----------------------------------------------------------------------------
+// SEARCH — TF-IDF + relevance boosts
+// -----------------------------------------------------------------------------
+
 func (vs *VectorStore) Search(query string, limit int) ([]VectorDocument, error) {
 	if !vs.initialized {
 		return nil, fmt.Errorf("vector store not initialized")
 	}
 
-	color.Blue("🔍 Searching for: %s", query)
-
 	vs.mu.RLock()
 	defer vs.mu.RUnlock()
 
-	// Enhanced TF-IDF like scoring with better query understanding
 	queryWords := vs.tokenize(query)
 	docScores := make(map[string]float32)
 	totalDocs := float32(len(vs.documents))
 
-	// Calculate scores for each document
-	for _, word := range queryWords {
-		if docIDs, exists := vs.index[word]; exists {
-			// TF (term frequency) - simple count
-			tf := float32(len(docIDs)) / totalDocs
+	// TF-IDF scoring
+	for _, w := range queryWords {
+		docs := vs.index[w]
+		if len(docs) == 0 {
+			continue
+		}
 
-			// IDF (inverse document frequency)
-			docFreq := float32(len(docIDs))
-			idf := float32(1.0)
-			if docFreq > 0 {
-				idf = float32(math.Log(float64(totalDocs) / float64(docFreq)))
-			}
+		tf := float32(len(docs)) / totalDocs
+		df := float64(len(docs))
+		idf := float32(math.Log(float64(totalDocs) / df))
 
-			// TF-IDF score
-			score := tf * idf
-
-			for _, docID := range docIDs {
-				docScores[docID] += score
-			}
+		score := tf * idf
+		for _, id := range docs {
+			docScores[id] += score
 		}
 	}
 
-	// MAJOR IMPROVEMENT: Add significant bonus for exact command matches
+	// Boost for exact command name in query
 	queryLower := strings.ToLower(query)
-
-	// Check for common patterns in the query and boost relevant commands
-	if strings.Contains(queryLower, "list") && strings.Contains(queryLower, "file") {
-		// Boost ls, find, dir commands
-		for docID, doc := range vs.documents {
-			cmdLower := strings.ToLower(doc.Metadata.Command)
-			if cmdLower == "ls" || cmdLower == "find" || cmdLower == "dir" {
-				docScores[docID] += 3.0
-			}
-		}
-	}
-
-	if strings.Contains(queryLower, "directory") || strings.Contains(queryLower, "folder") {
-		// Boost directory-related commands
-		for docID, doc := range vs.documents {
-			cmdLower := strings.ToLower(doc.Metadata.Command)
-			if cmdLower == "ls" || cmdLower == "pwd" || cmdLower == "dir" {
-				docScores[docID] += 2.0
-			}
-		}
-	}
-
-	// Add bonus for exact command matches
-	if exactDocs := vs.searchExactCommand(query); len(exactDocs) > 0 {
-		for _, doc := range exactDocs {
-			docScores[doc.ID] += 2.0 // Bonus for exact matches
-		}
-	}
-
-	// Add bonus for partial matches in command names
-	for docID, doc := range vs.documents {
-		commandName := strings.ToLower(doc.Metadata.Command)
-		queryLower := strings.ToLower(query)
-
-		// Bonus if query contains command name
-		if strings.Contains(queryLower, commandName) {
-			docScores[docID] += 1.5
-		}
-
-		// Bonus if command name contains query words
-		for _, word := range queryWords {
-			if strings.Contains(commandName, word) {
-				docScores[docID] += 0.5
-			}
-		}
-	}
-
-	// NEW: Penalize completely irrelevant commands
-	for docID, doc := range vs.documents {
+	for id, doc := range vs.documents {
 		cmdLower := strings.ToLower(doc.Metadata.Command)
-		// Penalize git commands for non-git queries (unless git is mentioned)
-		if strings.HasPrefix(cmdLower, "git-") && !strings.Contains(queryLower, "git") {
-			docScores[docID] *= 0.1 // Reduce score by 90%
-		}
-		// Penalize kubectl commands for non-kubernetes queries
-		if strings.HasPrefix(cmdLower, "kubectl") && !strings.Contains(queryLower, "kube") {
-			docScores[docID] *= 0.1
-		}
-		// Penalize dangerous commands for safe queries
-		if (cmdLower == "killall" || cmdLower == "rm") &&
-			!strings.Contains(queryLower, "kill") && !strings.Contains(queryLower, "remove") {
-			docScores[docID] *= 0.1
+		if strings.Contains(queryLower, cmdLower) {
+			docScores[id] += 2.0
 		}
 	}
 
-	// Convert to results
+	// Convert to list
 	var results []VectorDocument
-	for docID, score := range docScores {
-		if doc, exists := vs.documents[docID]; exists && score > 0.1 { // Increased threshold
-			doc.Similarity = score
-			results = append(results, doc)
+	for id, score := range docScores {
+		if score < 0.10 {
+			continue
 		}
+		doc := vs.documents[id]
+		doc.Similarity = score
+		results = append(results, doc)
 	}
 
-	// Sort by similarity score (descending)
+	// Sort
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Similarity > results[j].Similarity
 	})
 
-	// Apply limit
 	if len(results) > limit {
 		results = results[:limit]
 	}
 
 	color.Green("✅ Found %d relevant documents for '%s'", len(results), query)
-
-	// Debug: Show top results with better filtering
-	if len(results) > 0 {
-		color.Cyan("🔍 Top results:")
-		for i := 0; i < min(5, len(results)); i++ {
-			doc := results[i]
-			color.Cyan("  %d. %s (score: %.2f)", i+1, doc.Metadata.Command, doc.Similarity)
-		}
-	}
-
 	return results, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+// -----------------------------------------------------------------------------
+// GET FULL COMMAND INFO — used for ExplainCommand
+// -----------------------------------------------------------------------------
 
-// searchExactCommand searches for exact command matches
-func (vs *VectorStore) searchExactCommand(query string) []VectorDocument {
-	var results []VectorDocument
-	query = strings.ToLower(strings.TrimSpace(query))
-
-	// Check if query contains a command name
-	for _, doc := range vs.documents {
-		if strings.ToLower(doc.Metadata.Command) == query {
-			results = append(results, doc)
-		}
-	}
-
-	return results
-}
-
-// GetCommandInfo retrieves comprehensive information about a command
-func (vs *VectorStore) GetCommandInfo(command string) (*CommandInfo, error) {
-	if !vs.initialized {
-		return nil, fmt.Errorf("vector store not initialized")
-	}
-
-	vs.mu.RLock()
-	defer vs.mu.RUnlock()
-
-	var info CommandInfo
-	info.Name = command
-
-	// Collect all documents for this command
-	for _, doc := range vs.documents {
-		if doc.Metadata.Command == command {
-			switch doc.Metadata.Section {
-			case "command":
-				info.Description = doc.Metadata.Description
-			case "synopsis":
-				info.Synopsis = doc.Content
-			case "options":
-				info.Options = append(info.Options, doc.Metadata.Options...)
-			case "examples":
-				info.Examples = append(info.Examples, doc.Metadata.Examples...)
-			}
-		}
-	}
-
-	// Remove duplicates
-	info.Options = vs.removeDuplicates(info.Options)
-	info.Examples = vs.removeDuplicates(info.Examples)
-
-	if info.Description == "" {
-		return nil, fmt.Errorf("no information found for command: %s", command)
-	}
-
-	return &info, nil
-}
-
-// CommandInfo contains comprehensive command information
 type CommandInfo struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
@@ -477,46 +305,80 @@ type CommandInfo struct {
 	Examples    []string `json:"examples"`
 }
 
-// removeDuplicates removes duplicate strings from a slice
-func (vs *VectorStore) removeDuplicates(slice []string) []string {
-	seen := make(map[string]bool)
-	var result []string
+func (vs *VectorStore) GetCommandInfo(cmd string) (*CommandInfo, error) {
+	if !vs.initialized {
+		return nil, fmt.Errorf("vector store not initialized")
+	}
 
-	for _, item := range slice {
-		if !seen[item] {
-			seen[item] = true
-			result = append(result, item)
+	vs.mu.RLock()
+	defer vs.mu.RUnlock()
+
+	var info CommandInfo
+	info.Name = cmd
+
+	for _, doc := range vs.documents {
+		if doc.Metadata.Command != cmd {
+			continue
+		}
+
+		switch doc.Metadata.Section {
+		case "command":
+			info.Description = doc.Metadata.Description
+		case "synopsis":
+			info.Synopsis = doc.Content
+		case "options":
+			info.Options = append(info.Options, doc.Metadata.Options...)
+		case "examples":
+			info.Examples = append(info.Examples, doc.Metadata.Examples...)
 		}
 	}
 
-	return result
+	if info.Description == "" {
+		return nil, fmt.Errorf("no information found for: %s", cmd)
+	}
+
+	info.Options = unique(info.Options)
+	info.Examples = unique(info.Examples)
+
+	return &info, nil
 }
 
-// GetRelevantCommands finds commands relevant to a user query
-func (vs *VectorStore) GetRelevantCommands(query string, maxResults int) ([]CommandInfo, error) {
-	docs, err := vs.Search(query, maxResults*2) // Get extra for deduplication
+func unique(list []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range list {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// -----------------------------------------------------------------------------
+// RELEVANT COMMANDS FOR RAG RETRIEVAL
+// -----------------------------------------------------------------------------
+
+func (vs *VectorStore) GetRelevantCommands(query string, max int) ([]CommandInfo, error) {
+	docs, err := vs.Search(query, max*2)
 	if err != nil {
 		return nil, err
 	}
 
-	// Group by command and get best match for each
-	commandDocs := make(map[string]VectorDocument)
-	for _, doc := range docs {
-		current, exists := commandDocs[doc.Metadata.Command]
-		if !exists || doc.Similarity > current.Similarity {
-			commandDocs[doc.Metadata.Command] = doc
+	best := map[string]VectorDocument{}
+	for _, d := range docs {
+		if existing, ok := best[d.Metadata.Command]; !ok || d.Similarity > existing.Similarity {
+			best[d.Metadata.Command] = d
 		}
 	}
 
-	// Convert to CommandInfo
 	var results []CommandInfo
-	for command := range commandDocs {
-		info, err := vs.GetCommandInfo(command)
+	for cmd := range best {
+		info, err := vs.GetCommandInfo(cmd)
 		if err == nil {
 			results = append(results, *info)
 		}
-
-		if len(results) >= maxResults {
+		if len(results) >= max {
 			break
 		}
 	}
@@ -524,80 +386,50 @@ func (vs *VectorStore) GetRelevantCommands(query string, maxResults int) ([]Comm
 	return results, nil
 }
 
-// ensureIndexDir creates the index directory
+// -----------------------------------------------------------------------------
+// PERSISTENCE
+// -----------------------------------------------------------------------------
+
 func (vs *VectorStore) ensureIndexDir() error {
-	color.Cyan("🔧 Creating vector index directory: %s", vs.indexDir)
-
-	// Create with proper permissions and parents
-	if err := os.MkdirAll(vs.indexDir, 0755); err != nil {
-		color.Red("❌ Failed to create vector index directory: %v", err)
-		return fmt.Errorf("failed to create directory %s: %w", vs.indexDir, err)
-	}
-
-	// Verify the directory was created
-	if info, err := os.Stat(vs.indexDir); err != nil {
-		color.Red("❌ Vector index directory doesn't exist after creation: %v", err)
-		return err
-	} else if !info.IsDir() {
-		color.Red("❌ Vector index path is not a directory: %s", vs.indexDir)
-		return fmt.Errorf("path is not a directory: %s", vs.indexDir)
-	}
-
-	color.Green("✅ Vector index directory created: %s", vs.indexDir)
-	return nil
+	return os.MkdirAll(vs.indexDir, 0755)
 }
 
-// saveVectorIndex saves the vector index to disk
 func (vs *VectorStore) saveVectorIndex() error {
-	indexFile := filepath.Join(vs.indexDir, "vector_index.json")
-	color.Cyan("💾 Saving vector index to: %s", indexFile)
-
-	// Ensure directory exists
 	if err := vs.ensureIndexDir(); err != nil {
-		return fmt.Errorf("failed to ensure index directory: %w", err)
+		return err
 	}
+
+	tempPath := filepath.Join(vs.indexDir, "vector_index.json.tmp")
+	finalPath := filepath.Join(vs.indexDir, "vector_index.json")
 
 	data, err := json.MarshalIndent(vs.documents, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal index: %w", err)
+		return err
 	}
 
-	// Write with temporary file first to avoid corruption
-	tempFile := indexFile + ".tmp"
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
-		color.Red("❌ Failed to write temporary index file: %v", err)
-		return fmt.Errorf("failed to write temporary file: %w", err)
+	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+		return err
 	}
 
-	// Rename to final file (atomic operation)
-	if err := os.Rename(tempFile, indexFile); err != nil {
-		color.Red("❌ Failed to rename temporary index file: %v", err)
-		return fmt.Errorf("failed to rename file: %w", err)
-	}
-
-	color.Green("💾 Vector index saved successfully: %s", indexFile)
-	color.Green("📊 Index contains %d documents", len(vs.documents))
-	return nil
+	return os.Rename(tempPath, finalPath)
 }
 
-// loadVectorIndex loads the vector index from disk
 func (vs *VectorStore) loadVectorIndex() error {
-	indexFile := filepath.Join(vs.indexDir, "vector_index.json")
+	path := filepath.Join(vs.indexDir, "vector_index.json")
 
-	data, err := os.ReadFile(indexFile)
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
-		if os.IsNotExist(err) {
-			color.Yellow("⚠️  No existing vector index found")
-			return nil
-		}
-		return fmt.Errorf("failed to read index file: %w", err)
+		return err
 	}
 
 	if err := json.Unmarshal(data, &vs.documents); err != nil {
-		return fmt.Errorf("failed to unmarshal index: %w", err)
+		return err
 	}
 
-	// Rebuild the inverted index
+	// Rebuild inverted index
 	vs.index = make(map[string][]string)
 	for _, doc := range vs.documents {
 		vs.addToIndex(doc)
@@ -608,17 +440,19 @@ func (vs *VectorStore) loadVectorIndex() error {
 	return nil
 }
 
-// IsInitialized returns whether the vector store is ready
 func (vs *VectorStore) IsInitialized() bool {
 	return vs.initialized
 }
 
-// GetStats returns statistics about the vector store
+// -----------------------------------------------------------------------------
+// STATS
+// -----------------------------------------------------------------------------
+
 func (vs *VectorStore) GetStats() map[string]interface{} {
 	vs.mu.RLock()
 	defer vs.mu.RUnlock()
 
-	commands := make(map[string]bool)
+	commands := map[string]bool{}
 	for _, doc := range vs.documents {
 		commands[doc.Metadata.Command] = true
 	}

@@ -9,6 +9,7 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/shell"
+	"helix/internal/utils"
 
 	"github.com/fatih/color"
 )
@@ -478,7 +479,7 @@ Command:`, request, gm.workingDir, currentBranch)
 		return fmt.Errorf("AI git command generation failed: %w", err)
 	}
 
-	command := ai.ExtractCommand(response)
+	command := utils.ExtractCommand(response)
 	if command == "" {
 		return fmt.Errorf("AI didn't generate a valid git command")
 	}

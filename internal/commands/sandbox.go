@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"helix/internal/shell"
@@ -12,7 +11,7 @@ import (
 	"github.com/fatih/color"
 )
 
-// SandboxMode defines the level of directory restriction
+// SandboxMode defines the restriction level
 type SandboxMode int
 
 const (
@@ -21,18 +20,18 @@ const (
 	SandboxStrict
 )
 
-// DirectorySandbox manages execution restrictions
+// DirectorySandbox with Mode C (read-only outside sandbox)
 type DirectorySandbox struct {
 	allowedDir  string
 	mode        SandboxMode
 	originalDir string
 }
 
-// NewDirectorySandbox creates a new sandbox instance
+// NewDirectorySandbox creates default sandbox
 func NewDirectorySandbox() *DirectorySandbox {
 	currentDir, err := os.Getwd()
 	if err != nil {
-		currentDir = "." // Fallback
+		currentDir = "."
 	}
 
 	return &DirectorySandbox{
@@ -42,200 +41,234 @@ func NewDirectorySandbox() *DirectorySandbox {
 	}
 }
 
-// ValidateCommand checks if a command is allowed within the sandbox
+// ================================================================
+// 🔥 MODE C CORE LOGIC
+// Allow READ-ONLY absolute paths anywhere,
+// but MODIFY/WRITE actions are blocked outside sandbox.
+// ================================================================
+
+// ValidateCommand checks if a command is allowed under sandbox rules
 func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 	if ds.mode == SandboxDisabled {
-		return true, "" // No restrictions
+		return true, ""
 	}
 
-	command = strings.ToLower(command)
+	commandLower := strings.ToLower(command)
 
-	// Always block absolute path traversal attempts
-	if ds.containsAbsolutePathTraversal(command) {
-		return false, "Command contains absolute path traversal"
+	// 1. Detect dangerous write/delete/edit operations
+	if ds.isDangerousWriteOperation(commandLower) {
+		args := ds.extractFileArguments(commandLower)
+
+		for _, arg := range args {
+			if arg == "" {
+				continue
+			}
+
+			if ds.isOutsideSandbox(arg) {
+				return false, fmt.Sprintf(
+					"write/delete/edit operation outside sandbox: %s", arg)
+			}
+		}
 	}
 
-	// Check for attempts to escape the sandbox directory
-	if ds.containsDirectoryEscape(command) {
-		return false, "Command attempts to escape sandbox directory"
+	// 2. Detect directory escape attempts (../ etc.)
+	if ds.containsDirectoryEscape(commandLower) {
+		return false, "command attempts directory escape"
 	}
 
-	// Check for dangerous operations outside sandbox
-	if ds.containsDangerousExternalOperations(command) {
-		return false, "Command performs dangerous operations outside sandbox"
+	// 3. ABSOLUTE PATHS ARE ALLOWED — ONLY VALIDATE TARGETS
+	// No regex-based blocking — we check resolved paths instead.
+	paths := ds.extractFileArguments(commandLower)
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+
+		// Safe: absolute path but read-only operation
+		// Only validate for write scenarios (done above)
+		_ = p
 	}
 
 	return true, ""
 }
 
-// containsAbsolutePathTraversal checks for absolute path usage
-func (ds *DirectorySandbox) containsAbsolutePathTraversal(command string) bool {
-	// Match absolute paths (Unix: /, Windows: C:\, D:\, etc.)
-	absolutePathPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`\s/(?:[^/]\S*)?`), // Unix absolute paths
-		regexp.MustCompile(`(?i)\s[a-z]:\\`),  // Windows drive letters (case-insensitive)
-		regexp.MustCompile(`rm\s+-rf\s+/`),    // Dangerous rm with root
-		regexp.MustCompile(`chmod\s+.*\s+/`),  // chmod on root
-		regexp.MustCompile(`chown\s+.*\s+/`),  // chown on root
+// ================================================================
+// 🔍 Dangerous write/edit/delete operations
+// ================================================================
+
+func (ds *DirectorySandbox) isDangerousWriteOperation(cmd string) bool {
+	dangerous := []string{
+		"rm ", "rm -rf", "mv ", "cp ", "dd ", "truncate",
+		"chmod", "chown", "tee ", "echo " + ">",
+		"sed -i", "perl -pi", "> ", ">> ",
 	}
 
-	for _, pattern := range absolutePathPatterns {
-		if pattern.MatchString(command) {
+	for _, d := range dangerous {
+		if strings.Contains(cmd, d) {
 			return true
 		}
 	}
-
 	return false
 }
 
-// containsDirectoryEscape checks for attempts to escape current directory
-func (ds *DirectorySandbox) containsDirectoryEscape(command string) bool {
-	// Patterns that attempt to move up directory hierarchy
+// ================================================================
+// ⚠ Escape detection
+// ================================================================
+
+func (ds *DirectorySandbox) containsDirectoryEscape(cmd string) bool {
 	escapePatterns := []string{
-		"cd ..", "cd ../", "cd ..\\",
-		"rm -rf ../", "rm -rf ..\\",
-		"../", "..\\",
+		"../", "..\\", "cd ..", "cd ../", "cd ..\\",
 	}
 
-	for _, pattern := range escapePatterns {
-		if strings.Contains(command, pattern) {
-			// Allow if it's just checking parent, but not operating on it
-			if ds.isJustChecking(command) {
-				continue
-			}
-			return true
-		}
-	}
-
-	return false
-}
-
-// containsDangerousExternalOperations checks for dangerous ops outside sandbox
-func (ds *DirectorySandbox) containsDangerousExternalOperations(command string) bool {
-	dangerousCommands := []string{
-		"rm -rf", "chmod", "chown", "mv ", "cp ", "dd ",
-		"format", "mkfs", "fdisk",
-	}
-
-	// If command contains dangerous operations with relative paths that escape
-	for _, dangerousCmd := range dangerousCommands {
-		if strings.Contains(command, dangerousCmd) {
-			// Check if it's operating outside current directory
-			if ds.operatesOutsideCurrentDir(command) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// isJustChecking checks if command is just inspecting rather than modifying
-func (ds *DirectorySandbox) isJustChecking(command string) bool {
-	safePatterns := []string{
-		"ls", "find", "grep", "cat", "head", "tail", "file",
-		"stat", "du", "df", "pwd", "echo", "print",
-	}
-
-	for _, pattern := range safePatterns {
-		if strings.HasPrefix(command, pattern) {
+	for _, p := range escapePatterns {
+		if strings.Contains(cmd, p) {
 			return true
 		}
 	}
 	return false
 }
 
-// operatesOutsideCurrentDir checks if command operates outside allowed directory
-func (ds *DirectorySandbox) operatesOutsideCurrentDir(command string) bool {
-	// Extract file/directory arguments from command
-	args := ds.extractFileArguments(command)
+// ================================================================
+// 🔍 Extract file paths from a shell command
+// ================================================================
 
-	for _, arg := range args {
-		if ds.isOutsideSandbox(arg) {
-			return true
-		}
-	}
+func (ds *DirectorySandbox) extractFileArguments(cmd string) []string {
+	var out []string
+	words := strings.Fields(cmd)
 
-	return false
-}
-
-// extractFileArguments extracts potential file/directory arguments from command
-func (ds *DirectorySandbox) extractFileArguments(command string) []string {
-	var files []string
-
-	// Split command into words
-	words := strings.Fields(command)
-
-	// Skip the command itself and flags, look for file-like arguments
-	for i := 1; i < len(words); i++ {
-		word := words[i]
-
-		// Skip flags
-		if strings.HasPrefix(word, "-") {
+	for _, w := range words {
+		// skip flags
+		if strings.HasPrefix(w, "-") {
 			continue
 		}
 
-		// Skip common non-file arguments
-		if ds.isCommonNonFileArgument(word) {
+		// skip pure URLs or tokens
+		if ds.isCommonNonFileArgument(w) {
 			continue
 		}
 
-		// This might be a file/directory argument
-		files = append(files, word)
+		// skip operators
+		if w == "|" || w == ">" || w == ">>" {
+			continue
+		}
+
+		// possible file path
+		out = append(out, w)
 	}
 
-	return files
+	return out
 }
 
-// isCommonNonFileArgument checks if argument is likely not a file
 func (ds *DirectorySandbox) isCommonNonFileArgument(arg string) bool {
-	nonFilePatterns := []string{
-		"yes", "no", "true", "false", "0", "1",
-		"localhost", "127.0.0.1", "0.0.0.0",
+	patterns := []string{
 		"http://", "https://", "ftp://",
+		"localhost", "127.0.0.1", "0.0.0.0",
+		"yes", "no", "true", "false",
 	}
 
-	for _, pattern := range nonFilePatterns {
-		if strings.Contains(arg, pattern) {
+	for _, p := range patterns {
+		if strings.Contains(arg, p) {
 			return true
 		}
 	}
-
 	return false
 }
 
-// isOutsideSandbox checks if a path is outside the allowed directory
-func (ds *DirectorySandbox) isOutsideSandbox(path string) bool {
-	// Clean and resolve the path
-	cleanPath := filepath.Clean(path)
+// ================================================================
+// 🧠 Realpath-based boundary check
+// ================================================================
 
-	// If it's a relative path, make it absolute relative to current dir
-	if !filepath.IsAbs(cleanPath) {
-		cleanPath = filepath.Join(ds.allowedDir, cleanPath)
+func (ds *DirectorySandbox) isOutsideSandbox(pathStr string) bool {
+	if ds.mode == SandboxDisabled {
+		return false
 	}
 
-	// Check if the resolved path is within the allowed directory
-	relativePath, err := filepath.Rel(ds.allowedDir, cleanPath)
+	// Resolve symlinks and clean
+	real, err := filepath.EvalSymlinks(pathStr)
 	if err != nil {
-		return true // Error means it's likely outside
+		real = filepath.Clean(pathStr)
 	}
 
-	// If relative path starts with .., it's outside
-	return strings.HasPrefix(relativePath, "..")
+	// If not absolute, resolve relative to sandbox root
+	if !filepath.IsAbs(real) {
+		real = filepath.Join(ds.allowedDir, real)
+	}
+
+	real = filepath.Clean(real)
+
+	// Now compare
+	rel, err := filepath.Rel(ds.allowedDir, real)
+	if err != nil {
+		return true
+	}
+
+	return strings.HasPrefix(rel, "..")
 }
 
-// SetMode changes the sandbox restriction level
+// ================================================================
+// 📁 Directory control
+// ================================================================
+
+func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
+	if ds.mode == SandboxDisabled {
+		return os.Chdir(newDir)
+	}
+
+	// Resolve
+	real, err := filepath.EvalSymlinks(newDir)
+	if err != nil {
+		real = filepath.Clean(newDir)
+	}
+
+	// Abs if needed
+	if !filepath.IsAbs(real) {
+		real = filepath.Join(ds.allowedDir, real)
+	}
+
+	real = filepath.Clean(real)
+
+	if ds.isOutsideSandbox(real) {
+		return fmt.Errorf("directory change outside sandbox: %s", newDir)
+	}
+
+	if err := os.Chdir(real); err != nil {
+		return err
+	}
+
+	ds.allowedDir = real
+	color.Green("📁 Changed directory: %s", real)
+	return nil
+}
+
+func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell.Env) error {
+	if ok, reason := ds.ValidateCommand(cmd); !ok {
+		return fmt.Errorf("sandbox violation: %s", reason)
+	}
+	return ExecuteCommand(cmd, cfg, env)
+}
+
+func (ds *DirectorySandbox) PrintStatus() {
+	color.Cyan("🔒 Sandbox Status:")
+	color.Cyan("  Mode: %s", ds.ModeString())
+	color.Cyan("  Allowed Directory: %s", ds.allowedDir)
+
+	cwd, _ := os.Getwd()
+	color.Cyan("  Current Working Directory: %s", cwd)
+}
+
+// ================================================================
+// Helpers
+// ================================================================
+
 func (ds *DirectorySandbox) SetMode(mode SandboxMode) {
 	ds.mode = mode
 	color.Yellow("🔒 Sandbox mode set to: %s", ds.ModeString())
 }
 
-// GetMode returns the current sandbox mode
 func (ds *DirectorySandbox) GetMode() SandboxMode {
 	return ds.mode
 }
 
-// ModeString returns a human-readable mode description
 func (ds *DirectorySandbox) ModeString() string {
 	switch ds.mode {
 	case SandboxDisabled:
@@ -249,46 +282,13 @@ func (ds *DirectorySandbox) ModeString() string {
 	}
 }
 
-// ChangeDirectory safely changes the current working directory
-func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
-	if ds.mode == SandboxDisabled {
-		return os.Chdir(newDir)
-	}
-
-	// Clean the path
-	cleanDir := filepath.Clean(newDir)
-
-	// If relative path, make absolute relative to current
-	if !filepath.IsAbs(cleanDir) {
-		cleanDir = filepath.Join(ds.allowedDir, cleanDir)
-	}
-
-	// Check if the new directory is within sandbox
-	if ds.isOutsideSandbox(cleanDir) {
-		return fmt.Errorf("cannot change to directory outside sandbox: %s", newDir)
-	}
-
-	// Change directory
-	if err := os.Chdir(cleanDir); err != nil {
-		return err
-	}
-
-	// Update allowed directory to new location
-	ds.allowedDir = cleanDir
-	color.Green("📁 Changed to directory: %s", cleanDir)
-
-	return nil
-}
-
-// GetCurrentDirectory returns the current sandboxed directory
 func (ds *DirectorySandbox) GetCurrentDirectory() string {
 	return ds.allowedDir
 }
 
-// ResetToOriginal resets to the original directory
 func (ds *DirectorySandbox) ResetToOriginal() error {
 	if ds.mode != SandboxDisabled && ds.isOutsideSandbox(ds.originalDir) {
-		return fmt.Errorf("cannot reset to original directory outside sandbox")
+		return fmt.Errorf("cannot reset outside sandbox")
 	}
 
 	if err := os.Chdir(ds.originalDir); err != nil {
@@ -296,29 +296,6 @@ func (ds *DirectorySandbox) ResetToOriginal() error {
 	}
 
 	ds.allowedDir = ds.originalDir
-	color.Green("📁 Reset to original directory: %s", ds.originalDir)
+	color.Green("📁 Reset to: %s", ds.originalDir)
 	return nil
-}
-
-// WrapCommand wraps a command with sandbox safety checks
-func (ds *DirectorySandbox) WrapCommand(command string, execConfig ExecuteConfig, env shell.Env) error {
-	// Validate command against sandbox rules
-	if valid, reason := ds.ValidateCommand(command); !valid {
-		return fmt.Errorf("sandbox violation: %s", reason)
-	}
-
-	// Execute the command with current directory context
-	return ExecuteCommand(command, execConfig, env)
-}
-
-// PrintStatus shows current sandbox status
-func (ds *DirectorySandbox) PrintStatus() {
-	color.Cyan("🔒 Sandbox Status:")
-	color.Cyan("  Mode: %s", ds.ModeString())
-	color.Cyan("  Allowed Directory: %s", ds.allowedDir)
-	color.Cyan("  Original Directory: %s", ds.originalDir)
-
-	// Show current working directory for comparison
-	currentDir, _ := os.Getwd()
-	color.Cyan("  Current Working Directory: %s", currentDir)
 }

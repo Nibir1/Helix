@@ -6,9 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"time"
 
-	"helix/internal/ai"
 	"helix/internal/shell"
 	"helix/internal/utils"
 
@@ -198,21 +196,6 @@ func AskForConfirmation(prompt string) bool {
 
 	response = strings.ToLower(strings.TrimSpace(response))
 	return response == "y" || response == "yes"
-}
-
-// ExplainCommand uses AI to explain what a command does
-func ExplainCommand(command string) (string, error) {
-	env := shell.DetectEnvironment()
-	promptBuilder := ai.NewPromptBuilder(env, utils.IsOnline(5*time.Second))
-	explainPrompt := promptBuilder.BuildExplainPrompt(command)
-
-	response, err := ai.RunModel(explainPrompt)
-	if err != nil {
-		return "", fmt.Errorf("AI explanation failed: %w", err)
-	}
-
-	cleaned := utils.CleanAIResponse(response)
-	return cleaned, nil
 }
 
 // Global syntax highlighter instance
