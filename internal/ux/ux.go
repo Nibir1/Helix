@@ -8,169 +8,170 @@ import (
 	"github.com/fatih/color"
 )
 
-// UX provides enhanced user experience features
+// UX provides enhanced sci-fi themed user experience features
 type UX struct {
-	typingSpeed time.Duration
-	colors      *ColorScheme
+	typingSpeed    time.Duration
+	colors         *ColorScheme
+	scifiMode      bool
+	animationSpeed time.Duration
 }
 
-// ColorScheme holds color configurations
+// ColorScheme holds sci-fi themed color configurations
 type ColorScheme struct {
-	Prompt     func(a ...interface{}) string
-	AIResponse func(a ...interface{}) string
-	Success    func(a ...interface{}) string
-	Error      func(a ...interface{}) string
-	Warning    func(a ...interface{}) string
-	Info       func(a ...interface{}) string
-	RAG        func(a ...interface{}) string
-	Suggestion func(a ...interface{}) string
+	Primary   func(a ...interface{}) string
+	Secondary func(a ...interface{}) string
+	Accent    func(a ...interface{}) string
+	Success   func(a ...interface{}) string
+	Error     func(a ...interface{}) string
+	Warning   func(a ...interface{}) string
+	Info      func(a ...interface{}) string
+	System    func(a ...interface{}) string
+	Neutral   func(a ...interface{}) string
+	Highlight func(a ...interface{}) string
 }
 
-// NewUX creates a new UX manager
+// NewUX creates a new sci-fi themed UX manager
 func NewUX() *UX {
 	return &UX{
-		typingSpeed: 30 * time.Millisecond,
+		typingSpeed:    25 * time.Millisecond,
+		animationSpeed: 120 * time.Millisecond,
+		scifiMode:      true,
 		colors: &ColorScheme{
-			Prompt:     color.New(color.FgCyan, color.Bold).SprintFunc(),
-			AIResponse: color.New(color.FgGreen).SprintFunc(),
-			Success:    color.New(color.FgGreen, color.Bold).SprintFunc(),
-			Error:      color.New(color.FgRed, color.Bold).SprintFunc(),
-			Warning:    color.New(color.FgYellow, color.Bold).SprintFunc(),
-			Info:       color.New(color.FgBlue).SprintFunc(),
-			RAG:        color.New(color.FgMagenta, color.Bold).SprintFunc(),
-			Suggestion: color.New(color.FgHiCyan).SprintFunc(),
+			Primary:   color.New(color.FgHiCyan, color.Bold).SprintFunc(),
+			Secondary: color.New(color.FgHiBlue).SprintFunc(),
+			Accent:    color.New(color.FgHiMagenta, color.Bold).SprintFunc(),
+			Success:   color.New(color.FgHiGreen, color.Bold).SprintFunc(),
+			Error:     color.New(color.FgHiRed, color.Bold).SprintFunc(),
+			Warning:   color.New(color.FgHiYellow, color.Bold).SprintFunc(),
+			Info:      color.New(color.FgHiWhite).SprintFunc(),
+			System:    color.New(color.FgHiGreen).SprintFunc(),
+			Neutral:   color.New(color.FgHiBlack).SprintFunc(),
+			Highlight: color.New(color.FgHiWhite, color.BgBlue, color.Bold).SprintFunc(),
 		},
 	}
 }
 
-// Typewriter prints text with a smooth, natural typing animation.
-// - Automatically speeds up for long text
-// - Slightly slower after punctuation (more human-like)
-// - Safe for multiline and large output
+// Typewriter prints text with enhanced sci-fi typing animation
 func (ux *UX) Typewriter(text string) {
 	runes := []rune(text)
 	n := len(runes)
 
-	// Base typing speed
-	baseDelay := 14 * time.Millisecond
-
-	// If text is long, speed it up proportionally
-	if n > 300 {
-		baseDelay = 6 * time.Millisecond
-	} else if n > 150 {
-		baseDelay = 10 * time.Millisecond
+	// Adaptive speed based on content length
+	baseDelay := ux.typingSpeed
+	if n > 400 {
+		baseDelay = 8 * time.Millisecond
+	} else if n > 200 {
+		baseDelay = 15 * time.Millisecond
 	}
 
 	for i, c := range runes {
 		fmt.Printf("%c", c)
 
-		// Newline? small pause
-		if c == '\n' {
+		// Enhanced pauses for dramatic effect
+		switch {
+		case c == '\n':
+			time.Sleep(baseDelay * 4)
+		case strings.ContainsRune(".!?", c):
+			time.Sleep(baseDelay * 8)
+		case strings.ContainsRune(",;:", c):
 			time.Sleep(baseDelay * 3)
-			continue
+		default:
+			// Add slight randomness for natural feel
+			variation := time.Duration(i%13) * time.Millisecond
+			time.Sleep(baseDelay + variation - (2 * time.Millisecond))
 		}
-
-		// Slow down after punctuation for realism
-		if strings.ContainsRune(".?!,", c) {
-			time.Sleep(baseDelay * 5)
-			continue
-		}
-
-		// Small natural variation (±20%)
-		delay := baseDelay
-		if i%7 == 0 {
-			delay = baseDelay + 3*time.Millisecond
-		} else if i%5 == 0 {
-			delay = baseDelay - 2*time.Millisecond
-		}
-
-		time.Sleep(delay)
 	}
-
 	fmt.Println()
 }
 
-// PrintAIResponse prints AI responses with typing effect and formatting
-func (ux *UX) PrintAIResponse(text string, useTypingEffect bool) {
-	formattedText := ux.formatResponse(text)
+// PrintSystemMessage displays system-level messages with sci-fi styling
+func (ux *UX) PrintSystemMessage(text string) {
+	ux.scifiPrint("🛸", "SYSTEM", text, ux.colors.System)
+}
 
-	fmt.Print(ux.colors.AIResponse("🤖 [Helix AI] → "))
+// PrintAIMessage displays AI responses with neural network theme
+func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
+	prefix := ux.scifiPrefix("🧠", "NEURAL_NET", ux.colors.Primary)
+	fmt.Print(prefix)
 
 	if useTypingEffect {
-		ux.Typewriter(formattedText)
+		ux.Typewriter(text)
 	} else {
-		fmt.Println(formattedText)
+		fmt.Println(text)
 	}
 }
 
-// PrintRAGEnhancedResponse prints AI responses with RAG context indication
-func (ux *UX) PrintRAGEnhancedResponse(text string, useTypingEffect bool) {
-	formattedText := ux.formatResponse(text)
-
-	fmt.Print(ux.colors.RAG("🧠 [Helix RAG] → "))
-
-	if useTypingEffect {
-		ux.Typewriter(formattedText)
-	} else {
-		fmt.Println(formattedText)
-	}
-}
-
-// PrintCommand prints command execution information
+// PrintCommand displays command execution with cyberpunk style
 func (ux *UX) PrintCommand(command string) {
-	fmt.Printf("%s %s\n",
-		ux.colors.Info("🚀 Executing:"),
-		ux.colors.Prompt(command))
+	ux.scifiPrint("⚡", "EXEC", command, ux.colors.Secondary)
 }
 
-// PrintSuccess prints success messages
+// PrintData displays data output with database theme
+func (ux *UX) PrintData(data string) {
+	ux.scifiPrint("💾", "DATA", data, ux.colors.Info)
+}
+
+// PrintSuccess displays success messages with positive sci-fi theme
 func (ux *UX) PrintSuccess(message string) {
-	fmt.Printf("%s %s\n", "✅", ux.colors.Success(message))
+	ux.scifiPrint("✅", "SUCCESS", message, ux.colors.Success)
 }
 
-// PrintError prints error messages
+// PrintError displays error messages with alert theme
 func (ux *UX) PrintError(message string) {
-	fmt.Printf("%s %s\n", "❌", ux.colors.Error(message))
+	ux.scifiPrint("🚨", "ERROR", message, ux.colors.Error)
 }
 
-// PrintWarning prints warning messages
+// PrintWarning displays warning messages with caution theme
 func (ux *UX) PrintWarning(message string) {
-	fmt.Printf("%s %s\n", "⚠️", ux.colors.Warning(message))
+	ux.scifiPrint("⚠️", "WARNING", message, ux.colors.Warning)
 }
 
-// PrintInfo prints informational messages
+// PrintInfo displays informational messages
 func (ux *UX) PrintInfo(message string) {
-	fmt.Printf("%s %s\n", "💡", ux.colors.Info(message))
+	ux.scifiPrint("ℹ️", "INFO", message, ux.colors.Info)
 }
 
-// PrintRAGInfo prints RAG-specific informational messages
-func (ux *UX) PrintRAGInfo(message string) {
-	fmt.Printf("%s %s\n", "🧠", ux.colors.RAG(message))
+// PrintDebug displays debug information
+func (ux *UX) PrintDebug(message string) {
+	ux.scifiPrint("🔧", "DEBUG", message, ux.colors.Neutral)
 }
 
-// PrintSuggestion prints command suggestions
-func (ux *UX) PrintSuggestion(message string) {
-	fmt.Printf("%s %s\n", "💡", ux.colors.Suggestion(message))
+// PrintRAGResponse displays RAG-enhanced responses with knowledge theme
+func (ux *UX) PrintRAGResponse(text string, useTypingEffect bool) {
+	prefix := ux.scifiPrefix("📚", "KNOWLEDGE_BASE", ux.colors.Accent)
+	fmt.Print(prefix)
+
+	if useTypingEffect {
+		ux.Typewriter(text)
+	} else {
+		fmt.Println(text)
+	}
 }
 
-// ShowWelcomeBanner displays the Helix welcome banner
+// ShowWelcomeBanner displays sci-fi welcome banner
 func (ux *UX) ShowWelcomeBanner(version string) {
 	banner := `
-██╗  ██╗███████╗██╗     ██╗██╗  ██╗
-██║  ██║██╔════╝██║     ██║╚██╗██╔╝
-███████║█████╗  ██║     ██║ ╚███╔╝ 
-██╔══██║██╔══╝  ██║     ██║ ██╔██╗ 
-██║  ██║███████╗███████╗██║██╔╝ ██╗
-╚═╝  ╚═╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝
-	`
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║            ██╗  ██╗███████╗██╗     ██╗██╗  ██╗                 ║
+║            ██║  ██║██╔════╝██║     ██║╚██╗██╔╝                 ║
+║            ███████║█████╗  ██║     ██║ ╚███╔╝                  ║
+║            ██╔══██║██╔══╝  ██║     ██║ ██╔██╗                  ║
+║            ██║  ██║███████╗███████╗██║██╔╝ ██╗                 ║
+║            ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝                 ║
+║                                                                ║
+║       🚀 Helix v` + version + ` - AI-Powered CLI Assistant            ║
+║                  Author - Nahasat Nibir                       ║
+║       📚 GitHub: https://github.com/Nibir1/Helix            ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+`
 
 	color.Cyan(banner)
-	color.Cyan("🚀 Helix v%s - AI-Powered CLI Assistant", version)
-	color.Cyan("📚 GitHub: https://github.com/Nibir1/Helix")
 	fmt.Println()
 }
 
-// ShowHelp displays the help information
+// ShowHelp displays sci-fi styled help information
 func (ux *UX) ShowHelp() {
 	color.Cyan("📖 Helix — Command Overview")
 	fmt.Println()
@@ -239,42 +240,23 @@ func (ux *UX) ShowHelp() {
 	fmt.Println("   Ask for anything — it will plan, reason, and execute.")
 }
 
-// ShowRAGStatus displays RAG system status information
+// ShowRAGStatus displays RAG system status with sci-fi theme
 func (ux *UX) ShowRAGStatus(stats map[string]interface{}) {
-	color.Cyan("🧠 RAG System Status:")
-	fmt.Println()
+	ux.sectionHeader("KNOWLEDGE BASE STATUS")
 
-	color.Cyan("📊 Statistics:")
-	color.Cyan("  • Initialized: %v", stats["initialized"])
-	color.Cyan("  • Indexed MAN Pages: %v", stats["indexed_pages"])
-
+	status := ux.colors.Error("OFFLINE")
 	if stats["initialized"].(bool) {
-		color.Green("✅ RAG System: ACTIVE")
-		color.Cyan("  • Vector Documents: %v", stats["total_documents"])
-		color.Cyan("  • Unique Commands: %v", stats["unique_commands"])
-		color.Cyan("  • Index Size: %v terms", stats["index_size"])
-
-		if indexedTime, ok := stats["indexed_time"]; ok {
-			color.Cyan("  • Last Indexed: %v", indexedTime)
-		}
-	} else {
-		indexingStatus := "UNKNOWN"
-		if status, ok := stats["indexing_status"]; ok {
-			indexingStatus = status.(string)
-		}
-		color.Yellow("🔄 RAG System: %s", indexingStatus)
-
-		if stats["indexed_pages"].(int) > 0 {
-			color.Cyan("  • Progress: %d pages indexed", stats["indexed_pages"])
-		}
+		status = ux.colors.Success("ONLINE")
 	}
 
-	fmt.Println()
-	color.Magenta("💡 RAG Features:")
-	color.Magenta("  • Command suggestions before AI processing")
-	color.Magenta("  • Enhanced prompts with MAN page context")
-	color.Magenta("  • Accurate command explanations")
-	color.Magenta("  • Automatic command documentation")
+	ux.PrintSystemMessage(fmt.Sprintf("Knowledge Base: %s", status))
+	ux.PrintData(fmt.Sprintf("Indexed Documents: %v", stats["indexed_pages"]))
+	ux.PrintData(fmt.Sprintf("Neural Connections: %v", stats["unique_commands"]))
+	ux.PrintData(fmt.Sprintf("Memory Allocation: %v terms", stats["index_size"]))
+
+	if indexedTime, ok := stats["indexed_time"]; ok {
+		ux.PrintDebug(fmt.Sprintf("Last Sync: %v", indexedTime))
+	}
 }
 
 // ShowCommandSuggestions displays RAG-based command suggestions
@@ -283,11 +265,9 @@ func (ux *UX) ShowCommandSuggestions(suggestions []interface{}) {
 		return
 	}
 
-	color.Cyan("💡 RAG Command Suggestions:")
-	fmt.Println()
-
+	ux.sectionHeader("NEURAL SUGGESTIONS")
 	for i, suggestion := range suggestions {
-		if i >= 3 { // Show top 3 suggestions
+		if i >= 3 {
 			break
 		}
 
@@ -296,157 +276,55 @@ func (ux *UX) ShowCommandSuggestions(suggestions []interface{}) {
 			description := s["description"].(string)
 			confidence := s["confidence"].(float32)
 
-			confidenceStr := fmt.Sprintf("%.0f%%", confidence*100)
-
-			color.Cyan("  • %s - %s", ux.colors.Suggestion(command), description)
-			color.Cyan("    Confidence: %s", confidenceStr)
-		}
-	}
-	fmt.Println()
-}
-
-// ShowRAGIndexingProgress displays RAG indexing progress
-func (ux *UX) ShowRAGIndexingProgress(elapsed time.Duration, pagesIndexed int) {
-	color.Yellow("🔄 RAG indexing in progress...")
-	color.Yellow("   Time elapsed: %v", ux.FormatDuration(elapsed))
-	if pagesIndexed > 0 {
-		color.Yellow("   Pages indexed: %d", pagesIndexed)
-	}
-}
-
-// ShowRAGIndexingComplete displays RAG indexing completion message
-func (ux *UX) ShowRAGIndexingComplete(duration time.Duration, totalPages int, totalCommands int) {
-	color.Green("🎉 RAG system initialized!")
-	color.Green("   Time: %s", ux.FormatDuration(duration))
-	color.Green("   MAN Pages: %d", totalPages)
-	color.Green("   Commands: %d", totalCommands)
-	color.Green("   RAG features are now active! 🧠")
-}
-
-// ShowRAGIndexingTimeout displays RAG indexing timeout message
-func (ux *UX) ShowRAGIndexingTimeout(duration time.Duration, pagesIndexed int) {
-	color.Yellow("⏰ RAG indexing timeout after %s", ux.FormatDuration(duration))
-	if pagesIndexed > 0 {
-		color.Yellow("   Using %d partially indexed pages", pagesIndexed)
-		color.Yellow("   RAG features may be limited")
-	} else {
-		color.Yellow("   No pages indexed - RAG features disabled")
-	}
-}
-
-// ShowEnhancedPromptInfo displays information about RAG-enhanced prompts
-func (ux *UX) ShowEnhancedPromptInfo(commandCount int) {
-	color.Magenta("🎯 RAG-enhanced prompt with %d relevant commands", commandCount)
-}
-
-// ShowRAGActiveMessage displays when RAG system becomes active
-func (ux *UX) ShowRAGActiveMessage() {
-	color.Green("🎉 RAG system is now ACTIVE! Enhanced commands available.")
-}
-
-// ShowCommandExplanation displays a detailed command explanation
-func (ux *UX) ShowCommandExplanation(command, explanation string) {
-	color.Cyan("📖 Command Explanation: %s", command)
-	fmt.Println()
-
-	// Split explanation into lines and print with proper formatting
-	lines := strings.Split(explanation, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+			ux.PrintInfo(fmt.Sprintf("Command: %s", ux.colors.Highlight(command)))
+			ux.PrintData(fmt.Sprintf("Description: %s", description))
+			ux.PrintDebug(fmt.Sprintf("Neural Confidence: %.0f%%", confidence*100))
 			fmt.Println()
-			continue
-		}
-
-		// Format different parts of the explanation
-		switch {
-		case strings.HasPrefix(line, "**") && strings.HasSuffix(line, "**"):
-			// Bold headers
-			cleanLine := strings.TrimPrefix(strings.TrimSuffix(line, "**"), "**")
-			color.Cyan("%s", cleanLine)
-		case strings.HasPrefix(line, "```bash"):
-			// Code blocks
-			color.Yellow("  %s", strings.TrimPrefix(line, "```bash"))
-		case strings.HasPrefix(line, "```"):
-			// End of code blocks
-			continue
-		case strings.HasPrefix(line, "  •"):
-			// List items
-			color.Green("  %s", line)
-		default:
-			// Regular text
-			fmt.Println(line)
 		}
 	}
 }
 
-// PrintCommandBreakdown displays a detailed breakdown of command components
-func (ux *UX) PrintCommandBreakdown(breakdown map[string]string) {
-	color.Cyan("📖 Command Breakdown:")
-	fmt.Println()
-
-	for component, explanation := range breakdown {
-		color.Cyan("  %s: %s", component, explanation)
-	}
-	fmt.Println()
-}
-
-// FormatDuration formats a duration for human readability
-func (ux *UX) FormatDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
-	hours := int(d.Hours())
-
-	if hours > 0 {
-		return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
-	}
-	return fmt.Sprintf("%dm %ds", minutes, seconds)
-}
-
-// ProgressBar shows a simple progress bar
+// ProgressBar shows a sci-fi styled progress bar
 func (ux *UX) ProgressBar(total int, description string) func() {
-	fmt.Printf("%s [", description)
+	fmt.Printf("%s [", ux.colors.System(description))
 	progress := 0
+	chars := []string{"▱", "▰"}
 
 	return func() {
 		if progress < total {
-			fmt.Print("█")
+			fmt.Print(ux.colors.Primary(chars[1]))
 			progress++
 		}
 		if progress == total {
-			fmt.Println("] ✅")
+			fmt.Println("] " + ux.colors.Success("COMPLETE"))
 		}
 	}
 }
 
-// ShowLoadingAnimation shows a simple loading animation
+// ShowLoadingAnimation shows a sci-fi loading animation
 func (ux *UX) ShowLoadingAnimation(message string, done chan bool) {
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	frames := []string{"⡿", "⣟", "⣯", "⣷", "⣾", "⣽", "⣻", "⢿"}
 	i := 0
 
 	go func() {
 		for {
 			select {
 			case <-done:
-				fmt.Print("\r\033[K") // Clear line
+				fmt.Print("\r\033[K")
 				return
 			default:
-				fmt.Printf("\r%s %s", frames[i], message)
+				fmt.Printf("\r%s %s %s",
+					ux.colors.Primary(frames[i]),
+					ux.colors.System(message),
+					ux.scifiDots(i))
 				i = (i + 1) % len(frames)
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(ux.animationSpeed)
 			}
 		}
 	}()
 }
 
-// PrintTable prints a simple table format
+// PrintTable prints a sci-fi styled table
 func (ux *UX) PrintTable(headers []string, rows [][]string) {
 	// Calculate column widths
 	widths := make([]int, len(headers))
@@ -462,92 +340,101 @@ func (ux *UX) PrintTable(headers []string, rows [][]string) {
 		}
 	}
 
-	// Print headers
-	for i, header := range headers {
-		fmt.Printf("%-*s", widths[i]+2, ux.colors.Info(header))
-	}
-	fmt.Println()
-
-	// Print separator
+	// Print headers with sci-fi style
+	fmt.Print("┌")
 	for i, width := range widths {
-		fmt.Printf("%-*s", width+2, strings.Repeat("-", width))
+		fmt.Print("─" + strings.Repeat("─", width) + "─")
 		if i < len(widths)-1 {
-			fmt.Print("  ")
+			fmt.Print("┬")
 		}
 	}
+	fmt.Println("┐")
+
+	// Headers
+	fmt.Print("│")
+	for i, header := range headers {
+		fmt.Printf(" %-*s │", widths[i], ux.colors.Primary(header))
+	}
 	fmt.Println()
 
-	// Print rows
+	// Separator
+	fmt.Print("├")
+	for i, width := range widths {
+		fmt.Print("─" + strings.Repeat("─", width) + "─")
+		if i < len(widths)-1 {
+			fmt.Print("┼")
+		}
+	}
+	fmt.Println("┤")
+
+	// Rows
 	for _, row := range rows {
+		fmt.Print("│")
 		for i, cell := range row {
-			fmt.Printf("%-*s", widths[i]+2, cell)
+			fmt.Printf(" %-*s │", widths[i], cell)
 		}
 		fmt.Println()
 	}
-}
 
-// PrintKeyValue prints key-value pairs in a formatted way
-func (ux *UX) PrintKeyValue(data map[string]interface{}) {
-	maxKeyLength := 0
-	for key := range data {
-		if len(key) > maxKeyLength {
-			maxKeyLength = len(key)
+	// Footer
+	fmt.Print("└")
+	for i, width := range widths {
+		fmt.Print("─" + strings.Repeat("─", width) + "─")
+		if i < len(widths)-1 {
+			fmt.Print("┴")
 		}
 	}
-
-	for key, value := range data {
-		padding := strings.Repeat(" ", maxKeyLength-len(key))
-		color.Cyan("  %s:%s %v", key, padding, value)
-	}
+	fmt.Println("┘")
 }
 
-// SetTypingSpeed adjusts the typing animation speed
+// Helper methods
+func (ux *UX) scifiPrint(emoji, label, text string, colorFunc func(...interface{}) string) {
+	fmt.Printf("%s %s %s\n",
+		emoji,
+		ux.scifiLabel(label),
+		colorFunc(text))
+}
+
+func (ux *UX) scifiPrefix(emoji, label string, colorFunc func(...interface{}) string) string {
+	return fmt.Sprintf("%s %s → ",
+		emoji,
+		colorFunc(label))
+}
+
+func (ux *UX) scifiLabel(label string) string {
+	return ux.colors.Neutral("[" + label + "]")
+}
+
+func (ux *UX) sectionHeader(title string) {
+	line := strings.Repeat("─", len(title)+4)
+	fmt.Printf("%s %s %s\n",
+		ux.colors.Primary("┌"+line+"┐"),
+		ux.colors.Highlight(title),
+		ux.colors.Primary("└"+line+"┘"))
+}
+
+func (ux *UX) scifiDots(frame int) string {
+	dots := []string{"   ", ".  ", ".. ", "..."}
+	return ux.colors.Neutral(dots[frame%len(dots)])
+}
+
+// SetAnimationSpeed adjusts animation speeds
+func (ux *UX) SetAnimationSpeed(speed time.Duration) {
+	ux.animationSpeed = speed
+}
+
+// SetTypingSpeed adjusts typing animation speed
 func (ux *UX) SetTypingSpeed(speed time.Duration) {
 	ux.typingSpeed = speed
 }
 
-// formatResponse cleans and formats AI responses
-func (ux *UX) formatResponse(text string) string {
-	// Remove excessive whitespace
-	text = strings.TrimSpace(text)
-
-	// Remove common AI prefixes
-	prefixes := []string{
-		"Assistant:", "AI:", "Helix:", "Response:",
-		"Here's the command:", "The command is:",
+// FormatDuration formats duration in sci-fi style
+func (ux *UX) FormatDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
-
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(text, prefix) {
-			text = strings.TrimPrefix(text, prefix)
-			text = strings.TrimSpace(text)
-		}
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
-
-	return text
-}
-
-// PrintRAGRetrievalInfo displays RAG retrieval information
-func (ux *UX) PrintRAGRetrievalInfo(query string, resultCount int, retrievalTime time.Duration) {
-	if resultCount > 0 {
-		color.Cyan("🔍 RAG Retrieval for: %s", query)
-		color.Green("✅ Found %d relevant documents", resultCount)
-		color.Green("✅ RAG retrieved %d commands in %s", resultCount, ux.FormatDuration(retrievalTime))
-	} else {
-		color.Cyan("🔍 RAG Retrieval for: %s", query)
-		color.Yellow("💡 No relevant command context found")
-	}
-}
-
-// PrintRAGEnhancedPromptInfo displays when RAG enhances a prompt
-func (ux *UX) PrintRAGEnhancedPromptInfo(commandCount int) {
-	if commandCount > 0 {
-		color.Magenta("🎯 Enhancing prompt with %d relevant commands", commandCount)
-		color.Magenta("🎯 RAG-enhanced prompt generated with command context")
-	}
-}
-
-// PrintDebugInfo displays debug information for development
-func (ux *UX) PrintDebugInfo(message string) {
-	color.Yellow("🔍 DEBUG: %s", message)
+	return fmt.Sprintf("%dm %ds", int(d.Minutes())%60, int(d.Seconds())%60)
 }
