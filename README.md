@@ -215,7 +215,7 @@ git commit -F .helix-commit-msg.txt
 This avoids shell‑escaping issues for messages with spaces or symbols.  
 Helix also checks for **staged changes** before committing to avoid empty commits.
 
-### Dangerous Git Actions (Option C)
+### Dangerous Git Actions
 
 For advanced workflows, the planner may also emit:
 
