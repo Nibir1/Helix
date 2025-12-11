@@ -1,6 +1,14 @@
 # Helix 🤖  
 **An Intelligent, AI‑Powered CLI Assistant That Understands Natural Language & System Documentation**
 
+---
+
+[![Helix Demo](https://img.youtube.com/vi/FJ_UbiX5o6U/maxresdefault.jpg)](https://youtu.be/FJ_UbiX5o6U)
+
+> 📺 **[Watch the full end-to-end demo](https://youtu.be/FJ_UbiX5o6U)** featuring core functionalities.
+
+---
+
 ![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
