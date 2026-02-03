@@ -16,10 +16,10 @@
 Helix is an **AI-powered command‑line assistant** that turns natural language into **safe, executable actions**.  
 It combines:
 
-- 🧠 **Local llama.cpp models** (privacy‑friendly, offline)
-- ☁️ **OpenAI planner support** for high‑quality reasoning
-- 📚 **RAG over system docs** so it actually *knows* your tools
-- 🛡️ **A multi-layer safety engine** around shell, git & packages
+- **Local llama.cpp models** (privacy‑friendly, offline)
+- **OpenAI planner support** for high‑quality reasoning
+- **RAG over system docs** so it actually *knows* your tools
+- **A multi-layer safety engine** around shell, git & packages
 
 It’s built as a **portfolio‑grade systems project** in Go, demonstrating real‑world skills in:
 
@@ -30,7 +30,7 @@ It’s built as a **portfolio‑grade systems project** in Go, demonstrating rea
 
 ---
 
-## ✨ What Helix Can Do
+## What Helix Can Do
 
 You talk. Helix figures out *how* to do it safely.
 
@@ -63,7 +63,7 @@ Under the hood, Helix:
 
 ---
 
-## 🧠 AI & Planner System (Phase 3.x)
+## AI & Planner System (Phase 3.x)
 
 Helix now has a **full agent-style planner** instead of only a “/cmd” translator.
 
@@ -144,7 +144,7 @@ If the planner ever returns junk, Helix will **drop invalid steps** or fall back
 
 ---
 
-## 🛡️ Shell Safety Subsystem (Multi‑Layer)
+## Shell Safety Subsystem (Multi‑Layer)
 
 Arbitrary shell execution is **heavily guarded**.
 
@@ -197,7 +197,7 @@ All shell commands execute via a `DirectorySandbox`:
 
 ---
 
-## 🌿 Git Assistant (Safe + Dangerous Flows)
+## Git Assistant (Safe + Dangerous Flows)
 
 Helix has a dedicated **GitManager** with two faces:
 
@@ -271,7 +271,7 @@ These flows:
 
 ---
 
-## 📦 Safe Package Management
+## Safe Package Management
 
 Instead of letting the LLM call `apt`/`brew` directly, Helix exposes a `package` tool:
 
@@ -296,15 +296,15 @@ On the Helix side:
 
 ---
 
-## 🎨 Terminal UX & Developer Experience
+## Terminal UX & Developer Experience
 
 Helix is designed to feel great in the terminal:
 
 - Colorized output with clear emoji for each subsystem:
-  - 🤖 planner & agent intent
-  - 🖥️ shell commands
-  - 🌿 git actions
-  - 📦 package operations
+  - planner & agent intent
+  - shell commands
+  - git actions
+  - package operations
 - Optional **typewriter effect** for AI responses.
 - Explicit step headers:
   - `--- Step 1 ---`, `--- Step 2 ---`, etc.
@@ -314,7 +314,7 @@ Helix is designed to feel great in the terminal:
 
 ---
 
-## 🏗 Architecture Overview
+## Architecture Overview
 
 ```text
 Helix/
@@ -339,7 +339,7 @@ Helix/
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -365,7 +365,7 @@ make start
 
 ---
 
-## 🧠 AI Backends
+## AI Backends
 
 Helix can use either:
 
@@ -385,7 +385,7 @@ When OpenAI is enabled, Helix:
 
 ---
 
-## 🧩 RAG & System Knowledge
+## RAG & System Knowledge
 
 Helix builds a vector store over hundreds of system command docs:
 
@@ -400,9 +400,9 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 🔥 Helix — Complete Feature & Capability List
+## Helix — Complete Feature & Capability List
 
-## 🧠 AI & RAG Intelligence
+## AI & RAG Intelligence
 
 * RAG-enhanced natural language command generation over 450+ indexed system commands
 * MAN page and CLI documentation indexing across 900+ vector documents
@@ -414,7 +414,7 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 🤖 Planner, Agent System & Tool Protocol
+## Planner, Agent System & Tool Protocol
 
 * Unified multi-tool agent system: response, shell, git, package
 * Ultra-strict JSON planner protocol with schema enforcement
@@ -427,7 +427,7 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 💻 Shell Execution System (Safety-First)
+## Shell Execution System (Safety-First)
 
 * Directory sandbox with safe-path enforcement
 * Multi-layer safety pipeline (validation → risk scoring → sandbox → execution)
@@ -443,7 +443,7 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 🌿 Git Automation (Safe + Dangerous Modes)
+## Git Automation (Safe + Dangerous Modes)
 
 * Natural language → Git automation
 * Safe Git actions: commit, add, tag, checkout, create-branch
@@ -462,7 +462,7 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 📦 Package Management System
+## Package Management System
 
 * Cross-platform package management abstraction
 * Supported managers: apt, brew, choco, winget, pacman, yum, dnf, snap
@@ -473,7 +473,7 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 🧩 System Architecture & Infrastructure
+## System Architecture & Infrastructure
 
 * Full llama.cpp integration for local inference
 * Offline LLaMA model execution (TinyLlama, LLaMA-2/3 GGUF)
@@ -488,7 +488,7 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 🎨 UX & Developer Productivity
+## UX & Developer Productivity
 
 * Semantic syntax highlighting (10+ token types)
 * Rich terminal UI with emojis and color-coded output
@@ -502,7 +502,7 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 🏁 Additional Workflow & System Features
+## Additional Workflow & System Features
 
 * Natural language → full multi-step workflows combining shell, git, and packages
 * Automatic embedding of environment state into planner queries
@@ -512,7 +512,7 @@ Indexing runs in the background so the CLI stays responsive.
 
 ---
 
-## 🎯 Why This Project Is Recruiter‑Friendly
+## Why This Project Is Recruiter‑Friendly
 
 Helix is intentionally structured as a **systems‑level AI project**, not just a demo:
 
@@ -538,7 +538,7 @@ If you want to see how the agent works internally, start from:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Ideas, issues, and PRs are welcome:
 
@@ -549,14 +549,14 @@ Ideas, issues, and PRs are welcome:
 
 ---
 
-## 📄 License
+## License
 
 Helix is released under the **MIT License** (see `LICENSE`).  
 LLaMA and other model weights have **their own licenses** — please review them before use.
 
 ---
 
-## 👤 Developer Spotlight
+## Developer Spotlight
 
 **Nahasat Nibir** — Building intelligent, high‑performance developer tools and AI‑powered systems in Go and Python.
 
@@ -567,9 +567,5 @@ LLaMA and other model weights have **their own licenses** — please review them
 ---
 
 <div align="center">
-Helix — Making the command line safer, smarter, and more approachable with AI.  
-<br />
-<a href="https://github.com/Nibir1/Helix/issues">🐞 Report Bug</a> ·
-<a href="https://github.com/Nibir1/Helix/issues">💡 Request Feature</a> ·
-⭐ Star the project
+Helix — Making the command line safer, smarter, and more approachable with AI.
 </div>
