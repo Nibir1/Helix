@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"math/rand"
+	"time"
+
 	"helix/internal/agent"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -12,97 +15,111 @@ import (
 
 // UI States
 const (
-	StateMain    = iota // Standard chat/command mode
-	StateConfirm        // Modal confirmation dialog (Y/N)
+	StateLoading = iota
+	StateMain
+	StateConfirm
 )
 
+// Msg types
+type MatrixTickMsg time.Time
+type GlitchTickMsg struct{}  // Triggers a glitch spike
+type GlitchResetMsg struct{} // Resets text to normal
+
 type AppModel struct {
-	// State
 	width   int
 	height  int
-	ready   bool // Is the UI initialized?
-	uiState int  // Current UI state (Main vs Confirm)
+	ready   bool
+	uiState int
 
-	// Interactive Modal Data
-	confirmMsg   string    // The question being asked (e.g. "Execute dangerous command?")
-	confirmReply chan bool // Channel to send the user's Y/N answer back to the Agent
+	// Animation Data
+	matrixDrops []int
+	bootTime    time.Time
 
-	// The Brain
+	// Glitch Data
+	glitchProb float64 // Current probability of character corruption (0.0 - 1.0)
+
+	confirmMsg   string
+	confirmReply chan bool
+
 	agent   *agent.Agent
-	agentCh chan tea.Msg // Channel to receive events (logs or requests) from UX
+	agentCh chan tea.Msg
 
-	// Components
-	viewport  viewport.Model  // The scrollable history
-	textInput textinput.Model // The command bar
-	spinner   spinner.Model   // "Thinking..." animation
-
-	// Theme
-	styles *Styles
-
-	// Data
-	history []string
+	viewport  viewport.Model
+	textInput textinput.Model
+	spinner   spinner.Model
+	styles    *Styles
+	history   []string
 }
 
-// NewModel creates the initial TUI state.
-// It requires the Agent instance and the channel where the Agent/UX writes output.
 func NewModel(ag *agent.Agent, agentCh chan tea.Msg) AppModel {
-	// Initialize styles immediately so we can use them for components
 	s := DefaultStyles()
 
 	ti := textinput.New()
-	ti.Placeholder = "Enter directive..."
+	ti.Placeholder = "Awaiting directive..."
 	ti.Focus()
 	ti.CharLimit = 256
 	ti.Width = 20
-
-	// POLISH: The Prompt
-	// Switched to a lightning bolt and used the Secondary (Neon Magenta) or Primary (Cyan) color
 	ti.Prompt = "⚡ "
-	ti.PromptStyle = s.InputPrompt
-	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText))
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSubtle))
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondary))
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier)).Bold(true)
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier))
 
-	// POLISH: The Spinner
-	// Switched to Dot for a cleaner, high-tech "busy" indicator
 	spin := spinner.New()
-	spin.Spinner = spinner.Dot
-	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier)) // Red for the Red Team theme
+	spin.Spinner = spinner.MiniDot
+	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier))
 
 	return AppModel{
-		textInput: ti,
-		spinner:   spin,
-		styles:    s,
-		history:   []string{},
-		agent:     ag,
-		agentCh:   agentCh,
-		uiState:   StateMain,
+		textInput:  ti,
+		spinner:    spin,
+		styles:     s,
+		history:    []string{},
+		agent:      ag,
+		agentCh:    agentCh,
+		uiState:    StateLoading,
+		bootTime:   time.Now(),
+		glitchProb: 0.0, // Start clean
 	}
 }
 
-// Helper: Init is the first function called by Bubble Tea
 func (m AppModel) Init() tea.Cmd {
 	return tea.Batch(
-		textinput.Blink,               // Start cursor blinking
-		m.spinner.Tick,                // Start spinner animation
-		waitForAgentOutput(m.agentCh), // Start listening for Agent/UX messages immediately
+		textinput.Blink,
+		m.spinner.Tick,
+		waitForAgentOutput(m.agentCh),
+		tickMatrix(),
+		scheduleGlitch(), // Start the random glitch timer
 	)
 }
 
-// NEW: A "Command" to wait for the next event from the Agent
-// This runs in a goroutine managed by Bubble Tea and returns a Msg when data arrives.
 func waitForAgentOutput(sub chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		msg, ok := <-sub
 		if !ok {
-			return nil // Channel closed
+			return nil
 		}
-
-		// If it's a plain string, wrap it in AgentMsg to keep our update switch logic clean.
-		// If it's already a struct (like ConfirmationRequest), return it as is.
 		if text, ok := msg.(string); ok {
 			return AgentMsg{Content: text}
 		}
 		return msg
 	}
+}
+
+func tickMatrix() tea.Cmd {
+	return tea.Tick(time.Millisecond*50, func(t time.Time) tea.Msg {
+		return MatrixTickMsg(t)
+	})
+}
+
+// scheduleGlitch waits a random time (2-5 seconds) before triggering a glitch
+func scheduleGlitch() tea.Cmd {
+	delay := time.Duration(rand.Intn(3000)+2000) * time.Millisecond
+	return tea.Tick(delay, func(t time.Time) tea.Msg {
+		return GlitchTickMsg{}
+	})
+}
+
+// resetGlitch waits a split second (150ms) before fixing the text
+func resetGlitch() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
+		return GlitchResetMsg{}
+	})
 }

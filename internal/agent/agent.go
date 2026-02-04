@@ -103,7 +103,7 @@ func (a *Agent) HandleInput(userInput string) {
 		plan = safePlan
 	}
 
-	a.ux.PrintSystemMessage(fmt.Sprintf("Agent Intent: %s", plan.Intent))
+	//a.ux.PrintSystemMessage(fmt.Sprintf("Agent Intent: %s", plan.Intent))
 	//a.ux.PrintDebug(fmt.Sprintf("Steps: %d", len(plan.Steps)))
 
 	// 4) Execute each step
@@ -141,7 +141,7 @@ func (a *Agent) HandleInput(userInput string) {
 		}
 	}
 
-	a.ux.PrintSuccess("Done.")
+	// a.ux.PrintSuccess("Done.")
 }
 
 //
