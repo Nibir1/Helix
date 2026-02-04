@@ -3,9 +3,9 @@
 
 ---
 
-[![Helix Demo](https://img.youtube.com/vi/FJ_UbiX5o6U/maxresdefault.jpg)](https://youtu.be/FJ_UbiX5o6U)
+[![Helix Demo](https://img.youtube.com/vi/5IE-ztGXIS8/maxresdefault.jpg)](https://youtu.be/5IE-ztGXIS8)
 
-> 📺 **[Watch the full end-to-end demo](https://youtu.be/FJ_UbiX5o6U)** featuring core functionalities.
+> 📺 **[Watch the full end-to-end demo](https://youtu.be/5IE-ztGXIS8)** featuring core functionalities.
 
 ---
 

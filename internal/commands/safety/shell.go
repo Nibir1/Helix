@@ -22,7 +22,7 @@ import (
 //  7. Extra high-level dangerous pattern checks
 //  8. Basic path safety checks
 func ValidateAndCleanShellCommand(raw string) (string, error) {
-	color.Yellow("🔍 DEBUG ValidateAndCleanCommand input: %q", raw)
+	color.Yellow("DEBUG ValidateAndCleanCommand input: %q", raw)
 
 	// Extra byte-level debug for weird issues (Phase 3.5+)
 	// utils.DebugPrintStringBytes(raw)
@@ -71,7 +71,7 @@ func ValidateAndCleanShellCommand(raw string) (string, error) {
 		return "", err
 	}
 
-	color.Yellow("🔍 DEBUG: Final validated command: %q", cmd)
+	color.Yellow("DEBUG: Final validated command: %q", cmd)
 	return cmd, nil
 }
 
@@ -123,7 +123,7 @@ func checkUnicodeHazards(cmd string) error {
 		}
 	}
 
-	color.Red("❌ Unicode safety violation in command:")
+	color.Red("Unicode safety violation in command:")
 	for _, r := range uniq {
 		color.Red("   • %s", r)
 	}

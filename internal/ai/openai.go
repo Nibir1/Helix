@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/fatih/color"
 )
 
 // ProviderType defines which AI backend Helix is using
@@ -172,7 +170,7 @@ func runWithOpenAI(prompt string, cfg ModelConfig) (string, error) {
 	}
 
 	content := strings.TrimSpace(completion.Choices[0].Message.Content)
-	color.Cyan("🔗 Using OpenAI model: %s", defaultOpenAIModel)
+	//color.Cyan("Using OpenAI model: %s", defaultOpenAIModel)
 
 	return content, nil
 }
