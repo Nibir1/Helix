@@ -14,7 +14,7 @@ import (
 
 // UPDATED: Enhanced debug info to include RAG status
 func showDebugInfo() {
-	color.Cyan("=== 🔧 HELIX DEBUG INFORMATION ===")
+	color.Cyan("=== HELIX DEBUG INFORMATION ===")
 	color.Cyan("Version: %s", config.HelixVersion)
 	color.Cyan("Model: %s", cfg.ModelFile)
 	color.Cyan("OS: %s", env.OSName)
@@ -31,29 +31,29 @@ func showDebugInfo() {
 		color.Cyan("RAG System: %v", stats["initialized"])
 		color.Cyan("MAN Pages Indexed: %v", stats["indexed_pages"])
 		if stats["initialized"].(bool) {
-			color.Green("RAG: ✅ ACTIVE")
+			color.Green("RAG: ACTIVE")
 		} else {
-			color.Yellow("RAG: 🔄 INDEXING")
+			color.Yellow("RAG: INDEXING")
 		}
 	} else {
-		color.Red("RAG: ❌ NOT INITIALIZED")
+		color.Red("RAG: NOT INITIALIZED")
 	}
 
 	// Check model status
 	if ai.ModelIsLoaded() {
-		color.Green("Model Status: ✅ Loaded")
+		color.Green("Model Status: Loaded")
 
 		// Better model test - more specific and in English
-		color.Blue("🧪 Running model test...")
+		color.Blue("Running model test...")
 		testResponse, err := ai.RunModel("Answer with one word only: Hello")
 		if err != nil {
-			color.Red("Model Test: ❌ Failed - %v", err)
+			color.Red("Model Test: Failed - %v", err)
 		} else {
 			cleanResponse := strings.TrimSpace(testResponse)
-			color.Green("Model Test: ✅ Working - '%s'", cleanResponse)
+			color.Green("Model Test: Working - '%s'", cleanResponse)
 		}
 	} else {
-		color.Red("Model Status: ❌ Not loaded")
+		color.Red("Model Status: Not loaded")
 	}
 
 	// Check package manager
@@ -79,10 +79,10 @@ func showHelp() {
 
 // Add this function to debug RAG issues
 func debugRAGSystem() {
-	color.Cyan("🔧 Debugging RAG System...")
+	color.Cyan("Debugging RAG System...")
 
 	if ragSystem == nil {
-		color.Red("❌ RAG system is nil")
+		color.Red("RAG system is nil")
 		return
 	}
 
@@ -90,36 +90,36 @@ func debugRAGSystem() {
 	color.Cyan("RAG Stats: %+v", stats)
 
 	// Test MAN page access directly
-	color.Blue("🧪 Testing MAN page access...")
+	color.Blue("Testing MAN page access...")
 	cmd := exec.Command("man", "ls")
 	if err := cmd.Run(); err != nil {
-		color.Red("❌ 'man ls' command failed: %v", err)
-		color.Yellow("💡 MAN pages may not be available on this system")
+		color.Red("'man ls' command failed: %v", err)
+		color.Yellow("MAN pages may not be available on this system")
 	} else {
-		color.Green("✅ MAN pages are accessible")
+		color.Green("MAN pages are accessible")
 	}
 }
 
 // Debug RAG initialization issues
 func debugRAGInitialization() {
-	color.Red("🔧 DEBUG: RAG System State")
+	color.Red("DEBUG: RAG System State")
 
 	// Test if MAN command works
 	cmd := exec.Command("which", "man")
 	output, err := cmd.Output()
 	if err != nil {
-		color.Red("❌ 'man' command not found on system")
+		color.Red("'man' command not found on system")
 	} else {
-		color.Green("✅ 'man' found at: %s", strings.TrimSpace(string(output)))
+		color.Green("'man' found at: %s", strings.TrimSpace(string(output)))
 	}
 
 	// Test basic MAN page access
 	cmd = exec.Command("man", "-k", "ls")
 	err = cmd.Run()
 	if err != nil {
-		color.Red("❌ 'man -k ls' failed: %v", err)
-		color.Yellow("💡 MAN database might need updating: run 'mandb'")
+		color.Red("'man -k ls' failed: %v", err)
+		color.Yellow("MAN database might need updating: run 'mandb'")
 	} else {
-		color.Green("✅ MAN pages are accessible")
+		color.Green("MAN pages are accessible")
 	}
 }

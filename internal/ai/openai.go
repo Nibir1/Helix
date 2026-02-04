@@ -172,7 +172,7 @@ func runWithOpenAI(prompt string, cfg ModelConfig) (string, error) {
 	}
 
 	content := strings.TrimSpace(completion.Choices[0].Message.Content)
-	color.Cyan("🔗 Using OpenAI model: %s", defaultOpenAIModel)
+	color.Cyan("Using OpenAI model: %s", defaultOpenAIModel)
 
 	return content, nil
 }

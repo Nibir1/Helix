@@ -9,8 +9,6 @@ import (
 	"helix/internal/commands"
 	"helix/internal/shell"
 	"helix/internal/ux"
-
-	"github.com/fatih/color"
 )
 
 // Agent is the core Agent Mode orchestrator.
@@ -24,14 +22,21 @@ type Agent struct {
 }
 
 // NewAgent creates a new Agent instance.
+// Now accepts an injected UX instance for TUI compatibility.
 func NewAgent(
 	env shell.Env,
-	_ interface{},
+	_ interface{}, // RAG placeholder
 	sandbox *commands.DirectorySandbox,
 	execConfig commands.ExecuteConfig,
 	typingEffect bool,
+	gui *ux.UX, // NEW: Injected UX
 ) *Agent {
 	gm := commands.NewGitManager(env, execConfig, sandbox)
+
+	// Fallback if nil (e.g. tests)
+	if gui == nil {
+		gui = ux.NewUX()
+	}
 
 	return &Agent{
 		env:          env,
@@ -39,7 +44,7 @@ func NewAgent(
 		execConfig:   execConfig,
 		gitManager:   gm,
 		typingEffect: typingEffect,
-		ux:           ux.NewUX(),
+		ux:           gui,
 	}
 }
 
@@ -62,13 +67,13 @@ func (a *Agent) HandleInput(userInput string) {
 	// 1) Call planner model
 	rawPlanOutput, err := ai.RunModel(plannerPrompt)
 	if err != nil {
-		color.Red("❌ Planner model error: %v", err)
+		a.ux.PrintError(fmt.Sprintf("Planner model error: %v", err))
 		resp, chatErr := ai.RunModel(userInput)
 		if chatErr != nil {
-			color.Red("❌ Chat fallback failed: %v", chatErr)
+			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
 			return
 		}
-		fmt.Println(strings.TrimSpace(resp))
+		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		return
 	}
 
@@ -77,33 +82,36 @@ func (a *Agent) HandleInput(userInput string) {
 	// 2) Parse / validate plan
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
 	if err != nil {
-		color.Yellow("⚠️ Planner parse error: %v", err)
+		a.ux.PrintWarning(fmt.Sprintf("Planner parse error: %v", err))
 
 		resp, chatErr := ai.RunModel(userInput)
 		if chatErr != nil {
-			color.Red("❌ Chat fallback failed: %v", chatErr)
+			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
 			return
 		}
 
-		fmt.Println(strings.TrimSpace(resp))
+		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		return
 	}
 
 	// 3) Safety layer enhancement
 	safePlan, err := a.prepareSafePlan(userInput, plan)
 	if err != nil {
-		color.Yellow("⚠️ Safety layer error: %v", err)
-		color.Yellow("⚠️ Proceeding with original plan anyway.")
+		a.ux.PrintWarning(fmt.Sprintf("Safety layer error: %v", err))
+		a.ux.PrintWarning("Proceeding with original plan anyway.")
 	} else {
 		plan = safePlan
 	}
 
-	color.Cyan("🤖 Agent Intent: %s", plan.Intent)
-	color.Cyan("🔧 Steps: %d", len(plan.Steps))
+	a.ux.PrintSystemMessage(fmt.Sprintf("Agent Intent: %s", plan.Intent))
+	a.ux.PrintDebug(fmt.Sprintf("Steps: %d", len(plan.Steps)))
 
 	// 4) Execute each step
 	for i, step := range plan.Steps {
-		color.Cyan("\n--- Step %d ---", i+1)
+		// Only print step header if there are multiple steps
+		if len(plan.Steps) > 1 {
+			a.ux.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
+		}
 
 		switch step.Tool {
 
@@ -112,28 +120,28 @@ func (a *Agent) HandleInput(userInput string) {
 
 		case "shell":
 			if err := a.handleShellStep(step); err != nil {
-				color.Red("❌ Shell step failed: %v", err)
+				a.ux.PrintError(fmt.Sprintf("Shell step failed: %v", err))
 				return
 			}
 
 		case "git":
 			if err := a.handleGitStep(step); err != nil {
-				color.Red("❌ Git step failed: %v", err)
+				a.ux.PrintError(fmt.Sprintf("Git step failed: %v", err))
 				return
 			}
 
 		case "package":
 			if err := a.handlePackageStep(step); err != nil {
-				color.Red("❌ Package step failed: %v", err)
+				a.ux.PrintError(fmt.Sprintf("Package step failed: %v", err))
 				return
 			}
 
 		default:
-			color.Yellow("⚠️ Unknown tool: %s", step.Tool)
+			a.ux.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
 		}
 	}
 
-	color.Green("\n🎉 Done.")
+	a.ux.PrintSuccess("Done.")
 }
 
 //
@@ -231,7 +239,7 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 		copy(safe.Steps[insertIndex+1:], safe.Steps[insertIndex:])
 		safe.Steps[insertIndex] = addStep
 
-		color.Green("✅ Safety layer inserted git add for: %s", strings.Join(mutatedPaths, " "))
+		a.ux.PrintSuccess(fmt.Sprintf("Safety layer inserted git add for: %s", strings.Join(mutatedPaths, " ")))
 	}
 
 	return &safe, nil
@@ -274,11 +282,8 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	if msg == "" {
 		return
 	}
-	if a.typingEffect {
-		a.ux.Typewriter(msg)
-	} else {
-		fmt.Println(msg)
-	}
+	// UX handles typing effect check if needed, or we pass explicit flag
+	a.ux.PrintAIMessage(msg, a.typingEffect)
 }
 
 // SHELL — includes risk scoring (Phase 3.5)
@@ -288,7 +293,7 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		return fmt.Errorf("empty shell command")
 	}
 
-	color.Cyan("🖥️ Shell: %s", cmd)
+	a.ux.PrintCommand(cmd)
 
 	// Hard safety validation
 	validCmd, err := commands.ValidateAndCleanCommand(cmd)
@@ -304,23 +309,26 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		// execute directly
 
 	case commands.ShellRiskMedium:
-		color.Yellow("⚠️ Medium risk shell command:")
+		a.ux.PrintWarning("Medium risk shell command:")
 		for _, r := range reasons {
-			color.Yellow("   • %s", r)
+			a.ux.PrintWarning(fmt.Sprintf("   • %s", r))
 		}
 		if !commands.AskForConfirmation("Execute anyway?") {
-			color.Yellow("❌ Command skipped")
+			a.ux.PrintWarning("Command skipped")
 			return nil
 		}
 
 	case commands.ShellRiskHigh:
-		color.Red("🚨 HIGH RISK — blocked")
+		a.ux.PrintError("HIGH RISK — blocked")
 		for _, r := range reasons {
-			color.Red("   • %s", r)
+			a.ux.PrintError(fmt.Sprintf("   • %s", r))
 		}
 		return fmt.Errorf("high-risk shell command blocked")
 	}
 
+	// The sandbox execution prints to stdout/stderr.
+	// In TUI mode, this will bypass the viewport unless captured.
+	// Ideally, Sandbox needs refactoring too, but for Phase 2 we prioritize Agent flow.
 	return a.sandbox.WrapCommand(validCmd, a.execConfig, a.env)
 }
 
@@ -331,7 +339,7 @@ func (a *Agent) handleGitStep(step ai.PlanStep) error {
 		return fmt.Errorf("missing git action")
 	}
 
-	color.Cyan("🌿 Git: action=%s", action)
+	a.ux.PrintCommand(fmt.Sprintf("git action: %s", action))
 	return a.gitManager.ExecutePlannedAction(action, step.Args)
 }
 
@@ -359,11 +367,11 @@ func (a *Agent) handlePackageStep(step ai.PlanStep) error {
 	}
 
 	if err := commands.IsPackageActionSafe(action, name, a.env); err != nil {
-		color.Red("❌ Package safety violation: %v", err)
+		a.ux.PrintError(fmt.Sprintf("Package safety violation: %v", err))
 		return err
 	}
 
-	color.Cyan("📦 Package: %s %s", action, name)
+	a.ux.PrintCommand(fmt.Sprintf("Package: %s %s", action, name))
 
 	commands.HandlePackageCommand(
 		[]string{action, name},

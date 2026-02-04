@@ -33,6 +33,7 @@ var (
 )
 
 func main() {
+	// Standard CLI startup logs (visible before TUI takes over alt-screen)
 	color.Cyan("🚀 Helix v%s — AI-powered CLI Agent", config.HelixVersion)
 
 	// --------------------------
@@ -140,11 +141,6 @@ func main() {
 	}
 
 	// --------------------------
-	// Show banner
-	// --------------------------
-	ux.NewUX().ShowWelcomeBanner(config.HelixVersion)
-
-	// --------------------------
 	// Minimal sanity check
 	// --------------------------
 	color.Blue("🧪 Running quick AI response test...")
@@ -156,97 +152,52 @@ func main() {
 	}
 
 	// --------------------------
-	// Initialize Agent Mode
+	// TUI & Agent Initialization
 	// --------------------------
+	color.Cyan("🔌 Connecting Neural Grid Interface...")
+
+	// 1. Create the TUI plumbing
+	// We create a channel to pipe Agent output directly to the UI
+	tuiChan := make(chan string, 100)
+
+	// 2. Configure UX to use this channel (Headless/TUI mode)
+	gui := ux.NewUX()
+	gui.SetOutputHandler(func(text string) {
+		tuiChan <- text
+	})
+
+	// 3. Save Original Output & Activate Hijacker
+	// We MUST save the original stdout so the TUI can draw to the real screen.
+	originalStdout := os.Stdout
+
+	// Now we hijack os.Stdout/Stderr. Any fmt.Println calls after this line
+	// (from deep inside AI/Commands packages) will go to the pipe -> TUI.
+	restoreStdio := utils.HijackStdio(tuiChan)
+	defer restoreStdio()
+
+	// --- CRITICAL FIX: Force color library to use the hijacked pipe ---
+	// This prevents the color library (used in internal/ai) from writing
+	// directly to the terminal and breaking the TUI layout.
+	color.Output = os.Stdout
+
+	// 4. Initialize Agent with the TUI-aware UX
 	agentCore = agent.NewAgent(
 		env,
-		ragSystem, // Phase 3: RAG-enhanced behaviour
+		ragSystem,
 		sandbox,
 		execConfig,
 		cfg.UserPrefs.TypingEffect,
+		gui, // Inject the specific UX instance
 	)
 
-	color.Green("🎉 Helix ready — type anything to begin")
-
-	// runAgentCLI()
-
-	// temporary TUI debug
-	if err := tui.Start(); err != nil {
-		panic(err)
-	}
-}
-
-// -----------------------------------------------------------------------------
-// CLEAN CLI LOOP
-// -----------------------------------------------------------------------------
-
-func runAgentCLI() {
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		color.Cyan("[helix]› ")
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-
-		if input == "" {
-			continue
-		}
-
-		// Save history
-		utils.AppendHistory(cfg.HistoryPath, input)
-
-		// -----------------------
-		// Slash commands (program control only)
-		// -----------------------
-		if strings.HasPrefix(input, "/") {
-			switch {
-
-			case input == "/exit":
-				color.Green("👋 Goodbye!")
-				return
-
-			case input == "/help":
-				showHelp()
-
-			case input == "/debug":
-				showDebugInfo()
-
-			case input == "/online":
-				checkOnlineStatus()
-
-			case strings.HasPrefix(input, "/rag-status"):
-				handleRAGStatus()
-			case strings.HasPrefix(input, "/rag-reindex"):
-				handleRAGReindex()
-			case strings.HasPrefix(input, "/rag-reset"):
-				handleRAGReset()
-			case strings.HasPrefix(input, "/rag-rebuild"):
-				handleRAGRebuild()
-
-			case strings.HasPrefix(input, "/sandbox"):
-				handleSandboxCommand(input)
-
-			case strings.HasPrefix(input, "/cd"):
-				handleChangeDirectory(input)
-
-			case strings.HasPrefix(input, "/dry-run"):
-				toggleDryRun()
-
-			default:
-				color.Yellow("⚠️ Unknown slash command. Try /help.")
-			}
-
-			continue
-		}
-
-		// -----------------------
-		// Natural-language Agent Mode
-		// -----------------------
-		if agentCore != nil {
-			agentCore.HandleInput(input)
-		} else {
-			color.Red("❌ Agent not initialized")
-		}
+	// 5. Launch The Grid (Bubble Tea Program)
+	// We pass 'originalStdout' so Bubble Tea writes to the actual terminal,
+	// bypassing our hijack.
+	if err := tui.Start(agentCore, tuiChan, originalStdout); err != nil {
+		// If TUI crashes, restore stdio so we can see the error
+		restoreStdio()
+		color.Red("❌ TUI Critical Failure: %v", err)
+		os.Exit(1)
 	}
 }
 

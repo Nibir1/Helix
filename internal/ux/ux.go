@@ -14,6 +14,7 @@ type UX struct {
 	colors         *ColorScheme
 	scifiMode      bool
 	animationSpeed time.Duration
+	outputHandler  func(text string) // Callback for TUI/Headless mode
 }
 
 // ColorScheme holds sci-fi themed color configurations
@@ -51,8 +52,30 @@ func NewUX() *UX {
 	}
 }
 
+// SetOutputHandler sets a custom output handler for UX (enables Headless/TUI mode)
+func (ux *UX) SetOutputHandler(handler func(string)) {
+	ux.outputHandler = handler
+}
+
+// Helper to route output either to stdout or the handler
+func (ux *UX) print(text string) {
+	if ux.outputHandler != nil {
+		ux.outputHandler(text)
+		return
+	}
+	fmt.Println(text)
+}
+
 // Typewriter prints text with enhanced sci-fi typing animation
+// In TUI mode, it skips the delay and sends the text immediately.
 func (ux *UX) Typewriter(text string) {
+	// TUI Mode: Skip blocking sleeps, let the Viewport handle rendering
+	if ux.outputHandler != nil {
+		ux.outputHandler(text)
+		return
+	}
+
+	// CLI Mode: Run animation
 	runes := []rune(text)
 	n := len(runes)
 
@@ -92,8 +115,32 @@ func (ux *UX) PrintSystemMessage(text string) {
 // PrintAIMessage displays AI responses with neural network theme
 func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
 	prefix := ux.scifiPrefix("🧠", "NEURAL_NET", ux.colors.Primary)
-	fmt.Print(prefix)
 
+	if ux.outputHandler != nil {
+		// In TUI mode, combine prefix and text and send
+		ux.outputHandler(prefix + text)
+		return
+	}
+
+	// CLI Mode
+	fmt.Print(prefix)
+	if useTypingEffect {
+		ux.Typewriter(text)
+	} else {
+		fmt.Println(text)
+	}
+}
+
+// PrintRAGResponse displays RAG-enhanced responses with knowledge theme
+func (ux *UX) PrintRAGResponse(text string, useTypingEffect bool) {
+	prefix := ux.scifiPrefix("📚", "KNOWLEDGE_BASE", ux.colors.Accent)
+
+	if ux.outputHandler != nil {
+		ux.outputHandler(prefix + text)
+		return
+	}
+
+	fmt.Print(prefix)
 	if useTypingEffect {
 		ux.Typewriter(text)
 	} else {
@@ -136,18 +183,6 @@ func (ux *UX) PrintDebug(message string) {
 	ux.scifiPrint("🔧", "DEBUG", message, ux.colors.Neutral)
 }
 
-// PrintRAGResponse displays RAG-enhanced responses with knowledge theme
-func (ux *UX) PrintRAGResponse(text string, useTypingEffect bool) {
-	prefix := ux.scifiPrefix("📚", "KNOWLEDGE_BASE", ux.colors.Accent)
-	fmt.Print(prefix)
-
-	if useTypingEffect {
-		ux.Typewriter(text)
-	} else {
-		fmt.Println(text)
-	}
-}
-
 // ShowWelcomeBanner displays sci-fi welcome banner
 func (ux *UX) ShowWelcomeBanner(version string) {
 	banner := `
@@ -166,78 +201,48 @@ func (ux *UX) ShowWelcomeBanner(version string) {
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
 `
-
-	color.Cyan(banner)
-	fmt.Println()
+	if ux.outputHandler != nil {
+		ux.outputHandler(color.CyanString(banner))
+	} else {
+		color.Cyan(banner)
+		fmt.Println()
+	}
 }
 
 // ShowHelp displays sci-fi styled help information
 func (ux *UX) ShowHelp() {
-	color.Cyan("📖 Helix — Command Overview")
-	fmt.Println()
+	var b strings.Builder
 
-	// ============================================================
-	// NATURAL LANGUAGE MODE (DEFAULT)
-	// ============================================================
-	color.Green("🤖 Natural Language Mode (Default)")
-	fmt.Println("  Just type your request and Helix will:")
-	fmt.Println("   • Understand your intent")
-	fmt.Println("   • Plan steps")
-	fmt.Println("   • Call tools automatically (shell / git / file ops)")
-	fmt.Println("   • Execute actions when appropriate")
-	fmt.Println()
-	fmt.Println("  Examples:")
-	fmt.Println("   • \"why is the sky blue?\"")
-	fmt.Println("   • \"list all files in this folder\"")
-	fmt.Println("   • \"update the version in the readme and commit it\"")
-	fmt.Println("   • \"create a new branch, edit config, and push it\"")
-	fmt.Println()
+	b.WriteString(color.CyanString("📖 Helix — Command Overview\n\n"))
 
-	// ============================================================
-	// LEGACY SHORTCUT COMMANDS
-	// (Optional – kept for power users)
-	// ============================================================
-	color.Yellow("⚡ Legacy Shortcuts (Optional)")
-	fmt.Println("  /ask <question>       - Force classic AI chat")
-	fmt.Println("  /cmd <request>        - Force command generation")
-	fmt.Println("  /explain <command>    - Explain what a command does")
-	fmt.Println("  /install <package>    - Install a package")
-	fmt.Println("  /update <package>     - Update a package")
-	fmt.Println("  /remove <package>     - Remove a package")
-	fmt.Println("  /git <operation>      - Git helper (legacy)")
-	fmt.Println()
+	b.WriteString(color.GreenString("🤖 Natural Language Mode (Default)\n"))
+	b.WriteString("  Just type your request and Helix will:\n")
+	b.WriteString("   • Understand your intent\n")
+	b.WriteString("   • Plan steps\n")
+	b.WriteString("   • Call tools automatically (shell / git / file ops)\n")
+	b.WriteString("   • Execute actions when appropriate\n\n")
 
-	// ============================================================
-	// SYSTEM / ADMIN COMMANDS
-	// (Teacher requirement: only these use slash)
-	// ============================================================
-	color.Cyan("⚙️  System Commands (Program Control)")
-	fmt.Println("  /help                 - Show this help screen")
-	fmt.Println("  /exit                 - Quit Helix")
-	fmt.Println("  /debug                - Show debug information")
-	fmt.Println("  /online               - Check internet status")
-	fmt.Println("  /sandbox <mode>       - Control directory restrictions")
-	fmt.Println("  /cd <dir>             - Change directory (sandbox-aware)")
-	fmt.Println()
+	b.WriteString("  Examples:\n")
+	b.WriteString("   • \"why is the sky blue?\"\n")
+	b.WriteString("   • \"list all files in this folder\"\n")
+	b.WriteString("   • \"update the version in the readme and commit it\"\n\n")
 
-	color.Magenta("🧠 RAG System Controls")
-	fmt.Println("  /rag-status           - Show RAG initialization status")
-	fmt.Println("  /rag-reindex          - Force rebuild RAG MAN page index")
-	fmt.Println("  /rag-reset            - Reset RAG database completely")
-	fmt.Println("  /rag-rebuild          - Rebuild RAG index from scratch")
-	fmt.Println()
+	b.WriteString(color.CyanString("⚙️  System Commands (Program Control)\n"))
+	b.WriteString("  /help                 - Show this help screen\n")
+	b.WriteString("  /exit                 - Quit Helix\n")
+	b.WriteString("  /debug                - Show debug information\n")
+	b.WriteString("  /sandbox <mode>       - Control directory restrictions\n\n")
 
-	// ============================================================
-	// TIPS
-	// ============================================================
-	color.Green("💡 Tips:")
-	fmt.Println("  • NoSlash = full natural-language automation")
-	fmt.Println("  • SlashCommands = system control only (teacher requirement)")
-	fmt.Println("  • Helix auto-detects when to run shell, git, reasoning, etc.")
-	fmt.Println()
+	b.WriteString(color.MagentaString("🧠 RAG System Controls\n"))
+	b.WriteString("  /rag-status           - Show RAG initialization status\n\n")
 
-	color.Magenta("🎉 Helix Agent Mode is now your default interface.")
-	fmt.Println("   Ask for anything — it will plan, reason, and execute.")
+	b.WriteString(color.GreenString("💡 Tips:\n"))
+	b.WriteString("  • NoSlash = full natural-language automation\n")
+	b.WriteString("  • SlashCommands = system control only\n\n")
+
+	b.WriteString(color.MagentaString("🎉 Helix Agent Mode is now your default interface."))
+
+	ux.print(b.String())
 }
 
 // ShowRAGStatus displays RAG system status with sci-fi theme
@@ -279,13 +284,26 @@ func (ux *UX) ShowCommandSuggestions(suggestions []interface{}) {
 			ux.PrintInfo(fmt.Sprintf("Command: %s", ux.colors.Highlight(command)))
 			ux.PrintData(fmt.Sprintf("Description: %s", description))
 			ux.PrintDebug(fmt.Sprintf("Neural Confidence: %.0f%%", confidence*100))
-			fmt.Println()
+			if ux.outputHandler == nil {
+				fmt.Println()
+			}
 		}
 	}
 }
 
 // ProgressBar shows a sci-fi styled progress bar
+// Note: In TUI mode, complex dynamic progress bars are difficult to stream via single messages.
+// This simplifies to text output for TUI, or retains standard behavior for CLI.
 func (ux *UX) ProgressBar(total int, description string) func() {
+	if ux.outputHandler != nil {
+		// TUI Mode: Simple notification
+		ux.outputHandler(fmt.Sprintf("%s [Start]", description))
+		return func() {
+			ux.outputHandler(fmt.Sprintf("%s [%s]", description, ux.colors.Success("COMPLETE")))
+		}
+	}
+
+	// CLI Mode
 	fmt.Printf("%s [", ux.colors.System(description))
 	progress := 0
 	chars := []string{"▱", "▰"}
@@ -302,7 +320,15 @@ func (ux *UX) ProgressBar(total int, description string) func() {
 }
 
 // ShowLoadingAnimation shows a sci-fi loading animation
+// Skipped in TUI mode to avoid breaking layout/event loop
 func (ux *UX) ShowLoadingAnimation(message string, done chan bool) {
+	if ux.outputHandler != nil {
+		// TUI Mode: Just print the start message. The TUI has its own spinner.
+		ux.outputHandler(fmt.Sprintf("%s %s...", "⣻", message))
+		return
+	}
+
+	// CLI Mode
 	frames := []string{"⡿", "⣟", "⣯", "⣷", "⣾", "⣽", "⣻", "⢿"}
 	i := 0
 
@@ -340,59 +366,62 @@ func (ux *UX) PrintTable(headers []string, rows [][]string) {
 		}
 	}
 
-	// Print headers with sci-fi style
-	fmt.Print("┌")
+	var b strings.Builder
+
+	// Top Border
+	b.WriteString("┌")
 	for i, width := range widths {
-		fmt.Print("─" + strings.Repeat("─", width) + "─")
+		b.WriteString("─" + strings.Repeat("─", width) + "─")
 		if i < len(widths)-1 {
-			fmt.Print("┬")
+			b.WriteString("┬")
 		}
 	}
-	fmt.Println("┐")
+	b.WriteString("┐\n")
 
 	// Headers
-	fmt.Print("│")
+	b.WriteString("│")
 	for i, header := range headers {
-		fmt.Printf(" %-*s │", widths[i], ux.colors.Primary(header))
+		b.WriteString(fmt.Sprintf(" %-*s │", widths[i], ux.colors.Primary(header)))
 	}
-	fmt.Println()
+	b.WriteString("\n")
 
 	// Separator
-	fmt.Print("├")
+	b.WriteString("├")
 	for i, width := range widths {
-		fmt.Print("─" + strings.Repeat("─", width) + "─")
+		b.WriteString("─" + strings.Repeat("─", width) + "─")
 		if i < len(widths)-1 {
-			fmt.Print("┼")
+			b.WriteString("┼")
 		}
 	}
-	fmt.Println("┤")
+	b.WriteString("┤\n")
 
 	// Rows
 	for _, row := range rows {
-		fmt.Print("│")
+		b.WriteString("│")
 		for i, cell := range row {
-			fmt.Printf(" %-*s │", widths[i], cell)
+			b.WriteString(fmt.Sprintf(" %-*s │", widths[i], cell))
 		}
-		fmt.Println()
+		b.WriteString("\n")
 	}
 
 	// Footer
-	fmt.Print("└")
+	b.WriteString("└")
 	for i, width := range widths {
-		fmt.Print("─" + strings.Repeat("─", width) + "─")
+		b.WriteString("─" + strings.Repeat("─", width) + "─")
 		if i < len(widths)-1 {
-			fmt.Print("┴")
+			b.WriteString("┴")
 		}
 	}
-	fmt.Println("┘")
+	b.WriteString("┘")
+
+	ux.print(b.String())
 }
 
 // Helper methods
+
 func (ux *UX) scifiPrint(emoji, label, text string, colorFunc func(...interface{}) string) {
-	fmt.Printf("%s %s %s\n",
-		emoji,
-		ux.scifiLabel(label),
-		colorFunc(text))
+	msg := fmt.Sprintf("%s %s %s", emoji, ux.scifiLabel(label), colorFunc(text))
+	ux.print(msg)
 }
 
 func (ux *UX) scifiPrefix(emoji, label string, colorFunc func(...interface{}) string) string {
@@ -407,10 +436,11 @@ func (ux *UX) scifiLabel(label string) string {
 
 func (ux *UX) sectionHeader(title string) {
 	line := strings.Repeat("─", len(title)+4)
-	fmt.Printf("%s %s %s\n",
+	msg := fmt.Sprintf("%s %s %s",
 		ux.colors.Primary("┌"+line+"┐"),
 		ux.colors.Highlight(title),
 		ux.colors.Primary("└"+line+"┘"))
+	ux.print(msg)
 }
 
 func (ux *UX) scifiDots(frame int) string {
