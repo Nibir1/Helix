@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -29,16 +30,28 @@ type DirectorySandbox struct {
 
 // NewDirectorySandbox creates default sandbox
 func NewDirectorySandbox() *DirectorySandbox {
-	currentDir, err := os.Getwd()
+	cwd, err := os.Getwd()
 	if err != nil {
-		currentDir = "."
+		cwd = "."
+	}
+
+	// FIX: Immediately resolve symlinks to establish the "Canonical Root"
+	// This prevents issues where /var/tmp vs /private/var/tmp causes blocks.
+	realCwd, err := filepath.EvalSymlinks(cwd)
+	if err == nil {
+		cwd = realCwd
 	}
 
 	return &DirectorySandbox{
-		allowedDir:  currentDir,
+		allowedDir:  cwd,
 		mode:        SandboxCurrentDir,
-		originalDir: currentDir,
+		originalDir: cwd,
 	}
+}
+
+// GetCurrentDirectory returns the sandbox root.
+func (ds *DirectorySandbox) GetCurrentDirectory() string {
+	return ds.allowedDir
 }
 
 // ================================================================
@@ -64,9 +77,10 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 				continue
 			}
 
-			if ds.isOutsideSandbox(arg) {
+			// FIX: Use the robust ValidateSafePath instead of simple string checks
+			if _, err := ds.ValidateSafePath(arg); err != nil {
 				return false, fmt.Sprintf(
-					"write/delete/edit operation outside sandbox: %s", arg)
+					"sandbox violation: write/delete/edit operation outside sandbox: %s", arg)
 			}
 		}
 	}
@@ -76,20 +90,64 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 		return false, "command attempts directory escape"
 	}
 
-	// 3. ABSOLUTE PATHS ARE ALLOWED — ONLY VALIDATE TARGETS
-	// No regex-based blocking — we check resolved paths instead.
-	paths := ds.extractFileArguments(commandLower)
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
+	return true, ""
+}
 
-		// Safe: absolute path but read-only operation
-		// Only validate for write scenarios (done above)
-		_ = p
+// ================================================================
+// 🛡️ ROBUST PATH VALIDATION (The Fix for your Error)
+// ================================================================
+
+// ValidateSafePath checks if a target path is inside the sandbox.
+// It handles Symlinks, Case-Sensitivity (macOS/Windows), and Non-Existent files.
+func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) {
+	if ds.mode == SandboxDisabled {
+		return targetPath, nil
 	}
 
-	return true, ""
+	// 1. Absolutize
+	if !filepath.IsAbs(targetPath) {
+		targetPath = filepath.Join(ds.allowedDir, targetPath)
+	}
+
+	// 2. Clean
+	cleanTarget := filepath.Clean(targetPath)
+
+	// 3. Resolve Symlinks (Target)
+	// If the file doesn't exist (e.g. creating "danger.txt"), we resolve its PARENT.
+	realTarget, err := filepath.EvalSymlinks(cleanTarget)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist; check parent directory instead
+			parent := filepath.Dir(cleanTarget)
+			realParent, err := filepath.EvalSymlinks(parent)
+			if err == nil {
+				realTarget = filepath.Join(realParent, filepath.Base(cleanTarget))
+			} else {
+				// If parent also fails, we stick to the clean path
+				realTarget = cleanTarget
+			}
+		} else {
+			realTarget = cleanTarget
+		}
+	}
+
+	// 4. Resolve Symlinks (Root) - Ensure base comparison is accurate
+	realRoot, err := filepath.EvalSymlinks(ds.allowedDir)
+	if err != nil {
+		realRoot = ds.allowedDir
+	}
+
+	// 5. Case-Insensitive Comparison
+	// This fixes the /Users vs /users issue on macOS
+	rootCheck := strings.ToLower(realRoot)
+	targetCheck := strings.ToLower(realTarget)
+
+	// 6. The Security Check
+	if !strings.HasPrefix(targetCheck, rootCheck) {
+		return "", fmt.Errorf("path %s is outside root %s", cleanTarget, ds.allowedDir)
+	}
+
+	return cleanTarget, nil
 }
 
 // ================================================================
@@ -134,7 +192,12 @@ func (ds *DirectorySandbox) containsDirectoryEscape(cmd string) bool {
 
 func (ds *DirectorySandbox) extractFileArguments(cmd string) []string {
 	var out []string
-	words := strings.Fields(cmd)
+
+	// Basic cleaning to handle quotes roughly
+	cleanCmd := strings.ReplaceAll(cmd, "\"", "")
+	cleanCmd = strings.ReplaceAll(cleanCmd, "'", "")
+
+	words := strings.Fields(cleanCmd)
 
 	for _, w := range words {
 		// skip flags
@@ -148,7 +211,7 @@ func (ds *DirectorySandbox) extractFileArguments(cmd string) []string {
 		}
 
 		// skip operators
-		if w == "|" || w == ">" || w == ">>" {
+		if w == "|" || w == ">" || w == ">>" || w == "echo" {
 			continue
 		}
 
@@ -175,37 +238,6 @@ func (ds *DirectorySandbox) isCommonNonFileArgument(arg string) bool {
 }
 
 // ================================================================
-// 🧠 Realpath-based boundary check
-// ================================================================
-
-func (ds *DirectorySandbox) isOutsideSandbox(pathStr string) bool {
-	if ds.mode == SandboxDisabled {
-		return false
-	}
-
-	// Resolve symlinks and clean
-	real, err := filepath.EvalSymlinks(pathStr)
-	if err != nil {
-		real = filepath.Clean(pathStr)
-	}
-
-	// If not absolute, resolve relative to sandbox root
-	if !filepath.IsAbs(real) {
-		real = filepath.Join(ds.allowedDir, real)
-	}
-
-	real = filepath.Clean(real)
-
-	// Now compare
-	rel, err := filepath.Rel(ds.allowedDir, real)
-	if err != nil {
-		return true
-	}
-
-	return strings.HasPrefix(rel, "..")
-}
-
-// ================================================================
 // 📁 Directory control
 // ================================================================
 
@@ -214,37 +246,63 @@ func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
 		return os.Chdir(newDir)
 	}
 
-	// Resolve
-	real, err := filepath.EvalSymlinks(newDir)
+	// Use our robust validator for CD as well
+	safePath, err := ds.ValidateSafePath(newDir)
 	if err != nil {
-		real = filepath.Clean(newDir)
-	}
-
-	// Abs if needed
-	if !filepath.IsAbs(real) {
-		real = filepath.Join(ds.allowedDir, real)
-	}
-
-	real = filepath.Clean(real)
-
-	if ds.isOutsideSandbox(real) {
 		return fmt.Errorf("directory change outside sandbox: %s", newDir)
 	}
 
-	if err := os.Chdir(real); err != nil {
+	if err := os.Chdir(safePath); err != nil {
 		return err
 	}
 
-	ds.allowedDir = real
-	color.Green("📁 Changed directory: %s", real)
+	// Update allowedDir to the new path?
+	// NO. In strict sandbox, the root should usually stay the same,
+	// but in "CurrentDir" mode, we might allow drilling down.
+	// For "Mode C" (Root Lock), we do NOT update allowedDir (The Jail Cell),
+	// we just allow moving *inside* it.
+
+	// NOTE: If you want to restrict them to the INITIAL dir always, don't update ds.allowedDir.
+	// If you want to let them drill down, but not up past original, compare against originalDir.
+
+	color.Green("📁 Changed directory: %s", safePath)
 	return nil
 }
 
+// WrapCommand executes the command strictly within the sandbox logic.
+// It wires the output to os.Stdout so the TUI Hijacker can see it.
 func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell.Env) error {
+	// 1. Validate
 	if ok, reason := ds.ValidateCommand(cmd); !ok {
 		return fmt.Errorf("sandbox violation: %s", reason)
 	}
-	return ExecuteCommand(cmd, cfg, env)
+
+	if cfg.DryRun {
+		color.Yellow("[Dry Run] Would execute: %s", cmd)
+		return nil
+	}
+
+	// 2. Prepare Execution
+	// We use "sh -c" (or cmd /C) to handle redirects like "> file.txt" properly
+	shellBin := "/bin/sh"
+	if env.Shell != "" {
+		shellBin = env.Shell
+	}
+
+	var c *exec.Cmd
+	if strings.Contains(strings.ToLower(env.OSName), "windows") {
+		c = exec.Command("cmd", "/C", cmd)
+	} else {
+		c = exec.Command(shellBin, "-c", cmd)
+	}
+
+	// 3. Wire I/O for TUI Capture
+	// This is CRITICAL for Phase 2/3 TUI to display the output
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	c.Dir = ds.allowedDir // Force execution in allowed dir
+
+	return c.Run()
 }
 
 func (ds *DirectorySandbox) PrintStatus() {
@@ -282,15 +340,8 @@ func (ds *DirectorySandbox) ModeString() string {
 	}
 }
 
-func (ds *DirectorySandbox) GetCurrentDirectory() string {
-	return ds.allowedDir
-}
-
 func (ds *DirectorySandbox) ResetToOriginal() error {
-	if ds.mode != SandboxDisabled && ds.isOutsideSandbox(ds.originalDir) {
-		return fmt.Errorf("cannot reset outside sandbox")
-	}
-
+	// Validate against original dir logic if needed
 	if err := os.Chdir(ds.originalDir); err != nil {
 		return err
 	}

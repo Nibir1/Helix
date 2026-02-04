@@ -1,23 +1,35 @@
 package ux
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/fatih/color"
 )
 
-// UX provides enhanced sci-fi themed user experience features
+// ConfirmationRequest is sent to the TUI when the Agent needs user input.
+// This allows the Agent to pause and wait for a UI response (Y/N).
+type ConfirmationRequest struct {
+	Question  string
+	ReplyChan chan bool // The TUI sends true/false back here
+}
+
+// UX provides enhanced sci-fi themed user experience features.
 type UX struct {
 	typingSpeed    time.Duration
 	colors         *ColorScheme
 	scifiMode      bool
 	animationSpeed time.Duration
-	outputHandler  func(text string) // Callback for TUI/Headless mode
+
+	// eventHandler replaces the simple outputHandler.
+	// It accepts any event type (string logs or struct requests).
+	eventHandler func(interface{})
 }
 
-// ColorScheme holds sci-fi themed color configurations
+// ColorScheme holds sci-fi themed color configurations.
 type ColorScheme struct {
 	Primary   func(a ...interface{}) string
 	Secondary func(a ...interface{}) string
@@ -31,7 +43,7 @@ type ColorScheme struct {
 	Highlight func(a ...interface{}) string
 }
 
-// NewUX creates a new sci-fi themed UX manager
+// NewUX creates a new sci-fi themed UX manager.
 func NewUX() *UX {
 	return &UX{
 		typingSpeed:    25 * time.Millisecond,
@@ -52,26 +64,54 @@ func NewUX() *UX {
 	}
 }
 
-// SetOutputHandler sets a custom output handler for UX (enables Headless/TUI mode)
-func (ux *UX) SetOutputHandler(handler func(string)) {
-	ux.outputHandler = handler
+// SetEventHandler sets a custom handler for all UX events (Text logs or Interactive Requests).
+// This enables the TUI to react to the Agent's needs.
+func (ux *UX) SetEventHandler(handler func(interface{})) {
+	ux.eventHandler = handler
 }
 
-// Helper to route output either to stdout or the handler
+// AskYesNo prompts the user for confirmation.
+// In TUI mode, it sends a request and BLOCKS until the UI replies.
+// In CLI mode, it uses standard stdin.
+func (ux *UX) AskYesNo(question string) bool {
+	if ux.eventHandler != nil {
+		// TUI MODE:
+		// 1. Create a channel for the answer
+		replyCh := make(chan bool)
+
+		// 2. Send the request to the UI
+		ux.eventHandler(ConfirmationRequest{
+			Question:  question,
+			ReplyChan: replyCh,
+		})
+
+		// 3. BLOCK here until the UI (user) responds via the channel
+		return <-replyCh
+	}
+
+	// CLI MODE (Legacy/Fallback):
+	color.Yellow("%s [y/N]: ", question)
+	reader := bufio.NewReader(os.Stdin)
+	response, _ := reader.ReadString('\n')
+	response = strings.ToLower(strings.TrimSpace(response))
+	return response == "y" || response == "yes"
+}
+
+// Helper to route output either to stdout or the event handler
 func (ux *UX) print(text string) {
-	if ux.outputHandler != nil {
-		ux.outputHandler(text)
+	if ux.eventHandler != nil {
+		// In TUI mode, plain text is just one type of event
+		ux.eventHandler(text)
 		return
 	}
 	fmt.Println(text)
 }
 
-// Typewriter prints text with enhanced sci-fi typing animation
+// Typewriter prints text with enhanced sci-fi typing animation.
 // In TUI mode, it skips the delay and sends the text immediately.
 func (ux *UX) Typewriter(text string) {
-	// TUI Mode: Skip blocking sleeps, let the Viewport handle rendering
-	if ux.outputHandler != nil {
-		ux.outputHandler(text)
+	if ux.eventHandler != nil {
+		ux.eventHandler(text)
 		return
 	}
 
@@ -79,7 +119,6 @@ func (ux *UX) Typewriter(text string) {
 	runes := []rune(text)
 	n := len(runes)
 
-	// Adaptive speed based on content length
 	baseDelay := ux.typingSpeed
 	if n > 400 {
 		baseDelay = 8 * time.Millisecond
@@ -90,7 +129,6 @@ func (ux *UX) Typewriter(text string) {
 	for i, c := range runes {
 		fmt.Printf("%c", c)
 
-		// Enhanced pauses for dramatic effect
 		switch {
 		case c == '\n':
 			time.Sleep(baseDelay * 4)
@@ -99,7 +137,6 @@ func (ux *UX) Typewriter(text string) {
 		case strings.ContainsRune(",;:", c):
 			time.Sleep(baseDelay * 3)
 		default:
-			// Add slight randomness for natural feel
 			variation := time.Duration(i%13) * time.Millisecond
 			time.Sleep(baseDelay + variation - (2 * time.Millisecond))
 		}
@@ -107,22 +144,20 @@ func (ux *UX) Typewriter(text string) {
 	fmt.Println()
 }
 
-// PrintSystemMessage displays system-level messages with sci-fi styling
+// PrintSystemMessage displays system-level messages.
 func (ux *UX) PrintSystemMessage(text string) {
 	ux.scifiPrint("🛸", "SYSTEM", text, ux.colors.System)
 }
 
-// PrintAIMessage displays AI responses with neural network theme
+// PrintAIMessage displays AI responses.
 func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
 	prefix := ux.scifiPrefix("🧠", "NEURAL_NET", ux.colors.Primary)
 
-	if ux.outputHandler != nil {
-		// In TUI mode, combine prefix and text and send
-		ux.outputHandler(prefix + text)
+	if ux.eventHandler != nil {
+		ux.eventHandler(prefix + text)
 		return
 	}
 
-	// CLI Mode
 	fmt.Print(prefix)
 	if useTypingEffect {
 		ux.Typewriter(text)
@@ -131,12 +166,12 @@ func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
 	}
 }
 
-// PrintRAGResponse displays RAG-enhanced responses with knowledge theme
+// PrintRAGResponse displays RAG-enhanced responses.
 func (ux *UX) PrintRAGResponse(text string, useTypingEffect bool) {
 	prefix := ux.scifiPrefix("📚", "KNOWLEDGE_BASE", ux.colors.Accent)
 
-	if ux.outputHandler != nil {
-		ux.outputHandler(prefix + text)
+	if ux.eventHandler != nil {
+		ux.eventHandler(prefix + text)
 		return
 	}
 
@@ -148,42 +183,42 @@ func (ux *UX) PrintRAGResponse(text string, useTypingEffect bool) {
 	}
 }
 
-// PrintCommand displays command execution with cyberpunk style
+// PrintCommand displays command execution.
 func (ux *UX) PrintCommand(command string) {
 	ux.scifiPrint("⚡", "EXEC", command, ux.colors.Secondary)
 }
 
-// PrintData displays data output with database theme
+// PrintData displays data output.
 func (ux *UX) PrintData(data string) {
 	ux.scifiPrint("💾", "DATA", data, ux.colors.Info)
 }
 
-// PrintSuccess displays success messages with positive sci-fi theme
+// PrintSuccess displays success messages.
 func (ux *UX) PrintSuccess(message string) {
 	ux.scifiPrint("✅", "SUCCESS", message, ux.colors.Success)
 }
 
-// PrintError displays error messages with alert theme
+// PrintError displays error messages.
 func (ux *UX) PrintError(message string) {
 	ux.scifiPrint("🚨", "ERROR", message, ux.colors.Error)
 }
 
-// PrintWarning displays warning messages with caution theme
+// PrintWarning displays warning messages.
 func (ux *UX) PrintWarning(message string) {
 	ux.scifiPrint("⚠️", "WARNING", message, ux.colors.Warning)
 }
 
-// PrintInfo displays informational messages
+// PrintInfo displays informational messages.
 func (ux *UX) PrintInfo(message string) {
 	ux.scifiPrint("ℹ️", "INFO", message, ux.colors.Info)
 }
 
-// PrintDebug displays debug information
+// PrintDebug displays debug information.
 func (ux *UX) PrintDebug(message string) {
 	ux.scifiPrint("🔧", "DEBUG", message, ux.colors.Neutral)
 }
 
-// ShowWelcomeBanner displays sci-fi welcome banner
+// ShowWelcomeBanner displays sci-fi welcome banner.
 func (ux *UX) ShowWelcomeBanner(version string) {
 	banner := `
 ╔════════════════════════════════════════════════════════════════╗
@@ -201,31 +236,25 @@ func (ux *UX) ShowWelcomeBanner(version string) {
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
 `
-	if ux.outputHandler != nil {
-		ux.outputHandler(color.CyanString(banner))
+	if ux.eventHandler != nil {
+		ux.eventHandler(color.CyanString(banner))
 	} else {
 		color.Cyan(banner)
 		fmt.Println()
 	}
 }
 
-// ShowHelp displays sci-fi styled help information
+// ShowHelp displays sci-fi styled help information.
 func (ux *UX) ShowHelp() {
 	var b strings.Builder
 
 	b.WriteString(color.CyanString("📖 Helix — Command Overview\n\n"))
-
 	b.WriteString(color.GreenString("🤖 Natural Language Mode (Default)\n"))
 	b.WriteString("  Just type your request and Helix will:\n")
 	b.WriteString("   • Understand your intent\n")
 	b.WriteString("   • Plan steps\n")
 	b.WriteString("   • Call tools automatically (shell / git / file ops)\n")
 	b.WriteString("   • Execute actions when appropriate\n\n")
-
-	b.WriteString("  Examples:\n")
-	b.WriteString("   • \"why is the sky blue?\"\n")
-	b.WriteString("   • \"list all files in this folder\"\n")
-	b.WriteString("   • \"update the version in the readme and commit it\"\n\n")
 
 	b.WriteString(color.CyanString("⚙️  System Commands (Program Control)\n"))
 	b.WriteString("  /help                 - Show this help screen\n")
@@ -236,16 +265,12 @@ func (ux *UX) ShowHelp() {
 	b.WriteString(color.MagentaString("🧠 RAG System Controls\n"))
 	b.WriteString("  /rag-status           - Show RAG initialization status\n\n")
 
-	b.WriteString(color.GreenString("💡 Tips:\n"))
-	b.WriteString("  • NoSlash = full natural-language automation\n")
-	b.WriteString("  • SlashCommands = system control only\n\n")
-
 	b.WriteString(color.MagentaString("🎉 Helix Agent Mode is now your default interface."))
 
 	ux.print(b.String())
 }
 
-// ShowRAGStatus displays RAG system status with sci-fi theme
+// ShowRAGStatus displays RAG system status.
 func (ux *UX) ShowRAGStatus(stats map[string]interface{}) {
 	ux.sectionHeader("KNOWLEDGE BASE STATUS")
 
@@ -264,7 +289,7 @@ func (ux *UX) ShowRAGStatus(stats map[string]interface{}) {
 	}
 }
 
-// ShowCommandSuggestions displays RAG-based command suggestions
+// ShowCommandSuggestions displays RAG-based command suggestions.
 func (ux *UX) ShowCommandSuggestions(suggestions []interface{}) {
 	if len(suggestions) == 0 {
 		return
@@ -275,7 +300,6 @@ func (ux *UX) ShowCommandSuggestions(suggestions []interface{}) {
 		if i >= 3 {
 			break
 		}
-
 		if s, ok := suggestion.(map[string]interface{}); ok {
 			command := s["command"].(string)
 			description := s["description"].(string)
@@ -284,26 +308,22 @@ func (ux *UX) ShowCommandSuggestions(suggestions []interface{}) {
 			ux.PrintInfo(fmt.Sprintf("Command: %s", ux.colors.Highlight(command)))
 			ux.PrintData(fmt.Sprintf("Description: %s", description))
 			ux.PrintDebug(fmt.Sprintf("Neural Confidence: %.0f%%", confidence*100))
-			if ux.outputHandler == nil {
+			if ux.eventHandler == nil {
 				fmt.Println()
 			}
 		}
 	}
 }
 
-// ProgressBar shows a sci-fi styled progress bar
-// Note: In TUI mode, complex dynamic progress bars are difficult to stream via single messages.
-// This simplifies to text output for TUI, or retains standard behavior for CLI.
+// ProgressBar shows a sci-fi styled progress bar.
 func (ux *UX) ProgressBar(total int, description string) func() {
-	if ux.outputHandler != nil {
-		// TUI Mode: Simple notification
-		ux.outputHandler(fmt.Sprintf("%s [Start]", description))
+	if ux.eventHandler != nil {
+		ux.eventHandler(fmt.Sprintf("%s [Start]", description))
 		return func() {
-			ux.outputHandler(fmt.Sprintf("%s [%s]", description, ux.colors.Success("COMPLETE")))
+			ux.eventHandler(fmt.Sprintf("%s [%s]", description, ux.colors.Success("COMPLETE")))
 		}
 	}
 
-	// CLI Mode
 	fmt.Printf("%s [", ux.colors.System(description))
 	progress := 0
 	chars := []string{"▱", "▰"}
@@ -319,16 +339,13 @@ func (ux *UX) ProgressBar(total int, description string) func() {
 	}
 }
 
-// ShowLoadingAnimation shows a sci-fi loading animation
-// Skipped in TUI mode to avoid breaking layout/event loop
+// ShowLoadingAnimation shows a sci-fi loading animation.
 func (ux *UX) ShowLoadingAnimation(message string, done chan bool) {
-	if ux.outputHandler != nil {
-		// TUI Mode: Just print the start message. The TUI has its own spinner.
-		ux.outputHandler(fmt.Sprintf("%s %s...", "⣻", message))
+	if ux.eventHandler != nil {
+		ux.eventHandler(fmt.Sprintf("%s %s...", "⣻", message))
 		return
 	}
 
-	// CLI Mode
 	frames := []string{"⡿", "⣟", "⣯", "⣷", "⣾", "⣽", "⣻", "⢿"}
 	i := 0
 
@@ -350,14 +367,12 @@ func (ux *UX) ShowLoadingAnimation(message string, done chan bool) {
 	}()
 }
 
-// PrintTable prints a sci-fi styled table
+// PrintTable prints a sci-fi styled table.
 func (ux *UX) PrintTable(headers []string, rows [][]string) {
-	// Calculate column widths
 	widths := make([]int, len(headers))
 	for i, header := range headers {
 		widths[i] = len(header)
 	}
-
 	for _, row := range rows {
 		for i, cell := range row {
 			if len(cell) > widths[i] {
@@ -367,7 +382,6 @@ func (ux *UX) PrintTable(headers []string, rows [][]string) {
 	}
 
 	var b strings.Builder
-
 	// Top Border
 	b.WriteString("┌")
 	for i, width := range widths {
@@ -425,9 +439,7 @@ func (ux *UX) scifiPrint(emoji, label, text string, colorFunc func(...interface{
 }
 
 func (ux *UX) scifiPrefix(emoji, label string, colorFunc func(...interface{}) string) string {
-	return fmt.Sprintf("%s %s → ",
-		emoji,
-		colorFunc(label))
+	return fmt.Sprintf("%s %s → ", emoji, colorFunc(label))
 }
 
 func (ux *UX) scifiLabel(label string) string {
@@ -448,17 +460,14 @@ func (ux *UX) scifiDots(frame int) string {
 	return ux.colors.Neutral(dots[frame%len(dots)])
 }
 
-// SetAnimationSpeed adjusts animation speeds
 func (ux *UX) SetAnimationSpeed(speed time.Duration) {
 	ux.animationSpeed = speed
 }
 
-// SetTypingSpeed adjusts typing animation speed
 func (ux *UX) SetTypingSpeed(speed time.Duration) {
 	ux.typingSpeed = speed
 }
 
-// FormatDuration formats duration in sci-fi style
 func (ux *UX) FormatDuration(d time.Duration) string {
 	if d < time.Second {
 		return fmt.Sprintf("%dms", d.Milliseconds())

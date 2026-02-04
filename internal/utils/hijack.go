@@ -3,11 +3,13 @@ package utils
 import (
 	"bufio"
 	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-// HijackStdio redirects stdout and stderr to a channel.
+// HijackStdio redirects stdout and stderr to a Bubble Tea message channel.
 // It returns a cleanup function to restore original stdio.
-func HijackStdio(outChan chan string) func() {
+func HijackStdio(outChan chan tea.Msg) func() {
 	// Create a single pipe for both stdout and stderr.
 	// We use one pipe to ensure logs are merged in real-time.
 	r, w, _ := os.Pipe()
@@ -25,8 +27,8 @@ func HijackStdio(outChan chan string) func() {
 		scanner := bufio.NewScanner(r)
 		for scanner.Scan() {
 			text := scanner.Text()
-			// Send to TUI channel
-			// These lines will now appear inside the TUI viewport
+			// Send as a simple string, which satisfies the generic tea.Msg interface.
+			// The TUI loop will type-assert this back to string.
 			outChan <- text
 		}
 	}()

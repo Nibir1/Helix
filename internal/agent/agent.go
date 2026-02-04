@@ -313,7 +313,9 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		for _, r := range reasons {
 			a.ux.PrintWarning(fmt.Sprintf("   • %s", r))
 		}
-		if !commands.AskForConfirmation("Execute anyway?") {
+
+		// --- UPDATED INTERACTIVE CONFIRMATION ---
+		if !a.ux.AskYesNo("Execute anyway?") {
 			a.ux.PrintWarning("Command skipped")
 			return nil
 		}
@@ -326,9 +328,6 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		return fmt.Errorf("high-risk shell command blocked")
 	}
 
-	// The sandbox execution prints to stdout/stderr.
-	// In TUI mode, this will bypass the viewport unless captured.
-	// Ideally, Sandbox needs refactoring too, but for Phase 2 we prioritize Agent flow.
 	return a.sandbox.WrapCommand(validCmd, a.execConfig, a.env)
 }
 

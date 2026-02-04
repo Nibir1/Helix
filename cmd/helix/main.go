@@ -18,6 +18,7 @@ import (
 	"helix/internal/utils"
 	"helix/internal/ux"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 )
 
@@ -157,27 +158,25 @@ func main() {
 	color.Cyan("🔌 Connecting Neural Grid Interface...")
 
 	// 1. Create the TUI plumbing
-	// We create a channel to pipe Agent output directly to the UI
-	tuiChan := make(chan string, 100)
+	// UPDATED: Now carrying tea.Msg (generic events) instead of just strings.
+	tuiChan := make(chan tea.Msg, 100)
 
 	// 2. Configure UX to use this channel (Headless/TUI mode)
 	gui := ux.NewUX()
-	gui.SetOutputHandler(func(text string) {
-		tuiChan <- text
+	// UPDATED: SetEventHandler accepts interface{} (strings or structs)
+	gui.SetEventHandler(func(evt interface{}) {
+		tuiChan <- evt
 	})
 
 	// 3. Save Original Output & Activate Hijacker
-	// We MUST save the original stdout so the TUI can draw to the real screen.
 	originalStdout := os.Stdout
 
 	// Now we hijack os.Stdout/Stderr. Any fmt.Println calls after this line
-	// (from deep inside AI/Commands packages) will go to the pipe -> TUI.
+	// will go to the pipe -> TUI.
 	restoreStdio := utils.HijackStdio(tuiChan)
 	defer restoreStdio()
 
 	// --- CRITICAL FIX: Force color library to use the hijacked pipe ---
-	// This prevents the color library (used in internal/ai) from writing
-	// directly to the terminal and breaking the TUI layout.
 	color.Output = os.Stdout
 
 	// 4. Initialize Agent with the TUI-aware UX
@@ -194,7 +193,6 @@ func main() {
 	// We pass 'originalStdout' so Bubble Tea writes to the actual terminal,
 	// bypassing our hijack.
 	if err := tui.Start(agentCore, tuiChan, originalStdout); err != nil {
-		// If TUI crashes, restore stdio so we can see the error
 		restoreStdio()
 		color.Red("❌ TUI Critical Failure: %v", err)
 		os.Exit(1)
