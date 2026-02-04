@@ -64,10 +64,10 @@ func NewModel(ag *agent.Agent, agentCh chan tea.Msg) AppModel {
 	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondary))
 
 	// POLISH: The Spinner
-	// Switched to MiniDot for a cleaner, high-tech "busy" indicator
+	// Switched to Dot for a cleaner, high-tech "busy" indicator
 	spin := spinner.New()
-	spin.Spinner = spinner.MiniDot
-	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPrimary))
+	spin.Spinner = spinner.Dot
+	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier)) // Red for the Red Team theme
 
 	return AppModel{
 		textInput: ti,

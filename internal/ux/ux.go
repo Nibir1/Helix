@@ -146,12 +146,12 @@ func (ux *UX) Typewriter(text string) {
 
 // PrintSystemMessage displays system-level messages.
 func (ux *UX) PrintSystemMessage(text string) {
-	ux.scifiPrint("🛸", "SYSTEM", text, ux.colors.System)
+	ux.scifiPrint("SYSTEM", text, ux.colors.System)
 }
 
 // PrintAIMessage displays AI responses.
 func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
-	prefix := ux.scifiPrefix("🧠", "NEURAL_NET", ux.colors.Primary)
+	prefix := ux.scifiPrefix("[NEURAL_NET]", ux.colors.Primary)
 
 	if ux.eventHandler != nil {
 		ux.eventHandler(prefix + text)
@@ -168,7 +168,7 @@ func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
 
 // PrintRAGResponse displays RAG-enhanced responses.
 func (ux *UX) PrintRAGResponse(text string, useTypingEffect bool) {
-	prefix := ux.scifiPrefix("📚", "KNOWLEDGE_BASE", ux.colors.Accent)
+	prefix := ux.scifiPrefix("KNOWLEDGE_BASE", ux.colors.Accent)
 
 	if ux.eventHandler != nil {
 		ux.eventHandler(prefix + text)
@@ -185,37 +185,37 @@ func (ux *UX) PrintRAGResponse(text string, useTypingEffect bool) {
 
 // PrintCommand displays command execution.
 func (ux *UX) PrintCommand(command string) {
-	ux.scifiPrint("⚡", "EXEC", command, ux.colors.Secondary)
+	ux.scifiPrint("EXEC", command, ux.colors.Secondary)
 }
 
 // PrintData displays data output.
 func (ux *UX) PrintData(data string) {
-	ux.scifiPrint("💾", "DATA", data, ux.colors.Info)
+	ux.scifiPrint("DATA", data, ux.colors.Info)
 }
 
 // PrintSuccess displays success messages.
 func (ux *UX) PrintSuccess(message string) {
-	ux.scifiPrint("✅", "SUCCESS", message, ux.colors.Success)
+	ux.scifiPrint("SUCCESS", message, ux.colors.Success)
 }
 
 // PrintError displays error messages.
 func (ux *UX) PrintError(message string) {
-	ux.scifiPrint("🚨", "ERROR", message, ux.colors.Error)
+	ux.scifiPrint("ERROR", message, ux.colors.Error)
 }
 
 // PrintWarning displays warning messages.
 func (ux *UX) PrintWarning(message string) {
-	ux.scifiPrint("⚠️", "WARNING", message, ux.colors.Warning)
+	ux.scifiPrint("WARNING", message, ux.colors.Warning)
 }
 
 // PrintInfo displays informational messages.
 func (ux *UX) PrintInfo(message string) {
-	ux.scifiPrint("ℹ️", "INFO", message, ux.colors.Info)
+	ux.scifiPrint("INFO", message, ux.colors.Info)
 }
 
 // PrintDebug displays debug information.
 func (ux *UX) PrintDebug(message string) {
-	ux.scifiPrint("🔧", "DEBUG", message, ux.colors.Neutral)
+	ux.scifiPrint("DEBUG", message, ux.colors.Neutral)
 }
 
 // ShowWelcomeBanner displays sci-fi welcome banner.
@@ -230,9 +230,9 @@ func (ux *UX) ShowWelcomeBanner(version string) {
 ║            ██║  ██║███████╗███████╗██║██╔╝ ██╗                 ║
 ║            ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝                 ║
 ║                                                                ║
-║       🚀 Helix v` + version + ` - AI-Powered CLI Assistant            ║
-║                  Author - Nahasat Nibir                       ║
-║       📚 GitHub: https://github.com/Nibir1/Helix            ║
+║       Helix v` + version + ` - AI-Powered CLI Assistant            ║
+║                  Creator - Nahasat Nibir                       ║
+║       GitHub: https://github.com/Nibir1/Helix            ║
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
 `
@@ -248,24 +248,24 @@ func (ux *UX) ShowWelcomeBanner(version string) {
 func (ux *UX) ShowHelp() {
 	var b strings.Builder
 
-	b.WriteString(color.CyanString("📖 Helix — Command Overview\n\n"))
-	b.WriteString(color.GreenString("🤖 Natural Language Mode (Default)\n"))
+	b.WriteString(color.CyanString("Helix — Command Overview\n\n"))
+	b.WriteString(color.GreenString("Natural Language Mode (Default)\n"))
 	b.WriteString("  Just type your request and Helix will:\n")
 	b.WriteString("   • Understand your intent\n")
 	b.WriteString("   • Plan steps\n")
 	b.WriteString("   • Call tools automatically (shell / git / file ops)\n")
 	b.WriteString("   • Execute actions when appropriate\n\n")
 
-	b.WriteString(color.CyanString("⚙️  System Commands (Program Control)\n"))
+	b.WriteString(color.CyanString("System Commands (Program Control)\n"))
 	b.WriteString("  /help                 - Show this help screen\n")
 	b.WriteString("  /exit                 - Quit Helix\n")
 	b.WriteString("  /debug                - Show debug information\n")
 	b.WriteString("  /sandbox <mode>       - Control directory restrictions\n\n")
 
-	b.WriteString(color.MagentaString("🧠 RAG System Controls\n"))
+	b.WriteString(color.MagentaString("RAG System Controls\n"))
 	b.WriteString("  /rag-status           - Show RAG initialization status\n\n")
 
-	b.WriteString(color.MagentaString("🎉 Helix Agent Mode is now your default interface."))
+	b.WriteString(color.MagentaString("Helix Agent Mode is now your default interface."))
 
 	ux.print(b.String())
 }
@@ -433,13 +433,13 @@ func (ux *UX) PrintTable(headers []string, rows [][]string) {
 
 // Helper methods
 
-func (ux *UX) scifiPrint(emoji, label, text string, colorFunc func(...interface{}) string) {
-	msg := fmt.Sprintf("%s %s %s", emoji, ux.scifiLabel(label), colorFunc(text))
+func (ux *UX) scifiPrint(label, text string, colorFunc func(...interface{}) string) {
+	msg := fmt.Sprintf("%s %s", ux.scifiLabel(label), colorFunc(text))
 	ux.print(msg)
 }
 
-func (ux *UX) scifiPrefix(emoji, label string, colorFunc func(...interface{}) string) string {
-	return fmt.Sprintf("%s %s → ", emoji, colorFunc(label))
+func (ux *UX) scifiPrefix(label string, colorFunc func(...interface{}) string) string {
+	return fmt.Sprintf("%s → ", colorFunc(label))
 }
 
 func (ux *UX) scifiLabel(label string) string {

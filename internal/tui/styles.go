@@ -49,10 +49,10 @@ func DefaultStyles() *Styles {
 		Background(lipgloss.Color(ColorVoid)).
 		Foreground(lipgloss.Color(ColorText))
 
-	// Header: " HELIX // RED TEAM "
+	// Header: " HELIX // RED TEAM // Nahasat Nibir ^;;^ "
 	s.Header = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ColorVoid)).
-		Background(lipgloss.Color(ColorPrimary)).
+		Background(lipgloss.Color(ColorRectifier)).
 		Bold(true).
 		Padding(0, 1).
 		MarginRight(1)
@@ -71,7 +71,7 @@ func DefaultStyles() *Styles {
 
 	// Entity Names
 	s.SystemName = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorSecondary)).
+		Foreground(lipgloss.Color(ColorRectifier)).
 		Bold(true)
 
 	s.AgentName = lipgloss.NewStyle().

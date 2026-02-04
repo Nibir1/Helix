@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"helix/internal/agent"
+	"helix/internal/config"
 	"helix/internal/ux"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -30,23 +31,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.styles = DefaultStyles()
 
-		// Calculate heights dynamically based on styles
 		headerHeight := lipgloss.Height(m.headerView())
-		footerHeight := lipgloss.Height(m.inputView()) // Now includes border height
-
-		// Total vertical chrome
+		footerHeight := lipgloss.Height(m.inputView())
 		verticalMarginHeight := headerHeight + footerHeight
 
-		// Dynamic Input Width calculation
-		// We subtract borders (2) and padding (2) from the input container style
 		inputBoxWidth := m.width - 4
-		m.textInput.Width = inputBoxWidth - 4 // Internal text width
+		m.textInput.Width = inputBoxWidth - 4
 
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
 			m.viewport.YPosition = headerHeight
-			// Initial Sci-Fi Boot Message
-			m.viewport.SetContent(m.styles.SystemName.Render("⚡ SYSTEM ONLINE: INITIALIZING NEURAL LINK..."))
+
+			// --- CHANGE: Load the Welcome Banner at startup ---
+			banner := m.welcomeView()
+			m.viewport.SetContent(banner)
+			// We treat the banner as the first entry in history so it doesn't disappear on first input
+			m.history = append(m.history, banner)
+
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
@@ -57,24 +58,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 		}
 
-	// ---------------------------------------------------------
-	// Handle Confirmation Request (Modal Trigger)
-	// ---------------------------------------------------------
+	// Handle Confirmation Request
 	case ux.ConfirmationRequest:
 		m.uiState = StateConfirm
 		m.confirmMsg = msg.Question
 		m.confirmReply = msg.ReplyChan
 		return m, nil
 
-	// ---------------------------------------------------------
 	// Handle Key Presses
-	// ---------------------------------------------------------
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
 
-		// MODAL MODE
 		if m.uiState == StateConfirm {
 			switch msg.String() {
 			case "y", "Y":
@@ -87,13 +83,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// CHAT MODE
 		if m.uiState == StateMain {
 			if msg.Type == tea.KeyEnter {
 				input := m.textInput.Value()
 				if input != "" {
-					// Render User Input with "Iso" styling
-					// [USER] > input
 					userLabel := m.styles.SystemName.Render("[USER]")
 					userLine := fmt.Sprintf("%s › %s", userLabel, input)
 
@@ -142,7 +135,6 @@ func (m AppModel) View() string {
 	content := m.styles.Viewport.Render(m.viewport.View())
 	footer := m.inputView()
 
-	// Join vertically
 	baseView := lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 
 	if m.uiState == StateConfirm {
@@ -152,21 +144,66 @@ func (m AppModel) View() string {
 	return baseView
 }
 
-// Sub-view: Header
+// Sub-view: Header (Fixed at the top)
 func (m AppModel) headerView() string {
-	titleText := " HELIX // Creator - Nahasat Nibir ^;;^ "
+	titleText := " HELIX // RED TEAM // Nahasat Nibir ^;;^"
 	title := m.styles.Header.Render(fmt.Sprintf("%s %s", m.spinner.View(), titleText))
 
-	// Create a line that fills the rest of the width
 	lineWidth := max(0, m.width-lipgloss.Width(title))
 	line := m.styles.Status.Render(strings.Repeat("━", lineWidth))
 
 	return lipgloss.JoinHorizontal(lipgloss.Center, title, line)
 }
 
+// Sub-view: The Welcome Banner (Displayed in viewport at startup)
+func (m AppModel) welcomeView() string {
+	// Colors
+	// cyan := m.styles.AgentName
+	magenta := m.styles.SystemName
+	white := m.styles.ModalText
+
+	// The ASCII Art
+	art := `
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║               ██╗  ██╗███████╗██╗     ██╗██╗  ██╗              ║
+║               ██║  ██║██╔════╝██║     ██║╚██╗██╔╝              ║
+║               ███████║█████╗  ██║     ██║ ╚███╔╝               ║
+║               ██╔══██║██╔══╝  ██║     ██║ ██╔██╗               ║
+║               ██║  ██║███████╗███████╗██║██╔╝ ██╗              ║
+║               ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝              ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝`
+
+	// Info Lines
+	versionLine := fmt.Sprintf("Helix v%s - AI-Powered CLI Assistant", config.HelixVersion)
+	authorLine := "Creator - Nahasat Nibir"
+
+	// The Manifesto / Quote
+	quote := "- We scream truth through broken amps while empires rot in silence -"
+
+	// Compose the layout centered
+	// We use lipgloss.PlaceHorizontal to center each line relative to the window width
+
+	bannerContent := lipgloss.JoinVertical(
+		lipgloss.Center,
+		magenta.Render(art),
+		"", // spacer
+		white.Render(versionLine),
+		magenta.Render(authorLine),
+		"", // spacer
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorTertiary)).Italic(true).Render(quote),
+		"", // spacer
+		m.styles.Status.Render(strings.Repeat("─", 50)),
+		"",
+	)
+
+	// Center the whole block in the available width
+	return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, bannerContent)
+}
+
 // Sub-view: Input Area
 func (m AppModel) inputView() string {
-	// The border takes up 2 width, padding 2 width
 	return m.styles.Input.Width(m.width - 2).Render(m.textInput.View())
 }
 
