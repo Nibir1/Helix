@@ -14,6 +14,7 @@ import (
 	"helix/internal/config"
 	"helix/internal/rag"
 	"helix/internal/shell"
+	"helix/internal/tui"
 	"helix/internal/utils"
 	"helix/internal/ux"
 
@@ -167,7 +168,12 @@ func main() {
 
 	color.Green("🎉 Helix ready — type anything to begin")
 
-	runAgentCLI()
+	// runAgentCLI()
+
+	// temporary TUI debug
+	if err := tui.Start(); err != nil {
+		panic(err)
+	}
 }
 
 // -----------------------------------------------------------------------------
