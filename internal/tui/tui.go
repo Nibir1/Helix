@@ -30,21 +30,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.styles = DefaultStyles()
 
+		// Calculate heights dynamically based on styles
 		headerHeight := lipgloss.Height(m.headerView())
-		inputHeight := lipgloss.Height(m.inputView())
-		verticalMarginHeight := headerHeight + inputHeight
+		footerHeight := lipgloss.Height(m.inputView()) // Now includes border height
 
-		// Dynamic Input Width
-		newInputWidth := msg.Width - 5
-		if newInputWidth < 10 {
-			newInputWidth = 10
-		}
-		m.textInput.Width = newInputWidth
+		// Total vertical chrome
+		verticalMarginHeight := headerHeight + footerHeight
+
+		// Dynamic Input Width calculation
+		// We subtract borders (2) and padding (2) from the input container style
+		inputBoxWidth := m.width - 4
+		m.textInput.Width = inputBoxWidth - 4 // Internal text width
 
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
 			m.viewport.YPosition = headerHeight
-			m.viewport.SetContent("⚡ INITIALIZING HELIX RED TEAM PROTOCOL...")
+			// Initial Sci-Fi Boot Message
+			m.viewport.SetContent(m.styles.SystemName.Render("⚡ SYSTEM ONLINE: INITIALIZING NEURAL LINK..."))
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
@@ -56,25 +58,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	// ---------------------------------------------------------
-	// NEW: Handle Confirmation Request (Modal Trigger)
+	// Handle Confirmation Request (Modal Trigger)
 	// ---------------------------------------------------------
 	case ux.ConfirmationRequest:
 		m.uiState = StateConfirm
 		m.confirmMsg = msg.Question
 		m.confirmReply = msg.ReplyChan
-		// We return immediately to render the modal overlay
 		return m, nil
 
 	// ---------------------------------------------------------
-	// Handle Key Presses (Context Dependent)
+	// Handle Key Presses
 	// ---------------------------------------------------------
 	case tea.KeyMsg:
-		// Global Quit
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}
 
-		// MODE: CONFIRMATION (Modal)
+		// MODAL MODE
 		if m.uiState == StateConfirm {
 			switch msg.String() {
 			case "y", "Y":
@@ -87,14 +87,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// MODE: MAIN (Chat)
+		// CHAT MODE
 		if m.uiState == StateMain {
 			if msg.Type == tea.KeyEnter {
 				input := m.textInput.Value()
 				if input != "" {
-					userLine := fmt.Sprintf("%s %s", m.styles.SystemName.Render("USER >"), input)
-					m.history = append(m.history, userLine)
+					// Render User Input with "Iso" styling
+					// [USER] > input
+					userLabel := m.styles.SystemName.Render("[USER]")
+					userLine := fmt.Sprintf("%s › %s", userLabel, input)
 
+					m.history = append(m.history, userLine)
 					m.viewport.SetContent(strings.Join(m.history, "\n"))
 					m.viewport.GotoBottom()
 					m.textInput.Reset()
@@ -108,20 +111,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	// Message received from the Agent (via UX channel)
+	// Message from Agent
 	case AgentMsg:
 		m.history = append(m.history, msg.Content)
 		m.viewport.SetContent(strings.Join(m.history, "\n"))
 		m.viewport.GotoBottom()
 		return m, waitForAgentOutput(m.agentCh)
 
-	// Agent finished processing
 	case SessionDoneMsg:
 		m.textInput.Focus()
 		return m, textinput.Blink
 	}
 
-	// Update Bubbles components (Only update input if in Main mode)
 	if m.uiState == StateMain {
 		m.textInput, tiCmd = m.textInput.Update(msg)
 	}
@@ -137,13 +138,13 @@ func (m AppModel) View() string {
 		return "\n  Initializing The Grid..."
 	}
 
-	// Base Layer
 	header := m.headerView()
 	content := m.styles.Viewport.Render(m.viewport.View())
 	footer := m.inputView()
-	baseView := fmt.Sprintf("%s\n%s\n%s", header, content, footer)
 
-	// Overlay Layer (Modal)
+	// Join vertically
+	baseView := lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+
 	if m.uiState == StateConfirm {
 		return m.overlayView(baseView)
 	}
@@ -153,40 +154,36 @@ func (m AppModel) View() string {
 
 // Sub-view: Header
 func (m AppModel) headerView() string {
-	titleText := " HELIX // Creator - Nahasat Nibir "
+	titleText := " HELIX // Creator - Nahasat Nibir ^;;^ "
 	title := m.styles.Header.Render(fmt.Sprintf("%s %s", m.spinner.View(), titleText))
-	line := m.styles.Status.Render(strings.Repeat("─", max(0, m.width-lipgloss.Width(title))))
+
+	// Create a line that fills the rest of the width
+	lineWidth := max(0, m.width-lipgloss.Width(title))
+	line := m.styles.Status.Render(strings.Repeat("━", lineWidth))
+
 	return lipgloss.JoinHorizontal(lipgloss.Center, title, line)
 }
 
 // Sub-view: Input Area
 func (m AppModel) inputView() string {
-	safeWidth := max(0, m.width-4)
-	return m.styles.Input.Width(safeWidth).Render(m.textInput.View())
+	// The border takes up 2 width, padding 2 width
+	return m.styles.Input.Width(m.width - 2).Render(m.textInput.View())
 }
 
 // Sub-view: Modal Overlay
 func (m AppModel) overlayView(base string) string {
-	// Create the dialog box
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color(ColorRectifier)).
-		Background(lipgloss.Color(ColorVoid)).
-		Padding(1, 2).
-		Align(lipgloss.Center).
-		Render(fmt.Sprintf(
-			"⚠️  CONFIRM INSTRUCTION  ⚠️\n\n%s\n\n[Y] Proceed    [N] Abort",
-			m.styles.AgentName.Render(m.confirmMsg),
-		))
+	msg := m.styles.ModalText.Render(m.confirmMsg)
 
-	// Center it over the entire screen
+	dialog := m.styles.ModalBorder.Render(fmt.Sprintf(
+		"⚠️  CRITICAL DECISION REQUIRED  ⚠️\n\n%s\n\n[Y] EXECUTE    [N] ABORT",
+		msg,
+	))
+
 	return lipgloss.Place(
 		m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
 		dialog,
 		lipgloss.WithWhitespaceChars(" "),
-		// We don't dim the background because it's hard to read;
-		// instead, the popup just floats over the existing text.
 	)
 }
 
@@ -197,7 +194,6 @@ func max(a, b int) int {
 	return b
 }
 
-// Entry Point
 func Start(ag *agent.Agent, agentCh chan tea.Msg, output io.Writer) error {
 	p := tea.NewProgram(
 		NewModel(ag, agentCh),

@@ -46,27 +46,33 @@ type AppModel struct {
 // NewModel creates the initial TUI state.
 // It requires the Agent instance and the channel where the Agent/UX writes output.
 func NewModel(ag *agent.Agent, agentCh chan tea.Msg) AppModel {
+	// Initialize styles immediately so we can use them for components
+	s := DefaultStyles()
+
 	ti := textinput.New()
-	ti.Placeholder = "Enter command / directive..."
+	ti.Placeholder = "Enter directive..."
 	ti.Focus()
 	ti.CharLimit = 256
 	ti.Width = 20
 
-	// Style the prompt to look like a red cursor
-	ti.Prompt = "┃ "
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier))
+	// POLISH: The Prompt
+	// Switched to a lightning bolt and used the Secondary (Neon Magenta) or Primary (Cyan) color
+	ti.Prompt = "⚡ "
+	ti.PromptStyle = s.InputPrompt
 	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorText))
 	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSubtle))
+	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorSecondary))
 
-	// Configure the spinner (The "Loading" animation)
-	s := spinner.New()
-	s.Spinner = spinner.Dot // Sci-fi looking polygon
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier))
+	// POLISH: The Spinner
+	// Switched to MiniDot for a cleaner, high-tech "busy" indicator
+	spin := spinner.New()
+	spin.Spinner = spinner.MiniDot
+	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPrimary))
 
 	return AppModel{
 		textInput: ti,
-		spinner:   s,
-		styles:    DefaultStyles(),
+		spinner:   spin,
+		styles:    s,
 		history:   []string{},
 		agent:     ag,
 		agentCh:   agentCh,

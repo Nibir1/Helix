@@ -2,69 +2,103 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// THEME PALETTE: TRON LEGACY (RED TEAM / CLU)
+// THEME: TRON / CYBERPUNK
+// -----------------------
+// Primary:   Electric Cyan (#04D9FF) - The Agent / Success
+// Secondary: Neon Magenta (#FF0055)  - Warnings / User
+// Tertiary:  Solar Orange (#FF9900)  - System / Info
+// Void:      Deep Black (#050505)    - Background
+// Grid:      Dim Grey (#1A1A1A)      - UI Elements
+
 const (
-	ColorVoid      = "#080808" // Deepest black background
-	ColorGrid      = "#1a1a1a" // Subtle grid background
-	ColorRectifier = "#FF1E1E" // The primary "Bad Guy" red
-	ColorText      = "#E0E0E0" // Standard text (off-white)
-	ColorSubtle    = "#444444" // Dimmed text
-	ColorGlow      = "#550000" // Faint red background for active elements
+	ColorPrimary   = "#04D9FF" // Cyan
+	ColorSecondary = "#FF0055" // Magenta
+	ColorTertiary  = "#FF9900" // Orange
+	ColorText      = "#FAFAFA" // White-ish
+	ColorSubtle    = "#444444" // Grey
+	ColorVoid      = "#050505" // Black
+	ColorRectifier = "#FF0000" // Red (For the Red Team theme)
 )
 
 type Styles struct {
-	App        lipgloss.Style
-	Header     lipgloss.Style
-	Border     lipgloss.Style
-	Input      lipgloss.Style
+	// Base
+	App    lipgloss.Style
+	Header lipgloss.Style
+	Status lipgloss.Style
+
+	// Content
 	Viewport   lipgloss.Style
-	Status     lipgloss.Style
-	AgentName  lipgloss.Style
 	SystemName lipgloss.Style
+	AgentName  lipgloss.Style
+	Timestamp  lipgloss.Style
+
+	// Input
+	Input       lipgloss.Style
+	InputPrompt lipgloss.Style
+
+	// Modal
+	ModalBorder lipgloss.Style
+	ModalText   lipgloss.Style
 }
 
 func DefaultStyles() *Styles {
 	s := new(Styles)
 
-	// Base Application - Forces a black background
+	// Base Application Style
 	s.App = lipgloss.NewStyle().
 		Background(lipgloss.Color(ColorVoid)).
 		Foreground(lipgloss.Color(ColorText))
 
-	// The Glowing Red Border used on active panels
-	s.Border = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorRectifier)).
-		Padding(0, 1)
-
-	// Header Bar (Top)
+	// Header: " HELIX // RED TEAM "
 	s.Header = lipgloss.NewStyle().
-		Background(lipgloss.Color(ColorRectifier)).
 		Foreground(lipgloss.Color(ColorVoid)).
+		Background(lipgloss.Color(ColorPrimary)).
 		Bold(true).
 		Padding(0, 1).
-		MarginBottom(1)
+		MarginRight(1)
 
-	// Viewport (The central chat log)
+	// Status Line (The separator)
+	s.Status = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorSubtle))
+
+	// Viewport (The Chat Area)
+	// We add a subtle left border to define the "feed"
 	s.Viewport = lipgloss.NewStyle().
-		Background(lipgloss.Color(ColorVoid)).
-		Padding(0, 1) // Give text some breathing room
+		Padding(0, 1).
+		BorderLeft(true).
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(lipgloss.Color(ColorSubtle))
 
-	// Text Input (Bottom) - The "Prompt"
+	// Entity Names
+	s.SystemName = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorSecondary)).
+		Bold(true)
+
+	s.AgentName = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorPrimary)).
+		Bold(true)
+
+	// Input Area
 	s.Input = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorRectifier)). // Red border
-		Foreground(lipgloss.Color(ColorRectifier)).       // Red text
-		Padding(0, 1)
+		BorderForeground(lipgloss.Color(ColorPrimary)).
+		Padding(0, 1).
+		MarginTop(0)
 
-	// Status Bar elements
-	s.Status = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorSubtle)).
-		MarginTop(1)
+	s.InputPrompt = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorPrimary)).
+		Bold(true)
 
-	// AI/System prefixes
-	s.AgentName = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier)).Bold(true)
-	s.SystemName = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF")).Bold(true) // Cyan for System interrupts
+	// Modal (The Popup)
+	s.ModalBorder = lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color(ColorRectifier)).
+		Padding(1, 2).
+		Align(lipgloss.Center)
+
+	s.ModalText = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorText)).
+		Bold(true)
 
 	return s
 }

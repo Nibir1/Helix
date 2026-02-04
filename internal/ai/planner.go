@@ -219,7 +219,7 @@ NOW OUTPUT THE COMPLETE JSON:
 
 func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 	raw = strings.TrimSpace(raw)
-	color.Cyan("🔍 Planner raw output: %s", raw)
+	// color.Cyan("Planner raw output: %s", raw)
 
 	if raw == "" {
 		return nil, fmt.Errorf("empty planner output")
