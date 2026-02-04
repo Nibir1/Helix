@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"math/rand"
 	"time"
 
 	"helix/internal/agent"
@@ -20,10 +19,30 @@ const (
 	StateConfirm
 )
 
+// Log Types for Color Coding
+const (
+	LogTypeUser = iota
+	LogTypeInfo
+	LogTypeSuccess
+	LogTypeError
+	LogTypeWarning
+	LogTypeDebug
+	LogTypeAgent
+)
+
+// LogEntry replaces simple strings for history
+type LogEntry struct {
+	Type      int
+	Content   string
+	Timestamp time.Time
+}
+
 // Msg types
 type MatrixTickMsg time.Time
-type GlitchTickMsg struct{}  // Triggers a glitch spike
-type GlitchResetMsg struct{} // Resets text to normal
+type GlitchTickMsg struct{}
+type GlitchResetMsg struct{}
+type SystemTickMsg time.Time    // Triggers HUD updates
+type TypewriterTickMsg struct{} // New: Triggers character streaming
 
 type AppModel struct {
 	width   int
@@ -31,13 +50,23 @@ type AppModel struct {
 	ready   bool
 	uiState int
 
-	// Animation Data
+	// Animation / Glitch Data
 	matrixDrops []int
 	bootTime    time.Time
+	glitchProb  float64
 
-	// Glitch Data
-	glitchProb float64 // Current probability of character corruption (0.0 - 1.0)
+	// HUD Data (Real-time Resources)
+	memUsage    string
+	activeProcs int
 
+	// NEW: Typing Effect Data
+	isTyping    bool      // Are we currently streaming text?
+	pendingText string    // The full message waiting to be typed
+	typedSoFar  string    // What has been typed on screen so far
+	typingType  int       // The LogType of the message being typed
+	typingStart time.Time // When the current message stream started
+
+	// Interactive Modal Data
 	confirmMsg   string
 	confirmReply chan bool
 
@@ -48,7 +77,9 @@ type AppModel struct {
 	textInput textinput.Model
 	spinner   spinner.Model
 	styles    *Styles
-	history   []string
+
+	// History is now structured
+	history []LogEntry
 }
 
 func NewModel(ag *agent.Agent, agentCh chan tea.Msg) AppModel {
@@ -68,15 +99,18 @@ func NewModel(ag *agent.Agent, agentCh chan tea.Msg) AppModel {
 	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier))
 
 	return AppModel{
-		textInput:  ti,
-		spinner:    spin,
-		styles:     s,
-		history:    []string{},
-		agent:      ag,
-		agentCh:    agentCh,
-		uiState:    StateLoading,
-		bootTime:   time.Now(),
-		glitchProb: 0.0, // Start clean
+		textInput:   ti,
+		spinner:     spin,
+		styles:      s,
+		history:     []LogEntry{}, // Empty typed slice
+		agent:       ag,
+		agentCh:     agentCh,
+		uiState:     StateLoading,
+		bootTime:    time.Now(),
+		glitchProb:  0.0,
+		memUsage:    "0 MB",
+		activeProcs: 1,
+		isTyping:    false, // Init typing state
 	}
 }
 
@@ -86,7 +120,8 @@ func (m AppModel) Init() tea.Cmd {
 		m.spinner.Tick,
 		waitForAgentOutput(m.agentCh),
 		tickMatrix(),
-		scheduleGlitch(), // Start the random glitch timer
+		scheduleGlitch(),
+		tickSystem(), // Start the HUD heartbeat
 	)
 }
 
@@ -109,17 +144,30 @@ func tickMatrix() tea.Cmd {
 	})
 }
 
-// scheduleGlitch waits a random time (2-5 seconds) before triggering a glitch
 func scheduleGlitch() tea.Cmd {
-	delay := time.Duration(rand.Intn(3000)+2000) * time.Millisecond
+	// Random glitch every 2-5s
+	delay := time.Duration(2000+(time.Now().UnixNano()%3000)/1e6) * time.Millisecond
 	return tea.Tick(delay, func(t time.Time) tea.Msg {
 		return GlitchTickMsg{}
 	})
 }
 
-// resetGlitch waits a split second (150ms) before fixing the text
 func resetGlitch() tea.Cmd {
 	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
 		return GlitchResetMsg{}
+	})
+}
+
+// Update system stats every 1 second
+func tickSystem() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return SystemTickMsg(t)
+	})
+}
+
+// NEW: Helper for fast typing ticks (20ms = approx 50 chars/sec)
+func tickTypewriter() tea.Cmd {
+	return tea.Tick(20*time.Millisecond, func(t time.Time) tea.Msg {
+		return TypewriterTickMsg{}
 	})
 }
