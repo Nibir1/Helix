@@ -1,3 +1,5 @@
+// internal/utils/syntax.go
+
 package utils
 
 import (

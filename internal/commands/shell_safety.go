@@ -1,3 +1,5 @@
+// internal/commands/shell_safety.go
+
 package commands
 
 import (

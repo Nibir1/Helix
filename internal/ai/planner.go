@@ -1,3 +1,5 @@
+// internal/ai/planner.go
+
 package ai
 
 import (
@@ -11,7 +13,7 @@ import (
 
 //
 // ──────────────────────────────────────────────────────────────
-// 📐 PLANNER SCHEMA
+// PLANNER SCHEMA
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -58,7 +60,7 @@ var (
 )
 
 // ──────────────────────────────────────────────────────────────
-// 🧠 BuildPlannerPrompt — ULTRA-STRICT Version
+// BuildPlannerPrompt — ULTRA-STRICT Version
 // ──────────────────────────────────────────────────────────────
 func BuildPlannerPrompt(userInput string, envDescription string) string {
 	return fmt.Sprintf(`
@@ -213,7 +215,7 @@ NOW OUTPUT THE COMPLETE JSON:
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🧼 ParsePlanFromModelOutput
+// ParsePlanFromModelOutput
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -302,7 +304,7 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🧽 NORMALIZATION
+// NORMALIZATION
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -363,7 +365,7 @@ func fixPlan(p *Plan) {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🛡️ VALIDATION (SAFE + DANGEROUS GIT ACTIONS)
+// VALIDATION (SAFE + DANGEROUS GIT ACTIONS)
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -384,7 +386,7 @@ func validatePlan(p *Plan) error {
 	for _, step := range p.Steps {
 
 		if !validTools[step.Tool] {
-			color.Yellow("⚠️ Dropping unknown tool: %s", step.Tool)
+			color.Yellow("Dropping unknown tool: %s", step.Tool)
 			continue
 		}
 
@@ -407,7 +409,7 @@ func validatePlan(p *Plan) error {
 				"apt ", "apt-get ", "yum ", "dnf ", "pacman ", "zypper ",
 				"brew ", "pip ", "pip3 ", "npm ", "yarn ", "pnpm ",
 			}) {
-				color.Yellow("⚠️ Dropping package-manager command: %s", step.Command)
+				color.Yellow("Dropping package-manager command: %s", step.Command)
 				continue
 			}
 			step.Action = ""
@@ -420,7 +422,7 @@ func validatePlan(p *Plan) error {
 			switch step.Action {
 			case "install", "update", "remove":
 			default:
-				color.Yellow("⚠️ Dropping unsupported package action: %s", step.Action)
+				color.Yellow("Dropping unsupported package action: %s", step.Action)
 				continue
 			}
 			name := strings.TrimSpace(step.Args["name"])
@@ -439,7 +441,7 @@ func validatePlan(p *Plan) error {
 			case "commit", "tag", "add", "checkout", "create-branch":
 			case "push", "reset-hard", "clean", "delete-branch":
 			default:
-				color.Yellow("⚠️ Dropping unsupported git action: %s", step.Action)
+				color.Yellow("Dropping unsupported git action: %s", step.Action)
 				continue
 			}
 
@@ -468,7 +470,7 @@ func validatePlan(p *Plan) error {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🔎 HELPERS
+// HELPERS
 // ──────────────────────────────────────────────────────────────
 //
 

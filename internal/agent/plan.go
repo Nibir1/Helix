@@ -1,3 +1,5 @@
+// internal/agent/plan.go
+
 package agent
 
 type Plan struct {

@@ -1,3 +1,5 @@
+// internal/ai/openai.go
+
 package ai
 
 import (

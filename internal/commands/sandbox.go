@@ -1,3 +1,5 @@
+// internal/commands/sandbox.go
+
 package commands
 
 import (
@@ -55,7 +57,7 @@ func (ds *DirectorySandbox) GetCurrentDirectory() string {
 }
 
 // ================================================================
-// 🔥 MODE C CORE LOGIC
+// MODE C CORE LOGIC
 // Allow READ-ONLY absolute paths anywhere,
 // but MODIFY/WRITE actions are blocked outside sandbox.
 // ================================================================
@@ -94,7 +96,7 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 }
 
 // ================================================================
-// 🛡️ ROBUST PATH VALIDATION (The Fix for your Error)
+// ROBUST PATH VALIDATION (The Fix for your Error)
 // ================================================================
 
 // ValidateSafePath checks if a target path is inside the sandbox.
@@ -151,7 +153,7 @@ func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) 
 }
 
 // ================================================================
-// 🔍 Dangerous write/edit/delete operations
+// Dangerous write/edit/delete operations
 // ================================================================
 
 func (ds *DirectorySandbox) isDangerousWriteOperation(cmd string) bool {
@@ -170,7 +172,7 @@ func (ds *DirectorySandbox) isDangerousWriteOperation(cmd string) bool {
 }
 
 // ================================================================
-// ⚠ Escape detection
+// Escape detection
 // ================================================================
 
 func (ds *DirectorySandbox) containsDirectoryEscape(cmd string) bool {
@@ -187,7 +189,7 @@ func (ds *DirectorySandbox) containsDirectoryEscape(cmd string) bool {
 }
 
 // ================================================================
-// 🔍 Extract file paths from a shell command
+// Extract file paths from a shell command
 // ================================================================
 
 func (ds *DirectorySandbox) extractFileArguments(cmd string) []string {
@@ -238,7 +240,7 @@ func (ds *DirectorySandbox) isCommonNonFileArgument(arg string) bool {
 }
 
 // ================================================================
-// 📁 Directory control
+// Directory control
 // ================================================================
 
 func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {

@@ -1,3 +1,5 @@
+// internal/rag/vectorstore.go
+
 package rag
 
 import (
@@ -63,7 +65,7 @@ func NewVectorStore(env shell.Env) *VectorStore {
 
 // IndexMANPages is the ONLY method called by RAG system to index MAN pages.
 func (vs *VectorStore) IndexMANPages(pages []MANPage) error {
-	color.Blue("🔧 Indexing %d MAN pages in vector store...", len(pages))
+	color.Blue("Indexing %d MAN pages in vector store...", len(pages))
 
 	if len(pages) == 0 {
 		return fmt.Errorf("no MAN pages to index")
@@ -92,7 +94,7 @@ func (vs *VectorStore) IndexMANPages(pages []MANPage) error {
 	}
 
 	vs.initialized = true
-	color.Green("🎉 Vector indexing completed. Documents: %d", count)
+	color.Green("Vector indexing completed. Documents: %d", count)
 
 	return vs.saveVectorIndex()
 }
@@ -289,7 +291,7 @@ func (vs *VectorStore) Search(query string, limit int) ([]VectorDocument, error)
 		results = results[:limit]
 	}
 
-	color.Green("✅ Found %d relevant documents for '%s'", len(results), query)
+	color.Green("Found %d relevant documents for '%s'", len(results), query)
 	return results, nil
 }
 
@@ -436,7 +438,7 @@ func (vs *VectorStore) loadVectorIndex() error {
 	}
 
 	vs.initialized = true
-	color.Green("✅ Loaded vector index with %d documents", len(vs.documents))
+	color.Green("Loaded vector index with %d documents", len(vs.documents))
 	return nil
 }
 

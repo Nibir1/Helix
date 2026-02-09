@@ -1,3 +1,5 @@
+// internal/tui/styles.go
+
 package tui
 
 import (

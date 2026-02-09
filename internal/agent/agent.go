@@ -1,3 +1,5 @@
+// internal/agent/agent.go
+
 package agent
 
 import (
@@ -146,7 +148,7 @@ func (a *Agent) HandleInput(userInput string) {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🧼 SAFETY LAYER
+// SAFETY LAYER
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -273,7 +275,7 @@ func uniqueStrings(in []string) []string {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🔧 TOOL HANDLERS
+// TOOL HANDLERS
 // ──────────────────────────────────────────────────────────────
 //
 

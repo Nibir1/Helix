@@ -1,3 +1,5 @@
+// internal/tui/tui.go
+
 package tui
 
 import (
@@ -510,7 +512,7 @@ func (m AppModel) inputView() string {
 func (m AppModel) overlayView(base string) string {
 	msg := m.styles.ModalText.Render(m.confirmMsg)
 	dialog := m.styles.ModalBorder.Render(fmt.Sprintf(
-		"⚠️  CRITICAL DECISION REQUIRED  ⚠️\n\n%s\n\n[Y] EXECUTE    [N] ABORT",
+		"⚠️  CRITICAL DECISION REQUIRED    ⚠️\n\n%s\n\n[Y] EXECUTE    [N] ABORT",
 		msg,
 	))
 	return lipgloss.Place(

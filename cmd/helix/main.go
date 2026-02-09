@@ -35,7 +35,7 @@ var (
 
 func main() {
 	// Standard CLI startup logs (visible before TUI takes over alt-screen)
-	color.Cyan("🚀 Helix v%s — AI-powered CLI Agent", config.HelixVersion)
+	color.Cyan("Helix v%s — AI-powered CLI Agent", config.HelixVersion)
 
 	// --------------------------
 	// Load config
@@ -43,7 +43,7 @@ func main() {
 	var err error
 	cfg, err = config.DefaultConfig()
 	if err != nil {
-		color.Red("❌ Config error: %v", err)
+		color.Red("Config error: %v", err)
 		return
 	}
 
@@ -51,16 +51,16 @@ func main() {
 	// Detect environment
 	// --------------------------
 	env = shell.DetectEnvironment()
-	color.Blue("🌍 %s (%s shell)", strings.Title(env.OSName), env.Shell)
+	color.Blue("%s (%s shell)", strings.Title(env.OSName), env.Shell)
 
 	// --------------------------
 	// Online check
 	// --------------------------
 	online = utils.IsOnline(5 * time.Second)
 	if online {
-		color.Green("✅ Online mode enabled")
+		color.Green("Online mode enabled")
 	} else {
-		color.Yellow("⚠️ Offline mode – using local model")
+		color.Yellow("Offline mode - using local model")
 	}
 
 	// --------------------------
@@ -75,87 +75,87 @@ func main() {
 	selectedProvider := askForAIProvider()
 
 	if selectedProvider == ai.ProviderOpenAI && !online {
-		color.Red("❌ No internet – cannot use OpenAI provider.")
+		color.Red("No internet - cannot use OpenAI provider.")
 		color.Yellow("Switching to local model.")
 		selectedProvider = ai.ProviderLocal
 	}
 
 	if selectedProvider == ai.ProviderOpenAI {
 		if err := setupOpenAIProvider(); err != nil {
-			color.Red("❌ OpenAI setup failed: %v", err)
+			color.Red("OpenAI setup failed: %v", err)
 			color.Yellow("Switching to mock mode.")
 			runEnhancedMockMode()
 			return
 		}
 		ai.SetProvider(ai.ProviderOpenAI)
-		color.Green("✅ Using OpenAI cloud provider")
+		color.Green("Using OpenAI cloud provider")
 	} else {
 		// Local model
 		ai.SetProvider(ai.ProviderLocal)
 
 		if err := cfg.EnsureModelDir(); err != nil {
-			color.Red("❌ Model dir error: %v", err)
+			color.Red("Model dir error: %v", err)
 			return
 		}
 
-		color.Blue("📥 Checking local model…")
+		color.Blue("Checking local model…")
 		if err := ai.DownloadModel(cfg.ModelFile, config.ModelURL, config.ModelChecksum); err != nil {
-			color.Red("❌ Model download failed: %v", err)
+			color.Red("Model download failed: %v", err)
 			runEnhancedMockMode()
 			return
 		}
 
 		fileInfo, err := os.Stat(cfg.ModelFile)
 		if err != nil {
-			color.Red("❌ Model missing: %v", err)
+			color.Red("Model missing: %v", err)
 			runEnhancedMockMode()
 			return
 		}
 
-		color.Green("✅ Local model found (%.2f MB)", float64(fileInfo.Size())/(1024*1024))
+		color.Green("Local model found (%.2f MB)", float64(fileInfo.Size())/(1024*1024))
 
 		color.Blue("🔧 Loading model…")
 		if err := ai.LoadModel(cfg.ModelFile); err != nil {
-			color.Red("❌ Failed to load local model: %v", err)
+			color.Red("Failed to load local model: %v", err)
 			runEnhancedMockMode()
 			return
 		}
 		defer ai.CloseModel()
 
-		color.Green("✅ Local AI loaded successfully")
+		color.Green("Local AI loaded successfully")
 	}
 
 	// --------------------------
 	// Initialize RAG (blocking on first run)
 	// --------------------------
-	color.Blue("🧠 Initializing RAG system...")
+	color.Blue("Initializing RAG system...")
 	ragSystem = rag.NewSystem(env)
 
 	// On first run: full blocking initialization (with progress bar).
 	// On subsequent runs: returns quickly if state + index already exist.
 	if err := ragSystem.InitializeBlocking(); err != nil {
-		color.Red("❌ RAG initialization failed: %v", err)
+		color.Red("RAG initialization failed: %v", err)
 	} else if ragSystem.IsInitialized() {
-		color.Green("🧠 RAG system fully initialized")
+		color.Green("RAG system fully initialized")
 	} else {
-		color.Yellow("⚠️ RAG system did not fully initialize; Helix will run without RAG.")
+		color.Yellow("RAG system did not fully initialize; Helix will run without RAG.")
 	}
 
 	// --------------------------
 	// Minimal sanity check
 	// --------------------------
-	color.Blue("🧪 Running quick AI response test...")
+	color.Blue("Running quick AI response test...")
 	resp, err := ai.RunModel("hello")
 	if err != nil || strings.TrimSpace(resp) == "" {
-		color.Red("❌ Basic AI test failed")
+		color.Red("Basic AI test failed")
 	} else {
-		color.Green("✅ AI operational")
+		color.Green("AI operational")
 	}
 
 	// --------------------------
 	// TUI & Agent Initialization
 	// --------------------------
-	color.Cyan("🔌 Connecting Neural Grid Interface...")
+	color.Cyan("Connecting Neural Grid Interface...")
 
 	// 1. Create the TUI plumbing
 	// UPDATED: Now carrying tea.Msg (generic events) instead of just strings.
@@ -194,7 +194,7 @@ func main() {
 	// bypassing our hijack.
 	if err := tui.Start(agentCore, tuiChan, originalStdout); err != nil {
 		restoreStdio()
-		color.Red("❌ TUI Critical Failure: %v", err)
+		color.Red("TUI Critical Failure: %v", err)
 		os.Exit(1)
 	}
 }
@@ -204,7 +204,7 @@ func main() {
 // -----------------------------------------------------------------------------
 
 func runEnhancedMockMode() {
-	color.Yellow("⚠️ Mock mode enabled — no real AI")
+	color.Yellow("Mock mode enabled — no real AI")
 	env = shell.DetectEnvironment()
 	execConfig.DryRun = true
 
@@ -216,10 +216,10 @@ func runEnhancedMockMode() {
 		input = strings.TrimSpace(input)
 
 		if input == "/exit" {
-			color.Green("👋 Goodbye!")
+			color.Green("Goodbye!")
 			return
 		}
 
-		color.Yellow("🔧 Mock response: %s", input)
+		color.Yellow("Mock response: %s", input)
 	}
 }

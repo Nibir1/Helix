@@ -1,3 +1,5 @@
+// internal/tui/messages.go
+
 package tui
 
 // AgentMsg represents a line of text coming from the Helix Brain

@@ -1,3 +1,5 @@
+// internal/ai/model.go
+
 package ai
 
 import (
@@ -45,7 +47,7 @@ func LoadModel(modelPath string) error {
 		return fmt.Errorf("failed to load model: %w", err)
 	}
 
-	fmt.Printf("✅ Model loaded successfully: %s\n", modelPath)
+	fmt.Printf("Model loaded successfully: %s\n", modelPath)
 	return nil
 }
 

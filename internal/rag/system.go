@@ -1,3 +1,5 @@
+// internal/rag/system.go
+
 package rag
 
 import (
@@ -71,7 +73,7 @@ func NewSystem(env shell.Env) *RAGSystem {
 // -----------------------------------------------------------------------------
 
 func (rs *RAGSystem) Initialize() error {
-	color.Cyan("🚀 RAG System Has Been Initialized...")
+	color.Cyan("RAG System Has Been Initialized...")
 
 	// Make directory
 	if err := rs.ensureIndexDir(); err != nil {
@@ -80,7 +82,7 @@ func (rs *RAGSystem) Initialize() error {
 
 	// 1) Load saved state if possible
 	if rs.loadSystemState() {
-		color.Green("✅ RAG system loaded from existing state")
+		color.Green("RAG system loaded from existing state")
 		return nil
 	}
 
@@ -88,7 +90,7 @@ func (rs *RAGSystem) Initialize() error {
 	if rs.tryLoadExistingIndex() {
 		rs.initialized = true
 		rs.saveSystemState()
-		color.Green("✅ RAG system loaded from existing index")
+		color.Green("RAG system loaded from existing index")
 		return nil
 	}
 
@@ -106,7 +108,7 @@ func (rs *RAGSystem) InitializeBlocking() error {
 // -----------------------------------------------------------------------------
 
 func (rs *RAGSystem) fullIndexWithTimeout() error {
-	color.Blue("📚 Starting MAN page indexing (first time setup)...")
+	color.Blue("Starting MAN page indexing (first time setup)...")
 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), maxIndexingTime)
@@ -167,7 +169,7 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 					return
 				default:
 					EndProgressBar()
-					color.Yellow("⏰ Indexing timeout after %v", utils.FormatDuration(time.Since(start)))
+					color.Yellow("Indexing timeout after %v", utils.FormatDuration(time.Since(start)))
 					return
 				}
 			}
@@ -191,22 +193,22 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 	// Evaluate result
 	count := rs.indexer.GetIndexedCount()
 	if count == 0 {
-		color.Red("❌ No usable MAN pages indexed")
+		color.Red("No usable MAN pages indexed")
 		rs.initialized = false
 		rs.saveSystemState()
 		return nil
 	}
 
 	if indexErr != nil {
-		color.Yellow("⚠️ Indexing completed with issues: %v", indexErr)
+		color.Yellow("Indexing completed with issues: %v", indexErr)
 	}
 
-	color.Green("🎉 MAN page indexing completed with %d pages", count)
+	color.Green("MAN page indexing completed with %d pages", count)
 
 	// Build vector index
 	pages := rs.indexer.GetAllIndexedPages()
 	if len(pages) == 0 {
-		color.Red("❌ No pages available for vector indexing")
+		color.Red("No pages available for vector indexing")
 		rs.initialized = false
 		rs.saveSystemState()
 		return nil
@@ -214,14 +216,14 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 
 	color.Blue("🔧 Building vector index with %d pages...", len(pages))
 	if err := rs.vectorStore.IndexMANPages(pages); err != nil {
-		color.Yellow("⚠️ Vector store indexing failed: %v", err)
+		color.Yellow("Vector store indexing failed: %v", err)
 		rs.initialized = true
 		rs.saveSystemState()
 		return nil
 	}
 
 	rs.initialized = true
-	color.Green("🎉 RAG fully initialized in %s", utils.FormatDuration(time.Since(start)))
+	color.Green("RAG fully initialized in %s", utils.FormatDuration(time.Since(start)))
 	return rs.saveSystemState()
 }
 
@@ -237,11 +239,11 @@ func (rs *RAGSystem) Retrieve(query string) ([]CommandInfo, error) {
 	start := time.Now()
 	relevant, err := rs.vectorStore.GetRelevantCommands(query, 3)
 	if err != nil {
-		color.Yellow("⚠️  RAG search failed: %v", err)
+		color.Yellow("RAG search failed: %v", err)
 		return nil, nil
 	}
 
-	color.Green("✅ RAG retrieved %d commands in %s",
+	color.Green("RAG retrieved %d commands in %s",
 		len(relevant), utils.FormatDuration(time.Since(start)))
 
 	return relevant, nil

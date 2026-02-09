@@ -1,3 +1,5 @@
+// internal/ai/download.go
+
 package ai
 
 import (
@@ -23,7 +25,7 @@ func DownloadModel(modelPath, url, expectedChecksum string) error {
 
 	// Skip download if already present
 	if _, err := os.Stat(modelPath); err == nil {
-		fmt.Println("✅ Model already exists locally.")
+		fmt.Println("Model already exists locally.")
 		return nil
 	}
 
@@ -36,7 +38,7 @@ func DownloadModel(modelPath, url, expectedChecksum string) error {
 	}
 
 	// Start download
-	fmt.Println("⬇️  Downloading model from:", url)
+	fmt.Println("Downloading model from:", url)
 	client := &http.Client{Timeout: 0}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -77,6 +79,6 @@ func DownloadModel(modelPath, url, expectedChecksum string) error {
 		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
 	}
 
-	fmt.Println("✅ Model downloaded and verified successfully!")
+	fmt.Println("Model downloaded and verified successfully!")
 	return nil
 }

@@ -1,3 +1,5 @@
+// internal/commands/execute.go
+
 package commands
 
 import (
@@ -108,9 +110,9 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 
 	// Command header
 	if config.DryRun {
-		fmt.Printf("%s ", color.YellowString("🚀 Dry Run:"))
+		fmt.Printf("%s ", color.YellowString("Dry Run:"))
 	} else {
-		fmt.Printf("%s ", color.YellowString("🚀 Executing:"))
+		fmt.Printf("%s ", color.YellowString("Executing:"))
 	}
 
 	// Syntax highlighting (optional)
@@ -159,7 +161,7 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 			code := exitErr.ExitCode()
 
 			if isNonFatalExit(command, code) {
-				color.Yellow("⚠️  Non-fatal exit (%d) — continuing", code)
+				color.Yellow("Non-fatal exit (%d) — continuing", code)
 				return nil
 			}
 

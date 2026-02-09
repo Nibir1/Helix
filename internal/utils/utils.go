@@ -1,3 +1,5 @@
+// internal/utils/utils.go
+
 package utils
 
 import (
@@ -14,7 +16,7 @@ import (
 
 //
 // ──────────────────────────────────────────────────────────────
-// 📌 BASIC I/O HELPERS
+// BASIC I/O HELPERS
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -50,7 +52,7 @@ func AskYesNo(prompt string) (bool, error) {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 📡 CONNECTIVITY
+// CONNECTIVITY
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -84,7 +86,7 @@ func IsOnline(timeout time.Duration) bool {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🧹 STRING SANITIZATION
+// STRING SANITIZATION
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -101,7 +103,7 @@ func SafeTrim(s string) string {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🔐 COMMAND SAFETY
+// COMMAND SAFETY
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -130,7 +132,7 @@ func ValidateCommand(command string) error {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 📦 PACKAGE NAME EXTRACTION
+// PACKAGE NAME EXTRACTION
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -153,7 +155,7 @@ func ExtractPackageName(command string) string {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🕒 TIME UTILS
+// TIME UTILS
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -170,7 +172,7 @@ func FormatDuration(d time.Duration) string {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🔍 STRING HELPERS
+// STRING HELPERS
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -210,7 +212,7 @@ func IsMostlyEnglish(text string) bool {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 🧠 QUOTE / BRACE VALIDATION
+// QUOTE / BRACE VALIDATION
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -283,7 +285,7 @@ func FixUnmatchedQuotes(cmd string) string {
 
 //
 // ──────────────────────────────────────────────────────────────
-// 📁 FILE UTILS
+// FILE UTILS
 // ──────────────────────────────────────────────────────────────
 //
 
@@ -355,7 +357,7 @@ func CleanAIResponse(response string) string {
 }
 
 // ──────────────────────────────────────────────────────────────
-// 🐞 DEBUG HELPERS
+// DEBUG HELPERS
 // ──────────────────────────────────────────────────────────────
 // Before running Helix (only when needed):
 // export HELIX_DEBUG=1
@@ -371,7 +373,7 @@ func DebugPrintStringBytes(s string) {
 		return
 	}
 
-	fmt.Println("🔍 DEBUG String bytes:")
+	fmt.Println("DEBUG String bytes:")
 	for i, r := range s {
 		fmt.Printf("  [%d] '%c' (U+%04X)\n", i, r, r)
 	}

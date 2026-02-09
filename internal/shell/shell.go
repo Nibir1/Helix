@@ -1,3 +1,5 @@
+// internal/shell/shell.go
+
 package shell
 
 import (

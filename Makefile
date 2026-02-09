@@ -28,9 +28,9 @@ build-all: all
 
 # Clean build artifacts AND generated data (but keep models)
 clean:
-	@echo "🧹 Cleaning build artifacts and generated data..."
+	@echo "Cleaning build artifacts and generated data..."
 	./$(SCRIPTS_DIR)/build.sh clean
-	@echo "🧹 Cleaning user data (preserving models)..."
+	@echo "Cleaning user data (preserving models)..."
 	# Remove RAG indexes
 	-rm -rf "$(HELIX_HOME)/rag_index"
 	-rm -rf "$(HELIX_HOME)/vector_index"
@@ -45,17 +45,17 @@ clean:
 	# Remove temporary files but KEEP models directory
 	-find "$(HELIX_HOME)" -name "*.tmp" -delete
 	-find "$(HELIX_HOME)" -name "*.json" -not -path "*/models/*" -delete
-	@echo "✅ Clean completed (models preserved in $(HELIX_HOME)/models/)"
+	@echo "Clean completed (models preserved in $(HELIX_HOME)/models/)"
 
 # Deep clean (including models) - USE WITH CAUTION
 deep-clean: clean
-	@echo "🔥 Deep cleaning (including models)..."
+	@echo "Deep cleaning (including models)..."
 	-rm -rf "$(HELIX_HOME)/models"
-	@echo "⚠️  All data including models have been removed"
+	@echo "All data including models have been removed"
 
 # Development build (fast, for testing)
 dev: current
-	@echo "🚀 Running development build..."
+	@echo "Running development build..."
 	./$(DIST_DIR)/helix
 
 # Run the built application
@@ -63,7 +63,7 @@ run: dev
 
 # Show build info
 info:
-	@echo "📊 Build Information:"
+	@echo "Build Information:"
 	@echo "Binary: $(BINARY_NAME)"
 	@echo "Dist dir: $(DIST_DIR)"
 	@echo "Scripts dir: $(SCRIPTS_DIR)"

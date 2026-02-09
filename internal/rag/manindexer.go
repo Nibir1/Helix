@@ -1,3 +1,5 @@
+// internal/rag/manindexer.go
+
 package rag
 
 import (
@@ -61,14 +63,14 @@ func NewMANIndexer(env shell.Env) *MANIndexer {
 // Progress is shown by RAGSystem via GetIndexedCount(); we keep
 // logging here minimal and non-spammy.
 func (mi *MANIndexer) IndexAvailableManPages() error {
-	color.Blue("📚 Scanning for MAN pages...")
+	color.Blue("Scanning for MAN pages...")
 
 	if err := mi.ensureIndexDir(); err != nil {
 		return fmt.Errorf("failed to create index directory: %w", err)
 	}
 
 	manPath := mi.getMANPath()
-	color.Cyan("🔍 MAN path: %s", manPath)
+	color.Cyan("MAN path: %s", manPath)
 
 	var wg sync.WaitGroup
 	pageChan := make(chan string, 100)
@@ -99,9 +101,9 @@ func (mi *MANIndexer) IndexAvailableManPages() error {
 	}
 
 	if processed == 0 {
-		color.Yellow("💡 MAN page indexing finished but no pages were usable")
+		color.Yellow("MAN page indexing finished but no pages were usable")
 	} else {
-		color.Green("🎉 MAN page indexing completed! Indexed %d pages", processed)
+		color.Green("MAN page indexing completed! Indexed %d pages", processed)
 	}
 
 	return mi.saveIndex()
@@ -112,7 +114,7 @@ func (mi *MANIndexer) IndexAvailableManPages() error {
 func (mi *MANIndexer) findMANPages(manPath string, pageChan chan<- string) {
 	defer close(pageChan)
 
-	color.Cyan("🔍 Using smart MAN page discovery...")
+	color.Cyan("Using smart MAN page discovery...")
 
 	totalFound := 0
 
@@ -131,10 +133,10 @@ func (mi *MANIndexer) findMANPages(manPath string, pageChan chan<- string) {
 	mi.discoveredTotal = totalFound
 
 	if totalFound == 0 {
-		color.Red("❌ No MAN pages found using any discovery method")
-		color.Yellow("💡 MAN pages might not be installed or MANPATH is misconfigured")
+		color.Red("No MAN pages found using any discovery method")
+		color.Yellow("MAN pages might not be installed or MANPATH is misconfigured")
 	} else {
-		color.Green("🎉 Discovered %d candidate commands for MAN indexing (filtered to useful ones)", totalFound)
+		color.Green("Discovered %d candidate commands for MAN indexing (filtered to useful ones)", totalFound)
 	}
 }
 
@@ -474,7 +476,7 @@ func (mi *MANIndexer) saveIndex() error {
 	mi.mu.RLock()
 	defer mi.mu.RUnlock()
 
-	color.Green("💾 MAN page index ready (%d pages)", len(mi.indexed))
+	color.Green("MAN page index ready (%d pages)", len(mi.indexed))
 	return nil
 }
 
@@ -514,7 +516,7 @@ func (mi *MANIndexer) SearchPages(query string) []MANPage {
 
 // DebugMANDiscovery is a noisy diagnostic helper; call manually if needed.
 func (mi *MANIndexer) DebugMANDiscovery() {
-	color.Cyan("🔍 DEBUG: Testing MAN page discovery methods...")
+	color.Cyan("DEBUG: Testing MAN page discovery methods...")
 
 	manPath := mi.getMANPath()
 	color.Cyan("MAN Path detected: %s", manPath)
@@ -524,10 +526,10 @@ func (mi *MANIndexer) DebugMANDiscovery() {
 	cmd := exec.Command("man", "-k", ".")
 	output, err := cmd.Output()
 	if err != nil {
-		color.Red("❌ 'man -k' failed: %v", err)
+		color.Red("'man -k' failed: %v", err)
 	} else {
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		color.Green("✅ 'man -k' found %d entries", len(lines))
+		color.Green("'man -k' found %d entries", len(lines))
 		for i := 0; i < min(3, len(lines)); i++ {
 			color.Cyan("  Sample %d: %s", i+1, lines[i])
 		}
@@ -539,12 +541,12 @@ func (mi *MANIndexer) DebugMANDiscovery() {
 	totalFiles := 0
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
-			color.Green("✅ MAN directory exists: %s", p)
+			color.Green("MAN directory exists: %s", p)
 			count := mi.countFilesInPath(p)
 			color.Cyan("  Contains ~%d files", count)
 			totalFiles += count
 		} else {
-			color.Red("❌ MAN directory missing: %s", p)
+			color.Red("MAN directory missing: %s", p)
 		}
 	}
 	color.Cyan("Total estimated MAN files: %d", totalFiles)

@@ -1,3 +1,5 @@
+// internal/utils/hijack.go
+
 package utils
 
 import (

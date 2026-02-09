@@ -1,3 +1,5 @@
+// internal/commands/pkgmanager.go
+
 package commands
 
 import (
@@ -385,41 +387,41 @@ func HandlePackageCommand(args []string, env shell.Env, mockMode bool, execConfi
 
 	pm := PackageManagerFactory(env)
 	if pm == nil {
-		color.Red("❌ No supported package manager detected")
-		color.Yellow("💡 Supported: apt, brew, choco, winget, pacman")
+		color.Red("No supported package manager detected")
+		color.Yellow("Supported: apt, brew, choco, winget, pacman")
 		return
 	}
 
 	// SAFETY FIRST
 	if err := IsPackageActionSafe(action, pkg, env); err != nil {
-		color.Red("❌ Package action blocked: %v", err)
+		color.Red("Package action blocked: %v", err)
 		return
 	}
 
-	color.Blue("📦 Package Manager: %s", pm.Name())
-	color.Blue("🔍 Checking package: %s", pkg)
+	color.Blue("Package Manager: %s", pm.Name())
+	color.Blue("Checking package: %s", pkg)
 
 	info, err := pm.CheckPackage(pkg)
 	if err != nil {
-		color.Yellow("⚠️  Could not check package status: %v", err)
+		color.Yellow("Could not check package status: %v", err)
 	}
 
 	if info.Installed {
-		color.Green("✅ %s is installed (v%s)", pkg, info.Version)
+		color.Green("%s is installed (v%s)", pkg, info.Version)
 
 		if action == "install" {
-			color.Yellow("💡 Package is already installed. Use '/update %s' to update.", pkg)
+			color.Yellow("Package is already installed. Use '/update %s' to update.", pkg)
 			return
 		}
 	} else {
-		color.Yellow("📥 %s is not installed", pkg)
+		color.Yellow("%s is not installed", pkg)
 
 		if action == "update" {
-			color.Yellow("💡 Package not installed. Use '/install %s' to install it first.", pkg)
+			color.Yellow("Package not installed. Use '/install %s' to install it first.", pkg)
 			return
 		}
 		if action == "remove" {
-			color.Yellow("💡 Package not installed — nothing to remove.")
+			color.Yellow("Package not installed — nothing to remove.")
 			return
 		}
 	}
@@ -433,25 +435,25 @@ func HandlePackageCommand(args []string, env shell.Env, mockMode bool, execConfi
 	case "remove":
 		command = pm.RemoveCommand(pkg)
 	default:
-		color.Red("❌ Unknown package action: %s", action)
+		color.Red("Unknown package action: %s", action)
 		return
 	}
 
-	color.Green("🚀 Command: %s", command)
+	color.Green("Command: %s", command)
 
 	if !mockMode {
 		if requiresSudo(pm.Name()) {
-			color.Yellow("⚠️  This command may require administrator privileges")
+			color.Yellow("This command may require administrator privileges")
 		}
 
 		if AskForConfirmation("Execute this command?") {
 			if err := ExecuteCommand(command, execConfig, env); err != nil {
-				color.Red("❌ Command failed: %v", err)
+				color.Red("Command failed: %v", err)
 			} else {
-				color.Green("✅ Command completed successfully!")
+				color.Green("Command completed successfully!")
 			}
 		} else {
-			color.Yellow("💡 Command cancelled. Run manually:")
+			color.Yellow("Command cancelled. Run manually:")
 			color.Cyan("  %s", command)
 		}
 	}

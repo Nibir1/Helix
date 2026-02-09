@@ -1,3 +1,5 @@
+# scripts/run-helix.sh
+
 #!/bin/bash
 set -e
 

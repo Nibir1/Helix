@@ -1,3 +1,5 @@
+// internal/tui/model.go
+
 package tui
 
 import (

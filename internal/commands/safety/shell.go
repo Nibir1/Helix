@@ -1,3 +1,5 @@
+// internal/commands/safety/shell.go
+
 package safety
 
 import (
@@ -40,7 +42,7 @@ func ValidateAndCleanShellCommand(raw string) (string, error) {
 
 	// 3) Quick heuristic quote check (non-fatal, try auto-fix)
 	if utils.HasUnbalancedQuotesQuick(cmd) {
-		color.Yellow("⚠️ Quick check: possibly unbalanced quotes, attempting auto-fix...")
+		color.Yellow("Quick check: possibly unbalanced quotes, attempting auto-fix...")
 		fixed := utils.FixUnmatchedQuotes(cmd)
 		if fixed != cmd {
 			color.Yellow("🔧 Auto-fix applied for quotes.")

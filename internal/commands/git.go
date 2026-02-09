@@ -1,3 +1,5 @@
+// internal/commands/git.go
+
 package commands
 
 import (
@@ -53,9 +55,9 @@ func (gm *GitManager) HandleGitRequest(request string) error {
 
 	// First, validate we're in a git repository
 	if !gm.isGitRepository() {
-		color.Red("❌ Not a git repository")
-		color.Yellow("💡 Current directory: %s", gm.workingDir)
-		color.Yellow("💡 Navigate to a git repository first or run 'git init'")
+		color.Red("Not a git repository")
+		color.Yellow("Current directory: %s", gm.workingDir)
+		color.Yellow("Navigate to a git repository first or run 'git init'")
 		return fmt.Errorf("not a git repository")
 	}
 
@@ -204,19 +206,19 @@ func (gm *GitManager) detectComplexGitOperation(request string) *GitOperation {
 
 // executeGitOperation safely executes a git operation with confirmation (for /git)
 func (gm *GitManager) executeGitOperation(operation *GitOperation) error {
-	color.Cyan("\n📋 Operation: %s", operation.Description)
-	color.Yellow("🚀 Command: %s", operation.Command)
+	color.Cyan("\n Operation: %s", operation.Description)
+	color.Yellow(" Command: %s", operation.Command)
 
 	// Show current directory and branch info
 	currentBranch, err := gm.getCurrentBranch()
 	if err == nil {
-		color.Blue("📍 Current branch: %s", currentBranch)
+		color.Blue("Current branch: %s", currentBranch)
 	}
-	color.Blue("📁 Repository: %s", gm.workingDir)
+	color.Blue("Repository: %s", gm.workingDir)
 
 	// Show risks
 	if len(operation.Risks) > 0 {
-		color.Red("⚠️  Risks:")
+		color.Red("--Risks:")
 		for _, risk := range operation.Risks {
 			color.Red("   • %s", risk)
 		}
@@ -225,7 +227,7 @@ func (gm *GitManager) executeGitOperation(operation *GitOperation) error {
 
 	// Get confirmation
 	if !AskForConfirmation(operation.Confirmation) {
-		color.Yellow("❌ Operation cancelled")
+		color.Yellow("Operation cancelled")
 		return nil
 	}
 
@@ -243,19 +245,19 @@ func (gm *GitManager) executeGitOperation(operation *GitOperation) error {
 		}
 		// Use unquoted branch name - let the command execution handle escaping
 		finalCommand = strings.ReplaceAll(finalCommand, "${BRANCH}", branch)
-		color.Green("🎯 Target branch: %s", branch)
+		color.Green("Target branch: %s", branch)
 	}
 
 	// Final confirmation for destructive operations
 	if gm.isDestructiveOperation(operation) {
-		if !AskForConfirmation("🚨 This is a destructive operation. Final confirmation?") {
-			color.Yellow("❌ Operation cancelled")
+		if !AskForConfirmation("This is a destructive operation. Final confirmation?") {
+			color.Yellow("Operation cancelled")
 			return nil
 		}
 	}
 
 	// Execute the command
-	color.Green("✅ Executing git operation...")
+	color.Green("Executing git operation...")
 	return gm.sandbox.WrapCommand(finalCommand, gm.execConfig, gm.env)
 }
 
@@ -281,12 +283,12 @@ func (gm *GitManager) executeMultiCommandOperation(operation *GitOperation) erro
 			return err
 		}
 		targetBranch = branch
-		color.Green("🎯 Target branch: %s", targetBranch)
+		color.Green("Target branch: %s", targetBranch)
 	}
 
 	// Final confirmation
 	if !AskForConfirmation("Execute these commands sequentially?") {
-		color.Yellow("❌ Operation cancelled")
+		color.Yellow("Operation cancelled")
 		return nil
 	}
 
@@ -295,39 +297,39 @@ func (gm *GitManager) executeMultiCommandOperation(operation *GitOperation) erro
 		// Replace branch placeholder
 		command := strings.ReplaceAll(rawCommand, "${BRANCH}", targetBranch)
 
-		color.Blue("\n📝 Step %d/%d: %s", i+1, len(commands), command)
+		color.Blue("\n Step %d/%d: %s", i+1, len(commands), command)
 
 		// SPECIAL HANDLING: For commit step, use a completely different approach
 		if i == len(commands)-1 && strings.Contains(rawCommand, "${COMMIT_CMD}") {
 			// This is the commit step - handle it specially
 			if err := gm.executeCommitStep(targetBranch); err != nil {
-				color.Red("❌ Commit failed: %v", err)
-				color.Yellow("💡 Operation incomplete. Check git status.")
+				color.Red("Commit failed: %v", err)
+				color.Yellow("Operation incomplete. Check git status.")
 				return err
 			}
-			color.Green("✅ Step %d completed", i+1)
+			color.Green("Step %d completed", i+1)
 			continue
 		}
 
 		if err := gm.sandbox.WrapCommand(command, gm.execConfig, gm.env); err != nil {
-			color.Red("❌ Command failed at step %d: %v", i+1, err)
-			color.Yellow("💡 Operation incomplete. Check git status.")
+			color.Red("Command failed at step %d: %v", i+1, err)
+			color.Yellow("Operation incomplete. Check git status.")
 			return err
 		}
 
-		color.Green("✅ Step %d completed", i+1)
+		color.Green("Step %d completed", i+1)
 	}
 
-	color.Green("🎉 All commands completed successfully!")
+	color.Green("All commands completed successfully!")
 	return nil
 }
 
 // executeCommitStep handles the commit step without shell escaping issues
 func (gm *GitManager) executeCommitStep(targetBranch string) error {
-	color.Cyan("💭 Commit options:")
-	color.Cyan("  1. Use default message ('Merge %s with squash')", targetBranch)
-	color.Cyan("  2. Enter custom message")
-	color.Cyan("  3. Open editor for message")
+	color.Cyan("Commit options:")
+	color.Cyan(" 1. Use default message ('Merge %s with squash')", targetBranch)
+	color.Cyan(" 2. Enter custom message")
+	color.Cyan(" 3. Open editor for message")
 
 	var choice string
 	color.Cyan("Choose option (1/2/3): ")
@@ -349,11 +351,11 @@ func (gm *GitManager) executeCommitStep(targetBranch string) error {
 		return gm.executeCommitWithMessage(targetBranch, message)
 	case "3":
 		// Let git open the editor
-		color.Blue("📝 Opening commit editor...")
+		color.Blue("Opening commit editor...")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
 	default:
 		// Default to editor
-		color.Blue("📝 Opening commit editor...")
+		color.Blue("Opening commit editor...")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
 	}
 }
@@ -361,14 +363,14 @@ func (gm *GitManager) executeCommitStep(targetBranch string) error {
 // executeCommitWithMessage executes git commit using a relative commit-message file
 // to avoid absolute paths (which are blocked by the sandbox).
 func (gm *GitManager) executeCommitWithMessage(targetBranch string, message string) error {
-	color.Blue("📝 Committing with message: %s", message)
+	color.Blue("Committing with message: %s", message)
 
 	// Safety: skip commit if nothing is staged
 	hasChanges, err := gm.hasStagedChanges()
 	if err != nil {
-		color.Yellow("⚠️  Could not detect staged changes: %v", err)
+		color.Yellow("Could not detect staged changes: %v", err)
 	} else if !hasChanges {
-		color.Yellow("ℹ️ No staged changes detected; skipping git commit.")
+		color.Yellow("No staged changes detected; skipping git commit.")
 		return nil
 	}
 
@@ -376,7 +378,7 @@ func (gm *GitManager) executeCommitWithMessage(targetBranch string, message stri
 	absPath := filepath.Join(gm.workingDir, relPath)
 
 	if err := os.WriteFile(absPath, []byte(message), 0o600); err != nil {
-		color.Yellow("⚠️  Could not write commit message file, using git editor instead")
+		color.Yellow("Could not write commit message file, using git editor instead")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
 	}
 	defer os.Remove(absPath)
@@ -412,9 +414,9 @@ func (gm *GitManager) isMultiCommandOperation(operation *GitOperation) bool {
 func (gm *GitManager) getTargetBranch() (string, error) {
 	branches, err := gm.getAvailableBranches()
 	if err != nil {
-		color.Yellow("⚠️  Could not fetch available branches")
+		color.Yellow("Could not fetch available branches")
 	} else if len(branches) > 0 {
-		color.Cyan("🌿 Available branches:")
+		color.Cyan("Available branches:")
 		for i, branch := range branches {
 			if i < 10 { // Show first 10 branches
 				color.Cyan("   %s", branch)
@@ -422,7 +424,7 @@ func (gm *GitManager) getTargetBranch() (string, error) {
 		}
 	}
 
-	color.Cyan("\n🔍 Enter target branch name: ")
+	color.Cyan("\n Enter target branch name: ")
 	var branch string
 	fmt.Scanln(&branch)
 	branch = strings.TrimSpace(branch)
@@ -473,7 +475,7 @@ Rules:
 
 Command:`, request, gm.workingDir, currentBranch)
 
-	color.Blue("🤖 Generating git command with AI...")
+	color.Blue("Generating git command with AI...")
 	response, err := ai.RunModel(prompt)
 	if err != nil {
 		return fmt.Errorf("AI git command generation failed: %w", err)
@@ -484,7 +486,7 @@ Command:`, request, gm.workingDir, currentBranch)
 		return fmt.Errorf("AI didn't generate a valid git command")
 	}
 
-	color.Cyan("💡 Generated command: %s", command)
+	color.Cyan("Generated command: %s", command)
 
 	// Basic git command validation
 	if !strings.HasPrefix(command, "git ") {
@@ -492,14 +494,14 @@ Command:`, request, gm.workingDir, currentBranch)
 	}
 
 	// Show current directory context
-	color.Blue("📍 Executing in: %s", gm.workingDir)
+	color.Blue("Executing in: %s", gm.workingDir)
 
 	// Ask for confirmation
 	if AskForConfirmation("Execute this git command?") {
 		return gm.sandbox.WrapCommand(command, gm.execConfig, gm.env)
 	}
 
-	color.Yellow("💡 Command ready: %s", command)
+	color.Yellow("Command ready: %s", command)
 	return nil
 }
 
@@ -531,7 +533,7 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 
 	// 1) Structural safety check (no shell injection via args)
 	if err := isPlannerGitActionSafe(action, args); err != nil {
-		color.Red("❌ Git safety violation: %v", err)
+		color.Red("Git safety violation: %v", err)
 		return err
 	}
 
@@ -544,7 +546,7 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		if msg == "" {
 			msg = "Helix: automated commit"
 		}
-		color.Blue("📝 Git commit (planner): %s", msg)
+		color.Blue("Git commit (planner): %s", msg)
 		return gm.executeCommitWithMessage("<planner>", msg)
 
 	case "tag":
@@ -553,7 +555,7 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		if err != nil {
 			return fmt.Errorf("invalid tag name %q: %w", nameRaw, err)
 		}
-		color.Blue("🏷️  Git tag (planner): %s", name)
+		color.Blue("Git tag (planner): %s", name)
 		cmd := fmt.Sprintf("git tag %s", name)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
@@ -562,7 +564,7 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		if paths == "" {
 			return fmt.Errorf("git add action missing 'paths'")
 		}
-		color.Blue("➕ Git add (planner): %s", paths)
+		color.Blue("Git add (planner): %s", paths)
 		cmd := fmt.Sprintf("git add %s", paths)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
@@ -575,7 +577,7 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		if err != nil {
 			return fmt.Errorf("invalid branch name %q: %w", branchRaw, err)
 		}
-		color.Blue("🌿 Git checkout (planner): %s", branch)
+		color.Blue("Git checkout (planner): %s", branch)
 		cmd := fmt.Sprintf("git checkout %s", branch)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
@@ -588,7 +590,7 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		if err != nil {
 			return fmt.Errorf("invalid branch name %q: %w", branchRaw, err)
 		}
-		color.Blue("🌿 Git create branch (planner): %s", branch)
+		color.Blue("Git create branch (planner): %s", branch)
 		cmd := fmt.Sprintf("git checkout -b %s", branch)
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
@@ -636,9 +638,9 @@ func (gm *GitManager) executePlannerPush(args map[string]string) error {
 
 	// Normal push
 	if !force {
-		color.Blue("📤 Git push (planner): %s %s", remote, branch)
+		color.Blue("Git push (planner): %s %s", remote, branch)
 		if !AskForConfirmation(fmt.Sprintf("Push branch %q to remote %q?", branch, remote)) {
-			color.Yellow("❌ Push cancelled")
+			color.Yellow("Push cancelled")
 			return nil
 		}
 		cmd := fmt.Sprintf("git push %s %s", remote, branch)
@@ -646,7 +648,7 @@ func (gm *GitManager) executePlannerPush(args map[string]string) error {
 	}
 
 	// Force push — HIGH DANGER
-	color.Red("🚨 FORCE PUSH REQUESTED")
+	color.Red("FORCE PUSH REQUESTED")
 	color.Red("Remote: %s", remote)
 	color.Red("Branch: %s", branch)
 	color.Yellow("This will overwrite history on the remote branch and can cause data loss for others.")
@@ -666,7 +668,7 @@ func (gm *GitManager) executePlannerResetHard(args map[string]string) error {
 		target = "HEAD"
 	}
 
-	color.Red("🚨 HARD RESET REQUESTED")
+	color.Red("HARD RESET REQUESTED")
 	color.Red("Target: %s", target)
 	color.Yellow("This will discard local changes and reset the branch to the specified target.")
 
@@ -689,7 +691,7 @@ func (gm *GitManager) executePlannerClean(args map[string]string) error {
 		description = "remove untracked files, directories, and ignored files"
 	}
 
-	color.Red("🚨 GIT CLEAN REQUESTED")
+	color.Red("GIT CLEAN REQUESTED")
 	color.Red("Mode: git clean %s", flags)
 	color.Yellow("This will %s. Deleted files cannot be recovered from git.", description)
 
@@ -719,12 +721,12 @@ func (gm *GitManager) executePlannerDeleteBranch(args map[string]string) error {
 
 	// Optional: protect super-common mains
 	if branch == "main" || branch == "master" {
-		color.Red("🚨 Attempt to delete primary branch %q", branch)
+		color.Red("Attempt to delete primary branch %q", branch)
 		if !confirmDangerousAction("delete main branch", "YES, DELETE MAIN") {
 			return fmt.Errorf("deletion of main branch cancelled")
 		}
 	} else {
-		color.Red("🚨 GIT BRANCH DELETE REQUESTED")
+		color.Red("GIT BRANCH DELETE REQUESTED")
 		color.Red("Branch: %s", branch)
 		if !confirmDangerousAction("delete branch", "YES, DELETE BRANCH") {
 			return fmt.Errorf("git branch delete cancelled by user")
@@ -800,7 +802,7 @@ func sanitizeGitName(name string) (string, error) {
 
 // confirmDangerousAction asks the user to type an exact phrase to proceed.
 func confirmDangerousAction(label, requiredPhrase string) bool {
-	color.Red("❗ This is a HIGH-RISK git operation: %s", label)
+	color.Red("This is a HIGH-RISK git operation: %s", label)
 	color.Yellow("Type %q to confirm:", requiredPhrase)
 
 	var input string
@@ -808,10 +810,10 @@ func confirmDangerousAction(label, requiredPhrase string) bool {
 	input = strings.TrimSpace(input)
 
 	if input != requiredPhrase {
-		color.Yellow("❌ Dangerous operation cancelled (phrase did not match)")
+		color.Yellow("Dangerous operation cancelled (phrase did not match)")
 		return false
 	}
 
-	color.Green("✅ Dangerous operation confirmed")
+	color.Green("Dangerous operation confirmed")
 	return true
 }
