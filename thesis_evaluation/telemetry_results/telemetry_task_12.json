@@ -1,0 +1,446 @@
+{
+ "session_id": "helix_20260411_230514_12",
+ "export_time": "2026-04-11T23:05:15.665083432Z",
+ "task_id": 12,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:05:14.884981139Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:14.886522476Z",
+   "task_id": 12,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:14.925053033Z",
+   "task_id": 12,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:14.92516002Z",
+   "task_id": 12,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:14.925162684Z",
+   "task_id": 12,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 74,
+    "input_preview": "Show the hardware architecture and kernel release version of this machine."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:14.925173928Z",
+   "task_id": 12,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Show the hardware architecture and kernel release version of this machine."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.661968196Z",
+   "task_id": 12,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 104,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"uname -m\"},{\"tool\":\"shell\",\"command\":\"uname -r\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662029856Z",
+   "task_id": 12,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 104,
+    "raw_output_length": 104
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662034085Z",
+   "task_id": 12,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_intent": "shell",
+    "steps_count": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662071881Z",
+   "task_id": 12,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662075175Z",
+   "task_id": 12,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_output_len": 104,
+    "steps_count": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662076972Z",
+   "task_id": 12,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "shell",
+    "steps_count": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662126536Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "steps_count": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662127365Z",
+   "task_id": 12,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "total_steps": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662323489Z",
+   "task_id": 12,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.66233447Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 8,
+    "command_preview": "uname -m"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662357889Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.66235888Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662359872Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662375718Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.66241245Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662505253Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662521206Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "uname -m",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662586849Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 8,
+    "original_length": 8,
+    "original_preview": "uname -m"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662685845Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [],
+    "reasons": [],
+    "requires_confirm": false,
+    "risk_level": "Low",
+    "risk_value": 0
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662686877Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 8,
+    "is_high_risk": false,
+    "reasons": null,
+    "reasons_count": 0,
+    "requires_confirmation": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662687767Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "uname -m",
+    "reasons": null,
+    "requires_confirm": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662688411Z",
+   "task_id": 12,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "execution_decision",
+   "success": true,
+   "data": {
+    "command": "uname -m",
+    "decision": "auto_execute",
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662688806Z",
+   "task_id": 12,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executing",
+   "success": true,
+   "data": {
+    "command": "uname -m"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662690882Z",
+   "task_id": 12,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662839341Z",
+   "task_id": 12,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "uname -m",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662841826Z",
+   "task_id": 12,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "uname -m",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662842795Z",
+   "task_id": 12,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executed",
+   "success": false,
+   "data": {
+    "command": "uname -m",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:15.662853079Z",
+   "task_id": 12,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "command": "uname -m",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "shell"
+   }
+  }
+ ]
+}

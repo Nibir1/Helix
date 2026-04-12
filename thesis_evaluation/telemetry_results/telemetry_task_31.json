@@ -1,0 +1,446 @@
+{
+ "session_id": "helix_20260411_230942_13",
+ "export_time": "2026-04-11T23:09:42.942881663Z",
+ "task_id": 31,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:09:42.135784329Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.137556521Z",
+   "task_id": 31,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.175222989Z",
+   "task_id": 31,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.175253905Z",
+   "task_id": 31,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.175256283Z",
+   "task_id": 31,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 168,
+    "input_preview": "Use rsync to synchronize the local_dir to remote_dir, ensuring symbolic links are preserved, and del..."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.175265251Z",
+   "task_id": 31,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Use rsync to synchronize the local_dir to remote_dir, ensuring symbolic links are preserved, and delete any files in the destination that no longer exist in the source."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.939900481Z",
+   "task_id": 31,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 133,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.93999738Z",
+   "task_id": 31,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 133,
+    "raw_output_length": 133
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940000538Z",
+   "task_id": 31,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940004774Z",
+   "task_id": 31,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940006769Z",
+   "task_id": 31,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_output_len": 133,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940008087Z",
+   "task_id": 31,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940046068Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940046604Z",
+   "task_id": 31,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940047479Z",
+   "task_id": 31,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940122272Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 75,
+    "command_preview": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940154053Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940155332Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940156425Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940173846Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940220155Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940297701Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940315993Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.94038833Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 75,
+    "original_length": 75,
+    "original_preview": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940464279Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [],
+    "reasons": [],
+    "requires_confirm": false,
+    "risk_level": "Low",
+    "risk_value": 0
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940465282Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 75,
+    "is_high_risk": false,
+    "reasons": null,
+    "reasons_count": 0,
+    "requires_confirmation": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.94046624Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir",
+    "reasons": null,
+    "requires_confirm": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940466837Z",
+   "task_id": 31,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "execution_decision",
+   "success": true,
+   "data": {
+    "command": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir",
+    "decision": "auto_execute",
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940467206Z",
+   "task_id": 31,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executing",
+   "success": true,
+   "data": {
+    "command": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.94047134Z",
+   "task_id": 31,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940654351Z",
+   "task_id": 31,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940666168Z",
+   "task_id": 31,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940667368Z",
+   "task_id": 31,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executed",
+   "success": false,
+   "data": {
+    "command": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:42.940668713Z",
+   "task_id": 31,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "command": "rsync -av --delete --links /tmp/eval_env/local_dir /tmp/eval_env/remote_dir",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "shell"
+   }
+  }
+ ]
+}

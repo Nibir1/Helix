@@ -1,0 +1,446 @@
+{
+ "session_id": "helix_20260411_230521_12",
+ "export_time": "2026-04-11T23:05:21.876193988Z",
+ "task_id": 13,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:05:21.242760078Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.244598754Z",
+   "task_id": 13,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.28538581Z",
+   "task_id": 13,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.285416409Z",
+   "task_id": 13,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.285417813Z",
+   "task_id": 13,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 83,
+    "input_preview": "Extract and display only the third column of a comma-separated file named data.csv."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.285436947Z",
+   "task_id": 13,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Extract and display only the third column of a comma-separated file named data.csv."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.87377235Z",
+   "task_id": 13,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 78,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"cut -d, -f3 data.csv\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873826874Z",
+   "task_id": 13,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 78,
+    "raw_output_length": 78
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873829113Z",
+   "task_id": 13,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873831183Z",
+   "task_id": 13,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873832543Z",
+   "task_id": 13,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_output_len": 78,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873833484Z",
+   "task_id": 13,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873881429Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873881919Z",
+   "task_id": 13,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873883005Z",
+   "task_id": 13,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873949331Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 20,
+    "command_preview": "cut -d, -f3 data.csv"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873974041Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873975102Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873975849Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.873991521Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874032477Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874208333Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874233333Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "cut -d, -f3 data.csv",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874290859Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 20,
+    "original_length": 20,
+    "original_preview": "cut -d, -f3 data.csv"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874393725Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [],
+    "reasons": [],
+    "requires_confirm": false,
+    "risk_level": "Low",
+    "risk_value": 0
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874394826Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 20,
+    "is_high_risk": false,
+    "reasons": null,
+    "reasons_count": 0,
+    "requires_confirmation": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874395545Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "cut -d, -f3 data.csv",
+    "reasons": null,
+    "requires_confirm": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874396008Z",
+   "task_id": 13,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "execution_decision",
+   "success": true,
+   "data": {
+    "command": "cut -d, -f3 data.csv",
+    "decision": "auto_execute",
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874396275Z",
+   "task_id": 13,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executing",
+   "success": true,
+   "data": {
+    "command": "cut -d, -f3 data.csv"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.87440548Z",
+   "task_id": 13,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874514543Z",
+   "task_id": 13,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "cut -d, -f3 data.csv",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.87451645Z",
+   "task_id": 13,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "cut -d, -f3 data.csv",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.87451717Z",
+   "task_id": 13,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executed",
+   "success": false,
+   "data": {
+    "command": "cut -d, -f3 data.csv",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:21.874518528Z",
+   "task_id": 13,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "command": "cut -d, -f3 data.csv",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "shell"
+   }
+  }
+ ]
+}

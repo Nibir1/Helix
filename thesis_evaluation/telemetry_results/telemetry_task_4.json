@@ -1,0 +1,446 @@
+{
+ "session_id": "helix_20260411_230424_12",
+ "export_time": "2026-04-11T23:04:25.181944455Z",
+ "task_id": 4,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:04:24.3599858Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:24.361937103Z",
+   "task_id": 4,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:24.400902454Z",
+   "task_id": 4,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:24.400943426Z",
+   "task_id": 4,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:24.400945712Z",
+   "task_id": 4,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 68,
+    "input_preview": "Display all active TCP connections and their associated process IDs."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:24.400955277Z",
+   "task_id": 4,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Display all active TCP connections and their associated process IDs."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.178821221Z",
+   "task_id": 4,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 72,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"netstat -tunlp\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.178882021Z",
+   "task_id": 4,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 72,
+    "raw_output_length": 72
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.178885886Z",
+   "task_id": 4,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.178890249Z",
+   "task_id": 4,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.178893086Z",
+   "task_id": 4,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_output_len": 72,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.17889517Z",
+   "task_id": 4,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.178944694Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.178945466Z",
+   "task_id": 4,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.178946652Z",
+   "task_id": 4,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179068635Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 14,
+    "command_preview": "netstat -tunlp"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179096709Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179098099Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179099188Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179115397Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179152182Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179247613Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179265941Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "netstat -tunlp",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179339785Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 14,
+    "original_length": 14,
+    "original_preview": "netstat -tunlp"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179448688Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [],
+    "reasons": [],
+    "requires_confirm": false,
+    "risk_level": "Low",
+    "risk_value": 0
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179449784Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 14,
+    "is_high_risk": false,
+    "reasons": null,
+    "reasons_count": 0,
+    "requires_confirmation": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179450698Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "netstat -tunlp",
+    "reasons": null,
+    "requires_confirm": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179451296Z",
+   "task_id": 4,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "execution_decision",
+   "success": true,
+   "data": {
+    "command": "netstat -tunlp",
+    "decision": "auto_execute",
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179451874Z",
+   "task_id": 4,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executing",
+   "success": true,
+   "data": {
+    "command": "netstat -tunlp"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179461759Z",
+   "task_id": 4,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179644589Z",
+   "task_id": 4,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "netstat -tunlp",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179647361Z",
+   "task_id": 4,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "netstat -tunlp",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.17966282Z",
+   "task_id": 4,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executed",
+   "success": false,
+   "data": {
+    "command": "netstat -tunlp",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:04:25.179664321Z",
+   "task_id": 4,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "command": "netstat -tunlp",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "shell"
+   }
+  }
+ ]
+}

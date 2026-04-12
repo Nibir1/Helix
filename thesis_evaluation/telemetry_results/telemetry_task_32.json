@@ -1,0 +1,446 @@
+{
+ "session_id": "helix_20260411_230948_12",
+ "export_time": "2026-04-11T23:09:49.175599817Z",
+ "task_id": 32,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:09:48.509976938Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:48.511490516Z",
+   "task_id": 32,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:48.550527037Z",
+   "task_id": 32,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:48.550562443Z",
+   "task_id": 32,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:48.550563781Z",
+   "task_id": 32,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 77,
+    "input_preview": "Use awk to sum the values in the 4th column of sales.txt and print the total."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:48.550573209Z",
+   "task_id": 32,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Use awk to sum the values in the 4th column of sales.txt and print the total."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172372615Z",
+   "task_id": 32,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 99,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"awk '{sum+=$4} END {print sum}' sales.txt\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172413674Z",
+   "task_id": 32,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 99,
+    "raw_output_length": 99
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172416276Z",
+   "task_id": 32,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172420241Z",
+   "task_id": 32,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172422063Z",
+   "task_id": 32,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_output_len": 99,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172423067Z",
+   "task_id": 32,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172455595Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172456126Z",
+   "task_id": 32,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172456928Z",
+   "task_id": 32,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172530996Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 41,
+    "command_preview": "awk '{sum+=$4} END {print sum}' sales.txt"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172562804Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172563939Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172564949Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172584518Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172627137Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172694991Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172712087Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "awk '{sum+=$4} END {print sum}' sales.txt",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172774869Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 41,
+    "original_length": 41,
+    "original_preview": "awk '{sum+=$4} END {print sum}' sales.txt"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172866885Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [],
+    "reasons": [],
+    "requires_confirm": false,
+    "risk_level": "Low",
+    "risk_value": 0
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172867927Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 41,
+    "is_high_risk": false,
+    "reasons": null,
+    "reasons_count": 0,
+    "requires_confirmation": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172868893Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "awk '{sum+=$4} END {print sum}' sales.txt",
+    "reasons": null,
+    "requires_confirm": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172869464Z",
+   "task_id": 32,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "execution_decision",
+   "success": true,
+   "data": {
+    "command": "awk '{sum+=$4} END {print sum}' sales.txt",
+    "decision": "auto_execute",
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172870044Z",
+   "task_id": 32,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executing",
+   "success": true,
+   "data": {
+    "command": "awk '{sum+=$4} END {print sum}' sales.txt"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.172872611Z",
+   "task_id": 32,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.173115334Z",
+   "task_id": 32,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "awk '{sum+=$4} END {print sum}' sales.txt",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.173117847Z",
+   "task_id": 32,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "awk '{sum+=$4} END {print sum}' sales.txt",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.173121905Z",
+   "task_id": 32,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executed",
+   "success": false,
+   "data": {
+    "command": "awk '{sum+=$4} END {print sum}' sales.txt",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:49.173126229Z",
+   "task_id": 32,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "command": "awk '{sum+=$4} END {print sum}' sales.txt",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "shell"
+   }
+  }
+ ]
+}

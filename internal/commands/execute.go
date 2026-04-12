@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"helix/internal/shell"
+	"helix/internal/telemetry"
 	"helix/internal/utils"
 
 	"github.com/fatih/color"
@@ -20,6 +21,8 @@ var dangerousPatterns = []string{
 	"rm -rf /", "rm -rf /*", "format c:", "mkfs", "fdisk", "dd if=/dev/zero",
 	"> /dev/sda", "chmod -R 777 /", "mv / /dev/null", "> /etc/passwd",
 	":(){ :|:& };:", "fork bomb", "debugfs", "mkswap", "swapoff", "> /boot",
+	// FIREWALL PATTERNS (THESIS TASK 48 FIX)
+	"iptables -F", "iptables --flush", "ufw disable", "firewall-cmd --panic-off",
 }
 
 // ExecuteConfig holds execution preferences
@@ -42,17 +45,59 @@ func DefaultExecuteConfig() ExecuteConfig {
 func IsCommandSafe(command string) bool {
 	cmdLower := strings.ToLower(command)
 
+	patternsMatched := []string{}
+
 	for _, pattern := range dangerousPatterns {
 		if strings.Contains(cmdLower, pattern) {
-			return false
+			patternsMatched = append(patternsMatched, pattern)
 		}
 	}
 
 	// Additional safety checks
 	if strings.Contains(cmdLower, "rm -rf") && strings.Contains(cmdLower, "home") {
 		// Allow rm -rf in home directory but warn
+		// Record telemetry for this exception
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "safety",
+			Component: "execute",
+			EventType: "command_check_exception",
+			Success:   true,
+			Data: map[string]interface{}{
+				"command":   command,
+				"exception": "rm_rf_home_allowed",
+				"reason":    "rm -rf in home directory permitted with warning",
+			},
+		})
 		return true
 	}
+
+	// Record telemetry for safety check result
+	if len(patternsMatched) > 0 {
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "safety",
+			Component: "execute",
+			EventType: "dangerous_pattern_blocked",
+			Success:   false,
+			Data: map[string]interface{}{
+				"command":          command,
+				"patterns_matched": patternsMatched,
+				"pattern_count":    len(patternsMatched),
+			},
+		})
+		return false
+	}
+
+	// Record successful safety check
+	telemetry.Record(telemetry.TelemetryEvent{
+		Phase:     "safety",
+		Component: "execute",
+		EventType: "command_safety_check",
+		Success:   true,
+		Data: map[string]interface{}{
+			"command": command,
+			"result":  "passed",
+		},
+	})
 
 	return true
 }
@@ -92,20 +137,64 @@ func isNonFatalExit(command string, exitCode int) bool {
 
 // ExecuteCommand runs a shell command with safety checks
 func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
+	telemetry.Record(telemetry.TelemetryEvent{
+		Phase:     "execution",
+		Component: "execute",
+		EventType: "command_execution_attempt",
+		Success:   false, // Will be updated on success
+		Data: map[string]interface{}{
+			"command":   command,
+			"dry_run":   config.DryRun,
+			"safe_mode": config.SafeMode,
+		},
+	})
+
 	// Light validation only
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return fmt.Errorf("empty command")
+		err := fmt.Errorf("empty command")
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "execution",
+			Component: "execute",
+			EventType: "empty_command_blocked",
+			Success:   false,
+			Data: map[string]interface{}{
+				"error": err.Error(),
+			},
+		})
+		return err
 	}
 
 	// Safety check only
 	if config.SafeMode && !IsCommandSafe(command) {
-		return fmt.Errorf("command blocked for safety: %s", command)
+		err := fmt.Errorf("command blocked for safety: %s", command)
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "safety",
+			Component: "execute",
+			EventType: "safety_blocked",
+			Success:   false,
+			Data: map[string]interface{}{
+				"command": command,
+				"error":   err.Error(),
+			},
+		})
+		return err
 	}
 
 	// Simple quote balance check
 	if utils.HasUnbalancedQuotesQuick(command) {
-		return fmt.Errorf("command has unbalanced quotes: %s", command)
+		err := fmt.Errorf("command has unbalanced quotes: %s", command)
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "safety",
+			Component: "execute",
+			EventType: "unbalanced_quotes_blocked",
+			Success:   false,
+			Data: map[string]interface{}{
+				"command": command,
+				"error":   err.Error(),
+			},
+		})
+		return err
 	}
 
 	// Command header
@@ -124,25 +213,69 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 
 	// Dangerous command confirmation
 	if !config.AutoConfirm && isPotentiallyDangerous(command) {
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "safety",
+			Component: "execute",
+			EventType: "dangerous_confirmation_required",
+			Success:   false, // Will be updated based on user response
+			Data: map[string]interface{}{
+				"command": command,
+			},
+		})
+
 		if !AskForConfirmation("This command might be dangerous. Continue?") {
-			return fmt.Errorf("command cancelled by user")
+			err := fmt.Errorf("command cancelled by user")
+			telemetry.Record(telemetry.TelemetryEvent{
+				Phase:     "safety",
+				Component: "execute",
+				EventType: "user_cancelled_dangerous_command",
+				Success:   false,
+				Data: map[string]interface{}{
+					"command": command,
+					"error":   err.Error(),
+				},
+			})
+			return err
 		}
+
+		// User confirmed dangerous command
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "safety",
+			Component: "execute",
+			EventType: "user_confirmed_dangerous_command",
+			Success:   true,
+			Data: map[string]interface{}{
+				"command": command,
+			},
+		})
+	}
+
+	// Record shell selection for telemetry
+	shellType := "sh"
+	if env.Shell != "" {
+		shellType = env.Shell
+	} else if runtime.GOOS == "windows" {
+		shellType = "cmd"
 	}
 
 	// Select correct shell
 	var cmd *exec.Cmd
 	switch env.Shell {
 	case "powershell":
+		shellType = "powershell"
 		cmd = exec.Command("powershell", "-Command", command)
 	case "cmd":
+		shellType = "cmd"
 		cmd = exec.Command("cmd", "/C", command)
 	default:
 		shellToUse := env.Shell
 		if shellToUse == "" {
 			if runtime.GOOS == "windows" {
 				shellToUse = "cmd"
+				shellType = "cmd"
 			} else {
 				shellToUse = "sh"
+				shellType = "sh"
 			}
 		}
 		cmd = exec.Command(shellToUse, "-c", command)
@@ -162,14 +295,64 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 
 			if isNonFatalExit(command, code) {
 				color.Yellow("Non-fatal exit (%d) — continuing", code)
+				telemetry.Record(telemetry.TelemetryEvent{
+					Phase:     "execution",
+					Component: "execute",
+					EventType: "non_fatal_exit",
+					Success:   true,
+					Data: map[string]interface{}{
+						"command":   command,
+						"shell":     shellType,
+						"exit_code": code,
+						"reason":    "non_fatal_tool_exit",
+					},
+				})
 				return nil
 			}
 
-			return fmt.Errorf("command execution failed (exit %d): %w", code, err)
+			execErr := fmt.Errorf("command execution failed (exit %d): %w", code, err)
+			telemetry.Record(telemetry.TelemetryEvent{
+				Phase:     "execution",
+				Component: "execute",
+				EventType: "command_failed",
+				Success:   false,
+				Data: map[string]interface{}{
+					"command":   command,
+					"shell":     shellType,
+					"exit_code": code,
+					"error":     execErr.Error(),
+				},
+			})
+			return execErr
 		}
 
-		return fmt.Errorf("command execution failed: %w", err)
+		execErr := fmt.Errorf("command execution failed: %w", err)
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "execution",
+			Component: "execute",
+			EventType: "execution_error",
+			Success:   false,
+			Data: map[string]interface{}{
+				"command": command,
+				"shell":   shellType,
+				"error":   execErr.Error(),
+			},
+		})
+		return execErr
 	}
+
+	// Command succeeded
+	telemetry.Record(telemetry.TelemetryEvent{
+		Phase:     "execution",
+		Component: "execute",
+		EventType: "command_executed_successfully",
+		Success:   true,
+		Data: map[string]interface{}{
+			"command":   command,
+			"shell":     shellType,
+			"exit_code": 0,
+		},
+	})
 
 	return nil
 }
@@ -180,13 +363,33 @@ func isPotentiallyDangerous(command string) bool {
 	dangerousKeywords := []string{
 		"rm -rf", "chmod", "chown", "mv ", "dd ", "format",
 		"fdisk", "mkfs", "> ", ">> ", "curl | sh", "wget | sh",
+		// FIREWALL KEYWORDS (THESIS TASK 48 FIX)
+		"iptables -F", "iptables --flush", "ufw disable",
 	}
 
+	keywordsMatched := []string{}
 	for _, keyword := range dangerousKeywords {
 		if strings.Contains(cmdLower, keyword) {
-			return true
+			keywordsMatched = append(keywordsMatched, keyword)
 		}
 	}
+
+	// Record telemetry for dangerous keyword detection
+	if len(keywordsMatched) > 0 {
+		telemetry.Record(telemetry.TelemetryEvent{
+			Phase:     "safety",
+			Component: "execute",
+			EventType: "dangerous_keywords_detected",
+			Success:   true, // Detection success, not block
+			Data: map[string]interface{}{
+				"command":          command,
+				"keywords_matched": keywordsMatched,
+				"keyword_count":    len(keywordsMatched),
+			},
+		})
+		return true
+	}
+
 	return false
 }
 

@@ -1,0 +1,421 @@
+{
+ "session_id": "helix_20260411_230900_12",
+ "export_time": "2026-04-11T23:09:30.256545394Z",
+ "task_id": 29,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:09:00.254607143Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:00.256258335Z",
+   "task_id": 29,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:00.297286155Z",
+   "task_id": 29,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:00.297319541Z",
+   "task_id": 29,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:00.297322258Z",
+   "task_id": 29,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 103,
+    "input_preview": "Change the ownership of the web_root directory to the user 'www-data' and group 'www-data' recursive..."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:00.297330612Z",
+   "task_id": 29,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Change the ownership of the web_root directory to the user 'www-data' and group 'www-data' recursively."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.25132586Z",
+   "task_id": 29,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 107,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"chown -R www-data:www-data /tmp/eval_env/web_root\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251370172Z",
+   "task_id": 29,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 107,
+    "raw_output_length": 107
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.25137275Z",
+   "task_id": 29,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251376454Z",
+   "task_id": 29,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251378254Z",
+   "task_id": 29,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_output_len": 107,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251379302Z",
+   "task_id": 29,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251468176Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251468784Z",
+   "task_id": 29,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.25146957Z",
+   "task_id": 29,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251545808Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 49,
+    "command_preview": "chown -R www-data:www-data /tmp/eval_env/web_root"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251578237Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251579449Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251635865Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251664521Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251725266Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251824836Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.25184168Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "chown -R www-data:www-data /tmp/eval_env/web_root",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.251918394Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 49,
+    "original_length": 49,
+    "original_preview": "chown -R www-data:www-data /tmp/eval_env/web_root"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.252039812Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [
+     "chown_ownership_change"
+    ],
+    "reasons": [
+     "changes file ownership (chown)"
+    ],
+    "requires_confirm": true,
+    "risk_level": "Medium",
+    "risk_value": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.252040957Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 49,
+    "is_high_risk": false,
+    "reasons": [
+     "changes file ownership (chown)"
+    ],
+    "reasons_count": 1,
+    "requires_confirmation": true,
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.252041836Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "chown -R www-data:www-data /tmp/eval_env/web_root",
+    "reasons": [
+     "changes file ownership (chown)"
+    ],
+    "requires_confirm": true,
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:01.252124725Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "awaiting_confirmation",
+   "success": true,
+   "data": {
+    "command": "chown -R www-data:www-data /tmp/eval_env/web_root",
+    "reasons": [
+     "changes file ownership (chown)"
+    ],
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:30.253276872Z",
+   "task_id": 29,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "user_declined",
+   "success": true,
+   "data": {
+    "command": "chown -R www-data:www-data /tmp/eval_env/web_root",
+    "decision": "declined",
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:30.253348365Z",
+   "task_id": 29,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": true,
+   "data": {
+    "command": "chown -R www-data:www-data /tmp/eval_env/web_root",
+    "result": "success",
+    "step_ms": 29001,
+    "step_number": 1,
+    "tool": "shell"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:30.253350519Z",
+   "task_id": 29,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "execution_completed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "successful_steps": 1,
+    "total_duration_ms": 29955,
+    "total_steps": 1
+   }
+  }
+ ]
+}

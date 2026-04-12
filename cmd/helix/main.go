@@ -14,6 +14,7 @@ import (
 	"helix/internal/config"
 	"helix/internal/rag"
 	"helix/internal/shell"
+	"helix/internal/telemetry"
 	"helix/internal/tui"
 	"helix/internal/utils"
 	"helix/internal/ux"
@@ -34,6 +35,20 @@ var (
 )
 
 func main() {
+	// ─────────────────────────────────────────────────────────────────
+	// CRITICAL: Ensure telemetry is saved on all exit paths
+	// ─────────────────────────────────────────────────────────────────
+	defer func() {
+		if telemetry.IsTelemetryEnabled() {
+			if err := telemetry.GetCollector().Close(); err != nil {
+				// Silent fail in production, log in debug mode
+				if os.Getenv("HELIX_DEBUG") == "1" {
+					color.Red("Telemetry save failed: %v", err)
+				}
+			}
+		}
+	}()
+
 	// Standard CLI startup logs (visible before TUI takes over alt-screen)
 	color.Cyan("Helix v%s — AI-powered CLI Agent", config.HelixVersion)
 
@@ -72,7 +87,19 @@ func main() {
 	// --------------------------
 	// AI Provider selection
 	// --------------------------
-	selectedProvider := askForAIProvider()
+	selectedProvider := ai.ProviderLocal // Default
+
+	// In telemetry mode, skip interactive prompts
+	if !telemetry.IsTelemetryEnabled() {
+		selectedProvider = askForAIProvider()
+	} else {
+		// Auto-select based on availability for headless mode
+		if online && os.Getenv("OPENAI_API_KEY") != "" {
+			selectedProvider = ai.ProviderOpenAI
+		} else {
+			selectedProvider = ai.ProviderLocal
+		}
+	}
 
 	if selectedProvider == ai.ProviderOpenAI && !online {
 		color.Red("No internet - cannot use OpenAI provider.")
@@ -83,8 +110,10 @@ func main() {
 	if selectedProvider == ai.ProviderOpenAI {
 		if err := setupOpenAIProvider(); err != nil {
 			color.Red("OpenAI setup failed: %v", err)
-			color.Yellow("Switching to mock mode.")
-			runEnhancedMockMode()
+			if !telemetry.IsTelemetryEnabled() {
+				color.Yellow("Switching to mock mode.")
+				runEnhancedMockMode()
+			}
 			return
 		}
 		ai.SetProvider(ai.ProviderOpenAI)
@@ -101,14 +130,18 @@ func main() {
 		color.Blue("Checking local model…")
 		if err := ai.DownloadModel(cfg.ModelFile, config.ModelURL, config.ModelChecksum); err != nil {
 			color.Red("Model download failed: %v", err)
-			runEnhancedMockMode()
+			if !telemetry.IsTelemetryEnabled() {
+				runEnhancedMockMode()
+			}
 			return
 		}
 
 		fileInfo, err := os.Stat(cfg.ModelFile)
 		if err != nil {
 			color.Red("Model missing: %v", err)
-			runEnhancedMockMode()
+			if !telemetry.IsTelemetryEnabled() {
+				runEnhancedMockMode()
+			}
 			return
 		}
 
@@ -117,7 +150,9 @@ func main() {
 		color.Blue("🔧 Loading model…")
 		if err := ai.LoadModel(cfg.ModelFile); err != nil {
 			color.Red("Failed to load local model: %v", err)
-			runEnhancedMockMode()
+			if !telemetry.IsTelemetryEnabled() {
+				runEnhancedMockMode()
+			}
 			return
 		}
 		defer ai.CloseModel()
@@ -144,26 +179,63 @@ func main() {
 	// --------------------------
 	// Minimal sanity check
 	// --------------------------
-	color.Blue("Running quick AI response test...")
-	resp, err := ai.RunModel("hello")
-	if err != nil || strings.TrimSpace(resp) == "" {
-		color.Red("Basic AI test failed")
-	} else {
-		color.Green("AI operational")
+	if !telemetry.IsTelemetryEnabled() {
+		color.Blue("Running quick AI response test...")
+		resp, err := ai.RunModel("hello")
+		if err != nil || strings.TrimSpace(resp) == "" {
+			color.Red("Basic AI test failed")
+		} else {
+			color.Green("AI operational")
+		}
 	}
 
 	// --------------------------
-	// TUI & Agent Initialization
+	// Initialize Agent Core
+	// --------------------------
+	color.Cyan("Initializing Helix core...")
+
+	// Create UX instance (used for both TUI and headless modes)
+	gui := ux.NewUX()
+
+	// Initialize Agent with UX
+	agentCore = agent.NewAgent(
+		env,
+		ragSystem,
+		sandbox,
+		execConfig,
+		cfg.UserPrefs.TypingEffect,
+		gui,
+	)
+
+	// ─────────────────────────────────────────────────────────────────
+	// HEADLESS MODE FOR THESIS EVALUATION
+	// ─────────────────────────────────────────────────────────────────
+	// When HELIX_TELEMETRY=1 is set, run in non-interactive mode
+	// Process command-line arguments directly and exit
+	// ─────────────────────────────────────────────────────────────────
+	if telemetry.IsTelemetryEnabled() {
+		if len(os.Args) > 1 {
+			// Join all arguments as the user input
+			input := strings.Join(os.Args[1:], " ")
+			if input != "" {
+				// Process the input through the agent
+				// Telemetry will be automatically recorded and saved via defer
+				agentCore.HandleInput(input)
+			}
+		}
+		// Exit immediately after processing (telemetry saved via defer)
+		return
+	}
+
+	// --------------------------
+	// TUI & Interactive Mode
 	// --------------------------
 	color.Cyan("Connecting Neural Grid Interface...")
 
 	// 1. Create the TUI plumbing
-	// UPDATED: Now carrying tea.Msg (generic events) instead of just strings.
 	tuiChan := make(chan tea.Msg, 100)
 
 	// 2. Configure UX to use this channel (Headless/TUI mode)
-	gui := ux.NewUX()
-	// UPDATED: SetEventHandler accepts interface{} (strings or structs)
 	gui.SetEventHandler(func(evt interface{}) {
 		tuiChan <- evt
 	})
@@ -179,17 +251,7 @@ func main() {
 	// --- CRITICAL FIX: Force color library to use the hijacked pipe ---
 	color.Output = os.Stdout
 
-	// 4. Initialize Agent with the TUI-aware UX
-	agentCore = agent.NewAgent(
-		env,
-		ragSystem,
-		sandbox,
-		execConfig,
-		cfg.UserPrefs.TypingEffect,
-		gui, // Inject the specific UX instance
-	)
-
-	// 5. Launch The Grid (Bubble Tea Program)
+	// 4. Launch The Grid (Bubble Tea Program)
 	// We pass 'originalStdout' so Bubble Tea writes to the actual terminal,
 	// bypassing our hijack.
 	if err := tui.Start(agentCore, tuiChan, originalStdout); err != nil {

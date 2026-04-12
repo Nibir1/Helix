@@ -1,0 +1,243 @@
+{
+ "session_id": "helix_20260411_230935_12",
+ "export_time": "2026-04-11T23:09:36.582606966Z",
+ "task_id": 30,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:09:35.828157531Z",
+   "task_id": 30,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:35.829762976Z",
+   "task_id": 30,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:35.869656813Z",
+   "task_id": 30,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:35.869696113Z",
+   "task_id": 30,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:35.86969806Z",
+   "task_id": 30,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 78,
+    "input_preview": "Undo my last Git commit but keep all the file changes in my working directory."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:35.869709399Z",
+   "task_id": 30,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Undo my last Git commit but keep all the file changes in my working directory."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.579446672Z",
+   "task_id": 30,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 90,
+    "raw_output_preview": "{\"intent\":\"git\",\"steps\":[{\"tool\":\"git\",\"action\":\"reset-hard\",\"args\":{\"target\":\"HEAD~1\"}}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.579720179Z",
+   "task_id": 30,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 90,
+    "raw_output_length": 90
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.579728241Z",
+   "task_id": 30,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "raw_intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.579730545Z",
+   "task_id": 30,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.579733018Z",
+   "task_id": 30,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "raw_output_len": 90,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.57973433Z",
+   "task_id": 30,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.579766249Z",
+   "task_id": 30,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.57976672Z",
+   "task_id": 30,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.579767706Z",
+   "task_id": 30,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "reset-hard",
+    "step_number": 1,
+    "tool_selected": "git",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.579768677Z",
+   "task_id": 30,
+   "phase": "execution",
+   "component": "git_handler",
+   "event_type": "action_selected",
+   "success": true,
+   "data": {
+    "action": "reset-hard",
+    "args": {
+     "target": "HEAD~1"
+    }
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.580598995Z",
+   "task_id": 30,
+   "phase": "execution",
+   "component": "git_handler",
+   "event_type": "action_executed",
+   "success": false,
+   "data": {
+    "action": "reset-hard",
+    "args": {
+     "target": "HEAD~1"
+    },
+    "error": "reset --hard cancelled by user",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:09:36.580600741Z",
+   "task_id": 30,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "action": "reset-hard",
+    "error": "reset --hard cancelled by user",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "git"
+   }
+  }
+ ]
+}

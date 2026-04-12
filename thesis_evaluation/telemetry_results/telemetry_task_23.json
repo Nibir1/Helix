@@ -1,0 +1,281 @@
+{
+ "session_id": "helix_20260411_230753_12",
+ "export_time": "2026-04-11T23:07:54.100719611Z",
+ "task_id": 23,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:07:53.398034845Z",
+   "task_id": 23,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:53.399690279Z",
+   "task_id": 23,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:53.440269749Z",
+   "task_id": 23,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:53.440299656Z",
+   "task_id": 23,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:53.440301143Z",
+   "task_id": 23,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 77,
+    "input_preview": "Commit the staged Git changes with the message 'Refactor JSON parsing logic'."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:53.440309963Z",
+   "task_id": 23,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Commit the staged Git changes with the message 'Refactor JSON parsing logic'."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.07902775Z",
+   "task_id": 23,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 108,
+    "raw_output_preview": "{\"intent\":\"git\",\"steps\":[{\"tool\":\"git\",\"action\":\"commit\",\"args\":{\"message\":\"Refactor JSON parsing logic\"}}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.079096015Z",
+   "task_id": 23,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 108,
+    "raw_output_length": 108
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.079113542Z",
+   "task_id": 23,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "raw_intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.079116007Z",
+   "task_id": 23,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.079119156Z",
+   "task_id": 23,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "raw_output_len": 108,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.079120465Z",
+   "task_id": 23,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.079377726Z",
+   "task_id": 23,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.079378837Z",
+   "task_id": 23,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.079379969Z",
+   "task_id": 23,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "commit",
+    "step_number": 1,
+    "tool_selected": "git",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.07938119Z",
+   "task_id": 23,
+   "phase": "execution",
+   "component": "git_handler",
+   "event_type": "action_selected",
+   "success": true,
+   "data": {
+    "action": "commit",
+    "args": {
+     "message": "Refactor JSON parsing logic"
+    }
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.099127901Z",
+   "task_id": 23,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.099166543Z",
+   "task_id": 23,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "git commit -F .helix-commit-msg.txt",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.0991703Z",
+   "task_id": 23,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "git commit -F .helix-commit-msg.txt",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.0992058Z",
+   "task_id": 23,
+   "phase": "execution",
+   "component": "git_handler",
+   "event_type": "action_executed",
+   "success": false,
+   "data": {
+    "action": "commit",
+    "args": {
+     "message": "Refactor JSON parsing logic"
+    },
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:54.099207124Z",
+   "task_id": 23,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "action": "commit",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 19,
+    "tool": "git"
+   }
+  }
+ ]
+}

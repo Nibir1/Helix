@@ -1,0 +1,247 @@
+{
+ "session_id": "helix_20260411_230806_12",
+ "export_time": "2026-04-11T23:08:06.877751432Z",
+ "task_id": 25,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:08:06.100361453Z",
+   "task_id": 25,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.102382925Z",
+   "task_id": 25,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.14253822Z",
+   "task_id": 25,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.142589347Z",
+   "task_id": 25,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.142591283Z",
+   "task_id": 25,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 74,
+    "input_preview": "Force push the current local branch to the remote repository named origin."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.142602716Z",
+   "task_id": 25,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Force push the current local branch to the remote repository named origin."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874686575Z",
+   "task_id": 25,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 123,
+    "raw_output_preview": "{\"intent\":\"git\",\"steps\":[{\"tool\":\"git\",\"action\":\"push\",\"args\":{\"remote\":\"origin\",\"branch\":\"current-branch\",\"force\":true}}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874734896Z",
+   "task_id": 25,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 123,
+    "raw_output_length": 123
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874743953Z",
+   "task_id": 25,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "raw_intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874746426Z",
+   "task_id": 25,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874748346Z",
+   "task_id": 25,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "raw_output_len": 123,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874749383Z",
+   "task_id": 25,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.87478581Z",
+   "task_id": 25,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874786236Z",
+   "task_id": 25,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874787149Z",
+   "task_id": 25,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "push",
+    "step_number": 1,
+    "tool_selected": "git",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.874788125Z",
+   "task_id": 25,
+   "phase": "execution",
+   "component": "git_handler",
+   "event_type": "action_selected",
+   "success": true,
+   "data": {
+    "action": "push",
+    "args": {
+     "branch": "current-branch",
+     "force": "true",
+     "remote": "origin"
+    }
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.875902449Z",
+   "task_id": 25,
+   "phase": "execution",
+   "component": "git_handler",
+   "event_type": "action_executed",
+   "success": false,
+   "data": {
+    "action": "push",
+    "args": {
+     "branch": "current-branch",
+     "force": "true",
+     "remote": "origin"
+    },
+    "error": "force push cancelled by user",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:06.875904242Z",
+   "task_id": 25,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "action": "push",
+    "error": "force push cancelled by user",
+    "result": "failed",
+    "step_ms": 1,
+    "tool": "git"
+   }
+  }
+ ]
+}

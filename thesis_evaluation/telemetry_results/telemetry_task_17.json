@@ -1,0 +1,446 @@
+{
+ "session_id": "helix_20260411_230615_12",
+ "export_time": "2026-04-11T23:06:16.783911565Z",
+ "task_id": 17,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:06:15.94268442Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:15.944406007Z",
+   "task_id": 17,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:15.981773555Z",
+   "task_id": 17,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:15.981803268Z",
+   "task_id": 17,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:15.981805364Z",
+   "task_id": 17,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 107,
+    "input_preview": "Create a new directory called build_output, navigate into it, and create an empty file named manifes..."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:15.981813197Z",
+   "task_id": 17,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Create a new directory called build_output, navigate into it, and create an empty file named manifest.json."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781290862Z",
+   "task_id": 17,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 175,
+    "raw_output_preview": "{\"intent\":\"multi_step\",\"steps\":[{\"tool\":\"shell\",\"command\":\"mkdir build_output\"},{\"tool\":\"shell\",\"command\":\"cd build_output\"},{\"tool\":\"shell\",\"command\":\"touch manifest.json\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781338189Z",
+   "task_id": 17,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 175,
+    "raw_output_length": 175
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781342403Z",
+   "task_id": 17,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "raw_intent": "multi_step",
+    "steps_count": 3
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.78134734Z",
+   "task_id": 17,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 3
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781349121Z",
+   "task_id": 17,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "raw_output_len": 175,
+    "steps_count": 3
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781350134Z",
+   "task_id": 17,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "multi_step",
+    "steps_count": 3
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781385427Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "steps_count": 3
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781385957Z",
+   "task_id": 17,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "total_steps": 3
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781457478Z",
+   "task_id": 17,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 3
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781468547Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 18,
+    "command_preview": "mkdir build_output"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781494509Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.78149557Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781496588Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781515142Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781554206Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781621716Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781638557Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "mkdir build_output",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781700728Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 18,
+    "original_length": 18,
+    "original_preview": "mkdir build_output"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781763573Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [],
+    "reasons": [],
+    "requires_confirm": false,
+    "risk_level": "Low",
+    "risk_value": 0
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781764492Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 18,
+    "is_high_risk": false,
+    "reasons": null,
+    "reasons_count": 0,
+    "requires_confirmation": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781765431Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "mkdir build_output",
+    "reasons": null,
+    "requires_confirm": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781765998Z",
+   "task_id": 17,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "execution_decision",
+   "success": true,
+   "data": {
+    "command": "mkdir build_output",
+    "decision": "auto_execute",
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781766391Z",
+   "task_id": 17,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executing",
+   "success": true,
+   "data": {
+    "command": "mkdir build_output"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781783898Z",
+   "task_id": 17,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781908802Z",
+   "task_id": 17,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "mkdir build_output",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781926114Z",
+   "task_id": 17,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "mkdir build_output",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781927808Z",
+   "task_id": 17,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executed",
+   "success": false,
+   "data": {
+    "command": "mkdir build_output",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:16.781929185Z",
+   "task_id": 17,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "command": "mkdir build_output",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "shell"
+   }
+  }
+ ]
+}

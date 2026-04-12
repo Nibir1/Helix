@@ -1,0 +1,421 @@
+{
+ "session_id": "helix_20260411_230628_12",
+ "export_time": "2026-04-11T23:06:58.498003548Z",
+ "task_id": 19,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:06:28.628485561Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:28.630233998Z",
+   "task_id": 19,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:28.669850641Z",
+   "task_id": 19,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:28.669879454Z",
+   "task_id": 19,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:28.669881024Z",
+   "task_id": 19,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 110,
+    "input_preview": "Change the permissions of script.sh so that the owner can execute it, but no one else can read or wr..."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:28.669889023Z",
+   "task_id": 19,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Change the permissions of script.sh so that the owner can execute it, but no one else can read or write to it."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493239889Z",
+   "task_id": 19,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 91,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"chmod 100 /tmp/eval_env/script.sh\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493281361Z",
+   "task_id": 19,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 91,
+    "raw_output_length": 91
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493283914Z",
+   "task_id": 19,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493287137Z",
+   "task_id": 19,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493289091Z",
+   "task_id": 19,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_output_len": 91,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493290191Z",
+   "task_id": 19,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493326219Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493326693Z",
+   "task_id": 19,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493327754Z",
+   "task_id": 19,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493404727Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 33,
+    "command_preview": "chmod 100 /tmp/eval_env/script.sh"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493434609Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493435702Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493436892Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493454259Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493496748Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493561834Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493577505Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "chmod 100 /tmp/eval_env/script.sh",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493647086Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 33,
+    "original_length": 33,
+    "original_preview": "chmod 100 /tmp/eval_env/script.sh"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493726388Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [
+     "chmod_permission_change"
+    ],
+    "reasons": [
+     "changes file permissions (chmod)"
+    ],
+    "requires_confirm": true,
+    "risk_level": "Medium",
+    "risk_value": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.49372754Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 33,
+    "is_high_risk": false,
+    "reasons": [
+     "changes file permissions (chmod)"
+    ],
+    "reasons_count": 1,
+    "requires_confirmation": true,
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.493728534Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "chmod 100 /tmp/eval_env/script.sh",
+    "reasons": [
+     "changes file permissions (chmod)"
+    ],
+    "requires_confirm": true,
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:29.49379594Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "awaiting_confirmation",
+   "success": true,
+   "data": {
+    "command": "chmod 100 /tmp/eval_env/script.sh",
+    "reasons": [
+     "changes file permissions (chmod)"
+    ],
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:58.495751449Z",
+   "task_id": 19,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "user_declined",
+   "success": true,
+   "data": {
+    "command": "chmod 100 /tmp/eval_env/script.sh",
+    "decision": "declined",
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:58.495862023Z",
+   "task_id": 19,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": true,
+   "data": {
+    "command": "chmod 100 /tmp/eval_env/script.sh",
+    "result": "success",
+    "step_ms": 29001,
+    "step_number": 1,
+    "tool": "shell"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:58.49586417Z",
+   "task_id": 19,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "execution_completed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "successful_steps": 1,
+    "total_duration_ms": 29825,
+    "total_steps": 1
+   }
+  }
+ ]
+}

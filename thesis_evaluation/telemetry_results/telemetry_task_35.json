@@ -1,0 +1,472 @@
+{
+ "session_id": "helix_20260411_231007_12",
+ "export_time": "2026-04-11T23:10:08.424783196Z",
+ "task_id": 35,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:10:07.44102373Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:07.442561184Z",
+   "task_id": 35,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:07.480028674Z",
+   "task_id": 35,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:07.480109721Z",
+   "task_id": 35,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:07.480111247Z",
+   "task_id": 35,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 98,
+    "input_preview": "Use sed to perform an in-place replacement of the word 'localhost' with '127.0.0.1' in config.ini."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:07.480120546Z",
+   "task_id": 35,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Use sed to perform an in-place replacement of the word 'localhost' with '127.0.0.1' in config.ini."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422100174Z",
+   "task_id": 35,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 108,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"perl -pi -e \\\"s/localhost/127.0.0.1/g\\\" config.ini\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422139617Z",
+   "task_id": 35,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 108,
+    "raw_output_length": 108
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422142671Z",
+   "task_id": 35,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422145555Z",
+   "task_id": 35,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422147649Z",
+   "task_id": 35,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "raw_output_len": 108,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422148638Z",
+   "task_id": 35,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422182678Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422183222Z",
+   "task_id": 35,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422184321Z",
+   "task_id": 35,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422260952Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 48,
+    "command_preview": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.42229151Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422292678Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422293646Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422311351Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422351812Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422448595Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422466947Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422556545Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 48,
+    "original_length": 48,
+    "original_preview": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422644989Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [],
+    "reasons": [],
+    "requires_confirm": false,
+    "risk_level": "Low",
+    "risk_value": 0
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422646082Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 48,
+    "is_high_risk": false,
+    "reasons": null,
+    "reasons_count": 0,
+    "requires_confirmation": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422646938Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini",
+    "reasons": null,
+    "requires_confirm": false,
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422647521Z",
+   "task_id": 35,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "execution_decision",
+   "success": true,
+   "data": {
+    "command": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini",
+    "decision": "auto_execute",
+    "risk_level": "Low"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.42264791Z",
+   "task_id": 35,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executing",
+   "success": true,
+   "data": {
+    "command": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.42277583Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "path_validated",
+   "success": true,
+   "data": {
+    "allowed_root": "/tmp/eval_env",
+    "symlink_resolved": false,
+    "target_path": "/tmp/eval_env/perl"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422809721Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "path_validated",
+   "success": true,
+   "data": {
+    "allowed_root": "/tmp/eval_env",
+    "symlink_resolved": false,
+    "target_path": "/tmp/eval_env/config.ini"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422810813Z",
+   "task_id": 35,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422874588Z",
+   "task_id": 35,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422877958Z",
+   "task_id": 35,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422879242Z",
+   "task_id": 35,
+   "phase": "execution",
+   "component": "shell_handler",
+   "event_type": "command_executed",
+   "success": false,
+   "data": {
+    "command": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:10:08.422881128Z",
+   "task_id": 35,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "command": "perl -pi -e \"s/localhost/127.0.0.1/g\" config.ini",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "shell"
+   }
+  }
+ ]
+}

@@ -1,0 +1,251 @@
+{
+ "session_id": "helix_20260411_230759_12",
+ "export_time": "2026-04-11T23:08:00.554517881Z",
+ "task_id": 24,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:07:59.672410523Z",
+   "task_id": 24,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:59.674164779Z",
+   "task_id": 24,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:59.713527898Z",
+   "task_id": 24,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:59.713556105Z",
+   "task_id": 24,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:59.713557822Z",
+   "task_id": 24,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 66,
+    "input_preview": "Uninstall the docker package and remove its orphaned dependencies."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:59.713566382Z",
+   "task_id": 24,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Uninstall the docker package and remove its orphaned dependencies."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544525634Z",
+   "task_id": 24,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 92,
+    "raw_output_preview": "{\"intent\":\"package\",\"steps\":[{\"tool\":\"package\",\"action\":\"remove\",\"args\":{\"name\":\"docker\"}}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544597848Z",
+   "task_id": 24,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 92,
+    "raw_output_length": 92
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544608566Z",
+   "task_id": 24,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "package",
+    "raw_intent": "package",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544611104Z",
+   "task_id": 24,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544613743Z",
+   "task_id": 24,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "package",
+    "raw_output_len": 92,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544614986Z",
+   "task_id": 24,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "package",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544652397Z",
+   "task_id": 24,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "package",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544653405Z",
+   "task_id": 24,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "package",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.54465456Z",
+   "task_id": 24,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "remove",
+    "step_number": 1,
+    "tool_selected": "package",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.544819829Z",
+   "task_id": 24,
+   "phase": "execution",
+   "component": "package_handler",
+   "event_type": "action_selected",
+   "success": true,
+   "data": {
+    "action": "remove",
+    "package": "docker"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.552985688Z",
+   "task_id": 24,
+   "phase": "execution",
+   "component": "package_handler",
+   "event_type": "action_completed",
+   "success": true,
+   "data": {
+    "action": "remove",
+    "package": "docker"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.552986945Z",
+   "task_id": 24,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": true,
+   "data": {
+    "action": "remove",
+    "result": "success",
+    "step_ms": 8,
+    "step_number": 1,
+    "tool": "package"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:08:00.552988239Z",
+   "task_id": 24,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "execution_completed",
+   "success": true,
+   "data": {
+    "intent": "package",
+    "successful_steps": 1,
+    "total_duration_ms": 839,
+    "total_steps": 1
+   }
+  }
+ ]
+}

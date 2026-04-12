@@ -1,0 +1,320 @@
+{
+ "session_id": "helix_20260411_230746_12",
+ "export_time": "2026-04-11T23:07:47.832628211Z",
+ "task_id": 22,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:07:46.923244854Z",
+   "task_id": 22,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:46.924976888Z",
+   "task_id": 22,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:46.968218294Z",
+   "task_id": 22,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:46.968249804Z",
+   "task_id": 22,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:46.968251186Z",
+   "task_id": 22,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 65,
+    "input_preview": "Using Git, stage all modified .go files in the current directory."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:46.968259691Z",
+   "task_id": 22,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Using Git, stage all modified .go files in the current directory."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.829963386Z",
+   "task_id": 22,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 145,
+    "raw_output_preview": "{\n  \"intent\": \"git\",\n  \"steps\": [\n    {\n      \"tool\": \"git\",\n      \"action\": \"add\",\n      \"args\": {\n        \"paths\": [\"*.go\"]\n      }\n    }\n  ]\n}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.83006697Z",
+   "task_id": 22,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 145,
+    "raw_output_length": 145
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830076283Z",
+   "task_id": 22,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "raw_intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830078676Z",
+   "task_id": 22,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830080537Z",
+   "task_id": 22,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "raw_output_len": 145,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830081529Z",
+   "task_id": 22,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830149508Z",
+   "task_id": 22,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830150062Z",
+   "task_id": 22,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "git",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830151036Z",
+   "task_id": 22,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "add",
+    "step_number": 1,
+    "tool_selected": "git",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830152488Z",
+   "task_id": 22,
+   "phase": "execution",
+   "component": "git_handler",
+   "event_type": "action_selected",
+   "success": true,
+   "data": {
+    "action": "add",
+    "args": {
+     "paths": "*.go"
+    }
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830354768Z",
+   "task_id": 22,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "path_validated",
+   "success": true,
+   "data": {
+    "allowed_root": "/tmp/eval_env",
+    "symlink_resolved": false,
+    "target_path": "/tmp/eval_env/git"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830443949Z",
+   "task_id": 22,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "path_validated",
+   "success": true,
+   "data": {
+    "allowed_root": "/tmp/eval_env",
+    "symlink_resolved": false,
+    "target_path": "/tmp/eval_env/add"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830481879Z",
+   "task_id": 22,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "path_validated",
+   "success": true,
+   "data": {
+    "allowed_root": "/tmp/eval_env",
+    "symlink_resolved": false,
+    "target_path": "/tmp/eval_env/*.go"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830487448Z",
+   "task_id": 22,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "intervention": 0,
+    "reason": "passed_all_checks",
+    "result": "allowed"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830537517Z",
+   "task_id": 22,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_started",
+   "success": true,
+   "data": {
+    "command": "git add *.go",
+    "shell": "unknown",
+    "work_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830540375Z",
+   "task_id": 22,
+   "phase": "execution",
+   "component": "sandbox",
+   "event_type": "execution_completed",
+   "success": false,
+   "data": {
+    "command": "git add *.go",
+    "exit_error": "exec: \"unknown\": executable file not found in $PATH"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.830541687Z",
+   "task_id": 22,
+   "phase": "execution",
+   "component": "git_handler",
+   "event_type": "action_executed",
+   "success": false,
+   "data": {
+    "action": "add",
+    "args": {
+     "paths": "*.go"
+    },
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "success": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:47.83054352Z",
+   "task_id": 22,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": false,
+   "data": {
+    "action": "add",
+    "error": "exec: \"unknown\": executable file not found in $PATH",
+    "result": "failed",
+    "step_ms": 0,
+    "tool": "git"
+   }
+  }
+ ]
+}

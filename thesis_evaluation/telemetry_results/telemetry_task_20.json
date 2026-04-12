@@ -1,0 +1,421 @@
+{
+ "session_id": "helix_20260411_230704_12",
+ "export_time": "2026-04-11T23:07:34.931843566Z",
+ "task_id": 20,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:07:04.079960838Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.081937338Z",
+   "task_id": 20,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.121813234Z",
+   "task_id": 20,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.121841286Z",
+   "task_id": 20,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.121842619Z",
+   "task_id": 20,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 78,
+    "input_preview": "Rename old_config.yaml to new_config.yaml and move it into the /tmp directory."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.121850662Z",
+   "task_id": 20,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Rename old_config.yaml to new_config.yaml and move it into the /tmp directory."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924748006Z",
+   "task_id": 20,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 116,
+    "raw_output_preview": "{\"intent\":\"multi_step\",\"steps\":[{\"tool\":\"shell\",\"command\":\"mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml\"}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.92479144Z",
+   "task_id": 20,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 116,
+    "raw_output_length": 116
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924794138Z",
+   "task_id": 20,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "raw_intent": "multi_step",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924797011Z",
+   "task_id": 20,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924799455Z",
+   "task_id": 20,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "raw_output_len": 116,
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924800772Z",
+   "task_id": 20,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "multi_step",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924836992Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "steps_count": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924837493Z",
+   "task_id": 20,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924838249Z",
+   "task_id": 20,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "",
+    "step_number": 1,
+    "tool_selected": "shell",
+    "total_steps": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924910199Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_started",
+   "success": true,
+   "data": {
+    "command_length": 53,
+    "command_preview": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924940128Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "success",
+    "stage": "trim_normalize",
+    "trimmed": false
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924941275Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "unicode_hazard_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.924951873Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.92496758Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "quote_brace_balance"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.92502577Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "core_malicious_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.925121121Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_stage",
+   "success": true,
+   "data": {
+    "result": "passed",
+    "stage": "extra_dangerous_check"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.925151071Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "static_analyzer",
+   "event_type": "validation_completed",
+   "success": true,
+   "data": {
+    "command_preview": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "intervention": 0,
+    "result": "passed",
+    "stage": "all_static_checks"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.925228294Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "shell_validator",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "cleaned_length": 53,
+    "original_length": 53,
+    "original_preview": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.925334715Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "risk_scorer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "auto_blocked": false,
+    "patterns_matched": [
+     "file_move_copy"
+    ],
+    "reasons": [
+     "moves or copies files"
+    ],
+    "requires_confirm": true,
+    "risk_level": "Medium",
+    "risk_value": 1
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.925335898Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "risk_analyzer",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command_length": 53,
+    "is_high_risk": false,
+    "reasons": [
+     "moves or copies files"
+    ],
+    "reasons_count": 1,
+    "requires_confirmation": true,
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.925336867Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "risk_classified",
+   "success": true,
+   "data": {
+    "command": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "reasons": [
+     "moves or copies files"
+    ],
+    "requires_confirm": true,
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:04.925407061Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "awaiting_confirmation",
+   "success": true,
+   "data": {
+    "command": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "reasons": [
+     "moves or copies files"
+    ],
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:34.928087431Z",
+   "task_id": 20,
+   "phase": "safety",
+   "component": "shell_handler",
+   "event_type": "user_declined",
+   "success": true,
+   "data": {
+    "command": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "decision": "declined",
+    "risk_level": "Medium"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:34.928298304Z",
+   "task_id": 20,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": true,
+   "data": {
+    "command": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "result": "success",
+    "step_ms": 30003,
+    "step_number": 1,
+    "tool": "shell"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:07:34.928300785Z",
+   "task_id": 20,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "execution_completed",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "successful_steps": 1,
+    "total_duration_ms": 30806,
+    "total_steps": 1
+   }
+  }
+ ]
+}

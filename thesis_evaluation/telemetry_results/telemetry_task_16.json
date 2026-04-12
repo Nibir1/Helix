@@ -1,0 +1,304 @@
+{
+ "session_id": "helix_20260411_230540_12",
+ "export_time": "2026-04-11T23:06:10.383132858Z",
+ "task_id": 16,
+ "environment": "",
+ "events": [
+  {
+   "timestamp": "2026-04-11T23:05:40.487644939Z",
+   "task_id": 16,
+   "phase": "safety",
+   "component": "sandbox",
+   "event_type": "sandbox_initialized",
+   "success": true,
+   "data": {
+    "allowed_dir": "/tmp/eval_env",
+    "cwd_resolved": "/tmp/eval_env",
+    "mode": "CurrentDirectory",
+    "original_dir": "/tmp/eval_env"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:40.489287474Z",
+   "task_id": 16,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_started",
+   "success": true,
+   "data": {
+    "index_dir": "/root/.helix/rag_index"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:40.527904108Z",
+   "task_id": 16,
+   "phase": "rag",
+   "component": "rag_system",
+   "event_type": "initialization_completed",
+   "success": true,
+   "data": {
+    "pages": 0,
+    "phase": "load_system_state",
+    "source": "saved_state"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:40.527940967Z",
+   "task_id": 16,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "agent_initialized",
+   "success": true,
+   "data": {
+    "cwd": "/tmp/eval_env",
+    "os": "linux",
+    "sandbox_mode": "CurrentDirectory",
+    "shell": "unknown"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:40.527942898Z",
+   "task_id": 16,
+   "phase": "agent",
+   "component": "agent_core",
+   "event_type": "input_received",
+   "success": true,
+   "data": {
+    "input_length": 33,
+    "input_preview": "Install the htop and jq packages."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:40.5279524Z",
+   "task_id": 16,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "planning_started",
+   "success": true,
+   "data": {
+    "env_description": "OS: linux, Shell: unknown, CWD: /tmp/eval_env",
+    "user_input": "Install the htop and jq packages."
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360555827Z",
+   "task_id": 16,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "llm_output_received",
+   "success": true,
+   "data": {
+    "raw_output_length": 153,
+    "raw_output_preview": "{\"intent\":\"multi_step\",\"steps\":[{\"tool\":\"package\",\"action\":\"install\",\"args\":{\"name\":\"htop\"}},{\"tool\":\"package\",\"action\":\"install\",\"args\":{\"name\":\"jq\"}}]}"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360628492Z",
+   "task_id": 16,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "json_valid",
+   "success": true,
+   "data": {
+    "json_extracted_length": 153,
+    "raw_output_length": 153
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360637836Z",
+   "task_id": 16,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "intent_classified",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "raw_intent": "multi_step",
+    "steps_count": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360640657Z",
+   "task_id": 16,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "validation_passed",
+   "success": true,
+   "data": {
+    "final_valid": true,
+    "steps_dropped": 0,
+    "steps_validated": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360642891Z",
+   "task_id": 16,
+   "phase": "planning",
+   "component": "planner",
+   "event_type": "plan_parsed_success",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "raw_output_len": 153,
+    "steps_count": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360644129Z",
+   "task_id": 16,
+   "phase": "planning",
+   "component": "agent_core",
+   "event_type": "plan_parsed",
+   "success": true,
+   "data": {
+    "duration_ms": 0,
+    "intent": "multi_step",
+    "steps_count": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360672574Z",
+   "task_id": 16,
+   "phase": "safety",
+   "component": "agent_core",
+   "event_type": "safety_layer_processed",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "steps_count": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360673055Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "plan_execution_started",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "total_steps": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360742992Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "install",
+    "step_number": 1,
+    "tool_selected": "package",
+    "total_steps": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:05:41.360907654Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "package_handler",
+   "event_type": "action_selected",
+   "success": true,
+   "data": {
+    "action": "install",
+    "package": "htop"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:10.37446956Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "package_handler",
+   "event_type": "action_completed",
+   "success": true,
+   "data": {
+    "action": "install",
+    "package": "htop"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:10.374471846Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": true,
+   "data": {
+    "action": "install",
+    "result": "success",
+    "step_ms": 29013,
+    "step_number": 1,
+    "tool": "package"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:10.374527689Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_started",
+   "success": true,
+   "data": {
+    "action": "install",
+    "step_number": 2,
+    "tool_selected": "package",
+    "total_steps": 2
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:10.374575056Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "package_handler",
+   "event_type": "action_selected",
+   "success": true,
+   "data": {
+    "action": "install",
+    "package": "jq"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:10.381608077Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "package_handler",
+   "event_type": "action_completed",
+   "success": true,
+   "data": {
+    "action": "install",
+    "package": "jq"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:10.381609428Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "step_completed",
+   "success": true,
+   "data": {
+    "action": "install",
+    "result": "success",
+    "step_ms": 7,
+    "step_number": 2,
+    "tool": "package"
+   }
+  },
+  {
+   "timestamp": "2026-04-11T23:06:10.381610475Z",
+   "task_id": 16,
+   "phase": "execution",
+   "component": "agent_core",
+   "event_type": "execution_completed",
+   "success": true,
+   "data": {
+    "intent": "multi_step",
+    "successful_steps": 2,
+    "total_duration_ms": 29853,
+    "total_steps": 2
+   }
+  }
+ ]
+}
