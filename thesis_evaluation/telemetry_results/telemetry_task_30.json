@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260411_230935_12",
- "export_time": "2026-04-11T23:09:36.582606966Z",
+ "session_id": "helix_20260413_175022_12",
+ "export_time": "2026-04-13T17:50:23.652375647Z",
  "task_id": 30,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-11T23:09:35.828157531Z",
+   "timestamp": "2026-04-13T17:50:22.652049442Z",
    "task_id": 30,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:35.829762976Z",
+   "timestamp": "2026-04-13T17:50:22.653276818Z",
    "task_id": 30,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:35.869656813Z",
+   "timestamp": "2026-04-13T17:50:22.678801019Z",
    "task_id": 30,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:35.869696113Z",
+   "timestamp": "2026-04-13T17:50:22.678820767Z",
    "task_id": 30,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:35.86969806Z",
+   "timestamp": "2026-04-13T17:50:22.678822036Z",
    "task_id": 30,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:35.869709399Z",
+   "timestamp": "2026-04-13T17:50:22.678828121Z",
    "task_id": 30,
    "phase": "planning",
    "component": "agent_core",
@@ -81,44 +81,44 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.579446672Z",
+   "timestamp": "2026-04-13T17:50:23.647828666Z",
    "task_id": 30,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 90,
-    "raw_output_preview": "{\"intent\":\"git\",\"steps\":[{\"tool\":\"git\",\"action\":\"reset-hard\",\"args\":{\"target\":\"HEAD~1\"}}]}"
+    "raw_output_length": 150,
+    "raw_output_preview": "{\"intent\":\"multi_step\",\"steps\":[{\"tool\":\"git\",\"action\":\"reset-hard\",\"args\":{\"target\":\"HEAD~1\"}},{\"tool\":\"git\",\"action\":\"add\",\"args\":{\"paths\":[\".\"]}}]}"
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.579720179Z",
+   "timestamp": "2026-04-13T17:50:23.647887147Z",
    "task_id": 30,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 90,
-    "raw_output_length": 90
+    "json_extracted_length": 150,
+    "raw_output_length": 150
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.579728241Z",
+   "timestamp": "2026-04-13T17:50:23.647895663Z",
    "task_id": 30,
    "phase": "planning",
    "component": "planner",
    "event_type": "intent_classified",
    "success": true,
    "data": {
-    "intent": "git",
-    "raw_intent": "git",
-    "steps_count": 1
+    "intent": "multi_step",
+    "raw_intent": "multi_step",
+    "steps_count": 2
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.579730545Z",
+   "timestamp": "2026-04-13T17:50:23.647898597Z",
    "task_id": 30,
    "phase": "planning",
    "component": "planner",
@@ -127,24 +127,24 @@
    "data": {
     "final_valid": true,
     "steps_dropped": 0,
-    "steps_validated": 1
+    "steps_validated": 2
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.579733018Z",
+   "timestamp": "2026-04-13T17:50:23.647900598Z",
    "task_id": 30,
    "phase": "planning",
    "component": "planner",
    "event_type": "plan_parsed_success",
    "success": true,
    "data": {
-    "intent": "git",
-    "raw_output_len": 90,
-    "steps_count": 1
+    "intent": "multi_step",
+    "raw_output_len": 150,
+    "steps_count": 2
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.57973433Z",
+   "timestamp": "2026-04-13T17:50:23.647901556Z",
    "task_id": 30,
    "phase": "planning",
    "component": "agent_core",
@@ -152,36 +152,36 @@
    "success": true,
    "data": {
     "duration_ms": 0,
-    "intent": "git",
-    "steps_count": 1
+    "intent": "multi_step",
+    "steps_count": 2
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.579766249Z",
+   "timestamp": "2026-04-13T17:50:23.647936667Z",
    "task_id": 30,
    "phase": "safety",
    "component": "agent_core",
    "event_type": "safety_layer_processed",
    "success": true,
    "data": {
-    "intent": "git",
-    "steps_count": 1
+    "intent": "multi_step",
+    "steps_count": 2
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.57976672Z",
+   "timestamp": "2026-04-13T17:50:23.647937212Z",
    "task_id": 30,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "plan_execution_started",
    "success": true,
    "data": {
-    "intent": "git",
-    "total_steps": 1
+    "intent": "multi_step",
+    "total_steps": 2
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.579767706Z",
+   "timestamp": "2026-04-13T17:50:23.648007489Z",
    "task_id": 30,
    "phase": "execution",
    "component": "agent_core",
@@ -191,11 +191,11 @@
     "action": "reset-hard",
     "step_number": 1,
     "tool_selected": "git",
-    "total_steps": 1
+    "total_steps": 2
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.579768677Z",
+   "timestamp": "2026-04-13T17:50:23.648008666Z",
    "task_id": 30,
    "phase": "execution",
    "component": "git_handler",
@@ -209,7 +209,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.580598995Z",
+   "timestamp": "2026-04-13T17:50:23.64890755Z",
    "task_id": 30,
    "phase": "execution",
    "component": "git_handler",
@@ -225,7 +225,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:09:36.580600741Z",
+   "timestamp": "2026-04-13T17:50:23.648909123Z",
    "task_id": 30,
    "phase": "execution",
    "component": "agent_core",

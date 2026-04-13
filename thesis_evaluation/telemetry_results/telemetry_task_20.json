@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260411_230704_12",
- "export_time": "2026-04-11T23:07:34.931843566Z",
+ "session_id": "helix_20260413_174750_12",
+ "export_time": "2026-04-13T17:48:20.262951038Z",
  "task_id": 20,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-11T23:07:04.079960838Z",
+   "timestamp": "2026-04-13T17:47:50.470357232Z",
    "task_id": 20,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.081937338Z",
+   "timestamp": "2026-04-13T17:47:50.471682365Z",
    "task_id": 20,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.121813234Z",
+   "timestamp": "2026-04-13T17:47:50.497500675Z",
    "task_id": 20,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.121841286Z",
+   "timestamp": "2026-04-13T17:47:50.497522074Z",
    "task_id": 20,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.121842619Z",
+   "timestamp": "2026-04-13T17:47:50.49752354Z",
    "task_id": 20,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.121850662Z",
+   "timestamp": "2026-04-13T17:47:50.497530155Z",
    "task_id": 20,
    "phase": "planning",
    "component": "agent_core",
@@ -81,44 +81,44 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924748006Z",
+   "timestamp": "2026-04-13T17:47:51.258659319Z",
    "task_id": 20,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 116,
-    "raw_output_preview": "{\"intent\":\"multi_step\",\"steps\":[{\"tool\":\"shell\",\"command\":\"mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml\"}]}"
+    "raw_output_length": 97,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"mv old_config.yaml /tmp/new_config.yaml\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.92479144Z",
+   "timestamp": "2026-04-13T17:47:51.258701696Z",
    "task_id": 20,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 116,
-    "raw_output_length": 116
+    "json_extracted_length": 97,
+    "raw_output_length": 97
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924794138Z",
+   "timestamp": "2026-04-13T17:47:51.258704526Z",
    "task_id": 20,
    "phase": "planning",
    "component": "planner",
    "event_type": "intent_classified",
    "success": true,
    "data": {
-    "intent": "multi_step",
-    "raw_intent": "multi_step",
+    "intent": "shell",
+    "raw_intent": "shell",
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924797011Z",
+   "timestamp": "2026-04-13T17:47:51.25870775Z",
    "task_id": 20,
    "phase": "planning",
    "component": "planner",
@@ -131,20 +131,20 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924799455Z",
+   "timestamp": "2026-04-13T17:47:51.258710321Z",
    "task_id": 20,
    "phase": "planning",
    "component": "planner",
    "event_type": "plan_parsed_success",
    "success": true,
    "data": {
-    "intent": "multi_step",
-    "raw_output_len": 116,
+    "intent": "shell",
+    "raw_output_len": 97,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924800772Z",
+   "timestamp": "2026-04-13T17:47:51.258711347Z",
    "task_id": 20,
    "phase": "planning",
    "component": "agent_core",
@@ -152,36 +152,36 @@
    "success": true,
    "data": {
     "duration_ms": 0,
-    "intent": "multi_step",
+    "intent": "shell",
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924836992Z",
+   "timestamp": "2026-04-13T17:47:51.258742449Z",
    "task_id": 20,
    "phase": "safety",
    "component": "agent_core",
    "event_type": "safety_layer_processed",
    "success": true,
    "data": {
-    "intent": "multi_step",
+    "intent": "shell",
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924837493Z",
+   "timestamp": "2026-04-13T17:47:51.258742931Z",
    "task_id": 20,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "plan_execution_started",
    "success": true,
    "data": {
-    "intent": "multi_step",
+    "intent": "shell",
     "total_steps": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924838249Z",
+   "timestamp": "2026-04-13T17:47:51.25874378Z",
    "task_id": 20,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924910199Z",
+   "timestamp": "2026-04-13T17:47:51.258821445Z",
    "task_id": 20,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 53,
-    "command_preview": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml"
+    "command_length": 39,
+    "command_preview": "mv old_config.yaml /tmp/new_config.yaml"
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924940128Z",
+   "timestamp": "2026-04-13T17:47:51.258863191Z",
    "task_id": 20,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924941275Z",
+   "timestamp": "2026-04-13T17:47:51.258864233Z",
    "task_id": 20,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.924951873Z",
+   "timestamp": "2026-04-13T17:47:51.258865403Z",
    "task_id": 20,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.92496758Z",
+   "timestamp": "2026-04-13T17:47:51.259009289Z",
    "task_id": 20,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.92502577Z",
+   "timestamp": "2026-04-13T17:47:51.259057043Z",
    "task_id": 20,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.925121121Z",
+   "timestamp": "2026-04-13T17:47:51.259133983Z",
    "task_id": 20,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.925151071Z",
+   "timestamp": "2026-04-13T17:47:51.259151066Z",
    "task_id": 20,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "command_preview": "mv old_config.yaml /tmp/new_config.yaml",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.925228294Z",
+   "timestamp": "2026-04-13T17:47:51.259219656Z",
    "task_id": 20,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 53,
-    "original_length": 53,
-    "original_preview": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml"
+    "cleaned_length": 39,
+    "original_length": 39,
+    "original_preview": "mv old_config.yaml /tmp/new_config.yaml"
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.925334715Z",
+   "timestamp": "2026-04-13T17:47:51.259287563Z",
    "task_id": 20,
    "phase": "safety",
    "component": "risk_scorer",
@@ -327,14 +327,14 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.925335898Z",
+   "timestamp": "2026-04-13T17:47:51.25928851Z",
    "task_id": 20,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 53,
+    "command_length": 39,
     "is_high_risk": false,
     "reasons": [
      "moves or copies files"
@@ -345,14 +345,14 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.925336867Z",
+   "timestamp": "2026-04-13T17:47:51.259289324Z",
    "task_id": 20,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "command": "mv old_config.yaml /tmp/new_config.yaml",
     "reasons": [
      "moves or copies files"
     ],
@@ -361,14 +361,14 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:04.925407061Z",
+   "timestamp": "2026-04-13T17:47:51.259361403Z",
    "task_id": 20,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "awaiting_confirmation",
    "success": true,
    "data": {
-    "command": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "command": "mv old_config.yaml /tmp/new_config.yaml",
     "reasons": [
      "moves or copies files"
     ],
@@ -376,44 +376,44 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:34.928087431Z",
+   "timestamp": "2026-04-13T17:48:20.260743979Z",
    "task_id": 20,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "user_declined",
    "success": true,
    "data": {
-    "command": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "command": "mv old_config.yaml /tmp/new_config.yaml",
     "decision": "declined",
     "risk_level": "Medium"
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:34.928298304Z",
+   "timestamp": "2026-04-13T17:48:20.260813811Z",
    "task_id": 20,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": true,
    "data": {
-    "command": "mv /tmp/eval_env/old_config.yaml /tmp/new_config.yaml",
+    "command": "mv old_config.yaml /tmp/new_config.yaml",
     "result": "success",
-    "step_ms": 30003,
+    "step_ms": 29001,
     "step_number": 1,
     "tool": "shell"
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:34.928300785Z",
+   "timestamp": "2026-04-13T17:48:20.260815831Z",
    "task_id": 20,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "execution_completed",
    "success": true,
    "data": {
-    "intent": "multi_step",
+    "intent": "shell",
     "successful_steps": 1,
-    "total_duration_ms": 30806,
+    "total_duration_ms": 29763,
     "total_steps": 1
    }
   }

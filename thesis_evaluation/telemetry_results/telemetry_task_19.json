@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260411_230628_12",
- "export_time": "2026-04-11T23:06:58.498003548Z",
+ "session_id": "helix_20260413_174714_12",
+ "export_time": "2026-04-13T17:47:44.933985941Z",
  "task_id": 19,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-11T23:06:28.628485561Z",
+   "timestamp": "2026-04-13T17:47:14.818488622Z",
    "task_id": 19,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:28.630233998Z",
+   "timestamp": "2026-04-13T17:47:14.81974289Z",
    "task_id": 19,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:28.669850641Z",
+   "timestamp": "2026-04-13T17:47:14.846942015Z",
    "task_id": 19,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:28.669879454Z",
+   "timestamp": "2026-04-13T17:47:14.846967496Z",
    "task_id": 19,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:28.669881024Z",
+   "timestamp": "2026-04-13T17:47:14.846968835Z",
    "task_id": 19,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:28.669889023Z",
+   "timestamp": "2026-04-13T17:47:14.846976501Z",
    "task_id": 19,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493239889Z",
+   "timestamp": "2026-04-13T17:47:15.926859691Z",
    "task_id": 19,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 91,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"chmod 100 /tmp/eval_env/script.sh\"}]}"
+    "raw_output_length": 77,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"chmod 100 script.sh\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493281361Z",
+   "timestamp": "2026-04-13T17:47:15.926917064Z",
    "task_id": 19,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 91,
-    "raw_output_length": 91
+    "json_extracted_length": 77,
+    "raw_output_length": 77
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493283914Z",
+   "timestamp": "2026-04-13T17:47:15.926921494Z",
    "task_id": 19,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493287137Z",
+   "timestamp": "2026-04-13T17:47:15.926925503Z",
    "task_id": 19,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493289091Z",
+   "timestamp": "2026-04-13T17:47:15.92692847Z",
    "task_id": 19,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 91,
+    "raw_output_len": 77,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493290191Z",
+   "timestamp": "2026-04-13T17:47:15.926930291Z",
    "task_id": 19,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493326219Z",
+   "timestamp": "2026-04-13T17:47:15.927147866Z",
    "task_id": 19,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493326693Z",
+   "timestamp": "2026-04-13T17:47:15.927149015Z",
    "task_id": 19,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493327754Z",
+   "timestamp": "2026-04-13T17:47:15.927150409Z",
    "task_id": 19,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493404727Z",
+   "timestamp": "2026-04-13T17:47:15.927224247Z",
    "task_id": 19,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 33,
-    "command_preview": "chmod 100 /tmp/eval_env/script.sh"
+    "command_length": 19,
+    "command_preview": "chmod 100 script.sh"
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493434609Z",
+   "timestamp": "2026-04-13T17:47:15.927255204Z",
    "task_id": 19,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493435702Z",
+   "timestamp": "2026-04-13T17:47:15.92726387Z",
    "task_id": 19,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493436892Z",
+   "timestamp": "2026-04-13T17:47:15.927265061Z",
    "task_id": 19,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493454259Z",
+   "timestamp": "2026-04-13T17:47:15.927291434Z",
    "task_id": 19,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493496748Z",
+   "timestamp": "2026-04-13T17:47:15.927914819Z",
    "task_id": 19,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493561834Z",
+   "timestamp": "2026-04-13T17:47:15.928135506Z",
    "task_id": 19,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493577505Z",
+   "timestamp": "2026-04-13T17:47:15.928166845Z",
    "task_id": 19,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "chmod 100 /tmp/eval_env/script.sh",
+    "command_preview": "chmod 100 script.sh",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493647086Z",
+   "timestamp": "2026-04-13T17:47:15.92831315Z",
    "task_id": 19,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 33,
-    "original_length": 33,
-    "original_preview": "chmod 100 /tmp/eval_env/script.sh"
+    "cleaned_length": 19,
+    "original_length": 19,
+    "original_preview": "chmod 100 script.sh"
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493726388Z",
+   "timestamp": "2026-04-13T17:47:15.928514573Z",
    "task_id": 19,
    "phase": "safety",
    "component": "risk_scorer",
@@ -327,14 +327,14 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.49372754Z",
+   "timestamp": "2026-04-13T17:47:15.928516185Z",
    "task_id": 19,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 33,
+    "command_length": 19,
     "is_high_risk": false,
     "reasons": [
      "changes file permissions (chmod)"
@@ -345,14 +345,14 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.493728534Z",
+   "timestamp": "2026-04-13T17:47:15.928517249Z",
    "task_id": 19,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "chmod 100 /tmp/eval_env/script.sh",
+    "command": "chmod 100 script.sh",
     "reasons": [
      "changes file permissions (chmod)"
     ],
@@ -361,14 +361,14 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:29.49379594Z",
+   "timestamp": "2026-04-13T17:47:15.928604623Z",
    "task_id": 19,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "awaiting_confirmation",
    "success": true,
    "data": {
-    "command": "chmod 100 /tmp/eval_env/script.sh",
+    "command": "chmod 100 script.sh",
     "reasons": [
      "changes file permissions (chmod)"
     ],
@@ -376,35 +376,35 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:58.495751449Z",
+   "timestamp": "2026-04-13T17:47:44.930882722Z",
    "task_id": 19,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "user_declined",
    "success": true,
    "data": {
-    "command": "chmod 100 /tmp/eval_env/script.sh",
+    "command": "chmod 100 script.sh",
     "decision": "declined",
     "risk_level": "Medium"
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:58.495862023Z",
+   "timestamp": "2026-04-13T17:47:44.930994508Z",
    "task_id": 19,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": true,
    "data": {
-    "command": "chmod 100 /tmp/eval_env/script.sh",
+    "command": "chmod 100 script.sh",
     "result": "success",
-    "step_ms": 29001,
+    "step_ms": 29004,
     "step_number": 1,
     "tool": "shell"
    }
   },
   {
-   "timestamp": "2026-04-11T23:06:58.49586417Z",
+   "timestamp": "2026-04-13T17:47:44.930997626Z",
    "task_id": 19,
    "phase": "execution",
    "component": "agent_core",
@@ -413,7 +413,7 @@
    "data": {
     "intent": "shell",
     "successful_steps": 1,
-    "total_duration_ms": 29825,
+    "total_duration_ms": 30084,
     "total_steps": 1
    }
   }

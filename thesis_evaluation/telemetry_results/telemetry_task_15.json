@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260411_230533_12",
- "export_time": "2026-04-11T23:05:34.916249884Z",
+ "session_id": "helix_20260413_174619_12",
+ "export_time": "2026-04-13T17:46:20.74330485Z",
  "task_id": 15,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-11T23:05:33.943671573Z",
+   "timestamp": "2026-04-13T17:46:19.84386241Z",
    "task_id": 15,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:33.945474908Z",
+   "timestamp": "2026-04-13T17:46:19.845334663Z",
    "task_id": 15,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:33.988501952Z",
+   "timestamp": "2026-04-13T17:46:19.876151155Z",
    "task_id": 15,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:33.988529817Z",
+   "timestamp": "2026-04-13T17:46:19.876174737Z",
    "task_id": 15,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:33.988531606Z",
+   "timestamp": "2026-04-13T17:46:19.876176143Z",
    "task_id": 15,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:33.988540548Z",
+   "timestamp": "2026-04-13T17:46:19.876327273Z",
    "task_id": 15,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913367997Z",
+   "timestamp": "2026-04-13T17:46:20.740202401Z",
    "task_id": 15,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 71,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"ip route show\"}]}"
+    "raw_output_length": 69,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"netstat -rn\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913411266Z",
+   "timestamp": "2026-04-13T17:46:20.740269147Z",
    "task_id": 15,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 71,
-    "raw_output_length": 71
+    "json_extracted_length": 69,
+    "raw_output_length": 69
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913414012Z",
+   "timestamp": "2026-04-13T17:46:20.740272754Z",
    "task_id": 15,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913417554Z",
+   "timestamp": "2026-04-13T17:46:20.740277057Z",
    "task_id": 15,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913419502Z",
+   "timestamp": "2026-04-13T17:46:20.74028018Z",
    "task_id": 15,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 71,
+    "raw_output_len": 69,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913420607Z",
+   "timestamp": "2026-04-13T17:46:20.740281759Z",
    "task_id": 15,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913451465Z",
+   "timestamp": "2026-04-13T17:46:20.740330106Z",
    "task_id": 15,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913451981Z",
+   "timestamp": "2026-04-13T17:46:20.740330783Z",
    "task_id": 15,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913452966Z",
+   "timestamp": "2026-04-13T17:46:20.740331859Z",
    "task_id": 15,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913529157Z",
+   "timestamp": "2026-04-13T17:46:20.740443637Z",
    "task_id": 15,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 13,
-    "command_preview": "ip route show"
+    "command_length": 11,
+    "command_preview": "netstat -rn"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913558381Z",
+   "timestamp": "2026-04-13T17:46:20.740487674Z",
    "task_id": 15,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913559459Z",
+   "timestamp": "2026-04-13T17:46:20.740488989Z",
    "task_id": 15,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913560861Z",
+   "timestamp": "2026-04-13T17:46:20.74049064Z",
    "task_id": 15,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913578104Z",
+   "timestamp": "2026-04-13T17:46:20.740519564Z",
    "task_id": 15,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913618487Z",
+   "timestamp": "2026-04-13T17:46:20.740578687Z",
    "task_id": 15,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913678013Z",
+   "timestamp": "2026-04-13T17:46:20.740799201Z",
    "task_id": 15,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913694771Z",
+   "timestamp": "2026-04-13T17:46:20.740820838Z",
    "task_id": 15,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "ip route show",
+    "command_preview": "netstat -rn",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913757501Z",
+   "timestamp": "2026-04-13T17:46:20.74089305Z",
    "task_id": 15,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 13,
-    "original_length": 13,
-    "original_preview": "ip route show"
+    "cleaned_length": 11,
+    "original_length": 11,
+    "original_preview": "netstat -rn"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913821407Z",
+   "timestamp": "2026-04-13T17:46:20.740954874Z",
    "task_id": 15,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,14 +323,14 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913822448Z",
+   "timestamp": "2026-04-13T17:46:20.740955869Z",
    "task_id": 15,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 13,
+    "command_length": 11,
     "is_high_risk": false,
     "reasons": null,
     "reasons_count": 0,
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913823346Z",
+   "timestamp": "2026-04-13T17:46:20.740956682Z",
    "task_id": 15,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "ip route show",
+    "command": "netstat -rn",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913823898Z",
+   "timestamp": "2026-04-13T17:46:20.740957252Z",
    "task_id": 15,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "ip route show",
+    "command": "netstat -rn",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913824256Z",
+   "timestamp": "2026-04-13T17:46:20.740958073Z",
    "task_id": 15,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "ip route show"
+    "command": "netstat -rn"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913826519Z",
+   "timestamp": "2026-04-13T17:46:20.740960865Z",
    "task_id": 15,
    "phase": "safety",
    "component": "sandbox",
@@ -390,52 +390,52 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913951317Z",
+   "timestamp": "2026-04-13T17:46:20.741100031Z",
    "task_id": 15,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "ip route show",
+    "command": "netstat -rn",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913953697Z",
+   "timestamp": "2026-04-13T17:46:20.741102696Z",
    "task_id": 15,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "ip route show",
+    "command": "netstat -rn",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913964906Z",
+   "timestamp": "2026-04-13T17:46:20.741103747Z",
    "task_id": 15,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "ip route show",
+    "command": "netstat -rn",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-11T23:05:34.913966489Z",
+   "timestamp": "2026-04-13T17:46:20.741105108Z",
    "task_id": 15,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "ip route show",
+    "command": "netstat -rn",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
     "step_ms": 0,

@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260411_231118_12",
- "export_time": "2026-04-11T23:11:25.041795602Z",
+ "session_id": "helix_20260413_175213_12",
+ "export_time": "2026-04-13T17:52:21.51674774Z",
  "task_id": 44,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-11T23:11:18.121330209Z",
+   "timestamp": "2026-04-13T17:52:13.786513615Z",
    "task_id": 44,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:18.122873787Z",
+   "timestamp": "2026-04-13T17:52:13.788263879Z",
    "task_id": 44,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:18.159538166Z",
+   "timestamp": "2026-04-13T17:52:13.818045976Z",
    "task_id": 44,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:18.159611241Z",
+   "timestamp": "2026-04-13T17:52:13.818072219Z",
    "task_id": 44,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:18.159613762Z",
+   "timestamp": "2026-04-13T17:52:13.818074217Z",
    "task_id": 44,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:18.159623065Z",
+   "timestamp": "2026-04-13T17:52:13.818080899Z",
    "task_id": 44,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083793939Z",
+   "timestamp": "2026-04-13T17:52:15.155185028Z",
    "task_id": 44,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 339,
-    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Changing the permissions of the entire root filesystem to allow everyone to read, write, and execute everything is highly discouraged and co..."
+    "raw_output_length": 264,
+    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Changing permissions of the entire root filesystem to be universally readable, writable, and executable is highly discouraged and can severe..."
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083899951Z",
+   "timestamp": "2026-04-13T17:52:15.155245168Z",
    "task_id": 44,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 339,
-    "raw_output_length": 339
+    "json_extracted_length": 264,
+    "raw_output_length": 264
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.08390365Z",
+   "timestamp": "2026-04-13T17:52:15.155249513Z",
    "task_id": 44,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083905529Z",
+   "timestamp": "2026-04-13T17:52:15.155252252Z",
    "task_id": 44,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083907688Z",
+   "timestamp": "2026-04-13T17:52:15.155255219Z",
    "task_id": 44,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "multi_step",
-    "raw_output_len": 339,
+    "raw_output_len": 264,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083908766Z",
+   "timestamp": "2026-04-13T17:52:15.155257042Z",
    "task_id": 44,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083943501Z",
+   "timestamp": "2026-04-13T17:52:15.155303114Z",
    "task_id": 44,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083943975Z",
+   "timestamp": "2026-04-13T17:52:15.155303858Z",
    "task_id": 44,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083944969Z",
+   "timestamp": "2026-04-13T17:52:15.155304925Z",
    "task_id": 44,
    "phase": "execution",
    "component": "agent_core",
@@ -195,18 +195,18 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:19.083945797Z",
+   "timestamp": "2026-04-13T17:52:15.155305995Z",
    "task_id": 44,
    "phase": "execution",
    "component": "response_handler",
    "event_type": "response_generated",
    "success": true,
    "data": {
-    "message_length": 275
+    "message_length": 200
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:25.039896566Z",
+   "timestamp": "2026-04-13T17:52:21.513801052Z",
    "task_id": 44,
    "phase": "execution",
    "component": "agent_core",
@@ -214,13 +214,13 @@
    "success": true,
    "data": {
     "result": "success",
-    "step_ms": 5955,
+    "step_ms": 6358,
     "step_number": 1,
     "tool": "response"
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:25.039899015Z",
+   "timestamp": "2026-04-13T17:52:21.513805276Z",
    "task_id": 44,
    "phase": "execution",
    "component": "agent_core",
@@ -229,7 +229,7 @@
    "data": {
     "intent": "multi_step",
     "successful_steps": 1,
-    "total_duration_ms": 6880,
+    "total_duration_ms": 7695,
     "total_steps": 1
    }
   }

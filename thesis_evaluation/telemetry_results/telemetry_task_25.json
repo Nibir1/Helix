@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260411_230806_12",
- "export_time": "2026-04-11T23:08:06.877751432Z",
+ "session_id": "helix_20260413_174851_12",
+ "export_time": "2026-04-13T17:48:52.820233747Z",
  "task_id": 25,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-11T23:08:06.100361453Z",
+   "timestamp": "2026-04-13T17:48:51.914198954Z",
    "task_id": 25,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.102382925Z",
+   "timestamp": "2026-04-13T17:48:51.915757632Z",
    "task_id": 25,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.14253822Z",
+   "timestamp": "2026-04-13T17:48:51.943208545Z",
    "task_id": 25,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.142589347Z",
+   "timestamp": "2026-04-13T17:48:51.943230367Z",
    "task_id": 25,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.142591283Z",
+   "timestamp": "2026-04-13T17:48:51.943232029Z",
    "task_id": 25,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.142602716Z",
+   "timestamp": "2026-04-13T17:48:51.943238513Z",
    "task_id": 25,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874686575Z",
+   "timestamp": "2026-04-13T17:48:52.817079438Z",
    "task_id": 25,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 123,
-    "raw_output_preview": "{\"intent\":\"git\",\"steps\":[{\"tool\":\"git\",\"action\":\"push\",\"args\":{\"remote\":\"origin\",\"branch\":\"current-branch\",\"force\":true}}]}"
+    "raw_output_length": 116,
+    "raw_output_preview": "{\"intent\":\"git\",\"steps\":[{\"tool\":\"git\",\"action\":\"push\",\"args\":{\"remote\":\"origin\",\"branch\":\"current\",\"force\":true}}]}"
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874734896Z",
+   "timestamp": "2026-04-13T17:48:52.817124379Z",
    "task_id": 25,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 123,
-    "raw_output_length": 123
+    "json_extracted_length": 116,
+    "raw_output_length": 116
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874743953Z",
+   "timestamp": "2026-04-13T17:48:52.817132866Z",
    "task_id": 25,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874746426Z",
+   "timestamp": "2026-04-13T17:48:52.817135728Z",
    "task_id": 25,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874748346Z",
+   "timestamp": "2026-04-13T17:48:52.817137739Z",
    "task_id": 25,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "git",
-    "raw_output_len": 123,
+    "raw_output_len": 116,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874749383Z",
+   "timestamp": "2026-04-13T17:48:52.817138696Z",
    "task_id": 25,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.87478581Z",
+   "timestamp": "2026-04-13T17:48:52.81716722Z",
    "task_id": 25,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874786236Z",
+   "timestamp": "2026-04-13T17:48:52.817167789Z",
    "task_id": 25,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874787149Z",
+   "timestamp": "2026-04-13T17:48:52.81716873Z",
    "task_id": 25,
    "phase": "execution",
    "component": "agent_core",
@@ -195,7 +195,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.874788125Z",
+   "timestamp": "2026-04-13T17:48:52.817169662Z",
    "task_id": 25,
    "phase": "execution",
    "component": "git_handler",
@@ -204,14 +204,14 @@
    "data": {
     "action": "push",
     "args": {
-     "branch": "current-branch",
+     "branch": "current",
      "force": "true",
      "remote": "origin"
     }
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.875902449Z",
+   "timestamp": "2026-04-13T17:48:52.818072879Z",
    "task_id": 25,
    "phase": "execution",
    "component": "git_handler",
@@ -220,7 +220,7 @@
    "data": {
     "action": "push",
     "args": {
-     "branch": "current-branch",
+     "branch": "current",
      "force": "true",
      "remote": "origin"
     },
@@ -229,7 +229,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:08:06.875904242Z",
+   "timestamp": "2026-04-13T17:48:52.81807437Z",
    "task_id": 25,
    "phase": "execution",
    "component": "agent_core",
@@ -239,7 +239,7 @@
     "action": "push",
     "error": "force push cancelled by user",
     "result": "failed",
-    "step_ms": 1,
+    "step_ms": 0,
     "tool": "git"
    }
   }

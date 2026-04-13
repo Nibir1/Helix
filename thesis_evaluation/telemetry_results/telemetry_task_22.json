@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260411_230746_12",
- "export_time": "2026-04-11T23:07:47.832628211Z",
+ "session_id": "helix_20260413_174832_12",
+ "export_time": "2026-04-13T17:48:33.57739488Z",
  "task_id": 22,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-11T23:07:46.923244854Z",
+   "timestamp": "2026-04-13T17:48:32.663848592Z",
    "task_id": 22,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:46.924976888Z",
+   "timestamp": "2026-04-13T17:48:32.665132825Z",
    "task_id": 22,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:46.968218294Z",
+   "timestamp": "2026-04-13T17:48:32.695632354Z",
    "task_id": 22,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:46.968249804Z",
+   "timestamp": "2026-04-13T17:48:32.695654934Z",
    "task_id": 22,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:46.968251186Z",
+   "timestamp": "2026-04-13T17:48:32.695656434Z",
    "task_id": 22,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:46.968259691Z",
+   "timestamp": "2026-04-13T17:48:32.695663268Z",
    "task_id": 22,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.829963386Z",
+   "timestamp": "2026-04-13T17:48:33.57468022Z",
    "task_id": 22,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 145,
-    "raw_output_preview": "{\n  \"intent\": \"git\",\n  \"steps\": [\n    {\n      \"tool\": \"git\",\n      \"action\": \"add\",\n      \"args\": {\n        \"paths\": [\"*.go\"]\n      }\n    }\n  ]\n}"
+    "raw_output_length": 82,
+    "raw_output_preview": "{\"intent\":\"git\",\"steps\":[{\"tool\":\"git\",\"action\":\"add\",\"args\":{\"paths\":[\"*.go\"]}}]}"
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.83006697Z",
+   "timestamp": "2026-04-13T17:48:33.5747466Z",
    "task_id": 22,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 145,
-    "raw_output_length": 145
+    "json_extracted_length": 82,
+    "raw_output_length": 82
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830076283Z",
+   "timestamp": "2026-04-13T17:48:33.574756215Z",
    "task_id": 22,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830078676Z",
+   "timestamp": "2026-04-13T17:48:33.574759207Z",
    "task_id": 22,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830080537Z",
+   "timestamp": "2026-04-13T17:48:33.574762235Z",
    "task_id": 22,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "git",
-    "raw_output_len": 145,
+    "raw_output_len": 82,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830081529Z",
+   "timestamp": "2026-04-13T17:48:33.574763841Z",
    "task_id": 22,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830149508Z",
+   "timestamp": "2026-04-13T17:48:33.574838734Z",
    "task_id": 22,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830150062Z",
+   "timestamp": "2026-04-13T17:48:33.574839325Z",
    "task_id": 22,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830151036Z",
+   "timestamp": "2026-04-13T17:48:33.574854877Z",
    "task_id": 22,
    "phase": "execution",
    "component": "agent_core",
@@ -195,7 +195,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830152488Z",
+   "timestamp": "2026-04-13T17:48:33.574856059Z",
    "task_id": 22,
    "phase": "execution",
    "component": "git_handler",
@@ -209,7 +209,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830354768Z",
+   "timestamp": "2026-04-13T17:48:33.575062145Z",
    "task_id": 22,
    "phase": "safety",
    "component": "sandbox",
@@ -222,7 +222,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830443949Z",
+   "timestamp": "2026-04-13T17:48:33.57508954Z",
    "task_id": 22,
    "phase": "safety",
    "component": "sandbox",
@@ -235,7 +235,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830481879Z",
+   "timestamp": "2026-04-13T17:48:33.575110147Z",
    "task_id": 22,
    "phase": "safety",
    "component": "sandbox",
@@ -248,7 +248,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830487448Z",
+   "timestamp": "2026-04-13T17:48:33.575113778Z",
    "task_id": 22,
    "phase": "safety",
    "component": "sandbox",
@@ -261,7 +261,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830537517Z",
+   "timestamp": "2026-04-13T17:48:33.575212859Z",
    "task_id": 22,
    "phase": "execution",
    "component": "sandbox",
@@ -274,7 +274,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830540375Z",
+   "timestamp": "2026-04-13T17:48:33.575216275Z",
    "task_id": 22,
    "phase": "execution",
    "component": "sandbox",
@@ -286,7 +286,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.830541687Z",
+   "timestamp": "2026-04-13T17:48:33.575217522Z",
    "task_id": 22,
    "phase": "execution",
    "component": "git_handler",
@@ -302,7 +302,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:07:47.83054352Z",
+   "timestamp": "2026-04-13T17:48:33.57521876Z",
    "task_id": 22,
    "phase": "execution",
    "component": "agent_core",

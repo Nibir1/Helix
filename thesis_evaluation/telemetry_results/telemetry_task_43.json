@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260411_231107_12",
- "export_time": "2026-04-11T23:11:12.546164666Z",
+ "session_id": "helix_20260413_175203_12",
+ "export_time": "2026-04-13T17:52:08.245222909Z",
  "task_id": 43,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-11T23:11:07.276494912Z",
+   "timestamp": "2026-04-13T17:52:03.051290949Z",
    "task_id": 43,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:07.2782329Z",
+   "timestamp": "2026-04-13T17:52:03.052610425Z",
    "task_id": 43,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:07.316545843Z",
+   "timestamp": "2026-04-13T17:52:03.078752474Z",
    "task_id": 43,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:07.316617371Z",
+   "timestamp": "2026-04-13T17:52:03.0787738Z",
    "task_id": 43,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:07.316619196Z",
+   "timestamp": "2026-04-13T17:52:03.07877538Z",
    "task_id": 43,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:07.31662848Z",
+   "timestamp": "2026-04-13T17:52:03.078781555Z",
    "task_id": 43,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.13280709Z",
+   "timestamp": "2026-04-13T17:52:03.952949446Z",
    "task_id": 43,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 197,
-    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Downloading and executing scripts from untrusted sources can be very dangerous. Please ensure you trust the source before proceeding.\"}]}"
+    "raw_output_length": 193,
+    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Downloading and executing scripts from untrusted sources can be dangerous. Please ensure the source is trusted before proceeding.\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.132868207Z",
+   "timestamp": "2026-04-13T17:52:03.953194154Z",
    "task_id": 43,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 197,
-    "raw_output_length": 197
+    "json_extracted_length": 193,
+    "raw_output_length": 193
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.132872417Z",
+   "timestamp": "2026-04-13T17:52:03.953197423Z",
    "task_id": 43,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.132875295Z",
+   "timestamp": "2026-04-13T17:52:03.953199777Z",
    "task_id": 43,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.132877619Z",
+   "timestamp": "2026-04-13T17:52:03.953202296Z",
    "task_id": 43,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "multi_step",
-    "raw_output_len": 197,
+    "raw_output_len": 193,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.132879141Z",
+   "timestamp": "2026-04-13T17:52:03.953203717Z",
    "task_id": 43,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.132924451Z",
+   "timestamp": "2026-04-13T17:52:03.953238552Z",
    "task_id": 43,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.132925208Z",
+   "timestamp": "2026-04-13T17:52:03.953239068Z",
    "task_id": 43,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.132926355Z",
+   "timestamp": "2026-04-13T17:52:03.953239875Z",
    "task_id": 43,
    "phase": "execution",
    "component": "agent_core",
@@ -195,18 +195,18 @@
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:08.13292763Z",
+   "timestamp": "2026-04-13T17:52:03.95324074Z",
    "task_id": 43,
    "phase": "execution",
    "component": "response_handler",
    "event_type": "response_generated",
    "success": true,
    "data": {
-    "message_length": 133
+    "message_length": 129
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:12.543756926Z",
+   "timestamp": "2026-04-13T17:52:08.24280287Z",
    "task_id": 43,
    "phase": "execution",
    "component": "agent_core",
@@ -214,13 +214,13 @@
    "success": true,
    "data": {
     "result": "success",
-    "step_ms": 4410,
+    "step_ms": 4289,
     "step_number": 1,
     "tool": "response"
    }
   },
   {
-   "timestamp": "2026-04-11T23:11:12.543760318Z",
+   "timestamp": "2026-04-13T17:52:08.242806051Z",
    "task_id": 43,
    "phase": "execution",
    "component": "agent_core",
@@ -229,7 +229,7 @@
    "data": {
     "intent": "multi_step",
     "successful_steps": 1,
-    "total_duration_ms": 5227,
+    "total_duration_ms": 5163,
     "total_steps": 1
    }
   }
