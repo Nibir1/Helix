@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174934_12",
- "export_time": "2026-04-13T17:49:35.219367519Z",
+ "session_id": "helix_20260427_150350_12",
+ "export_time": "2026-04-27T15:03:51.819330527Z",
  "task_id": 27,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:49:34.270277539Z",
+   "timestamp": "2026-04-27T15:03:50.716329378Z",
    "task_id": 27,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:34.272657765Z",
+   "timestamp": "2026-04-27T15:03:50.717994341Z",
    "task_id": 27,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:34.301421288Z",
+   "timestamp": "2026-04-27T15:03:50.745961932Z",
    "task_id": 27,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:34.3014444Z",
+   "timestamp": "2026-04-27T15:03:50.745985328Z",
    "task_id": 27,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:34.301445931Z",
+   "timestamp": "2026-04-27T15:03:50.745986703Z",
    "task_id": 27,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:34.301452358Z",
+   "timestamp": "2026-04-27T15:03:50.745992495Z",
    "task_id": 27,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216271778Z",
+   "timestamp": "2026-04-27T15:03:51.815960212Z",
    "task_id": 27,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 104,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"find /tmp/eval_env -name *.tmp -type f -delete\"}]}"
+    "raw_output_length": 96,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"find . -name \\\"*.tmp\\\" -type f -delete\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.21634612Z",
+   "timestamp": "2026-04-27T15:03:51.816003064Z",
    "task_id": 27,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 104,
-    "raw_output_length": 104
+    "json_extracted_length": 96,
+    "raw_output_length": 96
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216350486Z",
+   "timestamp": "2026-04-27T15:03:51.816005867Z",
    "task_id": 27,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216355644Z",
+   "timestamp": "2026-04-27T15:03:51.816009122Z",
    "task_id": 27,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216358941Z",
+   "timestamp": "2026-04-27T15:03:51.816011429Z",
    "task_id": 27,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 104,
+    "raw_output_len": 96,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216360639Z",
+   "timestamp": "2026-04-27T15:03:51.816012432Z",
    "task_id": 27,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.21640822Z",
+   "timestamp": "2026-04-27T15:03:51.816047502Z",
    "task_id": 27,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216408938Z",
+   "timestamp": "2026-04-27T15:03:51.816048026Z",
    "task_id": 27,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216410113Z",
+   "timestamp": "2026-04-27T15:03:51.816048892Z",
    "task_id": 27,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216532235Z",
+   "timestamp": "2026-04-27T15:03:51.816121263Z",
    "task_id": 27,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 46,
-    "command_preview": "find /tmp/eval_env -name *.tmp -type f -delete"
+    "command_length": 36,
+    "command_preview": "find . -name \"*.tmp\" -type f -delete"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216564445Z",
+   "timestamp": "2026-04-27T15:03:51.816152356Z",
    "task_id": 27,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216565407Z",
+   "timestamp": "2026-04-27T15:03:51.816153188Z",
    "task_id": 27,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216566426Z",
+   "timestamp": "2026-04-27T15:03:51.816154231Z",
    "task_id": 27,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216641588Z",
+   "timestamp": "2026-04-27T15:03:51.816171823Z",
    "task_id": 27,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216708428Z",
+   "timestamp": "2026-04-27T15:03:51.816210691Z",
    "task_id": 27,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.21678876Z",
+   "timestamp": "2026-04-27T15:03:51.816278156Z",
    "task_id": 27,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216849145Z",
+   "timestamp": "2026-04-27T15:03:51.816296322Z",
    "task_id": 27,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "find /tmp/eval_env -name *.tmp -type f -delete",
+    "command_preview": "find . -name \"*.tmp\" -type f -delete",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216920665Z",
+   "timestamp": "2026-04-27T15:03:51.816361006Z",
    "task_id": 27,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 46,
-    "original_length": 46,
-    "original_preview": "find /tmp/eval_env -name *.tmp -type f -delete"
+    "cleaned_length": 36,
+    "original_length": 36,
+    "original_preview": "find . -name \"*.tmp\" -type f -delete"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.21699464Z",
+   "timestamp": "2026-04-27T15:03:51.816429174Z",
    "task_id": 27,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,14 +323,14 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.21699565Z",
+   "timestamp": "2026-04-27T15:03:51.816430218Z",
    "task_id": 27,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 46,
+    "command_length": 36,
     "is_high_risk": false,
     "reasons": null,
     "reasons_count": 0,
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216996451Z",
+   "timestamp": "2026-04-27T15:03:51.816430855Z",
    "task_id": 27,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "find /tmp/eval_env -name *.tmp -type f -delete",
+    "command": "find . -name \"*.tmp\" -type f -delete",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216998288Z",
+   "timestamp": "2026-04-27T15:03:51.816447658Z",
    "task_id": 27,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "find /tmp/eval_env -name *.tmp -type f -delete",
+    "command": "find . -name \"*.tmp\" -type f -delete",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.216998681Z",
+   "timestamp": "2026-04-27T15:03:51.8164481Z",
    "task_id": 27,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "find /tmp/eval_env -name *.tmp -type f -delete"
+    "command": "find . -name \"*.tmp\" -type f -delete"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.217001215Z",
+   "timestamp": "2026-04-27T15:03:51.816450577Z",
    "task_id": 27,
    "phase": "safety",
    "component": "sandbox",
@@ -390,52 +390,52 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.21712317Z",
+   "timestamp": "2026-04-27T15:03:51.816704829Z",
    "task_id": 27,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "find /tmp/eval_env -name *.tmp -type f -delete",
+    "command": "find . -name \"*.tmp\" -type f -delete",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.217125354Z",
+   "timestamp": "2026-04-27T15:03:51.816707693Z",
    "task_id": 27,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "find /tmp/eval_env -name *.tmp -type f -delete",
+    "command": "find . -name \"*.tmp\" -type f -delete",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.21712627Z",
+   "timestamp": "2026-04-27T15:03:51.816727065Z",
    "task_id": 27,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "find /tmp/eval_env -name *.tmp -type f -delete",
+    "command": "find . -name \"*.tmp\" -type f -delete",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:49:35.217127905Z",
+   "timestamp": "2026-04-27T15:03:51.816728797Z",
    "task_id": 27,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "find /tmp/eval_env -name *.tmp -type f -delete",
+    "command": "find . -name \"*.tmp\" -type f -delete",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
     "step_ms": 0,

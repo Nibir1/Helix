@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_175122_12",
- "export_time": "2026-04-13T17:51:23.245811253Z",
+ "session_id": "helix_20260427_150540_12",
+ "export_time": "2026-04-27T15:05:41.781015084Z",
  "task_id": 39,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:51:22.248818923Z",
+   "timestamp": "2026-04-27T15:05:40.537636675Z",
    "task_id": 39,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:22.24998748Z",
+   "timestamp": "2026-04-27T15:05:40.538804837Z",
    "task_id": 39,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:22.276365493Z",
+   "timestamp": "2026-04-27T15:05:40.568795634Z",
    "task_id": 39,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:22.276386636Z",
+   "timestamp": "2026-04-27T15:05:40.568830975Z",
    "task_id": 39,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:22.276387832Z",
+   "timestamp": "2026-04-27T15:05:40.568832764Z",
    "task_id": 39,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:22.276394891Z",
+   "timestamp": "2026-04-27T15:05:40.568845312Z",
    "task_id": 39,
    "phase": "planning",
    "component": "agent_core",
@@ -81,7 +81,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240455543Z",
+   "timestamp": "2026-04-27T15:05:41.779255792Z",
    "task_id": 39,
    "phase": "planning",
    "component": "agent_core",
@@ -93,7 +93,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.24050088Z",
+   "timestamp": "2026-04-27T15:05:41.779282676Z",
    "task_id": 39,
    "phase": "planning",
    "component": "planner",
@@ -105,7 +105,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240503462Z",
+   "timestamp": "2026-04-27T15:05:41.779284408Z",
    "task_id": 39,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240506698Z",
+   "timestamp": "2026-04-27T15:05:41.779286345Z",
    "task_id": 39,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240508694Z",
+   "timestamp": "2026-04-27T15:05:41.779287826Z",
    "task_id": 39,
    "phase": "planning",
    "component": "planner",
@@ -144,7 +144,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240509849Z",
+   "timestamp": "2026-04-27T15:05:41.779288385Z",
    "task_id": 39,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240541644Z",
+   "timestamp": "2026-04-27T15:05:41.779311976Z",
    "task_id": 39,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240542124Z",
+   "timestamp": "2026-04-27T15:05:41.779312211Z",
    "task_id": 39,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240542943Z",
+   "timestamp": "2026-04-27T15:05:41.779312849Z",
    "task_id": 39,
    "phase": "execution",
    "component": "agent_core",
@@ -195,7 +195,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240616321Z",
+   "timestamp": "2026-04-27T15:05:41.779361676Z",
    "task_id": 39,
    "phase": "safety",
    "component": "static_analyzer",
@@ -207,7 +207,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240649211Z",
+   "timestamp": "2026-04-27T15:05:41.779380066Z",
    "task_id": 39,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240668372Z",
+   "timestamp": "2026-04-27T15:05:41.779380658Z",
    "task_id": 39,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240670241Z",
+   "timestamp": "2026-04-27T15:05:41.77938117Z",
    "task_id": 39,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240685109Z",
+   "timestamp": "2026-04-27T15:05:41.779395551Z",
    "task_id": 39,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240747485Z",
+   "timestamp": "2026-04-27T15:05:41.779420146Z",
    "task_id": 39,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240840869Z",
+   "timestamp": "2026-04-27T15:05:41.779458772Z",
    "task_id": 39,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,7 +280,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.240858509Z",
+   "timestamp": "2026-04-27T15:05:41.779470457Z",
    "task_id": 39,
    "phase": "safety",
    "component": "static_analyzer",
@@ -294,7 +294,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241009499Z",
+   "timestamp": "2026-04-27T15:05:41.779504606Z",
    "task_id": 39,
    "phase": "safety",
    "component": "shell_validator",
@@ -307,7 +307,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241344076Z",
+   "timestamp": "2026-04-27T15:05:41.779540686Z",
    "task_id": 39,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,7 +323,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241345741Z",
+   "timestamp": "2026-04-27T15:05:41.779541296Z",
    "task_id": 39,
    "phase": "safety",
    "component": "risk_analyzer",
@@ -339,7 +339,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241347259Z",
+   "timestamp": "2026-04-27T15:05:41.779541786Z",
    "task_id": 39,
    "phase": "safety",
    "component": "shell_handler",
@@ -353,7 +353,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241348041Z",
+   "timestamp": "2026-04-27T15:05:41.779542336Z",
    "task_id": 39,
    "phase": "execution",
    "component": "shell_handler",
@@ -366,7 +366,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241348623Z",
+   "timestamp": "2026-04-27T15:05:41.779542532Z",
    "task_id": 39,
    "phase": "execution",
    "component": "shell_handler",
@@ -377,7 +377,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241815874Z",
+   "timestamp": "2026-04-27T15:05:41.779614064Z",
    "task_id": 39,
    "phase": "safety",
    "component": "sandbox",
@@ -390,7 +390,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241842354Z",
+   "timestamp": "2026-04-27T15:05:41.779627562Z",
    "task_id": 39,
    "phase": "safety",
    "component": "sandbox",
@@ -403,7 +403,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241866124Z",
+   "timestamp": "2026-04-27T15:05:41.779638867Z",
    "task_id": 39,
    "phase": "safety",
    "component": "sandbox",
@@ -416,7 +416,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.24188012Z",
+   "timestamp": "2026-04-27T15:05:41.779653381Z",
    "task_id": 39,
    "phase": "safety",
    "component": "sandbox",
@@ -433,7 +433,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241892212Z",
+   "timestamp": "2026-04-27T15:05:41.779655826Z",
    "task_id": 39,
    "phase": "safety",
    "component": "sandbox",
@@ -450,7 +450,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241893181Z",
+   "timestamp": "2026-04-27T15:05:41.779656401Z",
    "task_id": 39,
    "phase": "safety",
    "component": "sandbox",
@@ -464,7 +464,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241895141Z",
+   "timestamp": "2026-04-27T15:05:41.779657758Z",
    "task_id": 39,
    "phase": "execution",
    "component": "shell_handler",
@@ -477,7 +477,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:23.241896554Z",
+   "timestamp": "2026-04-27T15:05:41.77965847Z",
    "task_id": 39,
    "phase": "execution",
    "component": "agent_core",
@@ -487,7 +487,7 @@
     "command": "echo \"127.0.0.1 dev.local\" | sudo tee -a /etc/hosts",
     "error": "sandbox violation: command attempts directory escape",
     "result": "failed",
-    "step_ms": 1,
+    "step_ms": 0,
     "tool": "shell"
    }
   }

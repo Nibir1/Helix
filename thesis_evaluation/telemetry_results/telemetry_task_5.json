@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174514_12",
- "export_time": "2026-04-13T17:45:15.412352562Z",
+ "session_id": "helix_20260427_145913_12",
+ "export_time": "2026-04-27T14:59:14.73165115Z",
  "task_id": 5,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:45:14.466408959Z",
+   "timestamp": "2026-04-27T14:59:13.223923393Z",
    "task_id": 5,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:14.4674896Z",
+   "timestamp": "2026-04-27T14:59:13.225342297Z",
    "task_id": 5,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:14.496678456Z",
+   "timestamp": "2026-04-27T14:59:13.251846862Z",
    "task_id": 5,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:14.496707768Z",
+   "timestamp": "2026-04-27T14:59:13.251868564Z",
    "task_id": 5,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:14.49670934Z",
+   "timestamp": "2026-04-27T14:59:13.251869865Z",
    "task_id": 5,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:14.496717318Z",
+   "timestamp": "2026-04-27T14:59:13.251923272Z",
    "task_id": 5,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409115933Z",
+   "timestamp": "2026-04-27T14:59:14.728628403Z",
    "task_id": 5,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 91,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"sed -n \\\"15,30p\\\" /var/log/syslog\"}]}"
+    "raw_output_length": 89,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"sed -n '15,30p' /var/log/syslog\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409175586Z",
+   "timestamp": "2026-04-27T14:59:14.728668574Z",
    "task_id": 5,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 91,
-    "raw_output_length": 91
+    "json_extracted_length": 89,
+    "raw_output_length": 89
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409180189Z",
+   "timestamp": "2026-04-27T14:59:14.728671117Z",
    "task_id": 5,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409184291Z",
+   "timestamp": "2026-04-27T14:59:14.728674049Z",
    "task_id": 5,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409187309Z",
+   "timestamp": "2026-04-27T14:59:14.728675938Z",
    "task_id": 5,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 91,
+    "raw_output_len": 89,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409188817Z",
+   "timestamp": "2026-04-27T14:59:14.728676878Z",
    "task_id": 5,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.40923541Z",
+   "timestamp": "2026-04-27T14:59:14.728714432Z",
    "task_id": 5,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409236079Z",
+   "timestamp": "2026-04-27T14:59:14.728714932Z",
    "task_id": 5,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409237271Z",
+   "timestamp": "2026-04-27T14:59:14.728715748Z",
    "task_id": 5,
    "phase": "execution",
    "component": "agent_core",
@@ -195,7 +195,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409348431Z",
+   "timestamp": "2026-04-27T14:59:14.728788002Z",
    "task_id": 5,
    "phase": "safety",
    "component": "static_analyzer",
@@ -203,11 +203,11 @@
    "success": true,
    "data": {
     "command_length": 31,
-    "command_preview": "sed -n \"15,30p\" /var/log/syslog"
+    "command_preview": "sed -n '15,30p' /var/log/syslog"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409418251Z",
+   "timestamp": "2026-04-27T14:59:14.728816568Z",
    "task_id": 5,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409419225Z",
+   "timestamp": "2026-04-27T14:59:14.728817395Z",
    "task_id": 5,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409420208Z",
+   "timestamp": "2026-04-27T14:59:14.728818388Z",
    "task_id": 5,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409441654Z",
+   "timestamp": "2026-04-27T14:59:14.728916874Z",
    "task_id": 5,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409483531Z",
+   "timestamp": "2026-04-27T14:59:14.728960586Z",
    "task_id": 5,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409708627Z",
+   "timestamp": "2026-04-27T14:59:14.729035099Z",
    "task_id": 5,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,21 +280,21 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409728925Z",
+   "timestamp": "2026-04-27T14:59:14.729052627Z",
    "task_id": 5,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "sed -n \"15,30p\" /var/log/syslog",
+    "command_preview": "sed -n '15,30p' /var/log/syslog",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409799659Z",
+   "timestamp": "2026-04-27T14:59:14.729125004Z",
    "task_id": 5,
    "phase": "safety",
    "component": "shell_validator",
@@ -303,11 +303,11 @@
    "data": {
     "cleaned_length": 31,
     "original_length": 31,
-    "original_preview": "sed -n \"15,30p\" /var/log/syslog"
+    "original_preview": "sed -n '15,30p' /var/log/syslog"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409891981Z",
+   "timestamp": "2026-04-27T14:59:14.729195264Z",
    "task_id": 5,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,7 +323,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409893151Z",
+   "timestamp": "2026-04-27T14:59:14.729196289Z",
    "task_id": 5,
    "phase": "safety",
    "component": "risk_analyzer",
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409893999Z",
+   "timestamp": "2026-04-27T14:59:14.729197231Z",
    "task_id": 5,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "sed -n \"15,30p\" /var/log/syslog",
+    "command": "sed -n '15,30p' /var/log/syslog",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409894616Z",
+   "timestamp": "2026-04-27T14:59:14.729197779Z",
    "task_id": 5,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "sed -n \"15,30p\" /var/log/syslog",
+    "command": "sed -n '15,30p' /var/log/syslog",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409894979Z",
+   "timestamp": "2026-04-27T14:59:14.729198143Z",
    "task_id": 5,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "sed -n \"15,30p\" /var/log/syslog"
+    "command": "sed -n '15,30p' /var/log/syslog"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.409898069Z",
+   "timestamp": "2026-04-27T14:59:14.729199981Z",
    "task_id": 5,
    "phase": "safety",
    "component": "sandbox",
@@ -390,52 +390,52 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.410035505Z",
+   "timestamp": "2026-04-27T14:59:14.729320546Z",
    "task_id": 5,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "sed -n \"15,30p\" /var/log/syslog",
+    "command": "sed -n '15,30p' /var/log/syslog",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.410038311Z",
+   "timestamp": "2026-04-27T14:59:14.729323323Z",
    "task_id": 5,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "sed -n \"15,30p\" /var/log/syslog",
+    "command": "sed -n '15,30p' /var/log/syslog",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.410039434Z",
+   "timestamp": "2026-04-27T14:59:14.729325737Z",
    "task_id": 5,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "sed -n \"15,30p\" /var/log/syslog",
+    "command": "sed -n '15,30p' /var/log/syslog",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:15.410040834Z",
+   "timestamp": "2026-04-27T14:59:14.729327594Z",
    "task_id": 5,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "sed -n \"15,30p\" /var/log/syslog",
+    "command": "sed -n '15,30p' /var/log/syslog",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
     "step_ms": 0,

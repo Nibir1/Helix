@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174540_12",
- "export_time": "2026-04-13T17:45:41.828407618Z",
+ "session_id": "helix_20260427_145940_12",
+ "export_time": "2026-04-27T14:59:41.469567786Z",
  "task_id": 9,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:45:40.83428977Z",
+   "timestamp": "2026-04-27T14:59:40.394526289Z",
    "task_id": 9,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:40.835725318Z",
+   "timestamp": "2026-04-27T14:59:40.397520379Z",
    "task_id": 9,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:40.862128847Z",
+   "timestamp": "2026-04-27T14:59:40.428504627Z",
    "task_id": 9,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:40.862215768Z",
+   "timestamp": "2026-04-27T14:59:40.428530255Z",
    "task_id": 9,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:40.862217552Z",
+   "timestamp": "2026-04-27T14:59:40.428531863Z",
    "task_id": 9,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:40.862249861Z",
+   "timestamp": "2026-04-27T14:59:40.428538488Z",
    "task_id": 9,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825340117Z",
+   "timestamp": "2026-04-27T14:59:41.466948425Z",
    "task_id": 9,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 110,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"grep -r \\\"connection_timeout\\\" /etc --include=*.conf\"}]}"
+    "raw_output_length": 100,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"grep -r \\\"connection_timeout\\\" /etc/*.conf\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825396857Z",
+   "timestamp": "2026-04-27T14:59:41.466981817Z",
    "task_id": 9,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 110,
-    "raw_output_length": 110
+    "json_extracted_length": 100,
+    "raw_output_length": 100
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825401478Z",
+   "timestamp": "2026-04-27T14:59:41.466984451Z",
    "task_id": 9,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825423187Z",
+   "timestamp": "2026-04-27T14:59:41.46698713Z",
    "task_id": 9,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825427278Z",
+   "timestamp": "2026-04-27T14:59:41.466988979Z",
    "task_id": 9,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 110,
+    "raw_output_len": 100,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825429062Z",
+   "timestamp": "2026-04-27T14:59:41.46698977Z",
    "task_id": 9,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825568363Z",
+   "timestamp": "2026-04-27T14:59:41.467014958Z",
    "task_id": 9,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825568988Z",
+   "timestamp": "2026-04-27T14:59:41.467015314Z",
    "task_id": 9,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825569776Z",
+   "timestamp": "2026-04-27T14:59:41.467016322Z",
    "task_id": 9,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825600587Z",
+   "timestamp": "2026-04-27T14:59:41.467079395Z",
    "task_id": 9,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 50,
-    "command_preview": "grep -r \"connection_timeout\" /etc --include=*.conf"
+    "command_length": 40,
+    "command_preview": "grep -r \"connection_timeout\" /etc/*.conf"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825627642Z",
+   "timestamp": "2026-04-27T14:59:41.467104023Z",
    "task_id": 9,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825628478Z",
+   "timestamp": "2026-04-27T14:59:41.46710485Z",
    "task_id": 9,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825629455Z",
+   "timestamp": "2026-04-27T14:59:41.467105631Z",
    "task_id": 9,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825645478Z",
+   "timestamp": "2026-04-27T14:59:41.467122845Z",
    "task_id": 9,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.82568888Z",
+   "timestamp": "2026-04-27T14:59:41.467169009Z",
    "task_id": 9,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825758276Z",
+   "timestamp": "2026-04-27T14:59:41.467245481Z",
    "task_id": 9,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825776423Z",
+   "timestamp": "2026-04-27T14:59:41.46725898Z",
    "task_id": 9,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "grep -r \"connection_timeout\" /etc --include=*.conf",
+    "command_preview": "grep -r \"connection_timeout\" /etc/*.conf",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.82583901Z",
+   "timestamp": "2026-04-27T14:59:41.467326744Z",
    "task_id": 9,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 50,
-    "original_length": 50,
-    "original_preview": "grep -r \"connection_timeout\" /etc --include=*.conf"
+    "cleaned_length": 40,
+    "original_length": 40,
+    "original_preview": "grep -r \"connection_timeout\" /etc/*.conf"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825920118Z",
+   "timestamp": "2026-04-27T14:59:41.467409087Z",
    "task_id": 9,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,14 +323,14 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825921068Z",
+   "timestamp": "2026-04-27T14:59:41.467410016Z",
    "task_id": 9,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 50,
+    "command_length": 40,
     "is_high_risk": false,
     "reasons": null,
     "reasons_count": 0,
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825921936Z",
+   "timestamp": "2026-04-27T14:59:41.467410597Z",
    "task_id": 9,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "grep -r \"connection_timeout\" /etc --include=*.conf",
+    "command": "grep -r \"connection_timeout\" /etc/*.conf",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825922466Z",
+   "timestamp": "2026-04-27T14:59:41.467411054Z",
    "task_id": 9,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "grep -r \"connection_timeout\" /etc --include=*.conf",
+    "command": "grep -r \"connection_timeout\" /etc/*.conf",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825924452Z",
+   "timestamp": "2026-04-27T14:59:41.467411725Z",
    "task_id": 9,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "grep -r \"connection_timeout\" /etc --include=*.conf"
+    "command": "grep -r \"connection_timeout\" /etc/*.conf"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.825928293Z",
+   "timestamp": "2026-04-27T14:59:41.467413374Z",
    "task_id": 9,
    "phase": "safety",
    "component": "sandbox",
@@ -390,52 +390,52 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.826049141Z",
+   "timestamp": "2026-04-27T14:59:41.467512028Z",
    "task_id": 9,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "grep -r \"connection_timeout\" /etc --include=*.conf",
+    "command": "grep -r \"connection_timeout\" /etc/*.conf",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.826051573Z",
+   "timestamp": "2026-04-27T14:59:41.467513964Z",
    "task_id": 9,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "grep -r \"connection_timeout\" /etc --include=*.conf",
+    "command": "grep -r \"connection_timeout\" /etc/*.conf",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.826052621Z",
+   "timestamp": "2026-04-27T14:59:41.467514687Z",
    "task_id": 9,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "grep -r \"connection_timeout\" /etc --include=*.conf",
+    "command": "grep -r \"connection_timeout\" /etc/*.conf",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:41.826055092Z",
+   "timestamp": "2026-04-27T14:59:41.467515775Z",
    "task_id": 9,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "grep -r \"connection_timeout\" /etc --include=*.conf",
+    "command": "grep -r \"connection_timeout\" /etc/*.conf",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
     "step_ms": 0,

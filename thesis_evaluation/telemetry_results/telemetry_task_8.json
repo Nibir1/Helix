@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174534_13",
- "export_time": "2026-04-13T17:45:35.278063246Z",
+ "session_id": "helix_20260427_145933_12",
+ "export_time": "2026-04-27T14:59:34.797336145Z",
  "task_id": 8,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:45:34.260932544Z",
+   "timestamp": "2026-04-27T14:59:33.894722807Z",
    "task_id": 8,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:34.262219313Z",
+   "timestamp": "2026-04-27T14:59:33.897053273Z",
    "task_id": 8,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:34.290962029Z",
+   "timestamp": "2026-04-27T14:59:33.929398161Z",
    "task_id": 8,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:34.291022399Z",
+   "timestamp": "2026-04-27T14:59:33.929421744Z",
    "task_id": 8,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:34.291024265Z",
+   "timestamp": "2026-04-27T14:59:33.929423487Z",
    "task_id": 8,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:34.291031118Z",
+   "timestamp": "2026-04-27T14:59:33.929430034Z",
    "task_id": 8,
    "phase": "planning",
    "component": "agent_core",
@@ -81,7 +81,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.274918061Z",
+   "timestamp": "2026-04-27T14:59:34.795438681Z",
    "task_id": 8,
    "phase": "planning",
    "component": "agent_core",
@@ -93,7 +93,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.274979045Z",
+   "timestamp": "2026-04-27T14:59:34.795471715Z",
    "task_id": 8,
    "phase": "planning",
    "component": "planner",
@@ -105,7 +105,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.274983195Z",
+   "timestamp": "2026-04-27T14:59:34.79547357Z",
    "task_id": 8,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275005521Z",
+   "timestamp": "2026-04-27T14:59:34.79547637Z",
    "task_id": 8,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275009231Z",
+   "timestamp": "2026-04-27T14:59:34.795477336Z",
    "task_id": 8,
    "phase": "planning",
    "component": "planner",
@@ -144,7 +144,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275010863Z",
+   "timestamp": "2026-04-27T14:59:34.795477916Z",
    "task_id": 8,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275081682Z",
+   "timestamp": "2026-04-27T14:59:34.795512744Z",
    "task_id": 8,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275082253Z",
+   "timestamp": "2026-04-27T14:59:34.795513138Z",
    "task_id": 8,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275083029Z",
+   "timestamp": "2026-04-27T14:59:34.79551382Z",
    "task_id": 8,
    "phase": "execution",
    "component": "agent_core",
@@ -195,7 +195,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275158818Z",
+   "timestamp": "2026-04-27T14:59:34.795561758Z",
    "task_id": 8,
    "phase": "safety",
    "component": "static_analyzer",
@@ -207,7 +207,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275190601Z",
+   "timestamp": "2026-04-27T14:59:34.795583895Z",
    "task_id": 8,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275191515Z",
+   "timestamp": "2026-04-27T14:59:34.795584432Z",
    "task_id": 8,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275192665Z",
+   "timestamp": "2026-04-27T14:59:34.795585095Z",
    "task_id": 8,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275209518Z",
+   "timestamp": "2026-04-27T14:59:34.795596271Z",
    "task_id": 8,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275249835Z",
+   "timestamp": "2026-04-27T14:59:34.795622836Z",
    "task_id": 8,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275313842Z",
+   "timestamp": "2026-04-27T14:59:34.795667948Z",
    "task_id": 8,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,7 +280,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275329772Z",
+   "timestamp": "2026-04-27T14:59:34.795678986Z",
    "task_id": 8,
    "phase": "safety",
    "component": "static_analyzer",
@@ -294,7 +294,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275390671Z",
+   "timestamp": "2026-04-27T14:59:34.795717626Z",
    "task_id": 8,
    "phase": "safety",
    "component": "shell_validator",
@@ -307,7 +307,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275457219Z",
+   "timestamp": "2026-04-27T14:59:34.795760763Z",
    "task_id": 8,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,7 +323,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275458249Z",
+   "timestamp": "2026-04-27T14:59:34.795761525Z",
    "task_id": 8,
    "phase": "safety",
    "component": "risk_analyzer",
@@ -339,7 +339,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275459062Z",
+   "timestamp": "2026-04-27T14:59:34.795762055Z",
    "task_id": 8,
    "phase": "safety",
    "component": "shell_handler",
@@ -353,7 +353,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275459761Z",
+   "timestamp": "2026-04-27T14:59:34.795762425Z",
    "task_id": 8,
    "phase": "execution",
    "component": "shell_handler",
@@ -366,7 +366,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275460187Z",
+   "timestamp": "2026-04-27T14:59:34.795762653Z",
    "task_id": 8,
    "phase": "execution",
    "component": "shell_handler",
@@ -377,7 +377,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275539895Z",
+   "timestamp": "2026-04-27T14:59:34.795764229Z",
    "task_id": 8,
    "phase": "safety",
    "component": "sandbox",
@@ -390,7 +390,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275682321Z",
+   "timestamp": "2026-04-27T14:59:34.79588526Z",
    "task_id": 8,
    "phase": "execution",
    "component": "sandbox",
@@ -403,7 +403,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275686201Z",
+   "timestamp": "2026-04-27T14:59:34.795886774Z",
    "task_id": 8,
    "phase": "execution",
    "component": "sandbox",
@@ -415,7 +415,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275687261Z",
+   "timestamp": "2026-04-27T14:59:34.795887337Z",
    "task_id": 8,
    "phase": "execution",
    "component": "shell_handler",
@@ -428,7 +428,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:35.275688626Z",
+   "timestamp": "2026-04-27T14:59:34.795888151Z",
    "task_id": 8,
    "phase": "execution",
    "component": "agent_core",

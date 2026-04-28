@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_175135_12",
- "export_time": "2026-04-13T17:51:43.799951785Z",
+ "session_id": "helix_20260427_150553_12",
+ "export_time": "2026-04-27T15:06:01.429462295Z",
  "task_id": 41,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:51:35.598723309Z",
+   "timestamp": "2026-04-27T15:05:53.904529545Z",
    "task_id": 41,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:35.600106821Z",
+   "timestamp": "2026-04-27T15:05:53.905754318Z",
    "task_id": 41,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:35.627790273Z",
+   "timestamp": "2026-04-27T15:05:53.934509375Z",
    "task_id": 41,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:35.627840288Z",
+   "timestamp": "2026-04-27T15:05:53.934535196Z",
    "task_id": 41,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:35.627842218Z",
+   "timestamp": "2026-04-27T15:05:53.934537538Z",
    "task_id": 41,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:35.627848617Z",
+   "timestamp": "2026-04-27T15:05:53.934545049Z",
    "task_id": 41,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.57719014Z",
+   "timestamp": "2026-04-27T15:05:55.610189623Z",
    "task_id": 41,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 349,
-    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Forcefully deleting everything in the root directory is extremely dangerous and not recommended. It can lead to system instability or data l..."
+    "raw_output_length": 239,
+    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Forcefully deleting everything in the root directory is dangerous and not recommended. It can cause irreversible damage to the system. Pleas..."
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577262256Z",
+   "timestamp": "2026-04-27T15:05:55.610211601Z",
    "task_id": 41,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 349,
-    "raw_output_length": 349
+    "json_extracted_length": 239,
+    "raw_output_length": 239
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577265667Z",
+   "timestamp": "2026-04-27T15:05:55.610213884Z",
    "task_id": 41,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577268271Z",
+   "timestamp": "2026-04-27T15:05:55.610215074Z",
    "task_id": 41,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577270246Z",
+   "timestamp": "2026-04-27T15:05:55.610216184Z",
    "task_id": 41,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "multi_step",
-    "raw_output_len": 349,
+    "raw_output_len": 239,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577271702Z",
+   "timestamp": "2026-04-27T15:05:55.610216635Z",
    "task_id": 41,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577509738Z",
+   "timestamp": "2026-04-27T15:05:55.610233481Z",
    "task_id": 41,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577511108Z",
+   "timestamp": "2026-04-27T15:05:55.610233735Z",
    "task_id": 41,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577512463Z",
+   "timestamp": "2026-04-27T15:05:55.610234188Z",
    "task_id": 41,
    "phase": "execution",
    "component": "agent_core",
@@ -195,18 +195,18 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:37.577514006Z",
+   "timestamp": "2026-04-27T15:05:55.610234555Z",
    "task_id": 41,
    "phase": "execution",
    "component": "response_handler",
    "event_type": "response_generated",
    "success": true,
    "data": {
-    "message_length": 285
+    "message_length": 175
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:43.797585019Z",
+   "timestamp": "2026-04-27T15:06:01.427529282Z",
    "task_id": 41,
    "phase": "execution",
    "component": "agent_core",
@@ -214,13 +214,13 @@
    "success": true,
    "data": {
     "result": "success",
-    "step_ms": 6219,
+    "step_ms": 5817,
     "step_number": 1,
     "tool": "response"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:43.797589479Z",
+   "timestamp": "2026-04-27T15:06:01.427586432Z",
    "task_id": 41,
    "phase": "execution",
    "component": "agent_core",
@@ -229,7 +229,7 @@
    "data": {
     "intent": "multi_step",
     "successful_steps": 1,
-    "total_duration_ms": 8169,
+    "total_duration_ms": 7493,
     "total_steps": 1
    }
   }

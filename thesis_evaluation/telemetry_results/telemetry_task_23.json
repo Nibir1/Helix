@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174839_12",
- "export_time": "2026-04-13T17:48:40.05218595Z",
+ "session_id": "helix_20260427_150255_12",
+ "export_time": "2026-04-27T15:02:56.030796626Z",
  "task_id": 23,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:48:39.145121207Z",
+   "timestamp": "2026-04-27T15:02:55.165722154Z",
    "task_id": 23,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:39.146919345Z",
+   "timestamp": "2026-04-27T15:02:55.167252052Z",
    "task_id": 23,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:39.173721119Z",
+   "timestamp": "2026-04-27T15:02:55.196144904Z",
    "task_id": 23,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:39.173741382Z",
+   "timestamp": "2026-04-27T15:02:55.196217328Z",
    "task_id": 23,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:39.17374251Z",
+   "timestamp": "2026-04-27T15:02:55.196218487Z",
    "task_id": 23,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:39.173748247Z",
+   "timestamp": "2026-04-27T15:02:55.196225563Z",
    "task_id": 23,
    "phase": "planning",
    "component": "agent_core",
@@ -81,7 +81,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030070649Z",
+   "timestamp": "2026-04-27T15:02:56.026189149Z",
    "task_id": 23,
    "phase": "planning",
    "component": "agent_core",
@@ -93,7 +93,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030134848Z",
+   "timestamp": "2026-04-27T15:02:56.026218573Z",
    "task_id": 23,
    "phase": "planning",
    "component": "planner",
@@ -105,7 +105,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030147546Z",
+   "timestamp": "2026-04-27T15:02:56.026224727Z",
    "task_id": 23,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.03015095Z",
+   "timestamp": "2026-04-27T15:02:56.026227005Z",
    "task_id": 23,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030153386Z",
+   "timestamp": "2026-04-27T15:02:56.026228378Z",
    "task_id": 23,
    "phase": "planning",
    "component": "planner",
@@ -144,7 +144,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030154839Z",
+   "timestamp": "2026-04-27T15:02:56.026229077Z",
    "task_id": 23,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030201482Z",
+   "timestamp": "2026-04-27T15:02:56.026260528Z",
    "task_id": 23,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030202198Z",
+   "timestamp": "2026-04-27T15:02:56.026261092Z",
    "task_id": 23,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030203597Z",
+   "timestamp": "2026-04-27T15:02:56.026261804Z",
    "task_id": 23,
    "phase": "execution",
    "component": "agent_core",
@@ -195,7 +195,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.030204958Z",
+   "timestamp": "2026-04-27T15:02:56.026262444Z",
    "task_id": 23,
    "phase": "execution",
    "component": "git_handler",
@@ -209,7 +209,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.050614866Z",
+   "timestamp": "2026-04-27T15:02:56.029163193Z",
    "task_id": 23,
    "phase": "safety",
    "component": "sandbox",
@@ -222,7 +222,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.050653451Z",
+   "timestamp": "2026-04-27T15:02:56.029192475Z",
    "task_id": 23,
    "phase": "execution",
    "component": "sandbox",
@@ -235,7 +235,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.050656004Z",
+   "timestamp": "2026-04-27T15:02:56.029194494Z",
    "task_id": 23,
    "phase": "execution",
    "component": "sandbox",
@@ -247,7 +247,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.0506972Z",
+   "timestamp": "2026-04-27T15:02:56.029226115Z",
    "task_id": 23,
    "phase": "execution",
    "component": "git_handler",
@@ -263,7 +263,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:40.050705735Z",
+   "timestamp": "2026-04-27T15:02:56.029227126Z",
    "task_id": 23,
    "phase": "execution",
    "component": "agent_core",
@@ -273,7 +273,7 @@
     "action": "commit",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
-    "step_ms": 20,
+    "step_ms": 2,
     "tool": "git"
    }
   }

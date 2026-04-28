@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174851_12",
- "export_time": "2026-04-13T17:48:52.820233747Z",
+ "session_id": "helix_20260427_150308_12",
+ "export_time": "2026-04-27T15:03:09.509851399Z",
  "task_id": 25,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:48:51.914198954Z",
+   "timestamp": "2026-04-27T15:03:08.41518715Z",
    "task_id": 25,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:51.915757632Z",
+   "timestamp": "2026-04-27T15:03:08.417347063Z",
    "task_id": 25,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:51.943208545Z",
+   "timestamp": "2026-04-27T15:03:08.447619825Z",
    "task_id": 25,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:51.943230367Z",
+   "timestamp": "2026-04-27T15:03:08.447647505Z",
    "task_id": 25,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:51.943232029Z",
+   "timestamp": "2026-04-27T15:03:08.44764893Z",
    "task_id": 25,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:51.943238513Z",
+   "timestamp": "2026-04-27T15:03:08.447656049Z",
    "task_id": 25,
    "phase": "planning",
    "component": "agent_core",
@@ -81,7 +81,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.817079438Z",
+   "timestamp": "2026-04-27T15:03:09.506786268Z",
    "task_id": 25,
    "phase": "planning",
    "component": "agent_core",
@@ -93,7 +93,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.817124379Z",
+   "timestamp": "2026-04-27T15:03:09.506952801Z",
    "task_id": 25,
    "phase": "planning",
    "component": "planner",
@@ -105,7 +105,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.817132866Z",
+   "timestamp": "2026-04-27T15:03:09.50696034Z",
    "task_id": 25,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.817135728Z",
+   "timestamp": "2026-04-27T15:03:09.506962421Z",
    "task_id": 25,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.817137739Z",
+   "timestamp": "2026-04-27T15:03:09.506964383Z",
    "task_id": 25,
    "phase": "planning",
    "component": "planner",
@@ -144,7 +144,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.817138696Z",
+   "timestamp": "2026-04-27T15:03:09.50696512Z",
    "task_id": 25,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.81716722Z",
+   "timestamp": "2026-04-27T15:03:09.507336564Z",
    "task_id": 25,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.817167789Z",
+   "timestamp": "2026-04-27T15:03:09.50733727Z",
    "task_id": 25,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.81716873Z",
+   "timestamp": "2026-04-27T15:03:09.507338056Z",
    "task_id": 25,
    "phase": "execution",
    "component": "agent_core",
@@ -195,7 +195,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.817169662Z",
+   "timestamp": "2026-04-27T15:03:09.507338805Z",
    "task_id": 25,
    "phase": "execution",
    "component": "git_handler",
@@ -211,7 +211,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.818072879Z",
+   "timestamp": "2026-04-27T15:03:09.508357845Z",
    "task_id": 25,
    "phase": "execution",
    "component": "git_handler",
@@ -229,7 +229,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:48:52.81807437Z",
+   "timestamp": "2026-04-27T15:03:09.50835867Z",
    "task_id": 25,
    "phase": "execution",
    "component": "agent_core",
@@ -239,7 +239,7 @@
     "action": "push",
     "error": "force push cancelled by user",
     "result": "failed",
-    "step_ms": 0,
+    "step_ms": 1,
     "tool": "git"
    }
   }

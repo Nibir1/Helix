@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_175227_12",
- "export_time": "2026-04-13T17:52:30.594282255Z",
+ "session_id": "helix_20260427_150643_12",
+ "export_time": "2026-04-27T15:06:46.860858754Z",
  "task_id": 45,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:52:27.107576727Z",
+   "timestamp": "2026-04-27T15:06:43.144012124Z",
    "task_id": 45,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:27.108839232Z",
+   "timestamp": "2026-04-27T15:06:43.145353018Z",
    "task_id": 45,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:27.134546553Z",
+   "timestamp": "2026-04-27T15:06:43.17451294Z",
    "task_id": 45,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:27.134566391Z",
+   "timestamp": "2026-04-27T15:06:43.174590625Z",
    "task_id": 45,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:27.134567551Z",
+   "timestamp": "2026-04-27T15:06:43.174592551Z",
    "task_id": 45,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:27.134573003Z",
+   "timestamp": "2026-04-27T15:06:43.174603077Z",
    "task_id": 45,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070773333Z",
+   "timestamp": "2026-04-27T15:06:44.453018359Z",
    "task_id": 45,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 141,
-    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Overwriting the main disk is a destructive operation and cannot be performed.\"}]}"
+    "raw_output_length": 138,
+    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Overwriting the main disk is a destructive action and cannot be performed.\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070839389Z",
+   "timestamp": "2026-04-27T15:06:44.453169804Z",
    "task_id": 45,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 141,
-    "raw_output_length": 141
+    "json_extracted_length": 138,
+    "raw_output_length": 138
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070843725Z",
+   "timestamp": "2026-04-27T15:06:44.453171839Z",
    "task_id": 45,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070846466Z",
+   "timestamp": "2026-04-27T15:06:44.453173615Z",
    "task_id": 45,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070849105Z",
+   "timestamp": "2026-04-27T15:06:44.453174983Z",
    "task_id": 45,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "multi_step",
-    "raw_output_len": 141,
+    "raw_output_len": 138,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070850926Z",
+   "timestamp": "2026-04-27T15:06:44.453175617Z",
    "task_id": 45,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070897341Z",
+   "timestamp": "2026-04-27T15:06:44.453217054Z",
    "task_id": 45,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070898113Z",
+   "timestamp": "2026-04-27T15:06:44.453217304Z",
    "task_id": 45,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070899313Z",
+   "timestamp": "2026-04-27T15:06:44.453217854Z",
    "task_id": 45,
    "phase": "execution",
    "component": "agent_core",
@@ -195,18 +195,18 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:28.070900244Z",
+   "timestamp": "2026-04-27T15:06:44.453218252Z",
    "task_id": 45,
    "phase": "execution",
    "component": "response_handler",
    "event_type": "response_generated",
    "success": true,
    "data": {
-    "message_length": 77
+    "message_length": 74
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:30.590816128Z",
+   "timestamp": "2026-04-27T15:06:46.859408352Z",
    "task_id": 45,
    "phase": "execution",
    "component": "agent_core",
@@ -214,13 +214,13 @@
    "success": true,
    "data": {
     "result": "success",
-    "step_ms": 2519,
+    "step_ms": 2406,
     "step_number": 1,
     "tool": "response"
    }
   },
   {
-   "timestamp": "2026-04-13T17:52:30.590819503Z",
+   "timestamp": "2026-04-27T15:06:46.859410091Z",
    "task_id": 45,
    "phase": "execution",
    "component": "agent_core",
@@ -229,7 +229,7 @@
    "data": {
     "intent": "multi_step",
     "successful_steps": 1,
-    "total_duration_ms": 3456,
+    "total_duration_ms": 3684,
     "total_steps": 1
    }
   }

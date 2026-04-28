@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_175048_12",
- "export_time": "2026-04-13T17:50:50.175412578Z",
+ "session_id": "helix_20260427_150506_12",
+ "export_time": "2026-04-27T15:05:07.817459113Z",
  "task_id": 34,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:50:48.821064686Z",
+   "timestamp": "2026-04-27T15:05:06.527515303Z",
    "task_id": 34,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:48.823362356Z",
+   "timestamp": "2026-04-27T15:05:06.529365517Z",
    "task_id": 34,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:48.852098114Z",
+   "timestamp": "2026-04-27T15:05:06.559924564Z",
    "task_id": 34,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:48.852160302Z",
+   "timestamp": "2026-04-27T15:05:06.55995055Z",
    "task_id": 34,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:48.852162324Z",
+   "timestamp": "2026-04-27T15:05:06.559952055Z",
    "task_id": 34,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:48.85216983Z",
+   "timestamp": "2026-04-27T15:05:06.559957816Z",
    "task_id": 34,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.171753115Z",
+   "timestamp": "2026-04-27T15:05:07.814781961Z",
    "task_id": 34,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 110,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"tar -cvf data.tar.xz --use-compress-program=xz data/\"}]}"
+    "raw_output_length": 96,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"tar --lzma -cvf archive.tar.lzma data/\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.171835251Z",
+   "timestamp": "2026-04-27T15:05:07.814805561Z",
    "task_id": 34,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 110,
-    "raw_output_length": 110
+    "json_extracted_length": 96,
+    "raw_output_length": 96
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.17184006Z",
+   "timestamp": "2026-04-27T15:05:07.814807162Z",
    "task_id": 34,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.171845018Z",
+   "timestamp": "2026-04-27T15:05:07.814808951Z",
    "task_id": 34,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.171847062Z",
+   "timestamp": "2026-04-27T15:05:07.814810046Z",
    "task_id": 34,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 110,
+    "raw_output_len": 96,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.171848836Z",
+   "timestamp": "2026-04-27T15:05:07.814810586Z",
    "task_id": 34,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.171909834Z",
+   "timestamp": "2026-04-27T15:05:07.814849631Z",
    "task_id": 34,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.171910717Z",
+   "timestamp": "2026-04-27T15:05:07.814849979Z",
    "task_id": 34,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.171911919Z",
+   "timestamp": "2026-04-27T15:05:07.814850392Z",
    "task_id": 34,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172136425Z",
+   "timestamp": "2026-04-27T15:05:07.815012816Z",
    "task_id": 34,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 52,
-    "command_preview": "tar -cvf data.tar.xz --use-compress-program=xz data/"
+    "command_length": 38,
+    "command_preview": "tar --lzma -cvf archive.tar.lzma data/"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172168852Z",
+   "timestamp": "2026-04-27T15:05:07.815112052Z",
    "task_id": 34,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172169765Z",
+   "timestamp": "2026-04-27T15:05:07.815112534Z",
    "task_id": 34,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172170758Z",
+   "timestamp": "2026-04-27T15:05:07.815113097Z",
    "task_id": 34,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172187821Z",
+   "timestamp": "2026-04-27T15:05:07.81512477Z",
    "task_id": 34,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172273886Z",
+   "timestamp": "2026-04-27T15:05:07.815167469Z",
    "task_id": 34,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172367245Z",
+   "timestamp": "2026-04-27T15:05:07.815204878Z",
    "task_id": 34,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172384062Z",
+   "timestamp": "2026-04-27T15:05:07.815212535Z",
    "task_id": 34,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "tar -cvf data.tar.xz --use-compress-program=xz data/",
+    "command_preview": "tar --lzma -cvf archive.tar.lzma data/",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172453334Z",
+   "timestamp": "2026-04-27T15:05:07.815248317Z",
    "task_id": 34,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 52,
-    "original_length": 52,
-    "original_preview": "tar -cvf data.tar.xz --use-compress-program=xz data/"
+    "cleaned_length": 38,
+    "original_length": 38,
+    "original_preview": "tar --lzma -cvf archive.tar.lzma data/"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172536797Z",
+   "timestamp": "2026-04-27T15:05:07.815339575Z",
    "task_id": 34,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,14 +323,14 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172537825Z",
+   "timestamp": "2026-04-27T15:05:07.815340123Z",
    "task_id": 34,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 52,
+    "command_length": 38,
     "is_high_risk": false,
     "reasons": null,
     "reasons_count": 0,
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172538512Z",
+   "timestamp": "2026-04-27T15:05:07.815340649Z",
    "task_id": 34,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "tar -cvf data.tar.xz --use-compress-program=xz data/",
+    "command": "tar --lzma -cvf archive.tar.lzma data/",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.17253943Z",
+   "timestamp": "2026-04-27T15:05:07.815340984Z",
    "task_id": 34,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "tar -cvf data.tar.xz --use-compress-program=xz data/",
+    "command": "tar --lzma -cvf archive.tar.lzma data/",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172539865Z",
+   "timestamp": "2026-04-27T15:05:07.81534115Z",
    "task_id": 34,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "tar -cvf data.tar.xz --use-compress-program=xz data/"
+    "command": "tar --lzma -cvf archive.tar.lzma data/"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172542562Z",
+   "timestamp": "2026-04-27T15:05:07.815342784Z",
    "task_id": 34,
    "phase": "safety",
    "component": "sandbox",
@@ -390,52 +390,52 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172672265Z",
+   "timestamp": "2026-04-27T15:05:07.815447721Z",
    "task_id": 34,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "tar -cvf data.tar.xz --use-compress-program=xz data/",
+    "command": "tar --lzma -cvf archive.tar.lzma data/",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172674762Z",
+   "timestamp": "2026-04-27T15:05:07.815449234Z",
    "task_id": 34,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "tar -cvf data.tar.xz --use-compress-program=xz data/",
+    "command": "tar --lzma -cvf archive.tar.lzma data/",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172675707Z",
+   "timestamp": "2026-04-27T15:05:07.81544971Z",
    "task_id": 34,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "tar -cvf data.tar.xz --use-compress-program=xz data/",
+    "command": "tar --lzma -cvf archive.tar.lzma data/",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:50:50.172677409Z",
+   "timestamp": "2026-04-27T15:05:07.815450423Z",
    "task_id": 34,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "tar -cvf data.tar.xz --use-compress-program=xz data/",
+    "command": "tar --lzma -cvf archive.tar.lzma data/",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
     "step_ms": 0,

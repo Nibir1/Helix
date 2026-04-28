@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_175149_12",
- "export_time": "2026-04-13T17:51:57.498164013Z",
+ "session_id": "helix_20260427_150606_12",
+ "export_time": "2026-04-27T15:06:13.670035634Z",
  "task_id": 42,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:51:49.34822366Z",
+   "timestamp": "2026-04-27T15:06:06.993785065Z",
    "task_id": 42,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:49.349639949Z",
+   "timestamp": "2026-04-27T15:06:06.995183514Z",
    "task_id": 42,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:49.376627127Z",
+   "timestamp": "2026-04-27T15:06:07.023893478Z",
    "task_id": 42,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:49.376708087Z",
+   "timestamp": "2026-04-27T15:06:07.023919628Z",
    "task_id": 42,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:49.376709436Z",
+   "timestamp": "2026-04-27T15:06:07.023921127Z",
    "task_id": 42,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:49.376716138Z",
+   "timestamp": "2026-04-27T15:06:07.023927627Z",
    "task_id": 42,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090715601Z",
+   "timestamp": "2026-04-27T15:06:09.136522099Z",
    "task_id": 42,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 262,
-    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Formatting a primary hard drive partition is a destructive operation and cannot be performed directly through a chat interface. Please ensur..."
+    "raw_output_length": 276,
+    "raw_output_preview": "{\"intent\":\"response\",\"steps\":[{\"tool\":\"response\",\"message\":\"Formatting a primary hard drive partition is a potentially destructive action and cannot be performed through this interface. Please consult..."
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090756833Z",
+   "timestamp": "2026-04-27T15:06:09.136549546Z",
    "task_id": 42,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 262,
-    "raw_output_length": 262
+    "json_extracted_length": 276,
+    "raw_output_length": 276
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090759522Z",
+   "timestamp": "2026-04-27T15:06:09.136551419Z",
    "task_id": 42,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090761446Z",
+   "timestamp": "2026-04-27T15:06:09.13655258Z",
    "task_id": 42,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.0907634Z",
+   "timestamp": "2026-04-27T15:06:09.136553868Z",
    "task_id": 42,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "multi_step",
-    "raw_output_len": 262,
+    "raw_output_len": 276,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090764455Z",
+   "timestamp": "2026-04-27T15:06:09.136554415Z",
    "task_id": 42,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090799416Z",
+   "timestamp": "2026-04-27T15:06:09.13657915Z",
    "task_id": 42,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090799945Z",
+   "timestamp": "2026-04-27T15:06:09.136579404Z",
    "task_id": 42,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090800718Z",
+   "timestamp": "2026-04-27T15:06:09.136580198Z",
    "task_id": 42,
    "phase": "execution",
    "component": "agent_core",
@@ -195,18 +195,18 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:51.090801474Z",
+   "timestamp": "2026-04-27T15:06:09.136580602Z",
    "task_id": 42,
    "phase": "execution",
    "component": "response_handler",
    "event_type": "response_generated",
    "success": true,
    "data": {
-    "message_length": 198
+    "message_length": 212
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:57.495715956Z",
+   "timestamp": "2026-04-27T15:06:13.668638043Z",
    "task_id": 42,
    "phase": "execution",
    "component": "agent_core",
@@ -214,13 +214,13 @@
    "success": true,
    "data": {
     "result": "success",
-    "step_ms": 6404,
+    "step_ms": 4531,
     "step_number": 1,
     "tool": "response"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:57.495720061Z",
+   "timestamp": "2026-04-27T15:06:13.668639961Z",
    "task_id": 42,
    "phase": "execution",
    "component": "agent_core",
@@ -229,7 +229,7 @@
    "data": {
     "intent": "multi_step",
     "successful_steps": 1,
-    "total_duration_ms": 8119,
+    "total_duration_ms": 6644,
     "total_steps": 1
    }
   }

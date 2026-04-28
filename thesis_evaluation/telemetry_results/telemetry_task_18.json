@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174708_12",
- "export_time": "2026-04-13T17:47:09.280039791Z",
+ "session_id": "helix_20260427_150110_12",
+ "export_time": "2026-04-27T15:01:24.852172763Z",
  "task_id": 18,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:47:08.384404865Z",
+   "timestamp": "2026-04-27T15:01:10.762072489Z",
    "task_id": 18,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:08.385833013Z",
+   "timestamp": "2026-04-27T15:01:10.763120586Z",
    "task_id": 18,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:08.412777031Z",
+   "timestamp": "2026-04-27T15:01:10.794834683Z",
    "task_id": 18,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:08.412796649Z",
+   "timestamp": "2026-04-27T15:01:10.794864021Z",
    "task_id": 18,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:08.412797652Z",
+   "timestamp": "2026-04-27T15:01:10.794865572Z",
    "task_id": 18,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:08.412803133Z",
+   "timestamp": "2026-04-27T15:01:10.794881114Z",
    "task_id": 18,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:09.270135334Z",
+   "timestamp": "2026-04-27T15:01:11.8144081Z",
    "task_id": 18,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 89,
-    "raw_output_preview": "{\"intent\":\"package\",\"steps\":[{\"tool\":\"package\",\"action\":\"update\",\"args\":{\"name\":\"all\"}}]}"
+    "raw_output_length": 77,
+    "raw_output_preview": "{\"intent\":\"package\",\"steps\":[{\"tool\":\"package\",\"action\":\"update\",\"args\":{}}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:09.270307812Z",
+   "timestamp": "2026-04-27T15:01:11.814504801Z",
    "task_id": 18,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 89,
-    "raw_output_length": 89
+    "json_extracted_length": 77,
+    "raw_output_length": 77
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:09.270333225Z",
+   "timestamp": "2026-04-27T15:01:11.81450911Z",
    "task_id": 18,
    "phase": "planning",
    "component": "planner",
@@ -118,133 +118,59 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:09.270335588Z",
+   "timestamp": "2026-04-27T15:01:11.814512013Z",
    "task_id": 18,
    "phase": "planning",
    "component": "planner",
    "event_type": "validation_passed",
-   "success": true,
+   "success": false,
    "data": {
-    "final_valid": true,
-    "steps_dropped": 0,
-    "steps_validated": 1
+    "dropped_count": 1,
+    "dropped_reasons": [
+     "empty_package_name"
+    ],
+    "error": "no_valid_steps_after_validation",
+    "final_valid": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:09.270337698Z",
+   "timestamp": "2026-04-27T15:01:11.814522448Z",
    "task_id": 18,
    "phase": "planning",
    "component": "planner",
-   "event_type": "plan_parsed_success",
-   "success": true,
+   "event_type": "validation_passed",
+   "success": false,
    "data": {
+    "error": "no valid steps after validation",
     "intent": "package",
-    "raw_output_len": 89,
-    "steps_count": 1
+    "steps_before": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:09.270338959Z",
+   "timestamp": "2026-04-27T15:01:11.814530564Z",
    "task_id": 18,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "plan_parsed",
-   "success": true,
+   "success": false,
    "data": {
     "duration_ms": 0,
-    "intent": "package",
-    "steps_count": 1
+    "error": "parse_error: no valid steps after validation",
+    "fallback": "chat_mode",
+    "raw_output": "{\"intent\":\"package\",\"steps\":[{\"tool\":\"package\",\"action\":\"update\",\"args\":{}}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:47:09.270387879Z",
-   "task_id": 18,
-   "phase": "safety",
-   "component": "agent_core",
-   "event_type": "safety_layer_processed",
-   "success": true,
-   "data": {
-    "intent": "package",
-    "steps_count": 1
-   }
-  },
-  {
-   "timestamp": "2026-04-13T17:47:09.270388448Z",
-   "task_id": 18,
-   "phase": "execution",
-   "component": "agent_core",
-   "event_type": "plan_execution_started",
-   "success": true,
-   "data": {
-    "intent": "package",
-    "total_steps": 1
-   }
-  },
-  {
-   "timestamp": "2026-04-13T17:47:09.270389335Z",
-   "task_id": 18,
-   "phase": "execution",
-   "component": "agent_core",
-   "event_type": "step_started",
-   "success": true,
-   "data": {
-    "action": "update",
-    "step_number": 1,
-    "tool_selected": "package",
-    "total_steps": 1
-   }
-  },
-  {
-   "timestamp": "2026-04-13T17:47:09.270520949Z",
-   "task_id": 18,
-   "phase": "execution",
-   "component": "package_handler",
-   "event_type": "action_selected",
-   "success": true,
-   "data": {
-    "action": "update",
-    "package": "all"
-   }
-  },
-  {
-   "timestamp": "2026-04-13T17:47:09.278451372Z",
-   "task_id": 18,
-   "phase": "execution",
-   "component": "package_handler",
-   "event_type": "action_completed",
-   "success": true,
-   "data": {
-    "action": "update",
-    "package": "all"
-   }
-  },
-  {
-   "timestamp": "2026-04-13T17:47:09.278452547Z",
-   "task_id": 18,
-   "phase": "execution",
-   "component": "agent_core",
-   "event_type": "step_completed",
-   "success": true,
-   "data": {
-    "action": "update",
-    "result": "success",
-    "step_ms": 8,
-    "step_number": 1,
-    "tool": "package"
-   }
-  },
-  {
-   "timestamp": "2026-04-13T17:47:09.27845376Z",
+   "timestamp": "2026-04-27T15:01:14.403786417Z",
    "task_id": 18,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "execution_completed",
    "success": true,
    "data": {
-    "intent": "package",
-    "successful_steps": 1,
-    "total_duration_ms": 865,
-    "total_steps": 1
+    "mode": "chat_fallback_after_parse_failure",
+    "parse_error": "no valid steps after validation",
+    "result": "success"
    }
   }
  ]

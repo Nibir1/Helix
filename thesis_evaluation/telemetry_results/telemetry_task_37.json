@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_175108_12",
- "export_time": "2026-04-13T17:51:10.033828315Z",
+ "session_id": "helix_20260427_150526_12",
+ "export_time": "2026-04-27T15:05:28.083601315Z",
  "task_id": 37,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:51:08.922526775Z",
+   "timestamp": "2026-04-27T15:05:26.423872153Z",
    "task_id": 37,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:08.923839856Z",
+   "timestamp": "2026-04-27T15:05:26.425051237Z",
    "task_id": 37,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:08.94986185Z",
+   "timestamp": "2026-04-27T15:05:26.456087843Z",
    "task_id": 37,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:08.949883759Z",
+   "timestamp": "2026-04-27T15:05:26.456184684Z",
    "task_id": 37,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:08.949885041Z",
+   "timestamp": "2026-04-27T15:05:26.456204154Z",
    "task_id": 37,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:08.949891235Z",
+   "timestamp": "2026-04-27T15:05:26.456210856Z",
    "task_id": 37,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030525255Z",
+   "timestamp": "2026-04-27T15:05:28.080612659Z",
    "task_id": 37,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 87,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"ls -l | awk '{print $1, $NF}'\"}]}"
+    "raw_output_length": 81,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"ls -l | cut -c 2-10,14-\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.03057706Z",
+   "timestamp": "2026-04-27T15:05:28.08063176Z",
    "task_id": 37,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 87,
-    "raw_output_length": 87
+    "json_extracted_length": 81,
+    "raw_output_length": 81
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030580042Z",
+   "timestamp": "2026-04-27T15:05:28.080633293Z",
    "task_id": 37,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030583475Z",
+   "timestamp": "2026-04-27T15:05:28.080635608Z",
    "task_id": 37,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030585634Z",
+   "timestamp": "2026-04-27T15:05:28.080636697Z",
    "task_id": 37,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 87,
+    "raw_output_len": 81,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.03058655Z",
+   "timestamp": "2026-04-27T15:05:28.080637136Z",
    "task_id": 37,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030623888Z",
+   "timestamp": "2026-04-27T15:05:28.080661745Z",
    "task_id": 37,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030624324Z",
+   "timestamp": "2026-04-27T15:05:28.080662022Z",
    "task_id": 37,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030625388Z",
+   "timestamp": "2026-04-27T15:05:28.080662417Z",
    "task_id": 37,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030701196Z",
+   "timestamp": "2026-04-27T15:05:28.080699334Z",
    "task_id": 37,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 29,
-    "command_preview": "ls -l | awk '{print $1, $NF}'"
+    "command_length": 23,
+    "command_preview": "ls -l | cut -c 2-10,14-"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030732328Z",
+   "timestamp": "2026-04-27T15:05:28.080713991Z",
    "task_id": 37,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030733269Z",
+   "timestamp": "2026-04-27T15:05:28.080714675Z",
    "task_id": 37,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030734253Z",
+   "timestamp": "2026-04-27T15:05:28.080715191Z",
    "task_id": 37,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030755076Z",
+   "timestamp": "2026-04-27T15:05:28.080723545Z",
    "task_id": 37,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030796103Z",
+   "timestamp": "2026-04-27T15:05:28.080765375Z",
    "task_id": 37,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030860151Z",
+   "timestamp": "2026-04-27T15:05:28.080820963Z",
    "task_id": 37,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.030877675Z",
+   "timestamp": "2026-04-27T15:05:28.080829821Z",
    "task_id": 37,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "ls -l | awk '{print $1, $NF}'",
+    "command_preview": "ls -l | cut -c 2-10,14-",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031078389Z",
+   "timestamp": "2026-04-27T15:05:28.080859926Z",
    "task_id": 37,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 29,
-    "original_length": 29,
-    "original_preview": "ls -l | awk '{print $1, $NF}'"
+    "cleaned_length": 23,
+    "original_length": 23,
+    "original_preview": "ls -l | cut -c 2-10,14-"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031164094Z",
+   "timestamp": "2026-04-27T15:05:28.080929415Z",
    "task_id": 37,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,14 +323,14 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031165141Z",
+   "timestamp": "2026-04-27T15:05:28.080952276Z",
    "task_id": 37,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 29,
+    "command_length": 23,
     "is_high_risk": false,
     "reasons": null,
     "reasons_count": 0,
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031165953Z",
+   "timestamp": "2026-04-27T15:05:28.080952869Z",
    "task_id": 37,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "ls -l | awk '{print $1, $NF}'",
+    "command": "ls -l | cut -c 2-10,14-",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.03116652Z",
+   "timestamp": "2026-04-27T15:05:28.080953193Z",
    "task_id": 37,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "ls -l | awk '{print $1, $NF}'",
+    "command": "ls -l | cut -c 2-10,14-",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031166885Z",
+   "timestamp": "2026-04-27T15:05:28.080953372Z",
    "task_id": 37,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "ls -l | awk '{print $1, $NF}'"
+    "command": "ls -l | cut -c 2-10,14-"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031328191Z",
+   "timestamp": "2026-04-27T15:05:28.080954835Z",
    "task_id": 37,
    "phase": "safety",
    "component": "sandbox",
@@ -390,52 +390,52 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031484855Z",
+   "timestamp": "2026-04-27T15:05:28.081107845Z",
    "task_id": 37,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "ls -l | awk '{print $1, $NF}'",
+    "command": "ls -l | cut -c 2-10,14-",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031487397Z",
+   "timestamp": "2026-04-27T15:05:28.081109039Z",
    "task_id": 37,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "ls -l | awk '{print $1, $NF}'",
+    "command": "ls -l | cut -c 2-10,14-",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031488449Z",
+   "timestamp": "2026-04-27T15:05:28.081109461Z",
    "task_id": 37,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "ls -l | awk '{print $1, $NF}'",
+    "command": "ls -l | cut -c 2-10,14-",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:51:10.031489818Z",
+   "timestamp": "2026-04-27T15:05:28.081110137Z",
    "task_id": 37,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "ls -l | awk '{print $1, $NF}'",
+    "command": "ls -l | cut -c 2-10,14-",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
     "step_ms": 0,

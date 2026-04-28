@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174500_12",
- "export_time": "2026-04-13T17:45:01.882636644Z",
+ "session_id": "helix_20260427_145859_12",
+ "export_time": "2026-04-27T14:59:01.121316631Z",
  "task_id": 3,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:45:00.164605033Z",
+   "timestamp": "2026-04-27T14:58:59.953759222Z",
    "task_id": 3,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:00.166044983Z",
+   "timestamp": "2026-04-27T14:58:59.954945171Z",
    "task_id": 3,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:00.194434145Z",
+   "timestamp": "2026-04-27T14:58:59.982027118Z",
    "task_id": 3,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:00.194542789Z",
+   "timestamp": "2026-04-27T14:58:59.982049963Z",
    "task_id": 3,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:00.194544705Z",
+   "timestamp": "2026-04-27T14:58:59.982051306Z",
    "task_id": 3,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:00.194552149Z",
+   "timestamp": "2026-04-27T14:58:59.98205798Z",
    "task_id": 3,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.877969872Z",
+   "timestamp": "2026-04-27T14:59:01.117976481Z",
    "task_id": 3,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 100,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"grep -o 'Failed' /var/log/auth.log | wc -l\"}]}"
+    "raw_output_length": 94,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"grep -c \\\"Failed\\\" /var/log/auth.log\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878051832Z",
+   "timestamp": "2026-04-27T14:59:01.118035557Z",
    "task_id": 3,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 100,
-    "raw_output_length": 100
+    "json_extracted_length": 94,
+    "raw_output_length": 94
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878055576Z",
+   "timestamp": "2026-04-27T14:59:01.118039465Z",
    "task_id": 3,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878059847Z",
+   "timestamp": "2026-04-27T14:59:01.11804468Z",
    "task_id": 3,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878063019Z",
+   "timestamp": "2026-04-27T14:59:01.118047702Z",
    "task_id": 3,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 100,
+    "raw_output_len": 94,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878064345Z",
+   "timestamp": "2026-04-27T14:59:01.118049059Z",
    "task_id": 3,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878107922Z",
+   "timestamp": "2026-04-27T14:59:01.11809591Z",
    "task_id": 3,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878108699Z",
+   "timestamp": "2026-04-27T14:59:01.118096733Z",
    "task_id": 3,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.87810975Z",
+   "timestamp": "2026-04-27T14:59:01.118097872Z",
    "task_id": 3,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878590777Z",
+   "timestamp": "2026-04-27T14:59:01.118216539Z",
    "task_id": 3,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 42,
-    "command_preview": "grep -o 'Failed' /var/log/auth.log | wc -l"
+    "command_length": 34,
+    "command_preview": "grep -c \"Failed\" /var/log/auth.log"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878647677Z",
+   "timestamp": "2026-04-27T14:59:01.11824608Z",
    "task_id": 3,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878648986Z",
+   "timestamp": "2026-04-27T14:59:01.118247443Z",
    "task_id": 3,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.878650141Z",
+   "timestamp": "2026-04-27T14:59:01.118248423Z",
    "task_id": 3,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.879554207Z",
+   "timestamp": "2026-04-27T14:59:01.118267433Z",
    "task_id": 3,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.879639324Z",
+   "timestamp": "2026-04-27T14:59:01.118307136Z",
    "task_id": 3,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.879871884Z",
+   "timestamp": "2026-04-27T14:59:01.11851256Z",
    "task_id": 3,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.879901418Z",
+   "timestamp": "2026-04-27T14:59:01.118529344Z",
    "task_id": 3,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "grep -o 'Failed' /var/log/auth.log | wc -l",
+    "command_preview": "grep -c \"Failed\" /var/log/auth.log",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.879978347Z",
+   "timestamp": "2026-04-27T14:59:01.118598152Z",
    "task_id": 3,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 42,
-    "original_length": 42,
-    "original_preview": "grep -o 'Failed' /var/log/auth.log | wc -l"
+    "cleaned_length": 34,
+    "original_length": 34,
+    "original_preview": "grep -c \"Failed\" /var/log/auth.log"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.880192686Z",
+   "timestamp": "2026-04-27T14:59:01.118671585Z",
    "task_id": 3,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,14 +323,14 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.880194005Z",
+   "timestamp": "2026-04-27T14:59:01.118673071Z",
    "task_id": 3,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 42,
+    "command_length": 34,
     "is_high_risk": false,
     "reasons": null,
     "reasons_count": 0,
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.880194878Z",
+   "timestamp": "2026-04-27T14:59:01.118684552Z",
    "task_id": 3,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "grep -o 'Failed' /var/log/auth.log | wc -l",
+    "command": "grep -c \"Failed\" /var/log/auth.log",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.880195411Z",
+   "timestamp": "2026-04-27T14:59:01.118685295Z",
    "task_id": 3,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "grep -o 'Failed' /var/log/auth.log | wc -l",
+    "command": "grep -c \"Failed\" /var/log/auth.log",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.88019599Z",
+   "timestamp": "2026-04-27T14:59:01.118685683Z",
    "task_id": 3,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "grep -o 'Failed' /var/log/auth.log | wc -l"
+    "command": "grep -c \"Failed\" /var/log/auth.log"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.880198448Z",
+   "timestamp": "2026-04-27T14:59:01.11868805Z",
    "task_id": 3,
    "phase": "safety",
    "component": "sandbox",
@@ -390,55 +390,55 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.880571855Z",
+   "timestamp": "2026-04-27T14:59:01.118810736Z",
    "task_id": 3,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "grep -o 'Failed' /var/log/auth.log | wc -l",
+    "command": "grep -c \"Failed\" /var/log/auth.log",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.880574068Z",
+   "timestamp": "2026-04-27T14:59:01.118813471Z",
    "task_id": 3,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "grep -o 'Failed' /var/log/auth.log | wc -l",
+    "command": "grep -c \"Failed\" /var/log/auth.log",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.88057493Z",
+   "timestamp": "2026-04-27T14:59:01.118814494Z",
    "task_id": 3,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "grep -o 'Failed' /var/log/auth.log | wc -l",
+    "command": "grep -c \"Failed\" /var/log/auth.log",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:01.880576524Z",
+   "timestamp": "2026-04-27T14:59:01.118815899Z",
    "task_id": 3,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "grep -o 'Failed' /var/log/auth.log | wc -l",
+    "command": "grep -c \"Failed\" /var/log/auth.log",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
-    "step_ms": 2,
+    "step_ms": 0,
     "tool": "shell"
    }
   }

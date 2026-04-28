@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174507_12",
- "export_time": "2026-04-13T17:45:08.857855994Z",
+ "session_id": "helix_20260427_145906_12",
+ "export_time": "2026-04-27T14:59:07.67921391Z",
  "task_id": 4,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:45:07.494476846Z",
+   "timestamp": "2026-04-27T14:59:06.63562221Z",
    "task_id": 4,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:07.496002488Z",
+   "timestamp": "2026-04-27T14:59:06.637051766Z",
    "task_id": 4,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:07.524332364Z",
+   "timestamp": "2026-04-27T14:59:06.663094072Z",
    "task_id": 4,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:07.524365736Z",
+   "timestamp": "2026-04-27T14:59:06.663170505Z",
    "task_id": 4,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:07.52440063Z",
+   "timestamp": "2026-04-27T14:59:06.663171527Z",
    "task_id": 4,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:07.524409316Z",
+   "timestamp": "2026-04-27T14:59:06.663178286Z",
    "task_id": 4,
    "phase": "planning",
    "component": "agent_core",
@@ -81,31 +81,31 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855199809Z",
+   "timestamp": "2026-04-27T14:59:07.675940901Z",
    "task_id": 4,
    "phase": "planning",
    "component": "agent_core",
    "event_type": "llm_output_received",
    "success": true,
    "data": {
-    "raw_output_length": 71,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"netstat -tupn\"}]}"
+    "raw_output_length": 73,
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"netstat -tunapl\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855239649Z",
+   "timestamp": "2026-04-27T14:59:07.675999652Z",
    "task_id": 4,
    "phase": "planning",
    "component": "planner",
    "event_type": "json_valid",
    "success": true,
    "data": {
-    "json_extracted_length": 71,
-    "raw_output_length": 71
+    "json_extracted_length": 73,
+    "raw_output_length": 73
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855242443Z",
+   "timestamp": "2026-04-27T14:59:07.676003229Z",
    "task_id": 4,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855245785Z",
+   "timestamp": "2026-04-27T14:59:07.676008069Z",
    "task_id": 4,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855247841Z",
+   "timestamp": "2026-04-27T14:59:07.676010852Z",
    "task_id": 4,
    "phase": "planning",
    "component": "planner",
@@ -139,12 +139,12 @@
    "success": true,
    "data": {
     "intent": "shell",
-    "raw_output_len": 71,
+    "raw_output_len": 73,
     "steps_count": 1
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855248919Z",
+   "timestamp": "2026-04-27T14:59:07.676012442Z",
    "task_id": 4,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855280922Z",
+   "timestamp": "2026-04-27T14:59:07.676056337Z",
    "task_id": 4,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855281439Z",
+   "timestamp": "2026-04-27T14:59:07.676057098Z",
    "task_id": 4,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855282225Z",
+   "timestamp": "2026-04-27T14:59:07.676058288Z",
    "task_id": 4,
    "phase": "execution",
    "component": "agent_core",
@@ -195,19 +195,19 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855354284Z",
+   "timestamp": "2026-04-27T14:59:07.676175421Z",
    "task_id": 4,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_started",
    "success": true,
    "data": {
-    "command_length": 13,
-    "command_preview": "netstat -tupn"
+    "command_length": 15,
+    "command_preview": "netstat -tunapl"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855381028Z",
+   "timestamp": "2026-04-27T14:59:07.676203951Z",
    "task_id": 4,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855381867Z",
+   "timestamp": "2026-04-27T14:59:07.676205188Z",
    "task_id": 4,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855382866Z",
+   "timestamp": "2026-04-27T14:59:07.676206256Z",
    "task_id": 4,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855400054Z",
+   "timestamp": "2026-04-27T14:59:07.676221844Z",
    "task_id": 4,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855461059Z",
+   "timestamp": "2026-04-27T14:59:07.676260714Z",
    "task_id": 4,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855668111Z",
+   "timestamp": "2026-04-27T14:59:07.676337102Z",
    "task_id": 4,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,34 +280,34 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855709529Z",
+   "timestamp": "2026-04-27T14:59:07.676355042Z",
    "task_id": 4,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "netstat -tupn",
+    "command_preview": "netstat -tunapl",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855775958Z",
+   "timestamp": "2026-04-27T14:59:07.676480711Z",
    "task_id": 4,
    "phase": "safety",
    "component": "shell_validator",
    "event_type": "validation_passed",
    "success": true,
    "data": {
-    "cleaned_length": 13,
-    "original_length": 13,
-    "original_preview": "netstat -tupn"
+    "cleaned_length": 15,
+    "original_length": 15,
+    "original_preview": "netstat -tunapl"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855872109Z",
+   "timestamp": "2026-04-27T14:59:07.676565821Z",
    "task_id": 4,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,14 +323,14 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.85587321Z",
+   "timestamp": "2026-04-27T14:59:07.676567018Z",
    "task_id": 4,
    "phase": "safety",
    "component": "risk_analyzer",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command_length": 13,
+    "command_length": 15,
     "is_high_risk": false,
     "reasons": null,
     "reasons_count": 0,
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855881948Z",
+   "timestamp": "2026-04-27T14:59:07.676567759Z",
    "task_id": 4,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "netstat -tupn",
+    "command": "netstat -tunapl",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855882604Z",
+   "timestamp": "2026-04-27T14:59:07.676581925Z",
    "task_id": 4,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "netstat -tupn",
+    "command": "netstat -tunapl",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.855883092Z",
+   "timestamp": "2026-04-27T14:59:07.676582523Z",
    "task_id": 4,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "netstat -tupn"
+    "command": "netstat -tunapl"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.8558861Z",
+   "timestamp": "2026-04-27T14:59:07.676584996Z",
    "task_id": 4,
    "phase": "safety",
    "component": "sandbox",
@@ -390,52 +390,52 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.856046059Z",
+   "timestamp": "2026-04-27T14:59:07.676704631Z",
    "task_id": 4,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "netstat -tupn",
+    "command": "netstat -tunapl",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.856048573Z",
+   "timestamp": "2026-04-27T14:59:07.67670728Z",
    "task_id": 4,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "netstat -tupn",
+    "command": "netstat -tunapl",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.856049601Z",
+   "timestamp": "2026-04-27T14:59:07.676708152Z",
    "task_id": 4,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "netstat -tupn",
+    "command": "netstat -tunapl",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:45:08.856051039Z",
+   "timestamp": "2026-04-27T14:59:07.676709497Z",
    "task_id": 4,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "netstat -tupn",
+    "command": "netstat -tunapl",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
     "step_ms": 0,

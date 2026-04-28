@@ -1,11 +1,11 @@
 {
- "session_id": "helix_20260413_174446_12",
- "export_time": "2026-04-13T17:44:47.767628757Z",
+ "session_id": "helix_20260427_145846_12",
+ "export_time": "2026-04-27T14:58:47.71224374Z",
  "task_id": 1,
  "environment": "",
  "events": [
   {
-   "timestamp": "2026-04-13T17:44:46.92677337Z",
+   "timestamp": "2026-04-27T14:58:46.677097822Z",
    "task_id": 1,
    "phase": "safety",
    "component": "sandbox",
@@ -19,7 +19,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:46.928466824Z",
+   "timestamp": "2026-04-27T14:58:46.679282166Z",
    "task_id": 1,
    "phase": "rag",
    "component": "rag_system",
@@ -30,7 +30,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:46.95524702Z",
+   "timestamp": "2026-04-27T14:58:46.706607092Z",
    "task_id": 1,
    "phase": "rag",
    "component": "rag_system",
@@ -43,7 +43,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:46.955268276Z",
+   "timestamp": "2026-04-27T14:58:46.706629059Z",
    "task_id": 1,
    "phase": "agent",
    "component": "agent_core",
@@ -57,7 +57,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:46.955269774Z",
+   "timestamp": "2026-04-27T14:58:46.706630371Z",
    "task_id": 1,
    "phase": "agent",
    "component": "agent_core",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:46.955276778Z",
+   "timestamp": "2026-04-27T14:58:46.706636864Z",
    "task_id": 1,
    "phase": "planning",
    "component": "agent_core",
@@ -81,7 +81,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764271696Z",
+   "timestamp": "2026-04-27T14:58:47.709006052Z",
    "task_id": 1,
    "phase": "planning",
    "component": "agent_core",
@@ -89,11 +89,11 @@
    "success": true,
    "data": {
     "raw_output_length": 90,
-    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"ps aux --sort=-%mem | head -n 10\"}]}"
+    "raw_output_preview": "{\"intent\":\"shell\",\"steps\":[{\"tool\":\"shell\",\"command\":\"ps aux --sort=-%mem | head -n 11\"}]}"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.76432914Z",
+   "timestamp": "2026-04-27T14:58:47.709063704Z",
    "task_id": 1,
    "phase": "planning",
    "component": "planner",
@@ -105,7 +105,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764332919Z",
+   "timestamp": "2026-04-27T14:58:47.709067614Z",
    "task_id": 1,
    "phase": "planning",
    "component": "planner",
@@ -118,7 +118,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764337379Z",
+   "timestamp": "2026-04-27T14:58:47.709071724Z",
    "task_id": 1,
    "phase": "planning",
    "component": "planner",
@@ -131,7 +131,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764339995Z",
+   "timestamp": "2026-04-27T14:58:47.709074784Z",
    "task_id": 1,
    "phase": "planning",
    "component": "planner",
@@ -144,7 +144,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764341604Z",
+   "timestamp": "2026-04-27T14:58:47.709076155Z",
    "task_id": 1,
    "phase": "planning",
    "component": "agent_core",
@@ -157,7 +157,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764573174Z",
+   "timestamp": "2026-04-27T14:58:47.709121819Z",
    "task_id": 1,
    "phase": "safety",
    "component": "agent_core",
@@ -169,7 +169,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764573857Z",
+   "timestamp": "2026-04-27T14:58:47.70912261Z",
    "task_id": 1,
    "phase": "execution",
    "component": "agent_core",
@@ -181,7 +181,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764574664Z",
+   "timestamp": "2026-04-27T14:58:47.709123655Z",
    "task_id": 1,
    "phase": "execution",
    "component": "agent_core",
@@ -195,7 +195,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764648496Z",
+   "timestamp": "2026-04-27T14:58:47.709229771Z",
    "task_id": 1,
    "phase": "safety",
    "component": "static_analyzer",
@@ -203,11 +203,11 @@
    "success": true,
    "data": {
     "command_length": 32,
-    "command_preview": "ps aux --sort=-%mem | head -n 10"
+    "command_preview": "ps aux --sort=-%mem | head -n 11"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764680537Z",
+   "timestamp": "2026-04-27T14:58:47.709273681Z",
    "task_id": 1,
    "phase": "safety",
    "component": "static_analyzer",
@@ -220,7 +220,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764681439Z",
+   "timestamp": "2026-04-27T14:58:47.709274934Z",
    "task_id": 1,
    "phase": "safety",
    "component": "static_analyzer",
@@ -232,7 +232,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764682509Z",
+   "timestamp": "2026-04-27T14:58:47.709276777Z",
    "task_id": 1,
    "phase": "safety",
    "component": "static_analyzer",
@@ -244,7 +244,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764698434Z",
+   "timestamp": "2026-04-27T14:58:47.709341991Z",
    "task_id": 1,
    "phase": "safety",
    "component": "static_analyzer",
@@ -256,7 +256,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764738948Z",
+   "timestamp": "2026-04-27T14:58:47.709386559Z",
    "task_id": 1,
    "phase": "safety",
    "component": "static_analyzer",
@@ -268,7 +268,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764802504Z",
+   "timestamp": "2026-04-27T14:58:47.709509904Z",
    "task_id": 1,
    "phase": "safety",
    "component": "static_analyzer",
@@ -280,21 +280,21 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764821489Z",
+   "timestamp": "2026-04-27T14:58:47.709526915Z",
    "task_id": 1,
    "phase": "safety",
    "component": "static_analyzer",
    "event_type": "validation_completed",
    "success": true,
    "data": {
-    "command_preview": "ps aux --sort=-%mem | head -n 10",
+    "command_preview": "ps aux --sort=-%mem | head -n 11",
     "intervention": 0,
     "result": "passed",
     "stage": "all_static_checks"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764884281Z",
+   "timestamp": "2026-04-27T14:58:47.709637603Z",
    "task_id": 1,
    "phase": "safety",
    "component": "shell_validator",
@@ -303,11 +303,11 @@
    "data": {
     "cleaned_length": 32,
     "original_length": 32,
-    "original_preview": "ps aux --sort=-%mem | head -n 10"
+    "original_preview": "ps aux --sort=-%mem | head -n 11"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.76495181Z",
+   "timestamp": "2026-04-27T14:58:47.709756932Z",
    "task_id": 1,
    "phase": "safety",
    "component": "risk_scorer",
@@ -323,7 +323,7 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764952781Z",
+   "timestamp": "2026-04-27T14:58:47.709758334Z",
    "task_id": 1,
    "phase": "safety",
    "component": "risk_analyzer",
@@ -339,45 +339,45 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764953616Z",
+   "timestamp": "2026-04-27T14:58:47.709759173Z",
    "task_id": 1,
    "phase": "safety",
    "component": "shell_handler",
    "event_type": "risk_classified",
    "success": true,
    "data": {
-    "command": "ps aux --sort=-%mem | head -n 10",
+    "command": "ps aux --sort=-%mem | head -n 11",
     "reasons": null,
     "requires_confirm": false,
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764954485Z",
+   "timestamp": "2026-04-27T14:58:47.709759784Z",
    "task_id": 1,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "execution_decision",
    "success": true,
    "data": {
-    "command": "ps aux --sort=-%mem | head -n 10",
+    "command": "ps aux --sort=-%mem | head -n 11",
     "decision": "auto_execute",
     "risk_level": "Low"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764954915Z",
+   "timestamp": "2026-04-27T14:58:47.709765455Z",
    "task_id": 1,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executing",
    "success": true,
    "data": {
-    "command": "ps aux --sort=-%mem | head -n 10"
+    "command": "ps aux --sort=-%mem | head -n 11"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.764959025Z",
+   "timestamp": "2026-04-27T14:58:47.709768154Z",
    "task_id": 1,
    "phase": "safety",
    "component": "sandbox",
@@ -390,52 +390,52 @@
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.765118498Z",
+   "timestamp": "2026-04-27T14:58:47.709923392Z",
    "task_id": 1,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_started",
    "success": true,
    "data": {
-    "command": "ps aux --sort=-%mem | head -n 10",
+    "command": "ps aux --sort=-%mem | head -n 11",
     "shell": "unknown",
     "work_dir": "/tmp/eval_env"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.765120959Z",
+   "timestamp": "2026-04-27T14:58:47.709926061Z",
    "task_id": 1,
    "phase": "execution",
    "component": "sandbox",
    "event_type": "execution_completed",
    "success": false,
    "data": {
-    "command": "ps aux --sort=-%mem | head -n 10",
+    "command": "ps aux --sort=-%mem | head -n 11",
     "exit_error": "exec: \"unknown\": executable file not found in $PATH"
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.76512187Z",
+   "timestamp": "2026-04-27T14:58:47.709927017Z",
    "task_id": 1,
    "phase": "execution",
    "component": "shell_handler",
    "event_type": "command_executed",
    "success": false,
    "data": {
-    "command": "ps aux --sort=-%mem | head -n 10",
+    "command": "ps aux --sort=-%mem | head -n 11",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "success": false
    }
   },
   {
-   "timestamp": "2026-04-13T17:44:47.765123163Z",
+   "timestamp": "2026-04-27T14:58:47.709928457Z",
    "task_id": 1,
    "phase": "execution",
    "component": "agent_core",
    "event_type": "step_completed",
    "success": false,
    "data": {
-    "command": "ps aux --sort=-%mem | head -n 10",
+    "command": "ps aux --sort=-%mem | head -n 11",
     "error": "exec: \"unknown\": executable file not found in $PATH",
     "result": "failed",
     "step_ms": 0,
