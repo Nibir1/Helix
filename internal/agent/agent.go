@@ -1,37 +1,66 @@
 // internal/agent/agent.go
-
+// Package agent provides the core Agent Mode orchestrator.
+// It accepts natural language input, plans steps via the AI planner,
+// and executes them through a safety‑first pipeline.
+// Author: Helix Red Team
+// Date: 2026-05-09
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"helix/internal/ai"
 	"helix/internal/commands"
+	"helix/internal/recon"
 	"helix/internal/shell"
+	"helix/internal/stealth"
 	"helix/internal/ux"
 )
 
 // Agent is the core Agent Mode orchestrator.
 type Agent struct {
-	env          shell.Env
-	sandbox      *commands.DirectorySandbox
-	execConfig   commands.ExecuteConfig
-	gitManager   *commands.GitManager
-	typingEffect bool
-	ux           *ux.UX
+	env            shell.Env
+	sandbox        *commands.DirectorySandbox
+	execConfig     commands.ExecuteConfig
+	gitManager     *commands.GitManager
+	typingEffect   bool
+	ux             *ux.UX
+	stealth        *stealth.StealthExecutor // stealth engine (memory‑only, log‑free)
+	stealthEnabled bool                     // runtime toggle; if true, use stealth execution
+	recon          *recon.ReconEngine
+
+	// OnSlashCommand is called when input starts with "/".
+	// It receives the full raw input line.  Return true if the command was
+	// handled internally; false to pass it to the AI planner.
+	OnSlashCommand func(string) bool
 }
 
 // NewAgent creates a new Agent instance.
-// Now accepts an injected UX instance for TUI compatibility.
+// It accepts an injected UX instance for TUI compatibility, along with
+// optional stealth and reconnaissance engines.
+//
+// Args:
+//
+//	env          – detected shell environment
+//	_            – placeholder for future RAG system (unused)
+//	sandbox      – directory confinement manager
+//	execConfig   – execution preferences (dry‑run, safe‑mode, etc.)
+//	typingEffect – whether to animate AI responses
+//	gui          – UX layer (may be nil)
+//	stealthExec  – optional memory‑only executor (may be nil)
+//	reconEng     – optional reconnaissance orchestrator (may be nil)
 func NewAgent(
 	env shell.Env,
 	_ interface{}, // RAG placeholder
 	sandbox *commands.DirectorySandbox,
 	execConfig commands.ExecuteConfig,
 	typingEffect bool,
-	gui *ux.UX, // NEW: Injected UX
+	gui *ux.UX,
+	stealthExec *stealth.StealthExecutor,
+	reconEng *recon.ReconEngine,
 ) *Agent {
 	gm := commands.NewGitManager(env, execConfig, sandbox)
 
@@ -41,22 +70,57 @@ func NewAgent(
 	}
 
 	return &Agent{
-		env:          env,
-		sandbox:      sandbox,
-		execConfig:   execConfig,
-		gitManager:   gm,
-		typingEffect: typingEffect,
-		ux:           gui,
+		env:            env,
+		sandbox:        sandbox,
+		execConfig:     execConfig,
+		gitManager:     gm,
+		typingEffect:   typingEffect,
+		ux:             gui,
+		stealth:        stealthExec,
+		stealthEnabled: stealthExec != nil, // enable by default if executor exists
+		recon:          reconEng,
 	}
 }
 
+// EnableStealth toggles memory‑only execution mode at runtime.
+// When enabled, shell commands are executed without leaving history
+// or persistent disk traces.
+func (a *Agent) EnableStealth(on bool) {
+	if a.stealth == nil && on {
+		a.ux.PrintWarning("Stealth engine not available – cannot enable stealth mode")
+		return
+	}
+	a.stealthEnabled = on
+	if on {
+		a.ux.PrintSuccess("Stealth mode ENABLED – commands run without history or disk traces")
+	} else {
+		a.ux.PrintInfo("Stealth mode DISABLED – commands run normally")
+	}
+}
+
+// IsStealthEnabled returns the current state of the stealth toggle.
+func (a *Agent) IsStealthEnabled() bool {
+	return a.stealthEnabled
+}
+
 // HandleInput is the main entry point for Agent Mode.
+// It intercepts slash‑prefixed commands before the planner if an
+// OnSlashCommand callback is set.
 func (a *Agent) HandleInput(userInput string) {
 	userInput = strings.TrimSpace(userInput)
 	if userInput == "" {
 		return
 	}
 
+	// --- Slash‑command interception ---
+	if strings.HasPrefix(userInput, "/") && a.OnSlashCommand != nil {
+		if a.OnSlashCommand(userInput) {
+			return // handled internally
+		}
+		// Fall through to AI planner.
+	}
+
+	// --- Standard planning ---
 	envDesc := fmt.Sprintf(
 		"OS: %s, Shell: %s, CWD: %s",
 		a.env.OSName,
@@ -105,12 +169,8 @@ func (a *Agent) HandleInput(userInput string) {
 		plan = safePlan
 	}
 
-	//a.ux.PrintSystemMessage(fmt.Sprintf("Agent Intent: %s", plan.Intent))
-	//a.ux.PrintDebug(fmt.Sprintf("Steps: %d", len(plan.Steps)))
-
 	// 4) Execute each step
 	for i, step := range plan.Steps {
-		// Only print step header if there are multiple steps
 		if len(plan.Steps) > 1 {
 			a.ux.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
 		}
@@ -138,12 +198,16 @@ func (a *Agent) HandleInput(userInput string) {
 				return
 			}
 
+		case "recon":
+			if err := a.handleReconStep(step); err != nil {
+				a.ux.PrintError(fmt.Sprintf("Recon step failed: %v", err))
+				return
+			}
+
 		default:
 			a.ux.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
 		}
 	}
-
-	// a.ux.PrintSuccess("Done.")
 }
 
 //
@@ -284,11 +348,10 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	if msg == "" {
 		return
 	}
-	// UX handles typing effect check if needed, or we pass explicit flag
 	a.ux.PrintAIMessage(msg, a.typingEffect)
 }
 
-// SHELL — includes risk scoring (Phase 3.5)
+// SHELL — includes risk scoring and stealth toggle
 func (a *Agent) handleShellStep(step ai.PlanStep) error {
 	cmd := strings.TrimSpace(step.Command)
 	if cmd == "" {
@@ -316,7 +379,6 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 			a.ux.PrintWarning(fmt.Sprintf("   • %s", r))
 		}
 
-		// --- UPDATED INTERACTIVE CONFIRMATION ---
 		if !a.ux.AskYesNo("Execute anyway?") {
 			a.ux.PrintWarning("Command skipped")
 			return nil
@@ -330,7 +392,75 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		return fmt.Errorf("high-risk shell command blocked")
 	}
 
+	// Stealth execution if enabled and engine available
+	if a.stealthEnabled && a.stealth != nil {
+		a.ux.PrintDebug("Stealth mode: running command from memory")
+		output, err := a.stealth.Execute(validCmd)
+		if err != nil {
+			return err
+		}
+		if output != "" {
+			a.ux.PrintAIMessage(output, false)
+		}
+		return nil
+	}
+
+	// Default sandbox execution
 	return a.sandbox.WrapCommand(validCmd, a.execConfig, a.env)
+}
+
+// handleReconStep processes a planner step with tool = "recon".
+func (a *Agent) handleReconStep(step ai.PlanStep) error {
+	toolName := strings.TrimSpace(step.Action)
+	if toolName == "" {
+		return fmt.Errorf("recon step missing action (tool name)")
+	}
+	args := make([]string, 0)
+	if step.Args != nil {
+		if flags, ok := step.Args["flags"]; ok {
+			args = append(args, strings.Fields(flags)...)
+		}
+		if target, ok := step.Args["target"]; ok {
+			args = append(args, target)
+		}
+	}
+	a.ux.PrintCommand(fmt.Sprintf("Recon %s %s", toolName, strings.Join(args, " ")))
+	result, err := a.recon.RunTool(toolName, args...)
+	if err != nil {
+		// This indicates a serious internal error (like recon engine not initialized)
+		return err
+	}
+	if result.Error != nil {
+		// Tool execution failed, e.g. not found or timed out.
+		// Warn but don't abort the whole plan.
+		a.ux.PrintWarning(fmt.Sprintf("Recon tool %q issue: %v", toolName, result.Error))
+		if strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
+			a.ux.PrintInfo(fmt.Sprintf("Install %s to enable this scan type.", toolName))
+		}
+		return nil
+	}
+	a.ux.PrintSuccess(fmt.Sprintf("Recon completed in %v", result.Elapsed))
+	if len(result.Parsed) > 0 {
+		summary, _ := json.MarshalIndent(result.Parsed, "", "  ")
+		a.ux.PrintData(string(summary))
+	} else {
+		// No open ports or other structured results found.
+		a.ux.PrintInfo("No open ports or interesting results found.")
+	}
+	return nil
+}
+
+// RunReconTool exposes the recon engine for manual /scan commands.
+func (a *Agent) RunReconTool(tool, flags, target string) (*recon.ReconResult, error) {
+	if a.recon == nil {
+		return nil, fmt.Errorf("recon engine not available")
+	}
+	args := []string{}
+	if flags != "" {
+		args = append(args, strings.Fields(flags)...)
+	}
+	args = append(args, target)
+	return a.recon.RunTool(tool, args...)
 }
 
 // GIT — supports safe + dangerous (Option C)

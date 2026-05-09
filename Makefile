@@ -1,3 +1,4 @@
+# Makefile for Helix - Build, Test, and Run Automation
 # Build configuration
 BINARY_NAME=helix
 DIST_DIR=dist
@@ -9,17 +10,28 @@ PROJECT_ROOT=$(shell pwd)
 # Default target
 all: current
 
+# -------------------------------------------------------------------
+# Ensure all shell scripts are executable before building / testing
+# -------------------------------------------------------------------
+define fix-perms
+	@chmod +x $(SCRIPTS_DIR)/*.sh 2>/dev/null || true
+endef
+
 # Build targets using the build script
 current:
+	$(fix-perms)
 	./$(SCRIPTS_DIR)/build.sh current
 
 macos:
+	$(fix-perms)
 	./$(SCRIPTS_DIR)/build.sh macos
 
 linux:
+	$(fix-perms)
 	./$(SCRIPTS_DIR)/build.sh linux
 
 windows:
+	$(fix-perms)
 	./$(SCRIPTS_DIR)/build.sh windows
 
 # Build for all platforms
@@ -28,6 +40,7 @@ build-all: all
 
 # Clean build artifacts AND generated data (but keep models)
 clean:
+	$(fix-perms)
 	@echo "Cleaning build artifacts and generated data..."
 	./$(SCRIPTS_DIR)/build.sh clean
 	@echo "Cleaning user data (preserving models)..."
@@ -72,6 +85,15 @@ info:
 
 # To run the project without building first
 start:
+	$(fix-perms)
 	./$(SCRIPTS_DIR)/run-helix.sh
 
-.PHONY: all current macos linux windows build-all clean deep-clean dev run info start
+test:
+	$(fix-perms)
+	@echo "Running all tests..."
+	@export CGO_CFLAGS="$$(./scripts/get-cgo-flags.sh cflags)"; \
+	 export CGO_LDFLAGS="$$(./scripts/get-cgo-flags.sh ldflags)"; \
+	 export CGO_CXXFLAGS="$$CGO_CFLAGS"; \
+	 go test ./internal/... -v -count=1
+
+.PHONY: all current macos linux windows build-all clean deep-clean dev run info start test

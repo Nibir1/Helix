@@ -66,9 +66,8 @@ func BuildPlannerPrompt(userInput string, envDescription string) string {
 	return fmt.Sprintf(`
 You are Helix's planning module.
 
-====================================================================
 ### ABSOLUTE OUTPUT RULES (CRITICAL — DO NOT BREAK)
-====================================================================
+
 - Output ONLY a SINGLE valid JSON object.
 - NO markdown fences. (NO +""+ or +"json"+)
 - NO commentary, no explanations, no surrounding text.
@@ -81,9 +80,8 @@ You are Helix's planning module.
 
 If unsure, output the smallest correct JSON plan.
 
-====================================================================
 ### STRING SAFETY RULES (NEW — REQUIRED)
-====================================================================
+
 To ensure valid JSON, YOU MUST follow these rules for ALL strings:
 
 1. **NO SINGLE QUOTES (') ANYWHERE inside JSON strings.**
@@ -104,17 +102,16 @@ To ensure valid JSON, YOU MUST follow these rules for ALL strings:
 
 6. **KEEP JSON COMPACT - avoid unnecessary whitespace to prevent truncation.**
 
-====================================================================
 ### REQUIRED JSON SCHEMA
-====================================================================
+
 {
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package",
-      "message": "...",     // for response
-      "command": "...",     // for shell
-      "action": "...",      // for git/package
+      "tool": "response" | "shell" | "git" | "package" | "recon",
+      "message": "...", // for response
+      "command": "...", // for shell
+      "action": "...", // for git/package/recon
       "args": { "key": "value" }
     }
   ]
@@ -122,15 +119,13 @@ To ensure valid JSON, YOU MUST follow these rules for ALL strings:
 
 "steps" MUST be a non-empty array.
 
-====================================================================
 ### RESPONSE TOOL RULES
-====================================================================
+
 - Only "message".
 - No "command", "action", or "args".
 
-====================================================================
 ### SHELL TOOL RULES (UPDATED — NO NESTED QUOTES)
-====================================================================
+
 - ONLY "command".
 - MUST NOT output:
     apt, apt-get, yum, dnf, pacman, zypper,
@@ -143,18 +138,24 @@ To ensure valid JSON, YOU MUST follow these rules for ALL strings:
     perl -pi -e "s/OLD/NEW/g" FILE
   instead of sed with nested quoting.
 
-====================================================================
 ### PACKAGE TOOL RULES
-====================================================================
+
 - tool = "package"
 - action = install | update | remove
 - args.name MUST be present
 - NEVER output shell install commands.
 - NEVER include "command".
 
-====================================================================
+### RECON TOOL RULES
+
+- tool = "recon"
+- action = one of: "nmap", "masscan", "ffuf", "amass"
+- args.flags = command‑line flags (e.g., "-sV --top-ports 100")
+- args.target = IP, CIDR, or URL
+- NEVER put recon commands under "shell".
+
 ### GIT TOOL RULES (SAFE + DANGEROUS OPTION C)
-====================================================================
+
 SAFE:
 - commit → args.message
 - tag → args.name (REQUIRED: must be full string like "v1.1.0")
@@ -171,18 +172,16 @@ DANGEROUS (allowed, agent requires confirmation):
 FORBIDDEN:
 - pull, merge, rebase, cherry-pick, fetch, clone, init, remote add, etc.
 
-====================================================================
 ### MULTI-STEP RULES
-====================================================================
+
 - intent MUST be "multi_step" if 2+ steps exist.
 - Steps may mix ANY tools.
 - JSON MUST NOT be truncated.
 - ALL steps MUST be complete and valid.
 - KEEP steps minimal to avoid truncation.
 
-====================================================================
 ### TRUNCATION PREVENTION RULES (NEW - CRITICAL)
-====================================================================
+
 - KEEP JSON COMPACT - minimize whitespace
 - If you have many steps, consider combining them
 - ALWAYS ensure complete JSON structure
@@ -192,9 +191,8 @@ FORBIDDEN:
 Example for version update:
 {"intent":"multi_step","steps":[{"tool":"shell","command":"perl -pi -e \"s/1.0.0/1.1.0/g\" README.md"},{"tool":"git","action":"add","args":{"paths":["README.md"]}},{"tool":"git","action":"commit","args":{"message":"Update version in README to 1.1.0"}},{"tool":"git","action":"tag","args":{"name":"v1.1.0"}}]}
 
-====================================================================
 ### FINAL HARD REQUIREMENT
-====================================================================
+
 Return ONLY the COMPLETE JSON object.
 NO text before.
 NO text after.
@@ -202,9 +200,8 @@ NO markdown.
 NO backticks.
 NO truncation.
 
-====================================================================
 ### CURRENT REQUEST
-====================================================================
+
 User Input: %s
 
 Environment: %s
@@ -374,11 +371,12 @@ func validatePlan(p *Plan) error {
 		return fmt.Errorf("planner produced no steps")
 	}
 
-	validTools := map[string]bool{
+	var validTools = map[string]bool{
 		"response": true,
 		"shell":    true,
 		"git":      true,
 		"package":  true,
+		"recon":    true,
 	}
 
 	var filtered []PlanStep
@@ -437,15 +435,17 @@ func validatePlan(p *Plan) error {
 				continue
 			}
 
-			switch step.Action {
-			case "commit", "tag", "add", "checkout", "create-branch":
-			case "push", "reset-hard", "clean", "delete-branch":
-			default:
-				color.Yellow("Dropping unsupported git action: %s", step.Action)
+		case "recon":
+			if step.Action == "" {
 				continue
 			}
-
-			step.Command = ""
+			switch step.Action {
+			case "nmap", "masscan", "ffuf", "amass":
+			default:
+				color.Yellow("Dropping unsupported recon tool: %s", step.Action)
+				continue
+			}
+			step.Command = "" // no raw command
 
 			cleanArgs := map[string]string{}
 			for k, v := range step.Args {

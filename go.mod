@@ -11,6 +11,7 @@ require (
 	github.com/go-skynet/go-llama.cpp v0.0.0-20240314183750-6a8041ef6b46
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/schollz/progressbar/v3 v3.18.0
+	golang.org/x/text v0.14.0
 )
 
 require (
@@ -40,5 +41,4 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/term v0.36.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
 )

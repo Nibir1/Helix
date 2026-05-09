@@ -1,4 +1,7 @@
 // cmd/helix/handlers.go
+// Purpose: Slash-command handlers for Helix.
+// Author: Helix Red Team
+// Date: 2026-05-09
 
 package main
 
@@ -16,9 +19,51 @@ import (
 )
 
 // -------------------------------------------------------
-//
-//	/sandbox
-//
+// MASTER DISPATCHER – called by the agent when input
+// starts with "/". Returns true if handled.
+// -------------------------------------------------------
+func handleSlashCommand(input string) bool {
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return false
+	}
+
+	cmd := strings.ToLower(parts[0])
+
+	switch cmd {
+	case "/sandbox":
+		handleSandboxCommand(input)
+	case "/cd":
+		handleChangeDirectory(input)
+	case "/git":
+		handleGitCommand(input)
+	case "/rag-status":
+		handleRAGStatus()
+	case "/rag-reindex":
+		handleRAGReindex()
+	case "/rag-reset":
+		handleRAGReset()
+	case "/rag-rebuild":
+		handleRAGRebuild()
+	case "/dry-run":
+		toggleDryRun()
+	case "/online":
+		checkOnlineStatus()
+	case "/test-basic-ai":
+		testBasicAI()
+	case "/stealth":
+		handleStealthCommand(input)
+	case "/scan":
+		handleQuickScan(parts)
+	default:
+		return false // unknown – let the AI handle it
+	}
+
+	return true
+}
+
+// -------------------------------------------------------
+// /sandbox
 // -------------------------------------------------------
 func handleSandboxCommand(input string) {
 	args := strings.Fields(input)
@@ -47,9 +92,7 @@ func handleSandboxCommand(input string) {
 }
 
 // -------------------------------------------------------
-//
-//	/cd
-//
+// /cd
 // -------------------------------------------------------
 func handleChangeDirectory(input string) {
 	targetDir := strings.TrimSpace(strings.TrimPrefix(input, "/cd"))
@@ -65,9 +108,7 @@ func handleChangeDirectory(input string) {
 }
 
 // -------------------------------------------------------
-//
-//	/git
-//
+// /git
 // -------------------------------------------------------
 func handleGitCommand(input string) {
 	request := strings.TrimSpace(strings.TrimPrefix(input, "/git"))
@@ -82,9 +123,7 @@ func handleGitCommand(input string) {
 }
 
 // -------------------------------------------------------
-//
-//	/rag-status
-//
+// /rag-status
 // -------------------------------------------------------
 func handleRAGStatus() {
 	color.Cyan("RAG System Status:")
@@ -107,7 +146,6 @@ func handleRAGStatus() {
 	color.Cyan("  • Indexed MAN Pages: %v", indexedPages)
 
 	if initialized {
-		// Vector store details (if present)
 		if totalDocs, ok := stats["total_documents"]; ok {
 			color.Cyan("    • Vector Documents: %v", totalDocs)
 		}
@@ -116,7 +154,6 @@ func handleRAGStatus() {
 		}
 		color.Green("RAG system ACTIVE and ready for retrieval")
 	} else {
-		// Not initialized — decide whether we're actually indexing or just empty
 		switch v := indexedPages.(type) {
 		case int:
 			if v > 0 {
@@ -125,22 +162,14 @@ func handleRAGStatus() {
 				return
 			}
 		}
-
 		color.Yellow("RAG not initialized yet (no MAN pages indexed).")
 		color.Yellow("It will automatically index MAN pages when Helix initializes.")
 	}
 }
 
 // -------------------------------------------------------
-//
-//	/rag-reindex
-//
+// /rag-reindex
 // -------------------------------------------------------
-//
-// Force a full reindex in the background:
-//   - Deletes the on-disk RAG index directory
-//   - Keeps the current process running
-//   - Starts a background Initialize() which will rebuild everything
 func handleRAGReindex() {
 	if ragSystem == nil {
 		color.Red("RAG system not initialized")
@@ -152,7 +181,6 @@ func handleRAGReindex() {
 	home, _ := os.UserHomeDir()
 	ragDir := filepath.Join(home, ".helix", "rag_index")
 
-	// Remove the entire index directory so Initialize() is forced to rebuild
 	if err := os.RemoveAll(ragDir); err != nil {
 		color.Red("Failed to clear existing RAG index: %v", err)
 		return
@@ -160,7 +188,6 @@ func handleRAGReindex() {
 
 	color.Green("Existing RAG index removed. Starting background rebuild…")
 
-	// Kick off a background re-initialize
 	go func() {
 		color.Blue("Background RAG reindex started...")
 		if err := ragSystem.Initialize(); err != nil {
@@ -176,13 +203,8 @@ func handleRAGReindex() {
 }
 
 // -------------------------------------------------------
-//
-//	/rag-reset
-//
+// /rag-reset
 // -------------------------------------------------------
-//
-// Full reset of on-disk RAG data, but DOES NOT reindex immediately.
-// The user is expected to restart Helix or call /rag-reindex or /rag-rebuild.
 func handleRAGReset() {
 	if ragSystem == nil {
 		color.Red("RAG system not initialized")
@@ -204,15 +226,8 @@ func handleRAGReset() {
 }
 
 // -------------------------------------------------------
-//
-//	/rag-rebuild
-//
+// /rag-rebuild
 // -------------------------------------------------------
-//
-// Force a full synchronous rebuild of the RAG index.
-//   - Deletes all RAG index files
-//   - Runs Initialize() in the foreground (with progress logs)
-//   - Best for “nuke and rebuild now” scenarios
 func handleRAGRebuild() {
 	if ragSystem == nil {
 		color.Red("RAG system not initialized")
@@ -228,7 +243,6 @@ func handleRAGRebuild() {
 
 	var answer string
 	if _, err := fmt.Scanln(&answer); err != nil {
-		// If user just hits enter, treat as "no"
 		answer = ""
 	}
 
@@ -251,7 +265,6 @@ func handleRAGRebuild() {
 	color.Green("RAG index directory cleared.")
 	color.Blue("Starting full RAG rebuild (this may take a while)...")
 
-	// Synchronous rebuild using same Initialize() logic as startup
 	if err := ragSystem.Initialize(); err != nil {
 		color.Red("RAG rebuild failed: %v", err)
 		return
@@ -266,9 +279,7 @@ func handleRAGRebuild() {
 }
 
 // -------------------------------------------------------
-//
-//	/dry-run
-//
+// /dry-run
 // -------------------------------------------------------
 func toggleDryRun() {
 	execConfig.DryRun = !execConfig.DryRun
@@ -280,9 +291,7 @@ func toggleDryRun() {
 }
 
 // -------------------------------------------------------
-//
-//	/online
-//
+// /online
 // -------------------------------------------------------
 func checkOnlineStatus() {
 	color.Blue("Checking internet connectivity…")
@@ -295,14 +304,11 @@ func checkOnlineStatus() {
 }
 
 // -------------------------------------------------------
-//
-//	/test-basic-ai
-//
+// /test-basic-ai
 // -------------------------------------------------------
 func testBasicAI() {
 	color.Cyan("Testing basic AI model responses…")
 
-	// Test 1
 	resp1, err := ai.RunModel("Say 'hello world'")
 	if err != nil {
 		color.Red("Test 1 failed: %v", err)
@@ -310,11 +316,66 @@ func testBasicAI() {
 		color.Green("Test 1: %s", strings.TrimSpace(resp1))
 	}
 
-	// Test 2
 	resp2, err := ai.RunModel("Command to list files:")
 	if err != nil {
 		color.Red("Test 2 failed: %v", err)
 	} else {
 		color.Green("Test 2: %s", strings.TrimSpace(resp2))
+	}
+}
+
+// -------------------------------------------------------
+// /stealth
+// -------------------------------------------------------
+func handleStealthCommand(input string) {
+	args := strings.Fields(input)
+	if len(args) < 2 {
+		if agentCore != nil {
+			color.Cyan("Stealth mode: %v", agentCore.IsStealthEnabled())
+		}
+		color.Yellow("Usage: /stealth <on|off>")
+		return
+	}
+
+	switch strings.ToLower(args[1]) {
+	case "on", "enable":
+		if agentCore != nil {
+			agentCore.EnableStealth(true)
+		}
+	case "off", "disable":
+		if agentCore != nil {
+			agentCore.EnableStealth(false)
+		}
+	default:
+		color.Red("Unknown stealth mode: %s", args[1])
+	}
+}
+
+// -------------------------------------------------------
+// /scan – manual recon test
+// -------------------------------------------------------
+func handleQuickScan(args []string) {
+	if len(args) < 2 {
+		color.Cyan("Usage: /scan <target>")
+		return
+	}
+	target := args[1]
+	if agentCore == nil {
+		color.Red("Agent not initialized")
+		return
+	}
+	result, err := agentCore.RunReconTool("nmap", "-sV", target)
+	if err != nil {
+		color.Red("Recon failed: %v", err)
+		return
+	}
+	color.Green("Recon completed in %v", result.Elapsed)
+	if result.Error != nil {
+		color.Yellow("Tool error: %v", result.Error)
+	} else {
+		color.Cyan("Parsed results:")
+		for k, v := range result.Parsed {
+			color.Cyan("  %s: %v", k, v)
+		}
 	}
 }

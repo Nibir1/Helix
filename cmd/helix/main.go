@@ -1,4 +1,8 @@
 // cmd/helix/main.go
+// Purpose: Entry point for Helix – AI‑powered CLI assistant.
+// Author: Helix Red Team
+// Date: 2026-05-09
+// Dependencies: all internal packages, Bubble Tea, fatih/color
 
 package main
 
@@ -8,12 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"helix/internal/agent"
 	"helix/internal/ai"
 	"helix/internal/commands"
 	"helix/internal/config"
 	"helix/internal/rag"
+	"helix/internal/recon"
 	"helix/internal/shell"
+	"helix/internal/stealth"
 	"helix/internal/tui"
 	"helix/internal/utils"
 	"helix/internal/ux"
@@ -35,7 +44,7 @@ var (
 
 func main() {
 	// Standard CLI startup logs (visible before TUI takes over alt-screen)
-	color.Cyan("Helix v%s — AI-powered CLI Agent", config.HelixVersion)
+	color.Cyan("Helix v%s - AI-powered CLI Agent", config.HelixVersion)
 
 	// --------------------------
 	// Load config
@@ -51,7 +60,9 @@ func main() {
 	// Detect environment
 	// --------------------------
 	env = shell.DetectEnvironment()
-	color.Blue("%s (%s shell)", strings.Title(env.OSName), env.Shell)
+	// Use cases.Title to avoid deprecated strings.Title
+	caser := cases.Title(language.Und)
+	color.Blue("%s (%s shell)", caser.String(env.OSName), env.Shell)
 
 	// --------------------------
 	// Online check
@@ -131,8 +142,6 @@ func main() {
 	color.Blue("Initializing RAG system...")
 	ragSystem = rag.NewSystem(env)
 
-	// On first run: full blocking initialization (with progress bar).
-	// On subsequent runs: returns quickly if state + index already exist.
 	if err := ragSystem.InitializeBlocking(); err != nil {
 		color.Red("RAG initialization failed: %v", err)
 	} else if ragSystem.IsInitialized() {
@@ -157,13 +166,11 @@ func main() {
 	// --------------------------
 	color.Cyan("Connecting Neural Grid Interface...")
 
-	// 1. Create the TUI plumbing
-	// UPDATED: Now carrying tea.Msg (generic events) instead of just strings.
+	// 1. Create the TUI plumbing (carries generic tea.Msg events)
 	tuiChan := make(chan tea.Msg, 100)
 
 	// 2. Configure UX to use this channel (Headless/TUI mode)
 	gui := ux.NewUX()
-	// UPDATED: SetEventHandler accepts interface{} (strings or structs)
 	gui.SetEventHandler(func(evt interface{}) {
 		tuiChan <- evt
 	})
@@ -171,27 +178,39 @@ func main() {
 	// 3. Save Original Output & Activate Hijacker
 	originalStdout := os.Stdout
 
-	// Now we hijack os.Stdout/Stderr. Any fmt.Println calls after this line
-	// will go to the pipe -> TUI.
+	// Hijack os.Stdout/Stderr → pipe → TUI
 	restoreStdio := utils.HijackStdio(tuiChan)
 	defer restoreStdio()
 
-	// --- CRITICAL FIX: Force color library to use the hijacked pipe ---
+	// CRITICAL: Force color library to use the hijacked pipe
 	color.Output = os.Stdout
 
-	// 4. Initialize Agent with the TUI-aware UX
+	// --------------------------
+	// Stealth + Recon Initialization (Phase 1)
+	// --------------------------
+	stealthExec := stealth.NewStealthExecutor(stealth.DefaultStealthConfig())
+	reconConfig := recon.DefaultReconConfig()
+	reconEng := recon.NewReconEngine(env, reconConfig)
+
+	// 4. Initialize Agent with the TUI-aware UX, stealth, and recon
 	agentCore = agent.NewAgent(
 		env,
 		ragSystem,
 		sandbox,
 		execConfig,
 		cfg.UserPrefs.TypingEffect,
-		gui, // Inject the specific UX instance
+		gui,         // TUI‑aware UX
+		stealthExec, // memory‑only executor
+		reconEng,    // multi‑tool recon orchestrator
 	)
 
+	// Register slash command handler
+	agentCore.OnSlashCommand = func(input string) bool {
+		return handleSlashCommand(input)
+	}
+
 	// 5. Launch The Grid (Bubble Tea Program)
-	// We pass 'originalStdout' so Bubble Tea writes to the actual terminal,
-	// bypassing our hijack.
+	// Bubble Tea writes to the real terminal (originalStdout), bypassing the hijack.
 	if err := tui.Start(agentCore, tuiChan, originalStdout); err != nil {
 		restoreStdio()
 		color.Red("TUI Critical Failure: %v", err)
@@ -202,9 +221,8 @@ func main() {
 // -----------------------------------------------------------------------------
 // MOCK MODE
 // -----------------------------------------------------------------------------
-
 func runEnhancedMockMode() {
-	color.Yellow("Mock mode enabled — no real AI")
+	color.Yellow("Mock mode enabled - no real AI")
 	env = shell.DetectEnvironment()
 	execConfig.DryRun = true
 
