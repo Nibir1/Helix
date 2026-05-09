@@ -195,7 +195,7 @@ func main() {
 	// 4. Initialize Agent with the TUI-aware UX, stealth, and recon
 	agentCore = agent.NewAgent(
 		env,
-		ragSystem,
+		ragSystem, // NOW: pass the real RAG system (not a placeholder)
 		sandbox,
 		execConfig,
 		cfg.UserPrefs.TypingEffect,

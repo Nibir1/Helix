@@ -12,7 +12,7 @@ func TestNewReconEngine(t *testing.T) {
 	cfg := DefaultReconConfig()
 	eng := NewReconEngine(env, cfg)
 	if eng == nil {
-		t.Fatal("expected non‑nil engine")
+		t.Fatal("expected non-nil engine")
 	}
 }
 
@@ -20,9 +20,18 @@ func TestReconRunTool_NonexistentTool(t *testing.T) {
 	env := shell.Env{OSName: "linux"}
 	cfg := DefaultReconConfig()
 	eng := NewReconEngine(env, cfg)
-	_, err := eng.RunTool("bogus")
-	if err == nil {
-		t.Fatal("expected error for nonexistent tool")
+
+	result, err := eng.RunTool("bogus")
+	// The function itself does NOT return a hard error for missing tool;
+	// instead the error is embedded in the result so callers can decide.
+	if err != nil {
+		t.Fatalf("unexpected hard error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Error == nil {
+		t.Fatal("expected embedded error for nonexistent tool")
 	}
 }
 

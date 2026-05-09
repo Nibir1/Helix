@@ -14,6 +14,7 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/commands"
+	"helix/internal/rag"
 	"helix/internal/recon"
 	"helix/internal/shell"
 	"helix/internal/stealth"
@@ -23,6 +24,7 @@ import (
 // Agent is the core Agent Mode orchestrator.
 type Agent struct {
 	env            shell.Env
+	rag            *rag.RAGSystem
 	sandbox        *commands.DirectorySandbox
 	execConfig     commands.ExecuteConfig
 	gitManager     *commands.GitManager
@@ -39,13 +41,11 @@ type Agent struct {
 }
 
 // NewAgent creates a new Agent instance.
-// It accepts an injected UX instance for TUI compatibility, along with
-// optional stealth and reconnaissance engines.
 //
 // Args:
 //
 //	env          – detected shell environment
-//	_            – placeholder for future RAG system (unused)
+//	rag          – RAG system (may be nil if not initialized)
 //	sandbox      – directory confinement manager
 //	execConfig   – execution preferences (dry‑run, safe‑mode, etc.)
 //	typingEffect – whether to animate AI responses
@@ -54,7 +54,7 @@ type Agent struct {
 //	reconEng     – optional reconnaissance orchestrator (may be nil)
 func NewAgent(
 	env shell.Env,
-	_ interface{}, // RAG placeholder
+	ragSystem *rag.RAGSystem, // CHANGED: concrete type instead of interface{}
 	sandbox *commands.DirectorySandbox,
 	execConfig commands.ExecuteConfig,
 	typingEffect bool,
@@ -71,13 +71,14 @@ func NewAgent(
 
 	return &Agent{
 		env:            env,
+		rag:            ragSystem, // NEW: store RAG reference
 		sandbox:        sandbox,
 		execConfig:     execConfig,
 		gitManager:     gm,
 		typingEffect:   typingEffect,
 		ux:             gui,
 		stealth:        stealthExec,
-		stealthEnabled: stealthExec != nil, // enable by default if executor exists
+		stealthEnabled: stealthExec != nil,
 		recon:          reconEng,
 	}
 }
@@ -115,9 +116,24 @@ func (a *Agent) HandleInput(userInput string) {
 	// --- Slash‑command interception ---
 	if strings.HasPrefix(userInput, "/") && a.OnSlashCommand != nil {
 		if a.OnSlashCommand(userInput) {
-			return // handled internally
+			return
 		}
-		// Fall through to AI planner.
+	}
+
+	// --- RAG retrieval (if available) ---
+	ragContext := ""
+	if a.rag != nil && a.rag.IsInitialized() {
+		cmds, err := a.rag.Retrieve(userInput)
+		if err == nil && len(cmds) > 0 {
+			var sb strings.Builder
+			sb.WriteString("Relevant system commands (from the knowledge base):\n")
+			for _, cmd := range cmds {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", cmd.Name, cmd.Description))
+			}
+			ragContext = sb.String()
+		} else if err != nil {
+			a.ux.PrintDebug(fmt.Sprintf("RAG retrieval skipped: %v", err))
+		}
 	}
 
 	// --- Standard planning ---
@@ -128,7 +144,7 @@ func (a *Agent) HandleInput(userInput string) {
 		a.sandbox.GetCurrentDirectory(),
 	)
 
-	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc)
+	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
 
 	// 1) Call planner model
 	rawPlanOutput, err := ai.RunModel(plannerPrompt)

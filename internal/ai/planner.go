@@ -60,9 +60,18 @@ var (
 )
 
 // ──────────────────────────────────────────────────────────────
-// BuildPlannerPrompt — ULTRA-STRICT Version
+// BuildPlannerPrompt — ULTRA-STRICT Version (now with optional RAG context)
 // ──────────────────────────────────────────────────────────────
-func BuildPlannerPrompt(userInput string, envDescription string) string {
+func BuildPlannerPrompt(userInput string, envDescription string, ragContext string) string {
+	// Build the RAG knowledge section only if context is provided
+	ragSection := ""
+	if strings.TrimSpace(ragContext) != "" {
+		ragSection = fmt.Sprintf(`
+### RELEVANT SYSTEM COMMANDS (from Knowledge Base - use these when applicable)
+%s
+`, ragContext)
+	}
+
 	return fmt.Sprintf(`
 You are Helix's planning module.
 
@@ -199,6 +208,7 @@ NO text after.
 NO markdown.
 NO backticks.
 NO truncation.
+%s
 
 ### CURRENT REQUEST
 
@@ -207,7 +217,7 @@ User Input: %s
 Environment: %s
 
 NOW OUTPUT THE COMPLETE JSON:
-`, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
+`, ragSection, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
 }
 
 //
