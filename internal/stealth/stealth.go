@@ -56,6 +56,8 @@ func (s *StealthExecutor) Execute(command string) (string, error) {
 
 // executeWithSuppression runs the command via sh -c with environment
 // variables that prevent the shell from recording history.
+// Any non‑zero exit code is **not** treated as a fatal error – only
+// process‑start failures or timeouts will cause a real error.
 func (s *StealthExecutor) executeWithSuppression(command string) (string, error) {
 	cmd := exec.Command("sh", "-c", command)
 
@@ -75,7 +77,6 @@ func (s *StealthExecutor) executeWithSuppression(command string) (string, error)
 		if len(e) == 0 {
 			continue
 		}
-		// Cut out variables that start with any of these prefixes.
 		prefixes := []string{"HISTFILE=", "HISTSIZE=", "HISTFILESIZE=", "SAVEHIST=", "HISTIGNORE=", "HISTTIMEFORMAT="}
 		for _, p := range prefixes {
 			if len(e) >= len(p) && strings.HasPrefix(e, p) {
@@ -102,6 +103,12 @@ func (s *StealthExecutor) executeWithSuppression(command string) (string, error)
 	select {
 	case err := <-done:
 		if err != nil {
+			// If it's an exit error, we still return the output and NO error.
+			if _, ok := err.(*exec.ExitError); ok {
+				output := outBuf.String() + errBuf.String()
+				return output, nil // non‑fatal exit – do not abort mission
+			}
+			// Real error (e.g., command not found)
 			return "", fmt.Errorf("stealth command failed: %w", err)
 		}
 	case <-time.After(5 * time.Minute):

@@ -273,6 +273,7 @@ func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
 
 // WrapCommand executes the command strictly within the sandbox logic.
 // It wires the output to os.Stdout so the TUI Hijacker can see it.
+// Non‑zero exit codes are treated as non‑fatal: the mission continues.
 func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell.Env) error {
 	// 1. Validate
 	if ok, reason := ds.ValidateCommand(cmd); !ok {
@@ -285,7 +286,6 @@ func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell
 	}
 
 	// 2. Prepare Execution
-	// We use "sh -c" (or cmd /C) to handle redirects like "> file.txt" properly
 	shellBin := "/bin/sh"
 	if env.Shell != "" {
 		shellBin = env.Shell
@@ -298,13 +298,22 @@ func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell
 		c = exec.Command(shellBin, "-c", cmd)
 	}
 
-	// 3. Wire I/O for TUI Capture
-	// This is CRITICAL for Phase 2/3 TUI to display the output
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	c.Dir = ds.allowedDir // Force execution in allowed dir
+	c.Dir = ds.allowedDir
 
-	return c.Run()
+	err := c.Run()
+	if err != nil {
+		// If it's an exit error, the command ran but returned non‑zero.
+		// This is not a mission‑fatal error – just log and continue.
+		if _, ok := err.(*exec.ExitError); ok {
+			color.Yellow("Command exited with non‑zero status, continuing…")
+			return nil
+		}
+		// Real error (couldn't start the process, etc.)
+		return fmt.Errorf("command execution failed: %w", err)
+	}
+	return nil
 }
 
 func (ds *DirectorySandbox) PrintStatus() {

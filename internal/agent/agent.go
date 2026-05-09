@@ -208,6 +208,9 @@ func (a *Agent) HandleInput(userInput string) {
 			a.ux.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
 		}
 	}
+
+	// Mission complete – Red Team aesthetic
+	a.ux.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 }
 
 //
@@ -410,6 +413,7 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 }
 
 // handleReconStep processes a planner step with tool = "recon".
+// It now offers to install missing tools before retrying the scan.
 func (a *Agent) handleReconStep(step ai.PlanStep) error {
 	toolName := strings.TrimSpace(step.Action)
 	if toolName == "" {
@@ -425,26 +429,59 @@ func (a *Agent) handleReconStep(step ai.PlanStep) error {
 		}
 	}
 	a.ux.PrintCommand(fmt.Sprintf("Recon %s %s", toolName, strings.Join(args, " ")))
+
+	// First attempt
 	result, err := a.recon.RunTool(toolName, args...)
 	if err != nil {
-		// This indicates a serious internal error (like recon engine not initialized)
-		return err
+		return err // serious internal error
 	}
-	if result.Error != nil {
-		// Tool execution failed, e.g. not found or timed out.
-		// Warn but don't abort the whole plan.
-		a.ux.PrintWarning(fmt.Sprintf("Recon tool %q issue: %v", toolName, result.Error))
-		if strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
-			a.ux.PrintInfo(fmt.Sprintf("Install %s to enable this scan type.", toolName))
+
+	// Tool not found? → ask user, install, retry.
+	if result.Error != nil && strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
+		a.ux.PrintInfo(fmt.Sprintf("Recon tool %q is not installed.", toolName))
+		if a.ux.AskYesNo(fmt.Sprintf("Install %s now?", toolName)) {
+			if installErr := a.installPackage(toolName); installErr != nil {
+				a.ux.PrintError(fmt.Sprintf("Installation failed: %v", installErr))
+				return nil
+			}
+			a.ux.PrintSuccess(fmt.Sprintf("%s installed successfully — retrying the scan…", toolName))
+
+			// Retry after installation
+			result2, err2 := a.recon.RunTool(toolName, args...)
+			if err2 != nil {
+				a.ux.PrintError(fmt.Sprintf("Recon retry failed: %v", err2))
+				return nil
+			}
+			if result2.Error != nil {
+				a.ux.PrintWarning(fmt.Sprintf("Recon retry still had issue: %v", result2.Error))
+				return nil
+			}
+			a.ux.PrintSuccess(fmt.Sprintf("Recon completed in %v", result2.Elapsed))
+			if len(result2.Parsed) > 0 {
+				summary, _ := json.MarshalIndent(result2.Parsed, "", "  ")
+				a.ux.PrintData(string(summary))
+			} else {
+				a.ux.PrintInfo("No open ports or interesting results found.")
+			}
+			return nil
 		}
+		// User declined installation
+		a.ux.PrintInfo(fmt.Sprintf("Skipping recon step with %s (not installed).", toolName))
 		return nil
 	}
+
+	// Some other execution error (e.g. timeout)
+	if result.Error != nil {
+		a.ux.PrintWarning(fmt.Sprintf("Recon tool %q issue: %v", toolName, result.Error))
+		return nil
+	}
+
+	// Success – show results
 	a.ux.PrintSuccess(fmt.Sprintf("Recon completed in %v", result.Elapsed))
 	if len(result.Parsed) > 0 {
 		summary, _ := json.MarshalIndent(result.Parsed, "", "  ")
 		a.ux.PrintData(string(summary))
 	} else {
-		// No open ports or other structured results found.
 		a.ux.PrintInfo("No open ports or interesting results found.")
 	}
 	return nil
@@ -461,6 +498,25 @@ func (a *Agent) RunReconTool(tool, flags, target string) (*recon.ReconResult, er
 	}
 	args = append(args, target)
 	return a.recon.RunTool(tool, args...)
+}
+
+// installPackage attempts to install a single package using the detected
+// system package manager, after running the normal safety checks.
+func (a *Agent) installPackage(pkg string) error {
+	if err := commands.IsPackageActionSafe("install", pkg, a.env); err != nil {
+		return fmt.Errorf("package safety check failed: %w", err)
+	}
+
+	pm := commands.PackageManagerFactory(a.env)
+	if pm == nil {
+		return fmt.Errorf("no supported package manager found")
+	}
+
+	installCmd := pm.InstallCommand(pkg)
+	a.ux.PrintInfo(fmt.Sprintf("Running: %s", installCmd))
+
+	// Execute through the sandbox (respects dry‑run, safe‑mode, etc.).
+	return a.sandbox.WrapCommand(installCmd, a.execConfig, a.env)
 }
 
 // GIT — supports safe + dangerous (Option C)
