@@ -83,19 +83,26 @@ func (rs *RAGSystem) Initialize() error {
 	// 1) Load saved state if possible
 	if rs.loadSystemState() {
 		color.Green("RAG system loaded from existing state")
-		return nil
-	}
 
-	// 2) Load vector index if it exists
-	if rs.tryLoadExistingIndex() {
+		// 2) Load vector index if it exists
+	} else if rs.tryLoadExistingIndex() {
 		rs.initialized = true
 		rs.saveSystemState()
 		color.Green("RAG system loaded from existing index")
-		return nil
+
+		// 3) No index → first run → full indexing
+	} else {
+		if err := rs.fullIndexWithTimeout(); err != nil {
+			return err
+		}
 	}
 
-	// 3) No index → first run → full indexing
-	return rs.fullIndexWithTimeout()
+	// After vector store is ready, ensure MITRE techniques are indexed once
+	if rs.initialized && !rs.hasMitreIndex() {
+		rs.indexMitre()
+	}
+
+	return nil
 }
 
 // Blocks only during startup; same as Initialize() for now.
@@ -410,4 +417,84 @@ func renderProgressBarD(stage string, current, total int, rate float64, eta time
 func EndProgressBar() {
 	fmt.Print("\033[?25h\n") // show cursor
 	lastProgressLen = 0
+}
+
+// -----------------------------------------------------------------------------
+// MITRE TECHNIQUES INDEXING
+// -----------------------------------------------------------------------------
+
+// hasMitreIndex checks if any MITRE document already exists in the vector store.
+func (rs *RAGSystem) hasMitreIndex() bool {
+	docs, _ := rs.vectorStore.SearchBySource("T1059", "mitre", 1)
+	return len(docs) > 0
+}
+
+// indexMitre loads and indexes the MITRE techniques.
+func (rs *RAGSystem) indexMitre() {
+	techniques := loadMitreTechniques()
+	if len(techniques) == 0 {
+		return
+	}
+	if err := rs.vectorStore.IndexMitreTechniques(techniques); err != nil {
+		color.Yellow("MITRE indexing warning: %v", err)
+	} else {
+		color.Green("MITRE ATT&CK knowledge base indexed (%d techniques)", len(techniques))
+	}
+}
+
+// RetrieveMitre searches the vector store for MITRE techniques relevant to the query.
+func (rs *RAGSystem) RetrieveMitre(query string, max int) ([]MitreTechnique, error) {
+	if !rs.initialized {
+		return nil, nil
+	}
+	docs, err := rs.vectorStore.SearchBySource(query, "mitre", max)
+	if err != nil {
+		return nil, err
+	}
+	var techniques []MitreTechnique
+	seen := map[string]bool{}
+	for _, d := range docs {
+		id := d.Metadata.Command
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		// We don't have the full technique object here, but we can reconstruct basic info.
+		// The original MitreTechnique has ID, Name, Description, Detection, Alternatives.
+		// However, only ID + Name are in metadata; the rest are in separate documents.
+		// For the debrief, we can pass the document content directly to the AI.
+		// Simpler: we'll pass the VectorDocument itself to the explain handler,
+		// which can format them.
+		// But we'll define a lightweight result type for the caller.
+		techniques = append(techniques, MitreTechnique{
+			ID:          d.Metadata.Command,
+			Name:        d.Metadata.Description, // In our mitre docs, Description holds the name
+			Description: d.Content,              // we'll use the full content
+		})
+	}
+	return techniques, nil
+}
+
+// RetrieveMitreContext returns textual snippets from the MITRE knowledge base.
+func (rs *RAGSystem) RetrieveMitreContext(query string, max int) ([]string, error) {
+	if !rs.initialized {
+		return nil, nil
+	}
+	docs, err := rs.vectorStore.SearchBySource(query, "mitre", max*2) // fetch extra for dedup
+	if err != nil {
+		return nil, err
+	}
+	var contexts []string
+	seen := map[string]bool{}
+	for _, d := range docs {
+		if seen[d.Metadata.Command] {
+			continue
+		}
+		seen[d.Metadata.Command] = true
+		contexts = append(contexts, d.Content)
+		if len(contexts) >= max {
+			break
+		}
+	}
+	return contexts, nil
 }

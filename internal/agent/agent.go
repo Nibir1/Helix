@@ -585,3 +585,13 @@ func (a *Agent) handlePackageStep(step ai.PlanStep) error {
 
 	return nil
 }
+
+// GetUX returns the UX layer (useful for slash commands outside HandleInput).
+func (a *Agent) GetUX() *ux.UX {
+	return a.ux
+}
+
+// GetTypingEffect returns whether typing animation is enabled.
+func (a *Agent) GetTypingEffect() bool {
+	return a.typingEffect
+}

@@ -34,6 +34,7 @@ type Metadata struct {
 	Description string   `json:"description"`
 	Options     []string `json:"options"`
 	Examples    []string `json:"examples"`
+	Source      string   `json:"source"` // "man" or "mitre"
 }
 
 // VectorStore contains usable vector index and inverted index
@@ -43,6 +44,15 @@ type VectorStore struct {
 	index       map[string][]string // inverted index: word → docIDs
 	mu          sync.RWMutex
 	initialized bool
+}
+
+// MitreTechnique holds one technique from the ATT&CK matrix.
+type MitreTechnique struct {
+	ID           string   `json:"id"`           // e.g. "T1059"
+	Name         string   `json:"name"`         // e.g. "Command and Scripting Interpreter"
+	Description  string   `json:"description"`  // what the technique does
+	Detection    string   `json:"detection"`    // how blue teams might detect it
+	Alternatives []string `json:"alternatives"` // quieter paths
 }
 
 // Constructor
@@ -130,6 +140,7 @@ func (vs *VectorStore) docFromCommand(page MANPage) VectorDocument {
 			Command:     page.Name,
 			Section:     "command",
 			Description: page.Description,
+			Source:      "man",
 		},
 	}
 }
@@ -144,6 +155,7 @@ func (vs *VectorStore) docFromDescription(page MANPage) VectorDocument {
 		Metadata: Metadata{
 			Command: page.Name,
 			Section: "description",
+			Source:  "man",
 		},
 	}
 }
@@ -158,6 +170,7 @@ func (vs *VectorStore) docFromSynopsis(page MANPage) VectorDocument {
 		Metadata: Metadata{
 			Command: page.Name,
 			Section: "synopsis",
+			Source:  "man",
 		},
 	}
 }
@@ -174,6 +187,7 @@ func (vs *VectorStore) docFromOptions(page MANPage) VectorDocument {
 			Command: page.Name,
 			Section: "options",
 			Options: page.Options,
+			Source:  "man",
 		},
 	}
 }
@@ -190,6 +204,7 @@ func (vs *VectorStore) docFromExamples(page MANPage) VectorDocument {
 			Command:  page.Name,
 			Section:  "examples",
 			Examples: page.Examples,
+			Source:   "man",
 		},
 	}
 }
@@ -465,4 +480,75 @@ func (vs *VectorStore) GetStats() map[string]interface{} {
 		"index_size":      len(vs.index),
 		"initialized":     vs.initialized,
 	}
+}
+
+// ----------------- NEW: MITRE indexing ------------------
+
+// IndexMitreTechniques converts a slice of techniques into VectorDocuments
+// and indexes them just like MAN pages, but with Source = "mitre".
+func (vs *VectorStore) IndexMitreTechniques(techniques []MitreTechnique) error {
+	if len(techniques) == 0 {
+		return fmt.Errorf("no MITRE techniques to index")
+	}
+
+	for _, t := range techniques {
+		vs.addMitreDocuments(t)
+	}
+
+	vs.initialized = true
+	return vs.saveVectorIndex()
+}
+
+// addMitreDocuments creates multiple vector documents for each technique
+// so that different search facets (ID, name, description) hit the index.
+func (vs *VectorStore) addMitreDocuments(t MitreTechnique) {
+	// Document 1 – technique ID + name
+	vs.addMitreDoc(fmt.Sprintf("mitre-%s-id", t.ID),
+		fmt.Sprintf("MITRE ATT&CK %s: %s", t.ID, t.Name),
+		Metadata{Source: "mitre", Command: t.ID, Description: t.Name})
+
+	// Document 2 – full description
+	vs.addMitreDoc(fmt.Sprintf("mitre-%s-desc", t.ID),
+		t.Description,
+		Metadata{Source: "mitre", Command: t.ID, Description: t.Name})
+
+	// Document 3 – detection notes
+	if t.Detection != "" {
+		vs.addMitreDoc(fmt.Sprintf("mitre-%s-detection", t.ID),
+			fmt.Sprintf("Detection for %s: %s", t.ID, t.Detection),
+			Metadata{Source: "mitre", Command: t.ID, Description: t.Name})
+	}
+
+	// Document 4 – alternatives
+	if len(t.Alternatives) > 0 {
+		altText := strings.Join(t.Alternatives, " | ")
+		vs.addMitreDoc(fmt.Sprintf("mitre-%s-alt", t.ID),
+			fmt.Sprintf("Quieter alternatives for %s: %s", t.ID, altText),
+			Metadata{Source: "mitre", Command: t.ID, Description: t.Name})
+	}
+}
+
+func (vs *VectorStore) addMitreDoc(id, content string, meta Metadata) {
+	doc := VectorDocument{
+		ID:       id,
+		Content:  content,
+		Metadata: meta,
+	}
+	vs.documents[id] = doc
+	vs.addToIndex(doc)
+}
+
+// SearchBySource is a convenience wrapper around Search that filters by Source.
+func (vs *VectorStore) SearchBySource(query, source string, limit int) ([]VectorDocument, error) {
+	all, err := vs.Search(query, limit*3) // over-fetch to allow filtering
+	if err != nil {
+		return nil, err
+	}
+	var filtered []VectorDocument
+	for _, d := range all {
+		if d.Metadata.Source == source && len(filtered) < limit {
+			filtered = append(filtered, d)
+		}
+	}
+	return filtered, nil
 }

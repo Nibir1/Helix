@@ -55,6 +55,8 @@ func handleSlashCommand(input string) bool {
 		handleStealthCommand(input)
 	case "/scan":
 		handleQuickScan(parts)
+	case "/explain":
+		handleExplainCommand(input)
 	default:
 		return false // unknown – let the AI handle it
 	}
@@ -378,4 +380,103 @@ func handleQuickScan(args []string) {
 			color.Cyan("  %s: %v", k, v)
 		}
 	}
+}
+
+// -------------------------------------------------------
+// /explain – AI-powered technique analysis
+// -------------------------------------------------------
+
+func handleExplainCommand(input string) {
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/explain"))
+	if args == "" {
+		color.Red("Usage: /explain <command or technique description>")
+		return
+	}
+
+	color.Cyan("Adversarial Mind – analysing request...")
+
+	// Retrieve MITRE context
+	mitreContext := ""
+	if ragSystem != nil && ragSystem.IsInitialized() {
+		snippets, err := ragSystem.RetrieveMitreContext(args, 3)
+		if err == nil && len(snippets) > 0 {
+			mitreContext = "MITRE ATT&CK knowledge:\n" + strings.Join(snippets, "\n")
+		}
+	}
+
+	// UPDATED PROMPT: explicitly ban all markdown
+	prompt := fmt.Sprintf(`
+You are Helix's Adversarial Mind – an explainable attack planning module.
+
+Given the user's command or technique description, produce a structured debrief with these sections:
+
+1. Technique(s): Which MITRE ATT&CK techniques are involved? (list them with IDs and names)
+2. Expected Detections: What security tools or log sources would likely detect this activity?
+3. Quieter Alternatives: How could the same objective be achieved with less noise or fewer footprints?
+
+Use the following MITRE ATT&CK context if provided; otherwise, rely on your internal knowledge.
+
+MITRE Context:
+%s
+
+User Request: %s
+
+FORMAT RULES (STRICT):
+- Use ONLY plain text. NO markdown, NO bold/italic, NO backticks, NO hash signs.
+- Separate sections with blank lines.
+- Use simple hyphens for bullet points (- ).
+- Keep the section titles exactly as given: "1. Technique(s):", "2. Expected Detections:", "3. Quieter Alternatives:"
+- Do NOT wrap anything in asterisks.
+
+Now output the debrief:`,
+		mitreContext, args)
+
+	explainConfig := ai.ModelConfig{
+		Temperature: 0.7,
+		TopP:        0.9,
+		TopK:        40,
+		MaxTokens:   512,
+	}
+
+	resp, err := ai.RunModelWithConfig(prompt, explainConfig)
+	if err != nil {
+		color.Red("AI call failed: %v", err)
+		return
+	}
+
+	// Strip any rogue markdown and add colour to section headers
+	cleaned := cleanDebrief(strings.TrimSpace(resp))
+
+	// Display via agent UX (typing effect, TUI‑routed)
+	if agentCore != nil {
+		agentCore.GetUX().PrintAIMessage(cleaned, agentCore.GetTypingEffect())
+	} else {
+		color.Cyan(cleaned)
+	}
+
+	// Standard mission‑complete banner
+	if agentCore != nil {
+		agentCore.GetUX().PrintSuccess("Helix :: GRID STATUS :: CLEAR")
+	} else {
+		color.Green("Helix :: GRID STATUS :: CLEAR")
+	}
+}
+
+// cleanDebrief removes markdown artefacts and colourises section headers.
+func cleanDebrief(text string) string {
+	// Remove all double‑asterisks (bold markers)
+	text = strings.ReplaceAll(text, "**", "")
+
+	// Colourise the three expected section headers with cyan
+	headers := []string{
+		"1. Technique(s):",
+		"2. Expected Detections:",
+		"3. Quieter Alternatives:",
+	}
+	for _, h := range headers {
+		coloured := color.New(color.FgCyan, color.Bold).Sprint(h)
+		text = strings.Replace(text, h, coloured, 1)
+	}
+
+	return text
 }
