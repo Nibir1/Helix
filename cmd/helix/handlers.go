@@ -13,6 +13,7 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/commands"
+	"helix/internal/rag"
 	"helix/internal/utils"
 
 	"github.com/fatih/color"
@@ -57,6 +58,8 @@ func handleSlashCommand(input string) bool {
 		handleQuickScan(parts)
 	case "/explain":
 		handleExplainCommand(input)
+	case "/exploit":
+		handleExploitCommand(input)
 	default:
 		return false // unknown – let the AI handle it
 	}
@@ -479,4 +482,215 @@ func cleanDebrief(text string) string {
 	}
 
 	return text
+}
+
+// -------------------------------------------------------
+// /exploit – AI‑driven exploit suggestion with blast‑radius limiter
+// -------------------------------------------------------
+
+func handleExploitCommand(input string) {
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/exploit"))
+	args = strings.Trim(args, `"'`)
+
+	if args == "" {
+		color.Red("Usage: /exploit <target description or vulnerability>")
+		return
+	}
+
+	color.Cyan("Guardian – searching exploit knowledge base...")
+
+	if ragSystem == nil || !ragSystem.IsInitialized() {
+		color.Red("Exploit knowledge base not available.")
+		return
+	}
+
+	allEntries := ragSystem.GetAllExploitEntries()
+	if len(allEntries) == 0 {
+		color.Red("No exploit entries available in the knowledge base.")
+		return
+	}
+
+	// Filter by current OS
+	var compatible []rag.ExploitEntry
+	for _, e := range allEntries {
+		if isPlatformCompatible(e.Platform, env.OSName) {
+			compatible = append(compatible, e)
+		}
+	}
+
+	if len(compatible) == 0 {
+		color.Red("No exploits available for your current OS (%s).", env.OSName)
+		return
+	}
+
+	// OS‑aware feedback
+	if len(compatible) == 1 && compatible[0].Platform == "multi" {
+		color.Yellow("Only one multi‑platform exploit matches your OS (%s).", env.OSName)
+	} else {
+		color.Cyan("Exploit candidates filtered for your OS (%s):", env.OSName)
+	}
+	for _, e := range compatible {
+		color.Cyan("   • %s (%s) – %s", e.ID, e.CVE, truncateText(e.Description, 80))
+	}
+
+	// Build context string for the AI
+	var sb strings.Builder
+	sb.WriteString("Candidate exploits (filtered for current OS):\n")
+	for _, e := range compatible {
+		sb.WriteString(fmt.Sprintf("%s (%s): %s\n", e.ID, e.CVE, e.Description))
+	}
+	contexts := []string{sb.String()}
+
+	var contextBuf strings.Builder
+	contextBuf.WriteString("Candidate exploits:\n")
+	for _, ctx := range contexts {
+		contextBuf.WriteString(ctx)
+		contextBuf.WriteString("\n")
+	}
+
+	prompt := fmt.Sprintf(`
+You are Helix's Exploit Suggestor & Guardian.
+
+Given the user's request and the list of candidate exploits, select the most appropriate one.
+If no candidate clearly fits the request, output "NONE" as the exploit ID.
+
+User Request: %s
+
+%s
+
+INSTRUCTIONS (STRICT):
+- Output ONLY the exploit ID (e.g., EDB-12345) or "NONE" on the first line.
+- On the second line, output a ONE‑SENTENCE justification for your choice.
+- NO markdown, NO backticks, NO extra text.
+
+Now output your selection:`, args, contextBuf.String())
+
+	selectCfg := ai.ModelConfig{
+		Temperature: 0.4,
+		TopP:        0.9,
+		TopK:        40,
+		MaxTokens:   80,
+	}
+
+	resp, err := ai.RunModelWithConfig(prompt, selectCfg)
+	if err != nil {
+		color.Red("AI selection failed: %v", err)
+		return
+	}
+
+	lines := strings.SplitN(strings.TrimSpace(resp), "\n", 2)
+	selectedID := strings.TrimSpace(lines[0])
+	justification := ""
+	if len(lines) > 1 {
+		justification = strings.TrimSpace(lines[1])
+	}
+	selectedID = strings.Trim(selectedID, "`'\". ")
+
+	// Handle "NONE" or empty selection gracefully
+	if strings.EqualFold(selectedID, "none") || selectedID == "" {
+		color.Yellow("No exploit in the knowledge base closely matches your query.")
+		if justification != "" {
+			color.Cyan("AI reasoning: %s", justification)
+		}
+		return
+	}
+
+	entry, found := ragSystem.GetExploitByID(selectedID)
+	if !found {
+		color.Yellow("No exploit in the knowledge base matches the AI selection (%s).", selectedID)
+		if justification != "" {
+			color.Cyan("AI reasoning: %s", justification)
+		}
+		return
+	}
+
+	// Risk scoring and blast‑radius limiter
+	riskCategory := computeExploitRisk(entry)
+	color.Cyan("Selected: %s (%s) – CVSS %.1f", entry.ID, entry.CVE, entry.CVSS)
+	color.Cyan("Risk category: %s", riskCategory)
+
+	if riskCategory == "RED" {
+		color.Red("BLAST‑RADIUS LIMITER ENGAGED")
+		color.Red("This exploit is classified as RED ZONE – it has high CVSS, high impact, or high detection likelihood.")
+		color.Yellow("Blast radius: %s", entry.BlastRadius)
+		color.Yellow("Detection: %s", entry.Detection)
+		if !agentCore.GetUX().AskYesNo("This exploit is HIGH‑RISK (RED ZONE). Proceed with suggestion?") {
+			color.Yellow("Exploit suggestion cancelled.")
+			return
+		}
+		color.Green("Red‑zone confirmation accepted. Proceeding with suggestion.")
+	} else if riskCategory == "YELLOW" {
+		color.Yellow("Warning: This exploit carries moderate risk (YELLOW zone).")
+	}
+
+	displayExploitDebrief(entry, justification)
+}
+
+// truncateText shortens a string for display purposes.
+func truncateText(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}
+
+// isPlatformCompatible checks if the exploit's platform string matches the current OS.
+// Example: "windows" matches "windows", "linux" matches "linux", "multi" matches any.
+func isPlatformCompatible(exploitPlatform, currentOS string) bool {
+	plat := strings.ToLower(strings.TrimSpace(exploitPlatform))
+	os := strings.ToLower(currentOS)
+	if plat == "multi" || plat == "" {
+		return true
+	}
+	// Handle "linux/windows" style
+	parts := strings.Split(plat, "/")
+	for _, p := range parts {
+		if strings.TrimSpace(p) == os {
+			return true
+		}
+	}
+	return false
+}
+
+// computeExploitRisk categorises an exploit as GREEN, YELLOW, or RED.
+func computeExploitRisk(e rag.ExploitEntry) string {
+	// Heuristic: CVSS >= 7.0 or impact rce/lpe with high privileges => RED
+	if e.CVSS >= 7.0 || (e.Impact == "rce" && e.Privileges == "none") || e.Impact == "lpe" {
+		return "RED"
+	}
+	// CVSS >= 4.0 or dos/info with potential expansion => YELLOW
+	if e.CVSS >= 4.0 || e.Impact == "dos" || e.Impact == "rce" {
+		return "YELLOW"
+	}
+	return "GREEN"
+}
+
+// displayExploitDebrief shows the full exploit details in a structured format.
+func displayExploitDebrief(e rag.ExploitEntry, justification string) {
+	bold := color.New(color.FgCyan, color.Bold).SprintFunc()
+	agentCore.GetUX().PrintSystemMessage("=== Exploit Debrief ===")
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("ID:"), e.ID))
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("CVE:"), e.CVE))
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Platform:"), e.Platform))
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %.1f", bold("CVSS Score:"), e.CVSS))
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Impact:"), e.Impact))
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Privileges:"), e.Privileges))
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Detection:"), e.Detection))
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Blast Radius:"), e.BlastRadius))
+	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("AI Justification:"), justification))
+	agentCore.GetUX().PrintAIMessage("Alternatives (quieter paths):", false)
+	for _, alt := range e.Alternatives {
+		agentCore.GetUX().PrintData(fmt.Sprintf("  • %s", alt))
+	}
+	agentCore.GetUX().PrintSuccess("Helix :: GRID STATUS :: CLEAR")
+}
+
+// displayExploitFallback shows the AI response when no matching exploit entry is found.
+func displayExploitFallback(id, justification string) {
+	color.Cyan("AI suggested exploit: %s", id)
+	if justification != "" {
+		color.Cyan("Justification: %s", justification)
+	}
+	color.Yellow("Full exploit metadata not available in the knowledge base.")
+	color.Yellow("You may still evaluate the suggestion manually.")
 }

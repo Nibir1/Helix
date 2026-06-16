@@ -552,3 +552,73 @@ func (vs *VectorStore) SearchBySource(query, source string, limit int) ([]Vector
 	}
 	return filtered, nil
 }
+
+// ----------------- Exploit indexing ------------------
+
+// IndexExploitEntries creates vector documents for each exploit entry.
+func (vs *VectorStore) IndexExploitEntries(entries []ExploitEntry) error {
+	if len(entries) == 0 {
+		return fmt.Errorf("no exploit entries to index")
+	}
+
+	for _, e := range entries {
+		vs.addExploitDocuments(e)
+	}
+
+	vs.initialized = true
+	return vs.saveVectorIndex()
+}
+
+func (vs *VectorStore) addExploitDocuments(e ExploitEntry) {
+	// 1) ID + CVE + short description
+	vs.addExploitDoc(
+		fmt.Sprintf("exploit-%s-id", e.ID),
+		fmt.Sprintf("Exploit %s (%s): %s", e.ID, e.CVE, e.Description),
+		Metadata{Source: "exploit", Command: e.ID, Description: e.CVE},
+	)
+
+	// 2) Full description
+	vs.addExploitDoc(
+		fmt.Sprintf("exploit-%s-desc", e.ID),
+		e.Description,
+		Metadata{Source: "exploit", Command: e.ID},
+	)
+
+	// 3) Detection
+	if e.Detection != "" {
+		vs.addExploitDoc(
+			fmt.Sprintf("exploit-%s-detection", e.ID),
+			fmt.Sprintf("Detection for %s: %s", e.ID, e.Detection),
+			Metadata{Source: "exploit", Command: e.ID},
+		)
+	}
+
+	// 4) Alternatives
+	if len(e.Alternatives) > 0 {
+		altText := strings.Join(e.Alternatives, " | ")
+		vs.addExploitDoc(
+			fmt.Sprintf("exploit-%s-alt", e.ID),
+			fmt.Sprintf("Quieter alternatives for %s: %s", e.ID, altText),
+			Metadata{Source: "exploit", Command: e.ID},
+		)
+	}
+
+	// 5) Blast radius
+	if e.BlastRadius != "" {
+		vs.addExploitDoc(
+			fmt.Sprintf("exploit-%s-blast", e.ID),
+			fmt.Sprintf("Blast radius of %s: %s", e.ID, e.BlastRadius),
+			Metadata{Source: "exploit", Command: e.ID},
+		)
+	}
+}
+
+func (vs *VectorStore) addExploitDoc(id, content string, meta Metadata) {
+	doc := VectorDocument{
+		ID:       id,
+		Content:  content,
+		Metadata: meta,
+	}
+	vs.documents[id] = doc
+	vs.addToIndex(doc)
+}

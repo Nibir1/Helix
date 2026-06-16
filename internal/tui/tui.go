@@ -206,9 +206,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "y", "Y":
 				m.confirmReply <- true
 				m.uiState = StateMain
+				// Force an immediate frame update and resume listening for agent output
+				return m, tea.Batch(
+					tea.Tick(time.Millisecond, func(t time.Time) tea.Msg { return nil }),
+					waitForAgentOutput(m.agentCh),
+				)
 			case "n", "N":
 				m.confirmReply <- false
 				m.uiState = StateMain
+				return m, tea.Batch(
+					tea.Tick(time.Millisecond, func(t time.Time) tea.Msg { return nil }),
+					waitForAgentOutput(m.agentCh),
+				)
 			}
 			return m, nil
 		}
@@ -512,7 +521,7 @@ func (m AppModel) inputView() string {
 func (m AppModel) overlayView(base string) string {
 	msg := m.styles.ModalText.Render(m.confirmMsg)
 	dialog := m.styles.ModalBorder.Render(fmt.Sprintf(
-		"⚠️  CRITICAL DECISION REQUIRED    ⚠️\n\n%s\n\n[Y] EXECUTE    [N] ABORT",
+		"⚠️  CRITICAL DECISION REQUIRED ⚠️\n\n%s\n\n[Y] EXECUTE    [N] ABORT",
 		msg,
 	))
 	return lipgloss.Place(

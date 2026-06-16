@@ -41,12 +41,13 @@ type SystemState struct {
 // -----------------------------------------------------------------------------
 
 type RAGSystem struct {
-	env         shell.Env
-	indexer     *MANIndexer
-	vectorStore *VectorStore
-	initialized bool
-	indexDir    string
-	stateFile   string
+	env            shell.Env
+	indexer        *MANIndexer
+	vectorStore    *VectorStore
+	initialized    bool
+	indexDir       string
+	stateFile      string
+	exploitEntries map[string]ExploitEntry
 }
 
 // NewSystem constructs a new RAG system
@@ -60,11 +61,12 @@ func NewSystem(env shell.Env) *RAGSystem {
 	stateFile := filepath.Join(indexDir, stateFileName)
 
 	return &RAGSystem{
-		env:         env,
-		indexDir:    indexDir,
-		stateFile:   stateFile,
-		indexer:     NewMANIndexer(env),
-		vectorStore: NewVectorStore(env),
+		env:            env,
+		indexDir:       indexDir,
+		stateFile:      stateFile,
+		indexer:        NewMANIndexer(env),
+		vectorStore:    NewVectorStore(env),
+		exploitEntries: make(map[string]ExploitEntry),
 	}
 }
 
@@ -100,6 +102,11 @@ func (rs *RAGSystem) Initialize() error {
 	// After vector store is ready, ensure MITRE techniques are indexed once
 	if rs.initialized && !rs.hasMitreIndex() {
 		rs.indexMitre()
+	}
+
+	// Ensure exploit entries are indexed once
+	if rs.initialized && !rs.hasExploitIndex() {
+		rs.indexExploits()
 	}
 
 	return nil
@@ -497,4 +504,70 @@ func (rs *RAGSystem) RetrieveMitreContext(query string, max int) ([]string, erro
 		}
 	}
 	return contexts, nil
+}
+
+// -----------------------------------------------------------------------------
+// EXPLOIT ENTRIES INDEXING
+// -----------------------------------------------------------------------------
+
+// hasExploitIndex checks if any exploit document already exists.
+func (rs *RAGSystem) hasExploitIndex() bool {
+	docs, _ := rs.vectorStore.SearchBySource("EDB-", "exploit", 1)
+	return len(docs) > 0
+}
+
+// indexExploits loads and indexes the exploit entries.
+func (rs *RAGSystem) indexExploits() {
+	entries := loadExploitEntries()
+	if len(entries) == 0 {
+		return
+	}
+	// Store entries for later ID lookup
+	for _, e := range entries {
+		rs.exploitEntries[e.ID] = e
+	}
+	if err := rs.vectorStore.IndexExploitEntries(entries); err != nil {
+		color.Yellow("Exploit indexing warning: %v", err)
+	} else {
+		color.Green("Exploit knowledge base indexed (%d entries)", len(entries))
+	}
+}
+
+// GetExploitByID returns a full exploit entry by its ID.
+func (rs *RAGSystem) GetExploitByID(id string) (ExploitEntry, bool) {
+	e, ok := rs.exploitEntries[id]
+	return e, ok
+}
+
+// RetrieveExploitContext returns textual snippets from the exploit knowledge base.
+func (rs *RAGSystem) RetrieveExploitContext(query string, max int) ([]string, error) {
+	if !rs.initialized {
+		return nil, nil
+	}
+	docs, err := rs.vectorStore.SearchBySource(query, "exploit", max*2)
+	if err != nil {
+		return nil, err
+	}
+	var contexts []string
+	seen := map[string]bool{}
+	for _, d := range docs {
+		if seen[d.Metadata.Command] {
+			continue
+		}
+		seen[d.Metadata.Command] = true
+		contexts = append(contexts, d.Content)
+		if len(contexts) >= max {
+			break
+		}
+	}
+	return contexts, nil
+}
+
+// GetAllExploitEntries returns a slice of all currently loaded exploit entries.
+func (rs *RAGSystem) GetAllExploitEntries() []ExploitEntry {
+	entries := make([]ExploitEntry, 0, len(rs.exploitEntries))
+	for _, e := range rs.exploitEntries {
+		entries = append(entries, e)
+	}
+	return entries
 }
