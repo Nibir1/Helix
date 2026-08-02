@@ -1,8 +1,5 @@
 // cmd/helix/main.go
 // Purpose: Entry point for Helix – AI‑powered CLI assistant.
-// Author: Helix Red Team
-// Date: 2026-05-09
-// Dependencies: all internal packages, Bubble Tea, fatih/color
 
 package main
 
@@ -43,6 +40,12 @@ var (
 )
 
 func main() {
+	// Check for update-only mode first (before heavy init)
+	if len(os.Args) > 1 && os.Args[1] == "update" {
+		runKnowledgeUpdate()
+		return
+	}
+
 	// Standard CLI startup logs (visible before TUI takes over alt-screen)
 	color.Cyan("Helix v%s - AI-powered CLI Agent", config.HelixVersion)
 
@@ -60,7 +63,6 @@ func main() {
 	// Detect environment
 	// --------------------------
 	env = shell.DetectEnvironment()
-	// Use cases.Title to avoid deprecated strings.Title
 	caser := cases.Title(language.Und)
 	color.Blue("%s (%s shell)", caser.String(env.OSName), env.Shell)
 
@@ -79,6 +81,21 @@ func main() {
 	// --------------------------
 	sandbox = commands.NewDirectorySandbox()
 	execConfig = commands.DefaultExecuteConfig()
+
+	// --------------------------
+	// Initialize SQLite Database (Phase 3.5)
+	// --------------------------
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/tmp"
+	}
+	db, err := rag.OpenDB(homeDir)
+	if err != nil {
+		color.Red("Database error: %v", err)
+		return
+	}
+	defer db.Close()
+	color.Green("Knowledge database ready")
 
 	// --------------------------
 	// AI Provider selection
@@ -140,7 +157,7 @@ func main() {
 	// Initialize RAG (blocking on first run)
 	// --------------------------
 	color.Blue("Initializing RAG system...")
-	ragSystem = rag.NewSystem(env)
+	ragSystem = rag.NewSystem(env, db) // pass DB
 
 	if err := ragSystem.InitializeBlocking(); err != nil {
 		color.Red("RAG initialization failed: %v", err)
@@ -166,10 +183,10 @@ func main() {
 	// --------------------------
 	color.Cyan("Connecting Neural Grid Interface...")
 
-	// 1. Create the TUI plumbing (carries generic tea.Msg events)
+	// 1. Create the TUI plumbing
 	tuiChan := make(chan tea.Msg, 100)
 
-	// 2. Configure UX to use this channel (Headless/TUI mode)
+	// 2. Configure UX to use this channel
 	gui := ux.NewUX()
 	gui.SetEventHandler(func(evt interface{}) {
 		tuiChan <- evt
@@ -177,8 +194,6 @@ func main() {
 
 	// 3. Save Original Output & Activate Hijacker
 	originalStdout := os.Stdout
-
-	// Hijack os.Stdout/Stderr → pipe → TUI
 	restoreStdio := utils.HijackStdio(tuiChan)
 	defer restoreStdio()
 
@@ -186,22 +201,22 @@ func main() {
 	color.Output = os.Stdout
 
 	// --------------------------
-	// Stealth + Recon Initialization (Phase 1)
+	// Stealth + Recon Initialization
 	// --------------------------
 	stealthExec := stealth.NewStealthExecutor(stealth.DefaultStealthConfig())
 	reconConfig := recon.DefaultReconConfig()
 	reconEng := recon.NewReconEngine(env, reconConfig)
 
-	// 4. Initialize Agent with the TUI-aware UX, stealth, and recon
+	// 4. Initialize Agent with the TUI-aware UX, stealth, recon, and RAG
 	agentCore = agent.NewAgent(
 		env,
-		ragSystem, // NOW: pass the real RAG system (not a placeholder)
+		ragSystem, // the same RAG system (now with DB)
 		sandbox,
 		execConfig,
 		cfg.UserPrefs.TypingEffect,
-		gui,         // TUI‑aware UX
-		stealthExec, // memory‑only executor
-		reconEng,    // multi‑tool recon orchestrator
+		gui,
+		stealthExec,
+		reconEng,
 	)
 
 	// Register slash command handler
@@ -209,13 +224,34 @@ func main() {
 		return handleSlashCommand(input)
 	}
 
-	// 5. Launch The Grid (Bubble Tea Program)
-	// Bubble Tea writes to the real terminal (originalStdout), bypassing the hijack.
+	// 5. Launch The Grid
 	if err := tui.Start(agentCore, tuiChan, originalStdout); err != nil {
 		restoreStdio()
 		color.Red("TUI Critical Failure: %v", err)
 		os.Exit(1)
 	}
+}
+
+// runKnowledgeUpdate performs a standalone update of the knowledge base.
+func runKnowledgeUpdate() {
+	color.Cyan("Helix Knowledge Update Tool")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/tmp"
+	}
+	db, err := rag.OpenDB(homeDir)
+	if err != nil {
+		color.Red("Database error: %v", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if err := rag.UpdateAll(db); err != nil {
+		color.Red("Update failed: %v", err)
+		os.Exit(1)
+	}
+	color.Green("Knowledge base updated successfully.")
 }
 
 // -----------------------------------------------------------------------------

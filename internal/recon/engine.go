@@ -2,8 +2,7 @@
 // Package recon provides a multi‑tool reconnaissance orchestrator.
 // It parses natural‑language recon commands from the planner, runs
 // tools like nmap/masscan/ffuf, and gathers structured results.
-// Author: Helix Red Team
-// Date: 2026-05-09
+
 package recon
 
 import (

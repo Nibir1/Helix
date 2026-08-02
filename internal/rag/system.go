@@ -1,9 +1,11 @@
 // internal/rag/system.go
+// Package rag provides retrieval-augmented generation components.
 
 package rag
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -47,11 +49,13 @@ type RAGSystem struct {
 	initialized    bool
 	indexDir       string
 	stateFile      string
-	exploitEntries map[string]ExploitEntry
+	exploitEntries map[string]ExploitEntry // hardcoded fallback (Phase 3)
+	db             *sql.DB                 // SQLite knowledge base (Phase 3.5)
 }
 
-// NewSystem constructs a new RAG system
-func NewSystem(env shell.Env) *RAGSystem {
+// NewSystem constructs a new RAG system.
+// The database connection is mandatory for the scalable backend.
+func NewSystem(env shell.Env, db *sql.DB) *RAGSystem {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "/tmp"
@@ -67,6 +71,7 @@ func NewSystem(env shell.Env) *RAGSystem {
 		indexer:        NewMANIndexer(env),
 		vectorStore:    NewVectorStore(env),
 		exploitEntries: make(map[string]ExploitEntry),
+		db:             db,
 	}
 }
 
@@ -104,7 +109,8 @@ func (rs *RAGSystem) Initialize() error {
 		rs.indexMitre()
 	}
 
-	// Ensure exploit entries are indexed once
+	// Ensure exploit entries are loaded into memory (always, for fallback)
+	rs.loadExploitEntries()
 	if rs.initialized && !rs.hasExploitIndex() {
 		rs.indexExploits()
 	}
@@ -242,7 +248,7 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 }
 
 // -----------------------------------------------------------------------------
-// RETRIEVAL
+// RETRIEVAL (MAN pages via vector store)
 // -----------------------------------------------------------------------------
 
 func (rs *RAGSystem) Retrieve(query string) ([]CommandInfo, error) {
@@ -278,6 +284,19 @@ func (rs *RAGSystem) GetSystemStats() map[string]interface{} {
 		for k, v := range rs.vectorStore.GetStats() {
 			stats[k] = v
 		}
+	}
+
+	// Add database stats if available
+	if rs.db != nil {
+		var cveCount, exploitCount, kevCount, mitreCount int
+		rs.db.QueryRow("SELECT COUNT(*) FROM cve").Scan(&cveCount)
+		rs.db.QueryRow("SELECT COUNT(*) FROM exploit").Scan(&exploitCount)
+		rs.db.QueryRow("SELECT COUNT(*) FROM kev").Scan(&kevCount)
+		rs.db.QueryRow("SELECT COUNT(*) FROM mitre_technique").Scan(&mitreCount)
+		stats["db_cves"] = cveCount
+		stats["db_exploits"] = exploitCount
+		stats["db_kev"] = kevCount
+		stats["db_mitre"] = mitreCount
 	}
 
 	return stats
@@ -427,16 +446,14 @@ func EndProgressBar() {
 }
 
 // -----------------------------------------------------------------------------
-// MITRE TECHNIQUES INDEXING
+// MITRE TECHNIQUES INDEXING (hardcoded fallback)
 // -----------------------------------------------------------------------------
 
-// hasMitreIndex checks if any MITRE document already exists in the vector store.
 func (rs *RAGSystem) hasMitreIndex() bool {
 	docs, _ := rs.vectorStore.SearchBySource("T1059", "mitre", 1)
 	return len(docs) > 0
 }
 
-// indexMitre loads and indexes the MITRE techniques.
 func (rs *RAGSystem) indexMitre() {
 	techniques := loadMitreTechniques()
 	if len(techniques) == 0 {
@@ -449,7 +466,6 @@ func (rs *RAGSystem) indexMitre() {
 	}
 }
 
-// RetrieveMitre searches the vector store for MITRE techniques relevant to the query.
 func (rs *RAGSystem) RetrieveMitre(query string, max int) ([]MitreTechnique, error) {
 	if !rs.initialized {
 		return nil, nil
@@ -466,28 +482,20 @@ func (rs *RAGSystem) RetrieveMitre(query string, max int) ([]MitreTechnique, err
 			continue
 		}
 		seen[id] = true
-		// We don't have the full technique object here, but we can reconstruct basic info.
-		// The original MitreTechnique has ID, Name, Description, Detection, Alternatives.
-		// However, only ID + Name are in metadata; the rest are in separate documents.
-		// For the debrief, we can pass the document content directly to the AI.
-		// Simpler: we'll pass the VectorDocument itself to the explain handler,
-		// which can format them.
-		// But we'll define a lightweight result type for the caller.
 		techniques = append(techniques, MitreTechnique{
 			ID:          d.Metadata.Command,
-			Name:        d.Metadata.Description, // In our mitre docs, Description holds the name
-			Description: d.Content,              // we'll use the full content
+			Name:        d.Metadata.Description,
+			Description: d.Content,
 		})
 	}
 	return techniques, nil
 }
 
-// RetrieveMitreContext returns textual snippets from the MITRE knowledge base.
 func (rs *RAGSystem) RetrieveMitreContext(query string, max int) ([]string, error) {
 	if !rs.initialized {
 		return nil, nil
 	}
-	docs, err := rs.vectorStore.SearchBySource(query, "mitre", max*2) // fetch extra for dedup
+	docs, err := rs.vectorStore.SearchBySource(query, "mitre", max*2)
 	if err != nil {
 		return nil, err
 	}
@@ -507,24 +515,31 @@ func (rs *RAGSystem) RetrieveMitreContext(query string, max int) ([]string, erro
 }
 
 // -----------------------------------------------------------------------------
-// EXPLOIT ENTRIES INDEXING
+// EXPLOIT ENTRIES INDEXING (hardcoded fallback)
 // -----------------------------------------------------------------------------
 
-// hasExploitIndex checks if any exploit document already exists.
 func (rs *RAGSystem) hasExploitIndex() bool {
 	docs, _ := rs.vectorStore.SearchBySource("EDB-", "exploit", 1)
 	return len(docs) > 0
 }
 
-// indexExploits loads and indexes the exploit entries.
+// loadExploitEntries populates the in-memory exploitEntries map from hardcoded data.
+// It should be called on every startup regardless of vector index status.
+func (rs *RAGSystem) loadExploitEntries() {
+	if len(rs.exploitEntries) > 0 {
+		return // already loaded
+	}
+	entries := loadExploitEntries()
+	for _, e := range entries {
+		rs.exploitEntries[e.ID] = e
+	}
+}
+
+// indexExploits now only indexes into the vector store.
 func (rs *RAGSystem) indexExploits() {
 	entries := loadExploitEntries()
 	if len(entries) == 0 {
 		return
-	}
-	// Store entries for later ID lookup
-	for _, e := range entries {
-		rs.exploitEntries[e.ID] = e
 	}
 	if err := rs.vectorStore.IndexExploitEntries(entries); err != nil {
 		color.Yellow("Exploit indexing warning: %v", err)
@@ -533,13 +548,11 @@ func (rs *RAGSystem) indexExploits() {
 	}
 }
 
-// GetExploitByID returns a full exploit entry by its ID.
 func (rs *RAGSystem) GetExploitByID(id string) (ExploitEntry, bool) {
 	e, ok := rs.exploitEntries[id]
 	return e, ok
 }
 
-// RetrieveExploitContext returns textual snippets from the exploit knowledge base.
 func (rs *RAGSystem) RetrieveExploitContext(query string, max int) ([]string, error) {
 	if !rs.initialized {
 		return nil, nil
@@ -563,11 +576,43 @@ func (rs *RAGSystem) RetrieveExploitContext(query string, max int) ([]string, er
 	return contexts, nil
 }
 
-// GetAllExploitEntries returns a slice of all currently loaded exploit entries.
 func (rs *RAGSystem) GetAllExploitEntries() []ExploitEntry {
 	entries := make([]ExploitEntry, 0, len(rs.exploitEntries))
 	for _, e := range rs.exploitEntries {
 		entries = append(entries, e)
 	}
 	return entries
+}
+
+// -----------------------------------------------------------------------------
+// PHASE 3.5 – SQLite-Backed Semantic Search & Update
+// -----------------------------------------------------------------------------
+
+// SemanticSearch uses the SQLite database (FTS5 + embeddings) to find relevant
+// knowledge entries. Falls back to hardcoded vector store if DB not available.
+func (rs *RAGSystem) SemanticSearch(query string, limit int) ([]KnowledgeEntry, error) {
+	if rs.db != nil {
+		return SemanticSearch(rs.db, query, limit) // from search.go
+	}
+	// Fallback to old keyword search via vector store (if initialized)
+	if !rs.initialized {
+		return nil, nil
+	}
+	// We can approximate by fetching exploit context and MITRE context, but it's not ideal.
+	// For now, return empty.
+	return nil, nil
+}
+
+// UpdateKnowledge triggers a full update of the SQLite knowledge base.
+// It assumes rs.db is set.
+func (rs *RAGSystem) UpdateKnowledge() error {
+	if rs.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	return UpdateAll(rs.db)
+}
+
+// GetDB returns the underlying database handle (for direct queries if needed).
+func (rs *RAGSystem) GetDB() *sql.DB {
+	return rs.db
 }

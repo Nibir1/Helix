@@ -1,8 +1,7 @@
 // internal/stealth/stealth.go
 // Package stealth provides memory‑only command execution, history
 // suppression, log wiping, and anti‑forensic measures.
-// Author: Helix Red Team
-// Date: 2026-05-09
+
 package stealth
 
 import (

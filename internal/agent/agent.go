@@ -2,8 +2,7 @@
 // Package agent provides the core Agent Mode orchestrator.
 // It accepts natural language input, plans steps via the AI planner,
 // and executes them through a safety‑first pipeline.
-// Author: Helix Red Team
-// Date: 2026-05-09
+
 package agent
 
 import (

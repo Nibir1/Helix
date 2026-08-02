@@ -48,6 +48,8 @@ clean:
 	-rm -rf "$(HELIX_HOME)/rag_index"
 	-rm -rf "$(HELIX_HOME)/vector_index"
 	-rm -rf "$(HELIX_HOME)/man_index"
+	# Remove the knowledge database
+	-rm -f "$(HELIX_HOME)/helix.db"
 	# Remove history and logs
 	-rm -f "$(HELIX_HOME)/helix_history"
 	-rm -f "$(HELIX_HOME)/.helix_history"

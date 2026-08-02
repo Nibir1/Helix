@@ -176,3 +176,49 @@ func runWithOpenAI(prompt string, cfg ModelConfig) (string, error) {
 
 	return content, nil
 }
+
+// GetEmbeddings fetches embeddings for a batch of texts from OpenAI.
+func GetEmbeddings(texts []string) ([][]float32, error) {
+	if !HasOpenAIKey() {
+		return nil, fmt.Errorf("OpenAI key not configured")
+	}
+
+	type embRequest struct {
+		Model string   `json:"model"`
+		Input []string `json:"input"`
+	}
+	type embResponse struct {
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+
+	body := embRequest{Model: "text-embedding-3-small", Input: texts}
+	bodyBytes, _ := json.Marshal(body)
+
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/embeddings", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+openAIAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("embeddings request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("embeddings API returned %d", resp.StatusCode)
+	}
+	var embResp embResponse
+	if err := json.NewDecoder(resp.Body).Decode(&embResp); err != nil {
+		return nil, err
+	}
+	result := make([][]float32, len(embResp.Data))
+	for i, d := range embResp.Data {
+		result[i] = d.Embedding
+	}
+	return result, nil
+}

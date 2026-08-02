@@ -1,7 +1,5 @@
 // cmd/helix/handlers.go
 // Purpose: Slash-command handlers for Helix.
-// Author: Helix Red Team
-// Date: 2026-05-09
 
 package main
 
@@ -9,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"helix/internal/ai"
@@ -20,8 +19,7 @@ import (
 )
 
 // -------------------------------------------------------
-// MASTER DISPATCHER – called by the agent when input
-// starts with "/". Returns true if handled.
+// MASTER DISPATCHER
 // -------------------------------------------------------
 func handleSlashCommand(input string) bool {
 	parts := strings.Fields(input)
@@ -60,8 +58,12 @@ func handleSlashCommand(input string) bool {
 		handleExplainCommand(input)
 	case "/exploit":
 		handleExploitCommand(input)
+	case "/knowledge-update":
+		handleKnowledgeUpdate()
+	case "/knowledge-stats":
+		handleKnowledgeStats()
 	default:
-		return false // unknown – let the AI handle it
+		return false
 	}
 
 	return true
@@ -484,148 +486,6 @@ func cleanDebrief(text string) string {
 	return text
 }
 
-// -------------------------------------------------------
-// /exploit – AI‑driven exploit suggestion with blast‑radius limiter
-// -------------------------------------------------------
-
-func handleExploitCommand(input string) {
-	args := strings.TrimSpace(strings.TrimPrefix(input, "/exploit"))
-	args = strings.Trim(args, `"'`)
-
-	if args == "" {
-		color.Red("Usage: /exploit <target description or vulnerability>")
-		return
-	}
-
-	color.Cyan("Guardian – searching exploit knowledge base...")
-
-	if ragSystem == nil || !ragSystem.IsInitialized() {
-		color.Red("Exploit knowledge base not available.")
-		return
-	}
-
-	allEntries := ragSystem.GetAllExploitEntries()
-	if len(allEntries) == 0 {
-		color.Red("No exploit entries available in the knowledge base.")
-		return
-	}
-
-	// Filter by current OS
-	var compatible []rag.ExploitEntry
-	for _, e := range allEntries {
-		if isPlatformCompatible(e.Platform, env.OSName) {
-			compatible = append(compatible, e)
-		}
-	}
-
-	if len(compatible) == 0 {
-		color.Red("No exploits available for your current OS (%s).", env.OSName)
-		return
-	}
-
-	// OS‑aware feedback
-	if len(compatible) == 1 && compatible[0].Platform == "multi" {
-		color.Yellow("Only one multi‑platform exploit matches your OS (%s).", env.OSName)
-	} else {
-		color.Cyan("Exploit candidates filtered for your OS (%s):", env.OSName)
-	}
-	for _, e := range compatible {
-		color.Cyan("   • %s (%s) – %s", e.ID, e.CVE, truncateText(e.Description, 80))
-	}
-
-	// Build context string for the AI
-	var sb strings.Builder
-	sb.WriteString("Candidate exploits (filtered for current OS):\n")
-	for _, e := range compatible {
-		sb.WriteString(fmt.Sprintf("%s (%s): %s\n", e.ID, e.CVE, e.Description))
-	}
-	contexts := []string{sb.String()}
-
-	var contextBuf strings.Builder
-	contextBuf.WriteString("Candidate exploits:\n")
-	for _, ctx := range contexts {
-		contextBuf.WriteString(ctx)
-		contextBuf.WriteString("\n")
-	}
-
-	prompt := fmt.Sprintf(`
-You are Helix's Exploit Suggestor & Guardian.
-
-Given the user's request and the list of candidate exploits, select the most appropriate one.
-If no candidate clearly fits the request, output "NONE" as the exploit ID.
-
-User Request: %s
-
-%s
-
-INSTRUCTIONS (STRICT):
-- Output ONLY the exploit ID (e.g., EDB-12345) or "NONE" on the first line.
-- On the second line, output a ONE‑SENTENCE justification for your choice.
-- NO markdown, NO backticks, NO extra text.
-
-Now output your selection:`, args, contextBuf.String())
-
-	selectCfg := ai.ModelConfig{
-		Temperature: 0.4,
-		TopP:        0.9,
-		TopK:        40,
-		MaxTokens:   80,
-	}
-
-	resp, err := ai.RunModelWithConfig(prompt, selectCfg)
-	if err != nil {
-		color.Red("AI selection failed: %v", err)
-		return
-	}
-
-	lines := strings.SplitN(strings.TrimSpace(resp), "\n", 2)
-	selectedID := strings.TrimSpace(lines[0])
-	justification := ""
-	if len(lines) > 1 {
-		justification = strings.TrimSpace(lines[1])
-	}
-	selectedID = strings.Trim(selectedID, "`'\". ")
-
-	// Handle "NONE" or empty selection gracefully
-	if strings.EqualFold(selectedID, "none") || selectedID == "" {
-		color.Yellow("No exploit in the knowledge base closely matches your query.")
-		if justification != "" {
-			color.Cyan("AI reasoning: %s", justification)
-		}
-		return
-	}
-
-	entry, found := ragSystem.GetExploitByID(selectedID)
-	if !found {
-		color.Yellow("No exploit in the knowledge base matches the AI selection (%s).", selectedID)
-		if justification != "" {
-			color.Cyan("AI reasoning: %s", justification)
-		}
-		return
-	}
-
-	// Risk scoring and blast‑radius limiter
-	riskCategory := computeExploitRisk(entry)
-	color.Cyan("Selected: %s (%s) – CVSS %.1f", entry.ID, entry.CVE, entry.CVSS)
-	color.Cyan("Risk category: %s", riskCategory)
-
-	if riskCategory == "RED" {
-		color.Red("BLAST‑RADIUS LIMITER ENGAGED")
-		color.Red("This exploit is classified as RED ZONE – it has high CVSS, high impact, or high detection likelihood.")
-		color.Yellow("Blast radius: %s", entry.BlastRadius)
-		color.Yellow("Detection: %s", entry.Detection)
-		if !agentCore.GetUX().AskYesNo("This exploit is HIGH‑RISK (RED ZONE). Proceed with suggestion?") {
-			color.Yellow("Exploit suggestion cancelled.")
-			return
-		}
-		color.Green("Red‑zone confirmation accepted. Proceeding with suggestion.")
-	} else if riskCategory == "YELLOW" {
-		color.Yellow("Warning: This exploit carries moderate risk (YELLOW zone).")
-	}
-
-	displayExploitDebrief(entry, justification)
-}
-
 // truncateText shortens a string for display purposes.
 func truncateText(s string, max int) string {
 	if len(s) <= max {
@@ -693,4 +553,216 @@ func displayExploitFallback(id, justification string) {
 	}
 	color.Yellow("Full exploit metadata not available in the knowledge base.")
 	color.Yellow("You may still evaluate the suggestion manually.")
+}
+
+// -------------------------------------------------------
+// /knowledge-update – triggers a live data refresh
+// -------------------------------------------------------
+func handleKnowledgeUpdate() {
+	if ragSystem == nil {
+		color.Red("RAG system not initialized")
+		return
+	}
+	color.Cyan("Starting knowledge base update...")
+	if err := ragSystem.UpdateKnowledge(); err != nil {
+		color.Red("Update failed: %v", err)
+		return
+	}
+	color.Green("Knowledge base updated successfully.")
+	if agentCore != nil {
+		agentCore.GetUX().PrintSuccess("Helix :: GRID STATUS :: CLEAR")
+	} else {
+		color.Green("Helix :: GRID STATUS :: CLEAR")
+	}
+}
+
+// -------------------------------------------------------
+// /knowledge-stats – shows database statistics
+// -------------------------------------------------------
+func handleKnowledgeStats() {
+	if ragSystem == nil || ragSystem.GetDB() == nil {
+		color.Red("Knowledge database not available.")
+		return
+	}
+	stats := ragSystem.GetSystemStats()
+	color.Cyan("Knowledge Base Statistics:")
+	if cves, ok := stats["db_cves"]; ok {
+		color.Cyan("  CVEs: %v", cves)
+	}
+	if exploits, ok := stats["db_exploits"]; ok {
+		color.Cyan("  Exploits: %v", exploits)
+	}
+	if kev, ok := stats["db_kev"]; ok {
+		color.Cyan("  KEV (CISA): %v", kev)
+	}
+	if mitre, ok := stats["db_mitre"]; ok {
+		color.Cyan("  MITRE Techniques: %v", mitre)
+	}
+}
+
+// -------------------------------------------------------
+// /exploit – AI‑driven exploit suggestion (Phase 3.5 DB)
+// -------------------------------------------------------
+func handleExploitCommand(input string) {
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/exploit"))
+	args = strings.Trim(args, `"'`)
+
+	if args == "" {
+		color.Red("Usage: /exploit <target description or vulnerability>")
+		return
+	}
+
+	color.Cyan("Guardian – searching knowledge base...")
+
+	if ragSystem == nil || !ragSystem.IsInitialized() {
+		color.Red("Exploit knowledge base not available.")
+		return
+	}
+
+	// First try the SQLite semantic search
+	var entries []rag.KnowledgeEntry
+	if ragSystem.GetDB() != nil {
+		var err error
+		entries, err = ragSystem.SemanticSearch(args, 10)
+		if err != nil {
+			color.Yellow("Semantic search issue: %v", err)
+		}
+	}
+
+	// Fallback to hardcoded entries if DB returned nothing
+	if len(entries) == 0 {
+		allHardcoded := ragSystem.GetAllExploitEntries()
+		if len(allHardcoded) == 0 {
+			color.Red("No exploit entries available (neither DB nor hardcoded).")
+			return
+		}
+		// Filter hardcoded entries by OS compatibility
+		var compatible []rag.ExploitEntry
+		for _, e := range allHardcoded {
+			if isPlatformCompatible(e.Platform, env.OSName) {
+				compatible = append(compatible, e)
+			}
+		}
+		if len(compatible) == 0 {
+			color.Red("No exploits available for your current OS (%s).", env.OSName)
+			return
+		}
+		// Build context and let AI choose
+		var sb strings.Builder
+		sb.WriteString("Candidate exploits (filtered for current OS):\n")
+		for _, e := range compatible {
+			sb.WriteString(fmt.Sprintf("%s (%s): %s\n", e.ID, e.CVE, e.Description))
+		}
+		contextStr := sb.String()
+		prompt := fmt.Sprintf(
+			`You are Helix's Exploit Suggestor & Guardian.
+
+Given the user's request and the list of candidate exploits, select the most appropriate one.
+If no candidate clearly fits the request, output "NONE" as the exploit ID.
+
+User Request: %s
+
+%s
+
+INSTRUCTIONS (STRICT):
+- Output ONLY the exploit ID (e.g., EDB-12345) or "NONE" on the first line.
+- The first line must contain ONLY the ID or "NONE". No other text.
+- On the second line, output a ONE‑SENTENCE justification for your choice.
+- NO markdown, NO backticks, NO extra text.
+
+Now output your selection:`, args, contextStr,
+		)
+		selectCfg := ai.ModelConfig{Temperature: 0.4, TopP: 0.9, TopK: 40, MaxTokens: 80}
+		resp, err := ai.RunModelWithConfig(prompt, selectCfg)
+		if err != nil {
+			color.Red("AI selection failed: %v", err)
+			return
+		}
+		selectedID, justification := extractExploitIDAndJustification(resp)
+		if strings.EqualFold(selectedID, "none") || selectedID == "" {
+			color.Yellow("No suitable exploit found.")
+			return
+		}
+		entry, found := ragSystem.GetExploitByID(selectedID)
+		if !found {
+			color.Red("Selected exploit not found: %s", selectedID)
+			return
+		}
+		displayExploitDebrief(entry, justification)
+		return
+	}
+
+	// DB entries: let AI select the best KnowledgeEntry
+	var contextBuf strings.Builder
+	contextBuf.WriteString("Candidate exploits from knowledge base:\n")
+	for _, e := range entries {
+		contextBuf.WriteString(fmt.Sprintf("%s (%s): %s\n", e.SourceID, e.Title, e.Description))
+	}
+	contextStr := contextBuf.String()
+	prompt := fmt.Sprintf(
+		`You are Helix's Exploit Suggestor & Guardian.
+
+Given the user's request and the list of candidate exploits, select the most appropriate one.
+If no candidate clearly fits the request, output "NONE" as the exploit ID.
+
+User Request: %s
+
+%s
+
+INSTRUCTIONS (STRICT):
+- Output ONLY the exploit ID (e.g., EDB-12345) or "NONE" on the first line.
+- The first line must contain ONLY the ID or "NONE". No other text.
+- On the second line, output a ONE‑SENTENCE justification for your choice.
+- NO markdown, NO backticks, NO extra text.
+
+Now output your selection:`, args, contextStr,
+	)
+	selectCfg := ai.ModelConfig{Temperature: 0.4, TopP: 0.9, TopK: 40, MaxTokens: 80}
+	resp, err := ai.RunModelWithConfig(prompt, selectCfg)
+	if err != nil {
+		color.Red("AI selection failed: %v", err)
+		return
+	}
+	selectedID, justification := extractExploitIDAndJustification(resp)
+	if strings.EqualFold(selectedID, "none") || selectedID == "" {
+		color.Yellow("No suitable exploit found.")
+		return
+	}
+
+	// Try to get full details from hardcoded set first, else fallback to DB info
+	if e, ok := ragSystem.GetExploitByID(selectedID); ok {
+		displayExploitDebrief(e, justification)
+		return
+	}
+	// DB-only entry: show basic info
+	color.Cyan("Selected exploit: %s", selectedID)
+	if justification != "" {
+		color.Cyan("Justification: %s", justification)
+	}
+	color.Yellow("Full metadata not available; basic info shown.")
+	if agentCore != nil {
+		agentCore.GetUX().PrintSuccess("Helix :: GRID STATUS :: CLEAR")
+	} else {
+		color.Green("Helix :: GRID STATUS :: CLEAR")
+	}
+}
+
+// extractExploitIDAndJustification parses the AI response, falling back to a
+// regex to extract a valid exploit ID if the model returns extra text.
+func extractExploitIDAndJustification(resp string) (id, justification string) {
+	lines := strings.SplitN(strings.TrimSpace(resp), "\n", 2)
+	id = strings.TrimSpace(lines[0])
+	if len(lines) > 1 {
+		justification = strings.TrimSpace(lines[1])
+	}
+	id = strings.Trim(id, "`'\". ")
+
+	// Fallback: if the ID doesn't look like an exploit ID, try to find one in the response
+	if !strings.HasPrefix(id, "EDB-") && !strings.HasPrefix(id, "CVE-") && !strings.EqualFold(id, "none") {
+		re := regexp.MustCompile(`(EDB-\d+|CVE-\d{4}-\d+)`)
+		if match := re.FindString(resp); match != "" {
+			id = match
+		}
+	}
+	return
 }
