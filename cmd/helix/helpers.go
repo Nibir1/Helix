@@ -1,124 +1,499 @@
 // cmd/helix/helpers.go
-
 package main
 
 import (
-	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"helix/internal/ai"
-	"helix/internal/shell"
+	"helix/internal/commands"
+	"helix/internal/config"
+	"helix/internal/llamacpp"
+	"helix/internal/ollama"
+	"helix/internal/providers"
 
 	"github.com/fatih/color"
 )
 
-// -------------------------------------------------------
-//
-//	Mock-mode basic helpers
-//
-// -------------------------------------------------------
-func generateMockCommand(request string, env shell.Env) string {
-	req := strings.ToLower(request)
+type providerOption struct {
+	ID    string
+	Label string
+}
 
-	switch {
-	case strings.Contains(req, "list") && strings.Contains(req, "file"):
-		if env.IsUnixLike() {
-			return "ls -la"
-		}
-		return "dir"
+var providerOptions = []providerOption{
+	{ID: "openai", Label: "OpenAI"},
+	{ID: "anthropic", Label: "Anthropic"},
+	{ID: "deepseek", Label: "DeepSeek"},
+	{ID: "kimi", Label: "Kimi"},
+	{ID: "qwen", Label: "Qwen"},
+	{ID: "glm", Label: "GLM"},
+	{ID: "ollama", Label: "Ollama (local)"},
+	{ID: "llamacpp", Label: "llama.cpp server (local)"},
+	{ID: "custom", Label: "Custom OpenAI-compatible endpoint"},
+}
 
-	case strings.Contains(req, "disk space"):
-		if env.IsUnixLike() {
-			return "df -h"
-		}
-		return "wmic logicaldisk get size,freespace,caption"
+func normalizeProviderName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
 
+	switch name {
+	case "local", "llama", "llama.cpp", "llamacpp":
+		return "llamacpp"
+	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "ollama", "custom":
+		return name
 	default:
-		return "echo 'Mock command for: " + request + "'"
+		return name
 	}
 }
 
-func generateMockResponse(question string) string {
-	q := strings.ToLower(question)
+func isRemoteProvider(provider string) bool {
+	provider = normalizeProviderName(provider)
 
-	switch {
-	case strings.Contains(q, "hello"):
-		return "Hello! I'm Helix — your AI CLI assistant."
-
-	case strings.Contains(q, "time"):
-		return fmt.Sprintf("Current system time: %s", time.Now().Format(time.RFC1123))
-
+	switch provider {
+	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "custom":
+		return true
 	default:
-		return "Mock response: " + question
+		return false
 	}
 }
 
-func generateMockExplanation(cmd string) string {
-	return "Mock explanation for: " + cmd
+func chooseProviderWithSaved(cfg *config.Config) string {
+	saved := normalizeProviderName(cfg.Provider)
+
+	if saved != "" && commands.AskForConfirmation(fmt.Sprintf("Use saved provider %q?", saved)) {
+		return saved
+	}
+
+	return askForAIProvider()
 }
 
-// -------------------------------------------------------
-//  AI Provider Selection
-// -------------------------------------------------------
-
-func askForAIProvider() ai.ProviderType {
-	reader := bufio.NewReader(os.Stdin)
-
+func askForAIProvider() string {
 	for {
-		color.Cyan("\nChoose AI mode:")
-		color.Cyan("  1) OpenAI Cloud")
-		color.Cyan("  2) Local Model")
-		color.Cyan("Enter 1 or 2: ")
+		color.Cyan("Choose AI provider:")
 
-		choiceRaw, _ := reader.ReadString('\n')
-		choice := strings.TrimSpace(choiceRaw)
-
-		switch choice {
-		case "1":
-			return ai.ProviderOpenAI
-		case "2":
-			return ai.ProviderLocal
-		default:
-			color.Yellow("Please type 1 or 2.")
+		for i, option := range providerOptions {
+			color.Cyan("  %d) %s", i+1, option.Label)
 		}
+
+		line := strings.ToLower(strings.TrimSpace(commands.AskLine("Provider number or name")))
+
+		if line == "" {
+			continue
+		}
+
+		if idx, err := parseProviderNumber(line); err == nil {
+			return providerOptions[idx].ID
+		}
+
+		for _, option := range providerOptions {
+			if strings.EqualFold(option.ID, line) {
+				return option.ID
+			}
+		}
+
+		color.Yellow("Unknown provider. Try again.")
 	}
 }
 
-func setupOpenAIProvider() error {
-	reader := bufio.NewReader(os.Stdin)
+func parseProviderNumber(line string) (int, error) {
+	var n int
 
-	existing, err := ai.LoadOpenAIKeyFromDisk()
-	if err == nil && strings.TrimSpace(existing) != "" {
-		color.Green("Found a saved OpenAI API key.")
+	if _, err := fmt.Sscanf(line, "%d", &n); err != nil {
+		return 0, err
+	}
 
-		color.Cyan("Use saved key or paste new?")
-		color.Cyan("  1) Use saved")
-		color.Cyan("  2) Paste new key")
-		choiceRaw, _ := reader.ReadString('\n')
+	if n < 1 || n > len(providerOptions) {
+		return 0, fmt.Errorf("provider number out of range")
+	}
 
-		if strings.TrimSpace(choiceRaw) == "1" {
-			ai.ConfigureOpenAIKey(existing)
+	return n - 1, nil
+}
+
+func setupProvider(provider string) error {
+	provider = normalizeProviderName(provider)
+
+	switch provider {
+	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm":
+		return ensureRemoteAPIKey(provider)
+
+	case "custom":
+		return setupCustomProvider()
+
+	case "ollama":
+		return setupOllamaProvider()
+
+	case "llamacpp":
+		return setupLlamaCppProvider()
+
+	default:
+		return fmt.Errorf("unknown provider: %s", provider)
+	}
+}
+
+func ensureRemoteAPIKey(provider string) error {
+	if ai.ProviderHasSavedKey(provider) {
+		if commands.AskForConfirmation(fmt.Sprintf("Use saved API key for %s?", provider)) {
 			return nil
 		}
 	}
 
-	// Ask user for a new key
-	color.Cyan("Paste your OpenAI API key:")
-	keyRaw, _ := reader.ReadString('\n')
-	key := strings.TrimSpace(keyRaw)
-
+	key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("Paste API key for %s", provider)))
 	if key == "" {
 		return fmt.Errorf("API key cannot be empty")
 	}
 
-	if err := ai.SaveOpenAIKeyToDisk(key); err != nil {
+	return ai.SaveProviderKey(provider, key)
+}
+
+func setupCustomProvider() error {
+	baseURL := strings.TrimSpace(commands.AskLine("Custom OpenAI-compatible base URL (example: https://api.example.com/v1)"))
+	if baseURL == "" {
+		return fmt.Errorf("custom base URL cannot be empty")
+	}
+
+	key := strings.TrimSpace(commands.AskLine("Custom API key (optional)"))
+
+	if err := ai.RegisterCustomProvider(baseURL, key); err != nil {
 		return err
 	}
 
-	ai.ConfigureOpenAIKey(key)
-	color.Green("OpenAI API key saved.")
+	if key != "" {
+		if err := ai.SaveProviderKey("custom", key); err != nil {
+			return err
+		}
+	}
+
+	cfg.CustomProviderBaseURL = baseURL
+	return nil
+}
+
+func setupOllamaProvider() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if !ollama.IsInstalled() {
+		if !commands.AskForConfirmation("Ollama not found. Install Ollama now?") {
+			return fmt.Errorf("Ollama is not installed")
+		}
+
+		installCtx, installCancel := context.WithTimeout(context.Background(), 20*time.Minute)
+		defer installCancel()
+
+		if err := ollama.Install(installCtx); err != nil {
+			return err
+		}
+	}
+
+	return ollama.EnsureRunning(ctx)
+}
+
+func selectModelForProvider(provider string) error {
+	provider = normalizeProviderName(provider)
+
+	switch provider {
+	case "ollama":
+		return selectOllamaModel()
+
+	case "llamacpp":
+		// llama.cpp model selection happens during runtime setup.
+		return nil
+
+	default:
+		return selectRemoteModel(provider)
+	}
+}
+
+func selectRemoteModel(provider string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	models, err := ai.ListProviderModels(ctx)
+	defaultModel := ai.DefaultModelForProvider(provider)
+
+	if err != nil {
+		color.Yellow("Could not fetch live model list: %v", err)
+		color.Yellow("Using default model: %s", defaultModel)
+
+		ai.UseModel(defaultModel)
+		return nil
+	}
+
+	if len(models) == 0 {
+		ai.UseModel(defaultModel)
+		return nil
+	}
+
+	if defaultModel == "" && len(models) > 0 {
+		defaultModel = models[0].ID
+	}
+
+	color.Cyan("Available models:")
+
+	for i, model := range models {
+		if i >= 25 {
+			color.Cyan("  ... and %d more", len(models)-25)
+			break
+		}
+
+		color.Cyan("  %s", model.ID)
+	}
+
+	choice := strings.TrimSpace(commands.AskLine(fmt.Sprintf("Model ID (default: %s)", defaultModel)))
+
+	if choice == "" {
+		choice = defaultModel
+	}
+
+	ai.UseModel(choice)
+	return nil
+}
+
+func selectOllamaModel() error {
+	client := ollama.NewClient()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(models) == 0 {
+		recs := providers.RecommendLocalModels(providers.DetectHardware())
+
+		tag := ""
+
+		for _, rec := range recs {
+			if rec.Runtime == "ollama" && rec.OllamaTag != "" {
+				tag = rec.OllamaTag
+				break
+			}
+		}
+
+		if tag == "" {
+			return fmt.Errorf("no Ollama model recommendation available")
+		}
+
+		if !commands.AskForConfirmation(fmt.Sprintf("No Ollama models installed. Pull %s now?", tag)) {
+			return fmt.Errorf("no Ollama model selected")
+		}
+
+		pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer pullCancel()
+
+		if err := client.PullModel(pullCtx, tag, func(status string) {
+			color.Blue("Ollama pull: %s", status)
+		}); err != nil {
+			return err
+		}
+
+		ai.UseModel(tag)
+		return nil
+	}
+
+	color.Cyan("Installed Ollama models:")
+
+	for _, model := range models {
+		color.Cyan("  %s", model.ID)
+	}
+
+	choice := strings.TrimSpace(commands.AskLine(fmt.Sprintf("Ollama model (default: %s)", models[0].ID)))
+
+	if choice == "" {
+		choice = models[0].ID
+	}
+
+	if !containsModelID(models, choice) {
+		if !commands.AskForConfirmation(fmt.Sprintf("Model %q is not installed. Pull it now?", choice)) {
+			return fmt.Errorf("selected Ollama model is not installed")
+		}
+
+		pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer pullCancel()
+
+		if err := client.PullModel(pullCtx, choice, func(status string) {
+			color.Blue("Ollama pull: %s", status)
+		}); err != nil {
+			return err
+		}
+	}
+
+	ai.UseModel(choice)
+	return nil
+}
+
+func containsModelID(models []providers.ModelInfo, id string) bool {
+	for _, model := range models {
+		if strings.EqualFold(model.ID, id) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func setupLlamaCppProvider() error {
+	return setupLlamaCppWithModel(context.Background(), "")
+}
+
+func setupLlamaCppWithModel(ctx context.Context, model string) error {
+	if strings.TrimSpace(model) == "" {
+		model = promptForLlamaModel()
+	}
+
+	var modelPath string
+
+	switch {
+	case strings.HasPrefix(model, "http://"), strings.HasPrefix(model, "https://"):
+		if !commands.AskForConfirmation("Download model from URL?") {
+			return fmt.Errorf("model download cancelled")
+		}
+
+		path, err := llamacpp.EnsureModelFromURL(ctx, model)
+		if err != nil {
+			return err
+		}
+
+		modelPath = path
+
+	case fileExists(model):
+		modelPath = model
+
+	default:
+		rec, ok := llamacpp.FindModel(model)
+		if !ok {
+			return fmt.Errorf("model not found: %s", model)
+		}
+
+		if !commands.AskForConfirmation(fmt.Sprintf("Download %s?", rec.DisplayName)) {
+			return fmt.Errorf("model download cancelled")
+		}
+
+		path, err := llamacpp.EnsureModel(ctx, rec)
+		if err != nil {
+			return err
+		}
+
+		modelPath = path
+	}
+
+	if err := ai.EnsureLlamaCppServer(ctx, modelPath); err != nil {
+		return err
+	}
+
+	ai.UseModel("helix-local")
+	return nil
+}
+
+func promptForLlamaModel() string {
+	recs := llamacpp.RecommendedModels()
+
+	color.Cyan("Recommended llama.cpp models:")
+
+	for i, rec := range recs {
+		color.Cyan("  %d) %s", i+1, rec.DisplayName)
+	}
+
+	color.Cyan("You may also enter a local GGUF path or HTTPS URL.")
+
+	line := strings.TrimSpace(commands.AskLine("Choose model number, ID, path, or URL"))
+
+	if line == "" {
+		return recs[0].ID
+	}
+
+	if idx, err := parseProviderNumber(line); err == nil && idx < len(recs) {
+		return recs[idx].ID
+	}
+
+	return line
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func useProviderInteractive(provider string) error {
+	provider = normalizeProviderName(provider)
+
+	if err := setupProvider(provider); err != nil {
+		return err
+	}
+
+	// FIX: Activate provider BEFORE selecting model
+	if err := ai.UseProvider(provider); err != nil {
+		return err
+	}
+
+	if err := selectModelForProvider(provider); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func useModelInteractive(provider, model string) error {
+	provider = normalizeProviderName(provider)
+	model = strings.TrimSpace(model)
+
+	if model == "" {
+		return fmt.Errorf("model is empty")
+	}
+
+	switch provider {
+	case "ollama":
+		return ensureOllamaModel(model)
+
+	case "llamacpp":
+		return setupLlamaCppWithModel(context.Background(), model)
+
+	default:
+		ai.UseModel(model)
+		return nil
+	}
+}
+
+func ensureOllamaModel(model string) error {
+	if err := setupOllamaProvider(); err != nil {
+		return err
+	}
+
+	client := ollama.NewClient()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return err
+	}
+
+	if containsModelID(models, model) {
+		ai.UseModel(model)
+		return nil
+	}
+
+	if !commands.AskForConfirmation(fmt.Sprintf("Model %q is not installed. Pull it now?", model)) {
+		return fmt.Errorf("selected Ollama model is not installed")
+	}
+
+	pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer pullCancel()
+
+	if err := client.PullModel(pullCtx, model, func(status string) {
+		color.Blue("Ollama pull: %s", status)
+	}); err != nil {
+		return err
+	}
+
+	ai.UseModel(model)
 	return nil
 }

@@ -96,9 +96,6 @@ start:
 test:
 	$(fix-perms)
 	@echo "Running all tests..."
-	@export CGO_CFLAGS="$$(./scripts/get-cgo-flags.sh cflags)"; \
-	 export CGO_LDFLAGS="$$(./scripts/get-cgo-flags.sh ldflags)"; \
-	 export CGO_CXXFLAGS="$$CGO_CFLAGS"; \
-	 go test ./internal/... -v -count=1
+	go test ./... -v -count=1
 
 .PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test

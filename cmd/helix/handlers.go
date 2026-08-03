@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,6 +73,10 @@ func handleSlashCommand(input string) bool {
 		handleDoctor()
 	case "/provider-status":
 		handleProviderStatus()
+	case "/provider":
+		handleProviderCommand(parts)
+	case "/model":
+		handleModelCommand(parts)
 	default:
 		return false
 	}
@@ -782,21 +787,146 @@ func handleDoctor() {
 // handleProviderStatus shows AI provider health.
 func handleProviderStatus() {
 	color.Cyan("=== Provider Status ===")
-	color.Cyan("Current provider: %s", ai.GetProvider())
-	color.Cyan("OpenAI key configured: %v", ai.HasOpenAIKey())
-	color.Cyan("Local model loaded: %v", ai.ModelIsLoaded())
+
+	// Use the comprehensive registry status
+	lines := ai.ProviderStatus()
+	for _, line := range lines {
+		color.Cyan(line)
+	}
+
+	color.Cyan("Active Provider: %s", ai.ActiveProviderName())
+	color.Cyan("Active Model: %s", ai.ActiveModel())
 
 	if utils.IsOnline(3 * time.Second) {
 		color.Green("Network: online")
 	} else {
 		color.Yellow("Network: offline")
 	}
+}
 
-	if ai.GetProvider() == ai.ProviderOpenAI && !ai.HasOpenAIKey() {
-		color.Red("OpenAI provider selected but no API key is configured.")
+// -------------------------------------------------------
+// /provider
+// -------------------------------------------------------
+func handleProviderCommand(args []string) {
+	if len(args) == 1 {
+		displayProviderStatus()
+		return
 	}
 
-	if ai.GetProvider() == ai.ProviderLocal && !ai.ModelIsLoaded() {
-		color.Yellow("Local provider selected but model is not loaded.")
+	switch strings.ToLower(args[1]) {
+	case "status":
+		displayProviderStatus()
+
+	case "use":
+		if len(args) < 3 {
+			color.Red("Usage: /provider use <provider>")
+			return
+		}
+
+		name := strings.ToLower(args[2])
+
+		if !ai.HasProvider(name) && name != "custom" {
+			color.Red("Unknown provider: %s", name)
+			return
+		}
+
+		if err := useProviderInteractive(name); err != nil {
+			color.Red("Provider switch failed: %v", err)
+			return
+		}
+
+		if err := ai.UseProvider(name); err != nil {
+			color.Red("Provider activation failed: %v", err)
+			return
+		}
+
+		cfg.Provider = name
+		cfg.ProviderModel = ai.ActiveModel()
+
+		if err := cfg.SavePreferences(); err != nil {
+			color.Yellow("Could not save provider preferences: %v", err)
+		}
+
+		color.Green("Active provider: %s", name)
+		color.Green("Active model: %s", ai.ActiveModel())
+
+	default:
+		color.Yellow("Usage: /provider | /provider status | /provider use <provider>")
+	}
+}
+
+// -------------------------------------------------------
+// /model
+// -------------------------------------------------------
+func handleModelCommand(args []string) {
+	if len(args) == 1 {
+		listAvailableModels()
+		return
+	}
+
+	switch strings.ToLower(args[1]) {
+	case "list":
+		listAvailableModels()
+
+	case "use":
+		if len(args) < 3 {
+			color.Red("Usage: /model use <model-id>")
+			return
+		}
+
+		model := strings.Join(args[2:], " ")
+
+		if err := useModelInteractive(ai.ActiveProviderName(), model); err != nil {
+			color.Red("Model switch failed: %v", err)
+			return
+		}
+
+		cfg.ProviderModel = ai.ActiveModel()
+
+		if err := cfg.SavePreferences(); err != nil {
+			color.Yellow("Could not save model preference: %v", err)
+		}
+
+		color.Green("Active model: %s", ai.ActiveModel())
+
+	default:
+		color.Yellow("Usage: /model | /model list | /model use <model-id>")
+	}
+}
+
+func displayProviderStatus() {
+	lines := ai.ProviderStatus()
+
+	color.Cyan("=== Provider Status ===")
+
+	for _, line := range lines {
+		color.Cyan(line)
+	}
+}
+
+func listAvailableModels() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	models, err := ai.ListProviderModels(ctx)
+	if err != nil {
+		color.Red("Could not list models: %v", err)
+		return
+	}
+
+	if len(models) == 0 {
+		color.Yellow("No models returned by provider.")
+		return
+	}
+
+	color.Cyan("Available models:")
+
+	for i, model := range models {
+		if i >= 50 {
+			color.Cyan("... and %d more", len(models)-50)
+			break
+		}
+
+		color.Cyan("  %s", model.ID)
 	}
 }

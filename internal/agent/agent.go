@@ -150,7 +150,7 @@ func (a *Agent) HandleInput(userInput string) {
 	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
 
 	// 1) Call planner model
-	rawPlanOutput, err := ai.RunPlannerModel(plannerPrompt)
+	rawPlanOutput, err := ai.RunPlannerWithRetry(plannerPrompt)
 	if err != nil {
 		a.ux.PrintError(fmt.Sprintf("Planner model error: %v", err))
 		resp, chatErr := ai.RunModel(userInput)

@@ -9,9 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -134,17 +132,23 @@ func UpdateAll(db *sql.DB) error {
 
 	// Fetch NVD CVEs (incremental)
 	if err := updateNVD(db); err != nil {
-		color.Yellow("NVD update failed: %v", err)
+		color.Yellow("NVD update skipped/failed: %v", err)
 	}
+
 	// Fetch CISA KEV
+	color.Blue("Fetching CISA KEV...")
 	if err := updateKEV(db); err != nil {
 		color.Yellow("KEV update failed: %v", err)
 	}
+
 	// Fetch Exploit-DB
+	color.Blue("Fetching Exploit-DB...")
 	if err := updateExploitDB(db); err != nil {
 		color.Yellow("Exploit-DB update failed: %v", err)
 	}
+
 	// Fetch MITRE ATT&CK
+	color.Blue("Fetching MITRE ATT&CK...")
 	if err := updateMITRE(db); err != nil {
 		color.Yellow("MITRE update failed: %v", err)
 	}
@@ -154,7 +158,8 @@ func UpdateAll(db *sql.DB) error {
 		color.Yellow("Embedding generation failed: %v", err)
 	}
 
-	// Phase 0: explicitly rebuild FTS so search works even if triggers missed rows.
+	// Explicit FTS reindex to ensure search works immediately
+	color.Blue("Rebuilding FTS index...")
 	if err := ReindexKnowledgeFTS(db); err != nil {
 		color.Yellow("FTS reindex failed: %v", err)
 	}
@@ -163,55 +168,106 @@ func UpdateAll(db *sql.DB) error {
 	return nil
 }
 
-// updateNVD uses NVD API 2.0 with proper URL encoding, pagination, retry, and API key support.
+// updateNVD uses NVD API 2.0 with strict timeouts, browser spoofing, rate-limiting, and checkpointing.
 func updateNVD(db *sql.DB) error {
 	lastMod := getMeta(db, "nvd_last_mod_date")
+	layout := "2006-01-02T15:04:05.000"
 
+	var startTime time.Time
 	if lastMod == "" {
-		if envStart := os.Getenv("NVD_START_DATE"); envStart != "" {
-			lastMod = envStart
+		startTime = time.Now().UTC().AddDate(0, 0, -119)
+	} else {
+		if t, err := time.Parse(layout, lastMod); err == nil {
+			startTime = t
+		} else if t, err := time.Parse("2006-01-02T15:04:05.000Z", lastMod); err == nil {
+			startTime = t
 		} else {
-			// Safe default: rolling 120-day window.
-			lastMod = time.Now().UTC().AddDate(0, 0, -120).Format("2006-01-02T15:04:05.000Z")
+			startTime = time.Now().UTC().AddDate(0, 0, -119)
 		}
 	}
 
-	client := &http.Client{Timeout: defaultTimeout}
-	ctx := context.Background()
+	// FIX 1: Increase timeout to 90s. NVD servers are notoriously slow to generate large JSON payloads.
+	client := &http.Client{Timeout: 90 * time.Second}
 
-	total := 0
+	userAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	apiKey := os.Getenv("NVD_API_KEY")
+
+	// FIX 2: Dynamic rate limiting.
+	// Unauthenticated: 5 requests per 30 seconds -> sleep 6.5s to be safe.
+	// Authenticated: 50 requests per 30 seconds -> sleep 1s to be safe.
+	sleepDuration := 6500 * time.Millisecond
+	if apiKey != "" {
+		sleepDuration = 1 * time.Second
+	}
+
+	var total int
+	page := 0
+
+	// FIX 3: Incremental Checkpointing.
+	// Track the latest modification date seen in this run. If we fail on page 15,
+	// we save the date from page 14 so the next run doesn't start from page 1 again.
+	latestModDateSeen := startTime
 
 	for startIndex := 0; ; startIndex += 2000 {
-		params := url.Values{}
-		params.Set("lastModStartDate", lastMod)
-		params.Set("resultsPerPage", "2000")
-		params.Set("startIndex", strconv.Itoa(startIndex))
+		page++
+		endTime := time.Now().UTC()
 
-		requestURL := nvdBaseURL + "?" + params.Encode()
-
-		headers := map[string]string{
-			"User-Agent": "Helix/1.0",
+		if endTime.Sub(startTime) > 119*24*time.Hour {
+			endTime = startTime.AddDate(0, 0, 119)
 		}
 
-		if key := os.Getenv("NVD_API_KEY"); key != "" {
-			headers["apiKey"] = key
-		}
+		lastModStart := startTime.Format(layout)
+		lastModEnd := endTime.Format(layout)
 
-		bodyBytes, err := fetchWithRetry(ctx, client, requestURL, headers)
+		requestURL := fmt.Sprintf(
+			"%s?lastModStartDate=%s&lastModEndDate=%s&resultsPerPage=2000&startIndex=%d",
+			nvdBaseURL, lastModStart, lastModEnd, startIndex,
+		)
+
+		color.Blue("NVD: fetching page %d (start: %s)...", page, lastModStart)
+
+		req, err := http.NewRequest("GET", requestURL, nil)
 		if err != nil {
-			if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == http.StatusNotFound {
-				return fmt.Errorf(
-					"NVD API returned 404; verify date window (try NVD_START_DATE within last 120 days) and NVD_API_KEY: %w",
-					err,
-				)
-			}
+			return fmt.Errorf("NVD request creation: %w", err)
+		}
 
-			return err
+		req.Header.Set("User-Agent", userAgent)
+		req.Header.Set("Accept", "application/json")
+		if apiKey != "" {
+			req.Header.Set("apiKey", apiKey)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			// Save checkpoint before failing
+			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
+			return fmt.Errorf("NVD network error (timeout or blocked): %w. Checkpoint saved at %s", err, latestModDateSeen.Format(layout))
+		}
+
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
+			color.Yellow("NVD rate limited on page %d; sleeping 30s and retrying...", page)
+			time.Sleep(30 * time.Second)
+			startIndex -= 2000 // Retry this page
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
+			return fmt.Errorf("NVD API returned %d: %s", resp.StatusCode, string(bodyBytes[:min(len(bodyBytes), 200)]))
 		}
 
 		var nvdResp nvdResponse
 		if err := json.Unmarshal(bodyBytes, &nvdResp); err != nil {
-			return fmt.Errorf("decode NVD: %w", err)
+			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
+			return fmt.Errorf("decode NVD (possible Cloudflare block): %w", err)
+		}
+
+		if page == 1 && nvdResp.TotalResults > 0 {
+			totalPages := (nvdResp.TotalResults + 1999) / 2000
+			color.Cyan("NVD: Found %d total CVEs in this window (~%d pages)", nvdResp.TotalResults, totalPages)
 		}
 
 		for _, vuln := range nvdResp.Vulnerabilities {
@@ -220,13 +276,24 @@ func updateNVD(db *sql.DB) error {
 				continue
 			}
 
+			// Track checkpoint
+			if vuln.CVE.LastModified != "" {
+				if t, err := time.Parse(layout, vuln.CVE.LastModified); err == nil {
+					if t.After(latestModDateSeen) {
+						latestModDateSeen = t
+					}
+				} else if t, err := time.Parse("2006-01-02T15:04:05.000Z", vuln.CVE.LastModified); err == nil {
+					if t.After(latestModDateSeen) {
+						latestModDateSeen = t
+					}
+				}
+			}
+
 			desc := ""
 			if len(vuln.CVE.Descriptions) > 0 {
 				desc = vuln.CVE.Descriptions[0].Value
 			}
-
 			cvss := 0.0
-
 			if len(vuln.CVE.Metrics.CVSSMetricV31) > 0 {
 				cvss = vuln.CVE.Metrics.CVSSMetricV31[0].CVSSData.BaseScore
 			} else if len(vuln.CVE.Metrics.CVSSMetricV30) > 0 {
@@ -234,45 +301,30 @@ func updateNVD(db *sql.DB) error {
 			} else if len(vuln.CVE.Metrics.CVSSMetricV2) > 0 {
 				cvss = vuln.CVE.Metrics.CVSSMetricV2[0].CVSSData.BaseScore
 			}
-
 			raw, _ := json.Marshal(vuln)
-
-			_, err := db.Exec(`
-				INSERT OR REPLACE INTO cve(
-					id,
-					description,
-					cvss_score,
-					published_date,
-					last_modified_date,
-					raw_json
-				) VALUES(?,?,?,?,?,?)
-			`,
-				cveID,
-				desc,
-				cvss,
-				vuln.CVE.Published,
-				vuln.CVE.LastModified,
-				string(raw),
-			)
+			_, err := db.Exec(`INSERT OR REPLACE INTO cve(id, description, cvss_score, published_date, last_modified_date, raw_json)
+				VALUES(?,?,?,?,?,?)`,
+				cveID, desc, cvss,
+				vuln.CVE.Published, vuln.CVE.LastModified, string(raw))
 			if err != nil {
 				return fmt.Errorf("insert CVE %s: %w", cveID, err)
 			}
-
 			total++
 		}
+
+		color.Green("NVD: page %d processed (%d CVEs so far)", page, total)
 
 		if nvdResp.TotalResults == 0 || startIndex+2000 >= nvdResp.TotalResults {
 			break
 		}
 
-		// Be polite to the NVD API.
-		time.Sleep(500 * time.Millisecond)
+		// FIX 4: Polite delay to respect rate limits
+		time.Sleep(sleepDuration)
 	}
 
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	setMeta(db, "nvd_last_mod_date", now)
-
-	color.Green("NVD: %d CVEs updated", total)
+	// Save the final checkpoint
+	setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
+	color.Green("NVD: %d CVEs updated successfully", total)
 	return nil
 }
 
