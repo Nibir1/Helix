@@ -21,6 +21,7 @@
 *.out
 coverage.*
 *.coverprofile
+Helix-Full_Codebase.txt
 profile.cov
 
 # Dependency directories (remove the comment below to include it)
@@ -38,6 +39,7 @@ go.work.sum
 
 # Ignore model files
 *.gguf
+temp.md
 *.bin
 *.pt
 *.safetensors
@@ -46,11 +48,10 @@ go.work.sum
 .helix/
 helix/models/
 helix_data/
+collect_helix.sh
 models/
 
 
 # Editor/IDE
 # .idea/
 # .vscode/
-
-temp.md

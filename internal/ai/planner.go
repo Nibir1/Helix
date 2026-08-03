@@ -220,36 +220,38 @@ NOW OUTPUT THE COMPLETE JSON:
 `, ragSection, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
 }
 
-//
-// ──────────────────────────────────────────────────────────────
-// ParsePlanFromModelOutput
-// ──────────────────────────────────────────────────────────────
-//
-
+// ParsePlanFromModelOutput parses, repairs, validates, and normalizes planner JSON.
+// Phase 0 hardening:
+//   - strips markdown fences,
+//   - extracts the outermost JSON object,
+//   - validates first/last character,
+//   - validates brace balance,
+//   - returns explicit errors for malformed output.
 func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 	raw = strings.TrimSpace(raw)
-	// color.Cyan("Planner raw output: %s", raw)
-
 	if raw == "" {
 		return nil, fmt.Errorf("empty planner output")
 	}
 
-	// Strip illegal markdown fences
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```JSON")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
+	// Repair accidental markdown fences.
+	raw = stripMarkdownFences(raw)
 
-	// Extract JSON
-	jsonText := raw
-	if !strings.HasPrefix(raw, "{") {
-		if match := jsonObjectRegex.FindString(raw); match != "" {
-			jsonText = match
-		}
+	// Extract the outermost JSON object.
+	jsonText := extractJSONObject(raw)
+	if jsonText == "" {
+		return nil, fmt.Errorf("no JSON object found in planner output")
 	}
 
-	// Decode
+	// Strict structural validation.
+	if !strings.HasPrefix(jsonText, "{") || !strings.HasSuffix(jsonText, "}") {
+		return nil, fmt.Errorf("planner JSON must start with '{' and end with '}'")
+	}
+
+	if !jsonBracesBalanced(jsonText) {
+		return nil, fmt.Errorf("planner JSON has unbalanced braces")
+	}
+
+	// Decode into tolerant raw plan.
 	var rp rawPlan
 	if err := json.Unmarshal([]byte(jsonText), &rp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal planner JSON: %w", err)
@@ -261,9 +263,8 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 		Raw:    raw,
 	}
 
-	// Convert steps, normalize lists
+	// Convert steps and normalize args.
 	for _, rs := range rp.Steps {
-
 		ps := PlanStep{
 			Tool:    rs.Tool,
 			Message: rs.Message,
@@ -272,15 +273,13 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 			Args:    map[string]string{},
 		}
 
-		// Normalize args
 		for k, v := range rs.Args {
 			if v == nil {
 				continue
 			}
 
 			switch vv := v.(type) {
-
-			case []interface{}: // list → string
+			case []interface{}:
 				if len(vv) == 1 {
 					ps.Args[k] = strings.TrimSpace(fmt.Sprint(vv[0]))
 				} else {
@@ -290,7 +289,6 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 					}
 					ps.Args[k] = strings.Join(parts, " ")
 				}
-
 			default:
 				ps.Args[k] = strings.TrimSpace(fmt.Sprint(v))
 			}
@@ -299,7 +297,6 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 		plan.Steps = append(plan.Steps, ps)
 	}
 
-	// Normalize & validate
 	fixPlan(plan)
 
 	if err := validatePlan(plan); err != nil {
@@ -307,6 +304,74 @@ func ParsePlanFromModelOutput(raw string) (*Plan, error) {
 	}
 
 	return plan, nil
+}
+
+// stripMarkdownFences removes accidental leading/trailing markdown fences.
+func stripMarkdownFences(raw string) string {
+	raw = strings.TrimSpace(raw)
+
+	// Remove leading ```json or ``` line.
+	if strings.HasPrefix(raw, "```") {
+		if idx := strings.Index(raw, "\n"); idx >= 0 {
+			raw = strings.TrimSpace(raw[idx+1:])
+		} else {
+			raw = strings.TrimPrefix(raw, "```")
+		}
+	}
+
+	// Remove trailing fence.
+	raw = strings.TrimSuffix(raw, "```")
+
+	return strings.TrimSpace(raw)
+}
+
+// extractJSONObject extracts the outermost {...} candidate.
+func extractJSONObject(s string) string {
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+
+	if start == -1 || end == -1 || end <= start {
+		return ""
+	}
+
+	return strings.TrimSpace(s[start : end+1])
+}
+
+// jsonBracesBalanced performs a string-aware brace balance check.
+// It ignores braces that appear inside JSON string literals.
+func jsonBracesBalanced(s string) bool {
+	inString := false
+	escaped := false
+	depth := 0
+
+	for _, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		switch r {
+		case '\\':
+			if inString {
+				escaped = true
+			}
+		case '"':
+			inString = !inString
+		case '{':
+			if !inString {
+				depth++
+			}
+		case '}':
+			if !inString {
+				depth--
+				if depth < 0 {
+					return false
+				}
+			}
+		}
+	}
+
+	return depth == 0 && !inString
 }
 
 //

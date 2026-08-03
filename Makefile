@@ -76,6 +76,9 @@ dev: current
 # Run the built application
 run: dev
 
+# Generic build target that defaults to the current platform
+build: current
+
 # Show build info
 info:
 	@echo "Build Information:"
@@ -98,4 +101,4 @@ test:
 	 export CGO_CXXFLAGS="$$CGO_CFLAGS"; \
 	 go test ./internal/... -v -count=1
 
-.PHONY: all current macos linux windows build-all clean deep-clean dev run info start test
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test

@@ -1,5 +1,6 @@
 // internal/commands/execute.go
-
+// Purpose: Low-level command execution with safety checks.
+// Phase 0 change: confirmation prompts are routed through the Prompter abstraction.
 package commands
 
 import (
@@ -15,21 +16,21 @@ import (
 	"github.com/fatih/color"
 )
 
-// Dangerous commands and patterns to block
+// dangerousPatterns are hard-blocked command fragments.
 var dangerousPatterns = []string{
 	"rm -rf /", "rm -rf /*", "format c:", "mkfs", "fdisk", "dd if=/dev/zero",
 	"> /dev/sda", "chmod -R 777 /", "mv / /dev/null", "> /etc/passwd",
 	":(){ :|:& };:", "fork bomb", "debugfs", "mkswap", "swapoff", "> /boot",
 }
 
-// ExecuteConfig holds execution preferences
+// ExecuteConfig holds execution preferences.
 type ExecuteConfig struct {
 	DryRun      bool
 	AutoConfirm bool
 	SafeMode    bool
 }
 
-// DefaultExecuteConfig returns safe default execution settings
+// DefaultExecuteConfig returns safe default execution settings.
 func DefaultExecuteConfig() ExecuteConfig {
 	return ExecuteConfig{
 		DryRun:      false,
@@ -38,7 +39,7 @@ func DefaultExecuteConfig() ExecuteConfig {
 	}
 }
 
-// IsCommandSafe checks if a command contains dangerous patterns
+// IsCommandSafe checks for known dangerous patterns.
 func IsCommandSafe(command string) bool {
 	cmdLower := strings.ToLower(command)
 
@@ -48,89 +49,66 @@ func IsCommandSafe(command string) bool {
 		}
 	}
 
-	// Additional safety checks
-	if strings.Contains(cmdLower, "rm -rf") && strings.Contains(cmdLower, "home") {
-		// Allow rm -rf in home directory but warn
-		return true
-	}
-
 	return true
 }
 
-// -------------------------------------------------------
-// ✨ NEW: Smart Exit Code Handling (grep, diff, find)
-// -------------------------------------------------------
-
+// isNonFatalExit handles tools whose non-zero exit codes are often informational.
 func isNonFatalExit(command string, exitCode int) bool {
 	cmdLower := strings.ToLower(command)
 
-	// GREP
+	// grep: 1 means no matches, not a fatal error.
 	if strings.Contains(cmdLower, "grep ") || strings.HasPrefix(cmdLower, "grep") {
-		// 1 = no matches found → not fatal
-		// 2 = actual error
 		return exitCode == 1
 	}
 
-	// DIFF
+	// diff: 1 means differences found.
 	if strings.HasPrefix(cmdLower, "diff ") {
-		// diff returns:
-		// 0 = same
-		// 1 = different → NOT fatal
-		// 2 = fatal error
 		return exitCode == 1
 	}
 
-	// FIND
+	// find: 1 can occur for permission issues but may still produce output.
 	if strings.HasPrefix(cmdLower, "find ") {
-		// find may return non-zero for missing permissions etc.
-		// not fatal unless clearly error
 		return exitCode == 1
 	}
 
 	return false
 }
 
-// ExecuteCommand runs a shell command with safety checks
+// ExecuteCommand runs a shell command with safety checks.
 func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
-	// Light validation only
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return fmt.Errorf("empty command")
 	}
 
-	// Safety check only
 	if config.SafeMode && !IsCommandSafe(command) {
 		return fmt.Errorf("command blocked for safety: %s", command)
 	}
 
-	// Simple quote balance check
 	if utils.HasUnbalancedQuotesQuick(command) {
 		return fmt.Errorf("command has unbalanced quotes: %s", command)
 	}
 
-	// Command header
 	if config.DryRun {
 		fmt.Printf("%s ", color.YellowString("Dry Run:"))
 	} else {
 		fmt.Printf("%s ", color.YellowString("Executing:"))
 	}
 
-	// Syntax highlighting (optional)
 	if syntaxHighlighter != nil {
 		fmt.Println(syntaxHighlighter.HighlightCommand(command))
 	} else {
 		fmt.Println(command)
 	}
 
-	// Dangerous command confirmation
 	if !config.AutoConfirm && isPotentiallyDangerous(command) {
 		if !AskForConfirmation("This command might be dangerous. Continue?") {
 			return fmt.Errorf("command cancelled by user")
 		}
 	}
 
-	// Select correct shell
 	var cmd *exec.Cmd
+
 	switch env.Shell {
 	case "powershell":
 		cmd = exec.Command("powershell", "-Command", command)
@@ -145,6 +123,7 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 				shellToUse = "sh"
 			}
 		}
+
 		cmd = exec.Command(shellToUse, "-c", command)
 	}
 
@@ -152,11 +131,8 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 
-	// ------------ Execute ------------
 	err := cmd.Run()
-
 	if err != nil {
-		// Handle non-zero exit codes properly
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
 
@@ -174,9 +150,10 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 	return nil
 }
 
-// isPotentiallyDangerous checks for commands that need extra confirmation
+// isPotentiallyDangerous detects commands requiring explicit confirmation.
 func isPotentiallyDangerous(command string) bool {
 	cmdLower := strings.ToLower(command)
+
 	dangerousKeywords := []string{
 		"rm -rf", "chmod", "chown", "mv ", "dd ", "format",
 		"fdisk", "mkfs", "> ", ">> ", "curl | sh", "wget | sh",
@@ -187,23 +164,14 @@ func isPotentiallyDangerous(command string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
-// AskForConfirmation asks for user confirmation
-func AskForConfirmation(prompt string) bool {
-	var response string
-	fmt.Printf("%s [y/N]: ", prompt)
-	fmt.Scanln(&response)
-
-	response = strings.ToLower(strings.TrimSpace(response))
-	return response == "y" || response == "yes"
-}
-
-// Global syntax highlighter instance
+// syntaxHighlighter is the global command highlighter.
 var syntaxHighlighter *utils.SyntaxHighlighter
 
-// SetSyntaxHighlighter sets the global syntax highlighter instance
+// SetSyntaxHighlighter sets the global syntax highlighter.
 func SetSyntaxHighlighter(sh *utils.SyntaxHighlighter) {
 	syntaxHighlighter = sh
 }

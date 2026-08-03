@@ -324,37 +324,32 @@ func (gm *GitManager) executeMultiCommandOperation(operation *GitOperation) erro
 	return nil
 }
 
-// executeCommitStep handles the commit step without shell escaping issues
+// executeCommitStep handles the commit step without shell escaping issues.
 func (gm *GitManager) executeCommitStep(targetBranch string) error {
 	color.Cyan("Commit options:")
 	color.Cyan(" 1. Use default message ('Merge %s with squash')", targetBranch)
 	color.Cyan(" 2. Enter custom message")
 	color.Cyan(" 3. Open editor for message")
 
-	var choice string
-	color.Cyan("Choose option (1/2/3): ")
-	fmt.Scanln(&choice)
+	choice := strings.TrimSpace(AskLine("Choose option (1/2/3)"))
 
-	switch strings.TrimSpace(choice) {
+	switch choice {
 	case "1":
-		// Use default message with NO SHELL ESCAPING - let git handle it internally
-		return gm.executeCommitWithMessage(targetBranch, fmt.Sprintf("Merge %s with squash", targetBranch))
+		return gm.executeCommitWithMessage(
+			targetBranch,
+			fmt.Sprintf("Merge %s with squash", targetBranch),
+		)
 	case "2":
-		// Get custom message
-		color.Cyan("Enter commit message: ")
-		var message string
-		fmt.Scanln(&message)
-		message = strings.TrimSpace(message)
+		message := strings.TrimSpace(AskLine("Enter commit message"))
 		if message == "" {
 			message = fmt.Sprintf("Merge %s with squash", targetBranch)
 		}
+
 		return gm.executeCommitWithMessage(targetBranch, message)
 	case "3":
-		// Let git open the editor
 		color.Blue("Opening commit editor...")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
 	default:
-		// Default to editor
 		color.Blue("Opening commit editor...")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
 	}
@@ -410,7 +405,7 @@ func (gm *GitManager) isMultiCommandOperation(operation *GitOperation) bool {
 		strings.Contains(operation.Command, "${BRANCH}")
 }
 
-// getTargetBranch prompts user for target branch with suggestions
+// getTargetBranch prompts user for target branch with suggestions.
 func (gm *GitManager) getTargetBranch() (string, error) {
 	branches, err := gm.getAvailableBranches()
 	if err != nil {
@@ -418,15 +413,14 @@ func (gm *GitManager) getTargetBranch() (string, error) {
 	} else if len(branches) > 0 {
 		color.Cyan("Available branches:")
 		for i, branch := range branches {
-			if i < 10 { // Show first 10 branches
+			if i < 10 {
 				color.Cyan("   %s", branch)
 			}
 		}
 	}
 
-	color.Cyan("\n Enter target branch name: ")
-	var branch string
-	fmt.Scanln(&branch)
+	color.Cyan("")
+	branch := AskLine("Enter target branch name")
 	branch = strings.TrimSpace(branch)
 
 	if branch == "" {
@@ -803,17 +797,5 @@ func sanitizeGitName(name string) (string, error) {
 // confirmDangerousAction asks the user to type an exact phrase to proceed.
 func confirmDangerousAction(label, requiredPhrase string) bool {
 	color.Red("This is a HIGH-RISK git operation: %s", label)
-	color.Yellow("Type %q to confirm:", requiredPhrase)
-
-	var input string
-	fmt.Scanln(&input)
-	input = strings.TrimSpace(input)
-
-	if input != requiredPhrase {
-		color.Yellow("Dangerous operation cancelled (phrase did not match)")
-		return false
-	}
-
-	color.Green("Dangerous operation confirmed")
-	return true
+	return AskTypedConfirmation(label, requiredPhrase)
 }

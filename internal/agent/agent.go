@@ -82,19 +82,23 @@ func NewAgent(
 	}
 }
 
-// EnableStealth toggles memory‑only execution mode at runtime.
-// When enabled, shell commands are executed without leaving history
-// or persistent disk traces.
+// EnableStealth toggles local private-history mode.
+// Phase 0 safety quarantine:
+//   - no log wiping,
+//   - no anti-forensic behavior,
+//   - only local shell-history suppression for privacy.
 func (a *Agent) EnableStealth(on bool) {
 	if a.stealth == nil && on {
-		a.ux.PrintWarning("Stealth engine not available – cannot enable stealth mode")
+		a.ux.PrintWarning("Private execution engine not available")
 		return
 	}
+
 	a.stealthEnabled = on
+
 	if on {
-		a.ux.PrintSuccess("Stealth mode ENABLED – commands run without history or disk traces")
+		a.ux.PrintSuccess("Private history mode ENABLED — commands avoid writing shell history")
 	} else {
-		a.ux.PrintInfo("Stealth mode DISABLED – commands run normally")
+		a.ux.PrintInfo("Private history mode DISABLED — commands run normally")
 	}
 }
 
@@ -146,7 +150,7 @@ func (a *Agent) HandleInput(userInput string) {
 	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
 
 	// 1) Call planner model
-	rawPlanOutput, err := ai.RunModel(plannerPrompt)
+	rawPlanOutput, err := ai.RunPlannerModel(plannerPrompt)
 	if err != nil {
 		a.ux.PrintError(fmt.Sprintf("Planner model error: %v", err))
 		resp, chatErr := ai.RunModel(userInput)
@@ -427,78 +431,99 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 	return a.sandbox.WrapCommand(validCmd, a.execConfig, a.env)
 }
 
-// handleReconStep processes a planner step with tool = "recon".
-// It now offers to install missing tools before retrying the scan.
+// handleReconStep processes planner recon steps.
+// Phase 0 safety quarantine:
+//   - target must be explicitly authorized before scanning,
+//   - missing tools can still be installed with user permission,
+//   - unauthorized targets are rejected.
 func (a *Agent) handleReconStep(step ai.PlanStep) error {
 	toolName := strings.TrimSpace(step.Action)
 	if toolName == "" {
 		return fmt.Errorf("recon step missing action (tool name)")
 	}
-	args := make([]string, 0)
-	if step.Args != nil {
-		if flags, ok := step.Args["flags"]; ok {
-			args = append(args, strings.Fields(flags)...)
-		}
-		if target, ok := step.Args["target"]; ok {
-			args = append(args, target)
-		}
+
+	target := strings.TrimSpace(step.Args["target"])
+	if target == "" {
+		return fmt.Errorf("recon step missing args.target")
 	}
+
+	if a.recon == nil {
+		return fmt.Errorf("recon engine not available")
+	}
+
+	// Authorization gate.
+	if !a.recon.IsTargetAuthorized(target) {
+		a.ux.PrintError(fmt.Sprintf("Recon target %q is not authorized", target))
+		a.ux.PrintWarning(fmt.Sprintf("Authorize first: /scan authorize %s --reason \"<written scope>\"", target))
+		return fmt.Errorf("unauthorized recon target: %s", target)
+	}
+
+	args := make([]string, 0)
+	if flags, ok := step.Args["flags"]; ok {
+		args = append(args, strings.Fields(flags)...)
+	}
+	args = append(args, target)
+
 	a.ux.PrintCommand(fmt.Sprintf("Recon %s %s", toolName, strings.Join(args, " ")))
 
-	// First attempt
 	result, err := a.recon.RunTool(toolName, args...)
 	if err != nil {
-		return err // serious internal error
+		return err
 	}
 
-	// Tool not found? → ask user, install, retry.
+	// Missing tool handling.
 	if result.Error != nil && strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
 		a.ux.PrintInfo(fmt.Sprintf("Recon tool %q is not installed.", toolName))
+
 		if a.ux.AskYesNo(fmt.Sprintf("Install %s now?", toolName)) {
 			if installErr := a.installPackage(toolName); installErr != nil {
 				a.ux.PrintError(fmt.Sprintf("Installation failed: %v", installErr))
 				return nil
 			}
-			a.ux.PrintSuccess(fmt.Sprintf("%s installed successfully — retrying the scan…", toolName))
 
-			// Retry after installation
+			a.ux.PrintSuccess(fmt.Sprintf("%s installed successfully — retrying scan…", toolName))
+
 			result2, err2 := a.recon.RunTool(toolName, args...)
 			if err2 != nil {
 				a.ux.PrintError(fmt.Sprintf("Recon retry failed: %v", err2))
 				return nil
 			}
+
 			if result2.Error != nil {
-				a.ux.PrintWarning(fmt.Sprintf("Recon retry still had issue: %v", result2.Error))
+				a.ux.PrintWarning(fmt.Sprintf("Recon retry issue: %v", result2.Error))
 				return nil
 			}
+
 			a.ux.PrintSuccess(fmt.Sprintf("Recon completed in %v", result2.Elapsed))
+
 			if len(result2.Parsed) > 0 {
 				summary, _ := json.MarshalIndent(result2.Parsed, "", "  ")
 				a.ux.PrintData(string(summary))
 			} else {
 				a.ux.PrintInfo("No open ports or interesting results found.")
 			}
+
 			return nil
 		}
-		// User declined installation
+
 		a.ux.PrintInfo(fmt.Sprintf("Skipping recon step with %s (not installed).", toolName))
 		return nil
 	}
 
-	// Some other execution error (e.g. timeout)
 	if result.Error != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Recon tool %q issue: %v", toolName, result.Error))
 		return nil
 	}
 
-	// Success – show results
 	a.ux.PrintSuccess(fmt.Sprintf("Recon completed in %v", result.Elapsed))
+
 	if len(result.Parsed) > 0 {
 		summary, _ := json.MarshalIndent(result.Parsed, "", "  ")
 		a.ux.PrintData(string(summary))
 	} else {
 		a.ux.PrintInfo("No open ports or interesting results found.")
 	}
+
 	return nil
 }
 
@@ -593,4 +618,33 @@ func (a *Agent) GetUX() *ux.UX {
 // GetTypingEffect returns whether typing animation is enabled.
 func (a *Agent) GetTypingEffect() bool {
 	return a.typingEffect
+}
+
+// AuthorizeRecon explicitly authorizes a recon target.
+func (a *Agent) AuthorizeRecon(target, reason string) {
+	if a.recon == nil {
+		a.ux.PrintError("Recon engine not available")
+		return
+	}
+
+	a.recon.AuthorizeTarget(target, reason)
+	a.ux.PrintSuccess(fmt.Sprintf("Recon target authorized: %s", target))
+}
+
+// IsReconTargetAuthorized reports whether a target is authorized.
+func (a *Agent) IsReconTargetAuthorized(target string) bool {
+	if a.recon == nil {
+		return false
+	}
+
+	return a.recon.IsTargetAuthorized(target)
+}
+
+// ListAuthorizedReconTargets returns authorized targets and reasons.
+func (a *Agent) ListAuthorizedReconTargets() map[string]string {
+	if a.recon == nil {
+		return map[string]string{}
+	}
+
+	return a.recon.AuthorizedTargets()
 }

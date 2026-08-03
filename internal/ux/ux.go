@@ -479,3 +479,47 @@ func (ux *UX) FormatDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dm %ds", int(d.Minutes())%60, int(d.Seconds())%60)
 }
+
+// TextRequest is sent to the TUI when the Agent needs free-form text input.
+// Phase 0: used to route typed confirmations and branch prompts through the TUI.
+type TextRequest struct {
+	Prompt    string
+	ReplyChan chan string
+}
+
+// AskLine prompts the user for a single line of text.
+// In TUI mode, it blocks until the TUI returns a response.
+func (ux *UX) AskLine(prompt string) string {
+	if ux.eventHandler != nil {
+		reply := make(chan string)
+
+		ux.eventHandler(TextRequest{
+			Prompt:    prompt,
+			ReplyChan: reply,
+		})
+
+		return <-reply
+	}
+
+	fmt.Printf("%s: ", prompt)
+
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(line)
+}
+
+// AskTypedConfirmation requires the user to type an exact phrase.
+func (ux *UX) AskTypedConfirmation(label, requiredPhrase string) bool {
+	prompt := fmt.Sprintf(
+		"HIGH-RISK operation: %s. Type %q to confirm",
+		label,
+		requiredPhrase,
+	)
+
+	response := ux.AskLine(prompt)
+	return response == requiredPhrase
+}

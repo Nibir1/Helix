@@ -193,6 +193,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.confirmReply = msg.ReplyChan
 		return m, nil
 
+	case ux.TextRequest:
+		go audio.PlayAlert()
+
+		m.uiState = StateText
+		m.textPrompt = msg.Prompt
+		m.textReply = msg.ReplyChan
+
+		m.modalInput.SetValue("")
+		m.modalInput.Focus()
+
+		return m, textinput.Blink
+
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
@@ -201,6 +213,37 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState = StateMain
 			return m, nil
 		}
+
+		if m.uiState == StateText {
+			switch msg.Type {
+			case tea.KeyEnter:
+				if m.textReply != nil {
+					m.textReply <- m.modalInput.Value()
+				}
+
+				m.textReply = nil
+				m.uiState = StateMain
+				m.modalInput.Blur()
+
+				return m, waitForAgentOutput(m.agentCh)
+
+			case tea.KeyEsc:
+				if m.textReply != nil {
+					m.textReply <- ""
+				}
+
+				m.textReply = nil
+				m.uiState = StateMain
+				m.modalInput.Blur()
+
+				return m, waitForAgentOutput(m.agentCh)
+			}
+
+			var cmd tea.Cmd
+			m.modalInput, cmd = m.modalInput.Update(msg)
+			return m, cmd
+		}
+
 		if m.uiState == StateConfirm {
 			switch msg.String() {
 			case "y", "Y":
@@ -548,6 +591,10 @@ func (m AppModel) View() string {
 
 	baseView := lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 
+	if m.uiState == StateText {
+		return m.textView(baseView)
+	}
+
 	// 3. Modal Overlay
 	if m.uiState == StateConfirm {
 		return m.overlayView(baseView)
@@ -582,4 +629,25 @@ func runAgent(ag *agent.Agent, input string) tea.Cmd {
 		ag.HandleInput(input)
 		return SessionDoneMsg{}
 	}
+}
+
+// textView renders a modal text-input overlay.
+func (m AppModel) textView(base string) string {
+	prompt := m.styles.ModalText.Render(m.textPrompt)
+	input := m.styles.ModalBorder.Width(60).Render(m.modalInput.View())
+
+	dialog := m.styles.ModalBorder.Render(fmt.Sprintf(
+		"⚠️ INPUT REQUIRED ⚠️\n\n%s\n\n%s\n\n[ENTER] CONFIRM    [ESC] CANCEL",
+		prompt,
+		input,
+	))
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		dialog,
+		lipgloss.WithWhitespaceChars(" "),
+	)
 }

@@ -2,13 +2,16 @@
 package rag
 
 import (
+	"context"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,13 +21,111 @@ import (
 )
 
 const (
-	nvdBaseURL    = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-	kevURL        = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-	exploitCSVURL = "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"
-	mitreSTIXURL  = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
-
+	kevURL         = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+	exploitCSVURL  = "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"
+	mitreSTIXURL   = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 	defaultTimeout = 120 * time.Second
 )
+
+var (
+	// nvdBaseURL is mutable for tests.
+	nvdBaseURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+
+	// Retry tuning, mutable for tests.
+	nvdRetryAttempts  = 3
+	nvdRetryBaseDelay = 2 * time.Second
+)
+
+// APIError is a structured upstream API error.
+type APIError struct {
+	Source     string
+	StatusCode int
+	URL        string
+	Body       string
+}
+
+// Error implements error.
+func (e *APIError) Error() string {
+	if e.StatusCode == 0 {
+		return fmt.Sprintf("%s request failed: %s", e.Source, e.Body)
+	}
+
+	return fmt.Sprintf("%s API returned %d: %s", e.Source, e.StatusCode, errorSnippet(e.Body, 300))
+}
+
+// errorSnippet truncates error bodies for readable logs.
+func errorSnippet(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+
+	return s[:max] + "..."
+}
+
+// fetchWithRetry performs a GET request with retry/backoff for transient failures.
+func fetchWithRetry(
+	ctx context.Context,
+	client *http.Client,
+	requestURL string,
+	headers map[string]string,
+) ([]byte, error) {
+	var lastErr error
+
+	for attempt := 0; attempt < nvdRetryAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = &APIError{
+				Source:     "nvd",
+				StatusCode: 0,
+				URL:        requestURL,
+				Body:       err.Error(),
+			}
+
+			time.Sleep(nvdRetryBaseDelay * time.Duration(attempt+1))
+			continue
+		}
+
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			return bodyBytes, nil
+		}
+
+		apiErr := &APIError{
+			Source:     "nvd",
+			StatusCode: resp.StatusCode,
+			URL:        requestURL,
+			Body:       string(bodyBytes),
+		}
+
+		// Retry only transient/rate-limit errors.
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			lastErr = apiErr
+			time.Sleep(nvdRetryBaseDelay * time.Duration(attempt+1))
+			continue
+		}
+
+		// Non-retryable client error.
+		return nil, apiErr
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("request failed after retries")
+	}
+
+	return nil, lastErr
+}
 
 // UpdateAll fetches all data sources and updates the database.
 func UpdateAll(db *sql.DB) error {
@@ -53,49 +154,59 @@ func UpdateAll(db *sql.DB) error {
 		color.Yellow("Embedding generation failed: %v", err)
 	}
 
+	// Phase 0: explicitly rebuild FTS so search works even if triggers missed rows.
+	if err := ReindexKnowledgeFTS(db); err != nil {
+		color.Yellow("FTS reindex failed: %v", err)
+	}
+
 	color.Green("Knowledge base update completed in %v", time.Since(start))
 	return nil
 }
 
-// updateNVD uses NVD API 2.0 with pagination and incremental update.
+// updateNVD uses NVD API 2.0 with proper URL encoding, pagination, retry, and API key support.
 func updateNVD(db *sql.DB) error {
 	lastMod := getMeta(db, "nvd_last_mod_date")
+
 	if lastMod == "" {
-		// Sensible default for the first pull (CVE data from 2023 onward)
-		lastMod = "2023-01-01T00:00:00.000"
+		if envStart := os.Getenv("NVD_START_DATE"); envStart != "" {
+			lastMod = envStart
+		} else {
+			// Safe default: rolling 120-day window.
+			lastMod = time.Now().UTC().AddDate(0, 0, -120).Format("2006-01-02T15:04:05.000Z")
+		}
 	}
 
 	client := &http.Client{Timeout: defaultTimeout}
-	var total int
+	ctx := context.Background()
+
+	total := 0
 
 	for startIndex := 0; ; startIndex += 2000 {
-		url := fmt.Sprintf("%s?lastModStartDate=%s&resultsPerPage=2000&startIndex=%d",
-			nvdBaseURL, lastMod, startIndex)
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			return fmt.Errorf("NVD request creation: %w", err)
+		params := url.Values{}
+		params.Set("lastModStartDate", lastMod)
+		params.Set("resultsPerPage", "2000")
+		params.Set("startIndex", strconv.Itoa(startIndex))
+
+		requestURL := nvdBaseURL + "?" + params.Encode()
+
+		headers := map[string]string{
+			"User-Agent": "Helix/1.0",
 		}
-		req.Header.Set("User-Agent", "Helix/1.0")
-		// Optional: add NVD API key from env
+
 		if key := os.Getenv("NVD_API_KEY"); key != "" {
-			req.Header.Set("apiKey", key)
+			headers["apiKey"] = key
 		}
 
-		resp, err := client.Do(req)
+		bodyBytes, err := fetchWithRetry(ctx, client, requestURL, headers)
 		if err != nil {
-			return fmt.Errorf("NVD request: %w", err)
-		}
-		// Read body early so we can close it
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
-		resp.Body.Close()
+			if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == http.StatusNotFound {
+				return fmt.Errorf(
+					"NVD API returned 404; verify date window (try NVD_START_DATE within last 120 days) and NVD_API_KEY: %w",
+					err,
+				)
+			}
 
-		if resp.StatusCode == http.StatusTooManyRequests {
-			color.Yellow("NVD rate limited; sleeping 30s...")
-			time.Sleep(30 * time.Second)
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("NVD API returned %d (%s)", resp.StatusCode, string(bodyBytes[:min(len(bodyBytes), 200)]))
+			return err
 		}
 
 		var nvdResp nvdResponse
@@ -108,12 +219,14 @@ func updateNVD(db *sql.DB) error {
 			if cveID == "" {
 				continue
 			}
+
 			desc := ""
 			if len(vuln.CVE.Descriptions) > 0 {
 				desc = vuln.CVE.Descriptions[0].Value
 			}
+
 			cvss := 0.0
-			// Try CVSS v3.1 first, then v3.0, then v2
+
 			if len(vuln.CVE.Metrics.CVSSMetricV31) > 0 {
 				cvss = vuln.CVE.Metrics.CVSSMetricV31[0].CVSSData.BaseScore
 			} else if len(vuln.CVE.Metrics.CVSSMetricV30) > 0 {
@@ -121,26 +234,44 @@ func updateNVD(db *sql.DB) error {
 			} else if len(vuln.CVE.Metrics.CVSSMetricV2) > 0 {
 				cvss = vuln.CVE.Metrics.CVSSMetricV2[0].CVSSData.BaseScore
 			}
+
 			raw, _ := json.Marshal(vuln)
-			_, err := db.Exec(`INSERT OR REPLACE INTO cve(id, description, cvss_score, published_date, last_modified_date, raw_json)
-				VALUES(?,?,?,?,?,?)`,
-				cveID, desc, cvss,
-				vuln.CVE.Published, vuln.CVE.LastModified, string(raw))
+
+			_, err := db.Exec(`
+				INSERT OR REPLACE INTO cve(
+					id,
+					description,
+					cvss_score,
+					published_date,
+					last_modified_date,
+					raw_json
+				) VALUES(?,?,?,?,?,?)
+			`,
+				cveID,
+				desc,
+				cvss,
+				vuln.CVE.Published,
+				vuln.CVE.LastModified,
+				string(raw),
+			)
 			if err != nil {
 				return fmt.Errorf("insert CVE %s: %w", cveID, err)
 			}
+
 			total++
 		}
 
-		if startIndex+2000 >= nvdResp.TotalResults {
+		if nvdResp.TotalResults == 0 || startIndex+2000 >= nvdResp.TotalResults {
 			break
 		}
-		// Small delay to be polite
+
+		// Be polite to the NVD API.
 		time.Sleep(500 * time.Millisecond)
 	}
-	// Update metadata
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000")
+
+	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	setMeta(db, "nvd_last_mod_date", now)
+
 	color.Green("NVD: %d CVEs updated", total)
 	return nil
 }

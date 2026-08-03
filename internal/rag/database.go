@@ -162,3 +162,59 @@ func migrate(db *sql.DB) error {
 	}
 	return nil
 }
+
+// FTSCount returns the number of rows in the FTS index.
+func FTSCount(db *sql.DB) (int, error) {
+	var count int
+
+	err := db.QueryRow(`SELECT COUNT(*) FROM knowledge_fts`).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+// ReindexKnowledgeFTS explicitly rebuilds the FTS index from source tables.
+// This is required when triggers did not fire or when repairing an old database.
+func ReindexKnowledgeFTS(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM knowledge_fts`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO knowledge_fts(source_type, source_id, title, description)
+		SELECT 'cve', id, id, description FROM cve
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO knowledge_fts(source_type, source_id, title, description)
+		SELECT 'kev', cve_id, title, notes FROM kev
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO knowledge_fts(source_type, source_id, title, description)
+		SELECT 'exploit', edb_id, edb_id, description FROM exploit
+	`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO knowledge_fts(source_type, source_id, title, description)
+		SELECT 'mitre', technique_id, name, description FROM mitre_technique
+	`); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}

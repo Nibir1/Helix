@@ -19,6 +19,7 @@ const (
 	StateLoading = iota
 	StateMain
 	StateConfirm
+	StateText
 )
 
 // Log Types for Color Coding
@@ -72,6 +73,11 @@ type AppModel struct {
 	confirmMsg   string
 	confirmReply chan bool
 
+	// Phase 0: free-form text modal state.
+	textPrompt string
+	textReply  chan string
+	modalInput textinput.Model
+
 	agent   *agent.Agent
 	agentCh chan tea.Msg
 
@@ -96,6 +102,15 @@ func NewModel(ag *agent.Agent, agentCh chan tea.Msg) AppModel {
 	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier)).Bold(true)
 	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier))
 
+	// Phase 0: modal text input for typed confirmations and line prompts.
+	mi := textinput.New()
+	mi.Placeholder = "Type here..."
+	mi.CharLimit = 256
+	mi.Width = 60
+	mi.Prompt = "> "
+	mi.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier)).Bold(true)
+	mi.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier))
+
 	spin := spinner.New()
 	spin.Spinner = spinner.MiniDot
 	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRectifier))
@@ -104,7 +119,7 @@ func NewModel(ag *agent.Agent, agentCh chan tea.Msg) AppModel {
 		textInput:   ti,
 		spinner:     spin,
 		styles:      s,
-		history:     []LogEntry{}, // Empty typed slice
+		history:     []LogEntry{},
 		agent:       ag,
 		agentCh:     agentCh,
 		uiState:     StateLoading,
@@ -112,7 +127,8 @@ func NewModel(ag *agent.Agent, agentCh chan tea.Msg) AppModel {
 		glitchProb:  0.0,
 		memUsage:    "0 MB",
 		activeProcs: 1,
-		isTyping:    false, // Init typing state
+		isTyping:    false,
+		modalInput:  mi,
 	}
 }
 

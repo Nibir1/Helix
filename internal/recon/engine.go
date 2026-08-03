@@ -1,8 +1,9 @@
 // internal/recon/engine.go
-// Package recon provides a multi‑tool reconnaissance orchestrator.
-// It parses natural‑language recon commands from the planner, runs
-// tools like nmap/masscan/ffuf, and gathers structured results.
-
+// Purpose: Authorized multi-tool reconnaissance orchestration.
+// Phase 0 safety quarantine:
+//   - recon requires explicit target authorization,
+//   - unauthorized targets are rejected,
+//   - dangerous flags remain blocked unless explicitly allowed.
 package recon
 
 import (
@@ -10,42 +11,31 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"helix/internal/shell"
 )
-
-// ReconTarget represents a single target (IP, CIDR, URL).
-type ReconTarget struct {
-	Host  string
-	Ports []int
-}
 
 // ReconResult holds the output of one reconnaissance command.
 type ReconResult struct {
 	Tool    string
 	Target  string
 	Raw     string
-	Parsed  map[string]interface{} // structured data (e.g. open ports)
+	Parsed  map[string]interface{}
 	Error   error
 	Elapsed time.Duration
 }
 
-// ReconEngine manages the execution of reconnaissance tools.
-type ReconEngine struct {
-	env    shell.Env
-	config ReconConfig
-}
-
-// ReconConfig configures the engine’s behaviour.
+// ReconConfig configures engine behavior.
 type ReconConfig struct {
-	// Timeout per command.
-	Timeout time.Duration
-	// MaxParallel limits concurrent tool runs.
-	MaxParallel int
-	// Force allow dangerous flags (requires typed confirmation).
+	Timeout        time.Duration
+	MaxParallel    int
 	AllowDangerous bool
-	// Paths to tool binaries (can be overridden).
+
+	// RequireAuthorization enforces explicit target authorization.
+	RequireAuthorization bool
+
 	NmapPath    string
 	MasscanPath string
 	FfufPath    string
@@ -55,33 +45,105 @@ type ReconConfig struct {
 // DefaultReconConfig returns safe defaults.
 func DefaultReconConfig() ReconConfig {
 	return ReconConfig{
-		Timeout:        5 * time.Minute,
-		MaxParallel:    4,
-		AllowDangerous: false,
-		NmapPath:       "nmap",
-		MasscanPath:    "masscan",
-		FfufPath:       "ffuf",
-		AmassPath:      "amass",
+		Timeout:              5 * time.Minute,
+		MaxParallel:          4,
+		AllowDangerous:       false,
+		RequireAuthorization: true,
+		NmapPath:             "nmap",
+		MasscanPath:          "masscan",
+		FfufPath:             "ffuf",
+		AmassPath:            "amass",
 	}
+}
+
+// ReconEngine executes reconnaissance tools.
+type ReconEngine struct {
+	env    shell.Env
+	config ReconConfig
+
+	authMu            sync.Mutex
+	authorizedTargets map[string]string
 }
 
 // NewReconEngine creates a new engine.
 func NewReconEngine(env shell.Env, cfg ReconConfig) *ReconEngine {
-	return &ReconEngine{env: env, config: cfg}
+	return &ReconEngine{
+		env:               env,
+		config:            cfg,
+		authorizedTargets: make(map[string]string),
+	}
 }
 
-// RunTool executes a single recon tool with the given arguments.
-// tool is one of "nmap", "masscan", "ffuf", "amass".
-// args are the command‑line arguments (e.g., "-sV", "192.168.1.1").
-// On success the ReconResult.Error will be nil.
-// If the tool is not found the error is still embedded in the result
-// (rather than stopping the whole operation).
+// AuthorizeTarget marks a target as explicitly authorized.
+func (re *ReconEngine) AuthorizeTarget(target, reason string) {
+	target = strings.TrimSpace(target)
+	reason = strings.TrimSpace(reason)
+
+	if target == "" {
+		return
+	}
+
+	if reason == "" {
+		reason = "manual authorization"
+	}
+
+	re.authMu.Lock()
+	defer re.authMu.Unlock()
+
+	re.authorizedTargets[target] = reason
+}
+
+// IsTargetAuthorized reports whether a target is authorized.
+func (re *ReconEngine) IsTargetAuthorized(target string) bool {
+	target = strings.TrimSpace(target)
+
+	re.authMu.Lock()
+	defer re.authMu.Unlock()
+
+	_, ok := re.authorizedTargets[target]
+	return ok
+}
+
+// AuthorizedTargets returns a copy of authorized targets.
+func (re *ReconEngine) AuthorizedTargets() map[string]string {
+	re.authMu.Lock()
+	defer re.authMu.Unlock()
+
+	out := make(map[string]string, len(re.authorizedTargets))
+	for target, reason := range re.authorizedTargets {
+		out[target] = reason
+	}
+
+	return out
+}
+
+// RunTool executes a recon tool.
 func (re *ReconEngine) RunTool(tool string, args ...string) (*ReconResult, error) {
 	start := time.Now()
+
+	// Authorization gate.
+	if re.config.RequireAuthorization {
+		target := extractTarget(args)
+		if target == "" {
+			return &ReconResult{
+				Tool:    tool,
+				Error:   fmt.Errorf("recon target missing; authorize with /scan authorize <target> --reason \"...\""),
+				Elapsed: time.Since(start),
+			}, nil
+		}
+
+		if !re.IsTargetAuthorized(target) {
+			return &ReconResult{
+				Tool:    tool,
+				Target:  target,
+				Error:   fmt.Errorf("target %q is not authorized for reconnaissance", target),
+				Elapsed: time.Since(start),
+			}, nil
+		}
+	}
+
 	cmdPath, err := re.getToolPath(tool)
 	if err != nil {
-		// Tool not found – return a result with the error inside,
-		// not a hard error. This allows callers to handle it gracefully.
 		return &ReconResult{
 			Tool:    tool,
 			Error:   err,
@@ -89,20 +151,31 @@ func (re *ReconEngine) RunTool(tool string, args ...string) (*ReconResult, error
 		}, nil
 	}
 
-	// Basic safety: block obviously dangerous flags unless allowed.
 	if !re.config.AllowDangerous {
 		if err := re.checkArgs(tool, args); err != nil {
-			return &ReconResult{Tool: tool, Error: err, Elapsed: time.Since(start)}, nil
+			return &ReconResult{
+				Tool:    tool,
+				Error:   err,
+				Elapsed: time.Since(start),
+			}, nil
 		}
 	}
 
 	cmd := exec.Command(cmdPath, args...)
 	cmd.Stdin = nil
+
 	var outBuf, errBuf strings.Builder
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 
-	cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return &ReconResult{
+			Tool:    tool,
+			Error:   fmt.Errorf("failed to start %s: %w", tool, err),
+			Elapsed: time.Since(start),
+		}, nil
+	}
+
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
@@ -110,36 +183,51 @@ func (re *ReconEngine) RunTool(tool string, args ...string) (*ReconResult, error
 
 	select {
 	case err := <-done:
+		rawOutput := outBuf.String() + errBuf.String()
+
 		if err != nil {
 			return &ReconResult{
 				Tool:    tool,
-				Raw:     outBuf.String() + errBuf.String(),
+				Raw:     rawOutput,
 				Error:   err,
 				Elapsed: time.Since(start),
 			}, nil
 		}
+
+		return &ReconResult{
+			Tool:    tool,
+			Raw:     rawOutput,
+			Elapsed: time.Since(start),
+			Parsed:  parseOutput(tool, rawOutput),
+		}, nil
+
 	case <-time.After(re.config.Timeout):
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
+
 		return &ReconResult{
 			Tool:    tool,
 			Error:   fmt.Errorf("recon tool %s timed out after %v", tool, re.config.Timeout),
 			Elapsed: time.Since(start),
 		}, nil
 	}
-
-	rawOutput := outBuf.String() + errBuf.String()
-	result := &ReconResult{
-		Tool:    tool,
-		Raw:     rawOutput,
-		Elapsed: time.Since(start),
-		Parsed:  parseOutput(tool, rawOutput),
-	}
-	return result, nil
 }
 
-// getToolPath returns the absolute path to the tool binary.
+// extractTarget returns the last non-flag argument.
+func extractTarget(args []string) string {
+	for i := len(args) - 1; i >= 0; i-- {
+		arg := strings.TrimSpace(args[i])
+		if arg != "" && !strings.HasPrefix(arg, "-") {
+			return arg
+		}
+	}
+
+	return ""
+}
+
+// getToolPath resolves the tool binary.
 func (re *ReconEngine) getToolPath(tool string) (string, error) {
 	var path string
+
 	switch tool {
 	case "nmap":
 		path = re.config.NmapPath
@@ -152,34 +240,36 @@ func (re *ReconEngine) getToolPath(tool string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown recon tool: %s", tool)
 	}
-	// Verify that the binary exists.
+
 	if _, err := exec.LookPath(path); err != nil {
 		return "", fmt.Errorf("recon tool %q not found in PATH (looked for %s)", tool, path)
 	}
+
 	return path, nil
 }
 
-// checkArgs rejects obviously dangerous patterns in arguments.
+// checkArgs blocks obviously dangerous argument patterns.
 func (re *ReconEngine) checkArgs(tool string, args []string) error {
 	dangerous := map[string][]string{
-		"nmap":    {"--script", "http-brute"}, // aggressive brute‑forcing
-		"masscan": {"--rate", "1000000"},      // insane rate
-		"ffuf":    {"-w", "rockyou.txt"},      // huge wordlist
+		"nmap":    {"--script", "http-brute"},
+		"masscan": {"--rate", "1000000"},
+		"ffuf":    {"-w", "rockyou.txt"},
 	}
+
 	if bad, exists := dangerous[tool]; exists {
 		for _, arg := range args {
 			for _, b := range bad {
 				if strings.Contains(arg, b) {
-					return fmt.Errorf("dangerous flag %q blocked for tool %s (override with AllowDangerous)", arg, tool)
+					return fmt.Errorf("dangerous flag %q blocked for tool %s", arg, tool)
 				}
 			}
 		}
 	}
+
 	return nil
 }
 
-// parseOutput attempts to extract structured data from tool output.
-// Currently supports basic nmap and masscan.
+// parseOutput extracts structured data where possible.
 func parseOutput(tool, raw string) map[string]interface{} {
 	switch tool {
 	case "nmap":
@@ -193,9 +283,10 @@ func parseOutput(tool, raw string) map[string]interface{} {
 
 func parseNmapOutput(out string) map[string]interface{} {
 	res := map[string]interface{}{}
-	// Simple regex to find open ports.
+
 	re := regexp.MustCompile(`(\d+)/tcp\s+open\s+(\S+)`)
 	matches := re.FindAllStringSubmatch(out, -1)
+
 	var ports []map[string]string
 	for _, m := range matches {
 		ports = append(ports, map[string]string{
@@ -203,16 +294,20 @@ func parseNmapOutput(out string) map[string]interface{} {
 			"service": m[2],
 		})
 	}
+
 	if len(ports) > 0 {
 		res["open_ports"] = ports
 	}
+
 	return res
 }
 
 func parseMasscanOutput(out string) map[string]interface{} {
 	res := map[string]interface{}{}
+
 	re := regexp.MustCompile(`Discovered open port (\d+)/tcp on (\S+)`)
 	matches := re.FindAllStringSubmatch(out, -1)
+
 	var ports []map[string]string
 	for _, m := range matches {
 		ports = append(ports, map[string]string{
@@ -220,22 +315,28 @@ func parseMasscanOutput(out string) map[string]interface{} {
 			"ip":   m[2],
 		})
 	}
+
 	if len(ports) > 0 {
 		res["open_ports"] = ports
 	}
+
 	return res
 }
 
-// SummarizeResults aggregates multiple ReconResults into a concise report.
+// SummarizeResults aggregates multiple results into a report.
 func SummarizeResults(results []*ReconResult) string {
 	var b strings.Builder
+
 	b.WriteString("=== Reconnaissance Summary ===\n")
+
 	for _, r := range results {
 		b.WriteString(fmt.Sprintf("[%s] %s (took %v)\n", r.Tool, r.Target, r.Elapsed))
+
 		if r.Error != nil {
 			b.WriteString(fmt.Sprintf("  Error: %v\n", r.Error))
 			continue
 		}
+
 		if len(r.Parsed) > 0 {
 			openPorts, ok := r.Parsed["open_ports"].([]map[string]string)
 			if ok {
@@ -248,5 +349,6 @@ func SummarizeResults(results []*ReconResult) string {
 			b.WriteString("  (no structured results)\n")
 		}
 	}
+
 	return b.String()
 }

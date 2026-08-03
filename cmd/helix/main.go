@@ -192,6 +192,9 @@ func main() {
 		tuiChan <- evt
 	})
 
+	// Phase 0: route all command prompts through the TUI-aware UX layer.
+	commands.SetPrompter(gui)
+
 	// 3. Save Original Output & Activate Hijacker
 	originalStdout := os.Stdout
 	restoreStdio := utils.HijackStdio(tuiChan)

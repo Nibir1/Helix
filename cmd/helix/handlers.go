@@ -6,9 +6,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
+	"time"
 
 	"helix/internal/ai"
 	"helix/internal/commands"
@@ -56,12 +57,21 @@ func handleSlashCommand(input string) bool {
 		handleQuickScan(parts)
 	case "/explain":
 		handleExplainCommand(input)
+	case "/vuln", "/intel":
+		handleVulnCommand(input)
 	case "/exploit":
-		handleExploitCommand(input)
+		color.Yellow("/exploit is deprecated. Use /vuln for defensive vulnerability intelligence.")
+		handleVulnCommand(strings.Replace(input, "/exploit", "/vuln", 1))
 	case "/knowledge-update":
 		handleKnowledgeUpdate()
 	case "/knowledge-stats":
 		handleKnowledgeStats()
+	case "/knowledge-reindex":
+		handleKnowledgeReindex()
+	case "/doctor":
+		handleDoctor()
+	case "/provider-status":
+		handleProviderStatus()
 	default:
 		return false
 	}
@@ -246,15 +256,8 @@ func handleRAGRebuild() {
 	color.Yellow("  • Delete all cached MAN page embeddings")
 	color.Yellow("  • Re-scan MAN pages and rebuild the vector index")
 	color.Yellow("  • This may take several minutes on first run")
-	fmt.Print("Proceed with full rebuild now? [y/N]: ")
 
-	var answer string
-	if _, err := fmt.Scanln(&answer); err != nil {
-		answer = ""
-	}
-
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	if answer != "y" && answer != "yes" {
+	if !commands.AskForConfirmation("Proceed with full rebuild now?") {
 		color.Yellow("RAG rebuild cancelled by user")
 		return
 	}
@@ -363,23 +366,73 @@ func handleStealthCommand(input string) {
 // -------------------------------------------------------
 func handleQuickScan(args []string) {
 	if len(args) < 2 {
-		color.Cyan("Usage: /scan <target>")
+		color.Cyan("Usage:")
+		color.Cyan("  /scan authorize <target> --reason \"<written scope>\"")
+		color.Cyan("  /scan status")
+		color.Cyan("  /scan <target>")
 		return
 	}
-	target := args[1]
+
 	if agentCore == nil {
 		color.Red("Agent not initialized")
 		return
 	}
-	result, err := agentCore.RunReconTool("nmap", "-sV", target)
-	if err != nil {
-		color.Red("Recon failed: %v", err)
+
+	switch strings.ToLower(args[1]) {
+	case "authorize":
+		if len(args) < 3 {
+			color.Red("Usage: /scan authorize <target> --reason \"<written scope>\"")
+			return
+		}
+
+		target := args[2]
+		reason := "manual authorization"
+
+		for i, arg := range args {
+			if strings.EqualFold(arg, "--reason") && i+1 < len(args) {
+				reason = strings.Join(args[i+1:], " ")
+				break
+			}
+		}
+
+		agentCore.AuthorizeRecon(target, reason)
 		return
-	}
-	color.Green("Recon completed in %v", result.Elapsed)
-	if result.Error != nil {
-		color.Yellow("Tool error: %v", result.Error)
-	} else {
+
+	case "status":
+		targets := agentCore.ListAuthorizedReconTargets()
+		if len(targets) == 0 {
+			color.Yellow("No authorized recon targets.")
+			return
+		}
+
+		color.Cyan("Authorized recon targets:")
+		for target, reason := range targets {
+			color.Cyan("  • %s — %s", target, reason)
+		}
+		return
+
+	default:
+		target := args[1]
+
+		if !agentCore.IsReconTargetAuthorized(target) {
+			color.Red("Target %q is not authorized for reconnaissance.", target)
+			color.Yellow("Run: /scan authorize %s --reason \"<written scope>\"", target)
+			return
+		}
+
+		result, err := agentCore.RunReconTool("nmap", "-sV", target)
+		if err != nil {
+			color.Red("Recon failed: %v", err)
+			return
+		}
+
+		color.Green("Recon completed in %v", result.Elapsed)
+
+		if result.Error != nil {
+			color.Yellow("Tool error: %v", result.Error)
+			return
+		}
+
 		color.Cyan("Parsed results:")
 		for k, v := range result.Parsed {
 			color.Cyan("  %s: %v", k, v)
@@ -398,9 +451,8 @@ func handleExplainCommand(input string) {
 		return
 	}
 
-	color.Cyan("Adversarial Mind – analysing request...")
+	color.Cyan("Explainable defensive analysis — analysing request...")
 
-	// Retrieve MITRE context
 	mitreContext := ""
 	if ragSystem != nil && ragSystem.IsInitialized() {
 		snippets, err := ragSystem.RetrieveMitreContext(args, 3)
@@ -409,15 +461,13 @@ func handleExplainCommand(input string) {
 		}
 	}
 
-	// UPDATED PROMPT: explicitly ban all markdown
 	prompt := fmt.Sprintf(`
-You are Helix's Adversarial Mind – an explainable attack planning module.
+You are Helix's defensive explainability module.
+Given the user's command or technique description, produce a structured defensive debrief with these sections:
 
-Given the user's command or technique description, produce a structured debrief with these sections:
-
-1. Technique(s): Which MITRE ATT&CK techniques are involved? (list them with IDs and names)
-2. Expected Detections: What security tools or log sources would likely detect this activity?
-3. Quieter Alternatives: How could the same objective be achieved with less noise or fewer footprints?
+1. Technique(s): Which MITRE ATT&CK techniques are relevant? List IDs and names.
+2. Expected Detections: What logs, telemetry, or security controls may detect this activity?
+3. Mitigation Controls: What defensive mitigations, hardening steps, or patches reduce risk?
 
 Use the following MITRE ATT&CK context if provided; otherwise, rely on your internal knowledge.
 
@@ -427,14 +477,16 @@ MITRE Context:
 User Request: %s
 
 FORMAT RULES (STRICT):
-- Use ONLY plain text. NO markdown, NO bold/italic, NO backticks, NO hash signs.
+- Use ONLY plain text.
+- NO markdown, NO bold/italic, NO backticks, NO hash signs.
 - Separate sections with blank lines.
-- Use simple hyphens for bullet points (- ).
-- Keep the section titles exactly as given: "1. Technique(s):", "2. Expected Detections:", "3. Quieter Alternatives:"
-- Do NOT wrap anything in asterisks.
+- Use simple hyphens for bullet points.
+- Keep section titles exactly as given.
 
 Now output the debrief:`,
-		mitreContext, args)
+		mitreContext,
+		args,
+	)
 
 	explainConfig := ai.ModelConfig{
 		Temperature: 0.7,
@@ -449,110 +501,33 @@ Now output the debrief:`,
 		return
 	}
 
-	// Strip any rogue markdown and add colour to section headers
 	cleaned := cleanDebrief(strings.TrimSpace(resp))
 
-	// Display via agent UX (typing effect, TUI‑routed)
 	if agentCore != nil {
 		agentCore.GetUX().PrintAIMessage(cleaned, agentCore.GetTypingEffect())
-	} else {
-		color.Cyan(cleaned)
-	}
-
-	// Standard mission‑complete banner
-	if agentCore != nil {
 		agentCore.GetUX().PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 	} else {
+		color.Cyan(cleaned)
 		color.Green("Helix :: GRID STATUS :: CLEAR")
 	}
 }
 
-// cleanDebrief removes markdown artefacts and colourises section headers.
+// cleanDebrief removes markdown artifacts and colorizes section headers.
 func cleanDebrief(text string) string {
-	// Remove all double‑asterisks (bold markers)
 	text = strings.ReplaceAll(text, "**", "")
 
-	// Colourise the three expected section headers with cyan
 	headers := []string{
 		"1. Technique(s):",
 		"2. Expected Detections:",
-		"3. Quieter Alternatives:",
+		"3. Mitigation Controls:",
 	}
+
 	for _, h := range headers {
 		coloured := color.New(color.FgCyan, color.Bold).Sprint(h)
 		text = strings.Replace(text, h, coloured, 1)
 	}
 
 	return text
-}
-
-// truncateText shortens a string for display purposes.
-func truncateText(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-3] + "..."
-}
-
-// isPlatformCompatible checks if the exploit's platform string matches the current OS.
-// Example: "windows" matches "windows", "linux" matches "linux", "multi" matches any.
-func isPlatformCompatible(exploitPlatform, currentOS string) bool {
-	plat := strings.ToLower(strings.TrimSpace(exploitPlatform))
-	os := strings.ToLower(currentOS)
-	if plat == "multi" || plat == "" {
-		return true
-	}
-	// Handle "linux/windows" style
-	parts := strings.Split(plat, "/")
-	for _, p := range parts {
-		if strings.TrimSpace(p) == os {
-			return true
-		}
-	}
-	return false
-}
-
-// computeExploitRisk categorises an exploit as GREEN, YELLOW, or RED.
-func computeExploitRisk(e rag.ExploitEntry) string {
-	// Heuristic: CVSS >= 7.0 or impact rce/lpe with high privileges => RED
-	if e.CVSS >= 7.0 || (e.Impact == "rce" && e.Privileges == "none") || e.Impact == "lpe" {
-		return "RED"
-	}
-	// CVSS >= 4.0 or dos/info with potential expansion => YELLOW
-	if e.CVSS >= 4.0 || e.Impact == "dos" || e.Impact == "rce" {
-		return "YELLOW"
-	}
-	return "GREEN"
-}
-
-// displayExploitDebrief shows the full exploit details in a structured format.
-func displayExploitDebrief(e rag.ExploitEntry, justification string) {
-	bold := color.New(color.FgCyan, color.Bold).SprintFunc()
-	agentCore.GetUX().PrintSystemMessage("=== Exploit Debrief ===")
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("ID:"), e.ID))
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("CVE:"), e.CVE))
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Platform:"), e.Platform))
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %.1f", bold("CVSS Score:"), e.CVSS))
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Impact:"), e.Impact))
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Privileges:"), e.Privileges))
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Detection:"), e.Detection))
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("Blast Radius:"), e.BlastRadius))
-	agentCore.GetUX().PrintData(fmt.Sprintf("%s %s", bold("AI Justification:"), justification))
-	agentCore.GetUX().PrintAIMessage("Alternatives (quieter paths):", false)
-	for _, alt := range e.Alternatives {
-		agentCore.GetUX().PrintData(fmt.Sprintf("  • %s", alt))
-	}
-	agentCore.GetUX().PrintSuccess("Helix :: GRID STATUS :: CLEAR")
-}
-
-// displayExploitFallback shows the AI response when no matching exploit entry is found.
-func displayExploitFallback(id, justification string) {
-	color.Cyan("AI suggested exploit: %s", id)
-	if justification != "" {
-		color.Cyan("Justification: %s", justification)
-	}
-	color.Yellow("Full exploit metadata not available in the knowledge base.")
-	color.Yellow("You may still evaluate the suggestion manually.")
 }
 
 // -------------------------------------------------------
@@ -600,169 +575,228 @@ func handleKnowledgeStats() {
 	}
 }
 
-// -------------------------------------------------------
-// /exploit – AI‑driven exploit suggestion (Phase 3.5 DB)
-// -------------------------------------------------------
-func handleExploitCommand(input string) {
-	args := strings.TrimSpace(strings.TrimPrefix(input, "/exploit"))
-	args = strings.Trim(args, `"'`)
-
-	if args == "" {
-		color.Red("Usage: /exploit <target description or vulnerability>")
+// handleVulnCommand provides defensive vulnerability intelligence.
+func handleVulnCommand(input string) {
+	fields := strings.Fields(input)
+	if len(fields) == 0 {
 		return
 	}
 
-	color.Cyan("Guardian – searching knowledge base...")
+	query := strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
+	query = strings.Trim(query, `"'`)
 
-	if ragSystem == nil || !ragSystem.IsInitialized() {
-		color.Red("Exploit knowledge base not available.")
+	if query == "" {
+		color.Red("Usage: /vuln <CVE-ID|EDB-ID|MITRE-T-ID|search query>")
 		return
 	}
 
-	// First try the SQLite semantic search
-	var entries []rag.KnowledgeEntry
-	if ragSystem.GetDB() != nil {
-		var err error
-		entries, err = ragSystem.SemanticSearch(args, 10)
-		if err != nil {
-			color.Yellow("Semantic search issue: %v", err)
-		}
+	if ragSystem == nil || ragSystem.GetDB() == nil {
+		color.Red("Knowledge database not available.")
+		return
 	}
 
-	// Fallback to hardcoded entries if DB returned nothing
+	db := ragSystem.GetDB()
+
+	// Exact ID lookup first.
+	exact, err := rag.LookupVulnByID(db, query)
+	if err == nil && len(exact) > 0 {
+		displayVulnEntries(exact)
+		return
+	}
+
+	// Search fallback.
+	entries, err := rag.SearchVulns(db, query, 5)
+	if err != nil {
+		color.Red("Vulnerability search failed: %v", err)
+		return
+	}
+
 	if len(entries) == 0 {
-		allHardcoded := ragSystem.GetAllExploitEntries()
-		if len(allHardcoded) == 0 {
-			color.Red("No exploit entries available (neither DB nor hardcoded).")
-			return
+		color.Yellow("No matching vulnerability intelligence found.")
+		color.Yellow("Try /knowledge-update or /knowledge-reindex.")
+		return
+	}
+
+	displayVulnEntries(entries)
+}
+
+// displayVulnEntries prints defensive vulnerability intelligence.
+func displayVulnEntries(entries []rag.VulnIntel) {
+	bold := color.New(color.FgCyan, color.Bold).SprintFunc()
+
+	color.Cyan("=== Vulnerability Intelligence ===")
+
+	for i, e := range entries {
+		if i > 0 {
+			fmt.Println()
 		}
-		// Filter hardcoded entries by OS compatibility
-		var compatible []rag.ExploitEntry
-		for _, e := range allHardcoded {
-			if isPlatformCompatible(e.Platform, env.OSName) {
-				compatible = append(compatible, e)
+
+		color.Cyan("%s %s", bold("ID:"), e.ID)
+		color.Cyan("%s %s", bold("Source:"), e.SourceType)
+		color.Cyan("%s %s", bold("Title:"), e.Title)
+
+		if e.Description != "" {
+			color.Cyan("%s %s", bold("Description:"), e.Description)
+		}
+
+		if e.CVSS > 0 {
+			color.Cyan("%s %.1f", bold("CVSS:"), e.CVSS)
+		}
+
+		color.Cyan("%s %v", bold("CISA KEV:"), e.KEV)
+
+		if e.KEVAction != "" {
+			color.Cyan("%s %s", bold("KEV Action:"), e.KEVAction)
+		}
+
+		if e.KEVDueDate != "" {
+			color.Cyan("%s %s", bold("KEV Due:"), e.KEVDueDate)
+		}
+
+		if e.Platform != "" {
+			color.Cyan("%s %s", bold("Platform:"), e.Platform)
+		}
+
+		if e.Detection != "" {
+			color.Cyan("%s %s", bold("Detection:"), e.Detection)
+		}
+
+		if e.PatchGuidance != "" {
+			color.Cyan("%s %s", bold("Patch Guidance:"), e.PatchGuidance)
+		}
+
+		if len(e.References) > 0 {
+			color.Cyan("%s %s", bold("References:"), strings.Join(e.References, ", "))
+		}
+	}
+
+	fmt.Println()
+	color.Yellow("Defensive use only: prioritize patching and detection. No exploit execution is performed.")
+}
+
+// handleKnowledgeReindex explicitly rebuilds the FTS knowledge index.
+func handleKnowledgeReindex() {
+	if ragSystem == nil || ragSystem.GetDB() == nil {
+		color.Red("Knowledge database not available.")
+		return
+	}
+
+	db := ragSystem.GetDB()
+
+	color.Blue("Rebuilding knowledge FTS index...")
+
+	if err := rag.ReindexKnowledgeFTS(db); err != nil {
+		color.Red("FTS reindex failed: %v", err)
+		return
+	}
+
+	count, err := rag.FTSCount(db)
+	if err != nil {
+		color.Yellow("FTS reindex completed but count check failed: %v", err)
+		return
+	}
+
+	color.Green("FTS index rebuilt successfully. Rows indexed: %d", count)
+}
+
+// handleDoctor performs runtime diagnostics.
+func handleDoctor() {
+	color.Cyan("=== Helix Doctor ===")
+
+	// Config directory.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		color.Red("Home directory error: %v", err)
+	} else {
+		helixDir := filepath.Join(home, ".helix")
+
+		if fi, err := os.Stat(helixDir); err == nil && fi.IsDir() {
+			color.Green("Config directory OK: %s", helixDir)
+		} else {
+			color.Red("Config directory missing: %s", helixDir)
+		}
+	}
+
+	// Database and FTS.
+	if ragSystem != nil && ragSystem.GetDB() != nil {
+		db := ragSystem.GetDB()
+
+		if err := db.Ping(); err != nil {
+			color.Red("Database ping failed: %v", err)
+		} else {
+			color.Green("Database connection OK")
+		}
+
+		count, err := rag.FTSCount(db)
+		if err != nil {
+			color.Red("FTS count failed: %v", err)
+		} else {
+			color.Cyan("FTS rows: %d", count)
+			if count == 0 {
+				color.Yellow("FTS index empty. Run /knowledge-update and /knowledge-reindex.")
 			}
 		}
-		if len(compatible) == 0 {
-			color.Red("No exploits available for your current OS (%s).", env.OSName)
-			return
-		}
-		// Build context and let AI choose
-		var sb strings.Builder
-		sb.WriteString("Candidate exploits (filtered for current OS):\n")
-		for _, e := range compatible {
-			sb.WriteString(fmt.Sprintf("%s (%s): %s\n", e.ID, e.CVE, e.Description))
-		}
-		contextStr := sb.String()
-		prompt := fmt.Sprintf(
-			`You are Helix's Exploit Suggestor & Guardian.
-
-Given the user's request and the list of candidate exploits, select the most appropriate one.
-If no candidate clearly fits the request, output "NONE" as the exploit ID.
-
-User Request: %s
-
-%s
-
-INSTRUCTIONS (STRICT):
-- Output ONLY the exploit ID (e.g., EDB-12345) or "NONE" on the first line.
-- The first line must contain ONLY the ID or "NONE". No other text.
-- On the second line, output a ONE‑SENTENCE justification for your choice.
-- NO markdown, NO backticks, NO extra text.
-
-Now output your selection:`, args, contextStr,
-		)
-		selectCfg := ai.ModelConfig{Temperature: 0.4, TopP: 0.9, TopK: 40, MaxTokens: 80}
-		resp, err := ai.RunModelWithConfig(prompt, selectCfg)
-		if err != nil {
-			color.Red("AI selection failed: %v", err)
-			return
-		}
-		selectedID, justification := extractExploitIDAndJustification(resp)
-		if strings.EqualFold(selectedID, "none") || selectedID == "" {
-			color.Yellow("No suitable exploit found.")
-			return
-		}
-		entry, found := ragSystem.GetExploitByID(selectedID)
-		if !found {
-			color.Red("Selected exploit not found: %s", selectedID)
-			return
-		}
-		displayExploitDebrief(entry, justification)
-		return
-	}
-
-	// DB entries: let AI select the best KnowledgeEntry
-	var contextBuf strings.Builder
-	contextBuf.WriteString("Candidate exploits from knowledge base:\n")
-	for _, e := range entries {
-		contextBuf.WriteString(fmt.Sprintf("%s (%s): %s\n", e.SourceID, e.Title, e.Description))
-	}
-	contextStr := contextBuf.String()
-	prompt := fmt.Sprintf(
-		`You are Helix's Exploit Suggestor & Guardian.
-
-Given the user's request and the list of candidate exploits, select the most appropriate one.
-If no candidate clearly fits the request, output "NONE" as the exploit ID.
-
-User Request: %s
-
-%s
-
-INSTRUCTIONS (STRICT):
-- Output ONLY the exploit ID (e.g., EDB-12345) or "NONE" on the first line.
-- The first line must contain ONLY the ID or "NONE". No other text.
-- On the second line, output a ONE‑SENTENCE justification for your choice.
-- NO markdown, NO backticks, NO extra text.
-
-Now output your selection:`, args, contextStr,
-	)
-	selectCfg := ai.ModelConfig{Temperature: 0.4, TopP: 0.9, TopK: 40, MaxTokens: 80}
-	resp, err := ai.RunModelWithConfig(prompt, selectCfg)
-	if err != nil {
-		color.Red("AI selection failed: %v", err)
-		return
-	}
-	selectedID, justification := extractExploitIDAndJustification(resp)
-	if strings.EqualFold(selectedID, "none") || selectedID == "" {
-		color.Yellow("No suitable exploit found.")
-		return
-	}
-
-	// Try to get full details from hardcoded set first, else fallback to DB info
-	if e, ok := ragSystem.GetExploitByID(selectedID); ok {
-		displayExploitDebrief(e, justification)
-		return
-	}
-	// DB-only entry: show basic info
-	color.Cyan("Selected exploit: %s", selectedID)
-	if justification != "" {
-		color.Cyan("Justification: %s", justification)
-	}
-	color.Yellow("Full metadata not available; basic info shown.")
-	if agentCore != nil {
-		agentCore.GetUX().PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 	} else {
-		color.Green("Helix :: GRID STATUS :: CLEAR")
+		color.Red("Knowledge database not initialized")
+	}
+
+	// Provider/model.
+	color.Cyan("Provider: %s", ai.GetProvider())
+	color.Cyan("OpenAI key configured: %v", ai.HasOpenAIKey())
+	color.Cyan("Local model loaded: %v", ai.ModelIsLoaded())
+
+	if cfg != nil {
+		if _, err := os.Stat(cfg.ModelFile); err == nil {
+			color.Green("Model file present: %s", cfg.ModelFile)
+		} else {
+			color.Yellow("Model file missing: %s", cfg.ModelFile)
+		}
+	}
+
+	// Network.
+	if utils.IsOnline(3 * time.Second) {
+		color.Green("Network: online")
+	} else {
+		color.Yellow("Network: offline")
+	}
+
+	// Environment.
+	color.Cyan("OS: %s", env.OSName)
+	color.Cyan("Shell: %s", env.Shell)
+
+	// Sandbox.
+	if sandbox != nil {
+		color.Cyan("Sandbox: %s", sandbox.ModeString())
+	}
+
+	// Recon tools.
+	for _, tool := range []string{"nmap", "masscan", "ffuf", "amass"} {
+		if _, err := exec.LookPath(tool); err == nil {
+			color.Green("Recon tool available: %s", tool)
+		} else {
+			color.Yellow("Recon tool missing: %s", tool)
+		}
 	}
 }
 
-// extractExploitIDAndJustification parses the AI response, falling back to a
-// regex to extract a valid exploit ID if the model returns extra text.
-func extractExploitIDAndJustification(resp string) (id, justification string) {
-	lines := strings.SplitN(strings.TrimSpace(resp), "\n", 2)
-	id = strings.TrimSpace(lines[0])
-	if len(lines) > 1 {
-		justification = strings.TrimSpace(lines[1])
-	}
-	id = strings.Trim(id, "`'\". ")
+// handleProviderStatus shows AI provider health.
+func handleProviderStatus() {
+	color.Cyan("=== Provider Status ===")
+	color.Cyan("Current provider: %s", ai.GetProvider())
+	color.Cyan("OpenAI key configured: %v", ai.HasOpenAIKey())
+	color.Cyan("Local model loaded: %v", ai.ModelIsLoaded())
 
-	// Fallback: if the ID doesn't look like an exploit ID, try to find one in the response
-	if !strings.HasPrefix(id, "EDB-") && !strings.HasPrefix(id, "CVE-") && !strings.EqualFold(id, "none") {
-		re := regexp.MustCompile(`(EDB-\d+|CVE-\d{4}-\d+)`)
-		if match := re.FindString(resp); match != "" {
-			id = match
-		}
+	if utils.IsOnline(3 * time.Second) {
+		color.Green("Network: online")
+	} else {
+		color.Yellow("Network: offline")
 	}
-	return
+
+	if ai.GetProvider() == ai.ProviderOpenAI && !ai.HasOpenAIKey() {
+		color.Red("OpenAI provider selected but no API key is configured.")
+	}
+
+	if ai.GetProvider() == ai.ProviderLocal && !ai.ModelIsLoaded() {
+		color.Yellow("Local provider selected but model is not loaded.")
+	}
 }

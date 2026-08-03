@@ -1,5 +1,7 @@
 // internal/ai/model.go
-
+// Purpose: Local and remote model execution abstraction.
+// Phase 0 fix: remove destructive first-line truncation that could destroy
+// strict JSON planner output. Add planner-specific inference configuration.
 package ai
 
 import (
@@ -10,27 +12,43 @@ import (
 	llama "github.com/go-skynet/go-llama.cpp"
 )
 
+// model is the loaded local llama.cpp model.
+// It remains nil when OpenAI or mock mode is active.
 var model *llama.LLama
 
-// ModelConfig holds parameters for AI model inference
+// ModelConfig holds inference parameters.
+// StopWords is intentionally excluded from JSON persistence.
 type ModelConfig struct {
-	Temperature float32
-	TopP        float32
-	TopK        int
-	MaxTokens   int
+	Temperature float32  `json:"temperature"`
+	TopP        float32  `json:"top_p"`
+	TopK        int      `json:"top_k"`
+	MaxTokens   int      `json:"max_tokens"`
+	StopWords   []string `json:"-"`
 }
 
-// DefaultModelConfig returns optimized settings for CLI assistance
+// DefaultModelConfig returns safe general chat settings.
 func DefaultModelConfig() ModelConfig {
 	return ModelConfig{
 		Temperature: 0.7,
 		TopP:        0.9,
 		TopK:        40,
-		MaxTokens:   150,
+		MaxTokens:   512,
 	}
 }
 
-// LoadModel loads the GGUF model with better error handling
+// PlannerModelConfig returns settings optimized for strict JSON planner output.
+// It uses lower temperature and a much larger token budget so JSON is not cut off.
+func PlannerModelConfig() ModelConfig {
+	return ModelConfig{
+		Temperature: 0.2,
+		TopP:        0.95,
+		TopK:        40,
+		MaxTokens:   2048,
+		StopWords:   nil,
+	}
+}
+
+// LoadModel loads a GGUF model for local inference.
 func LoadModel(modelPath string) error {
 	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
 		return fmt.Errorf("model not found at %s", modelPath)
@@ -51,36 +69,50 @@ func LoadModel(modelPath string) error {
 	return nil
 }
 
-// RunModel queries the model with enhanced parameters
+// RunModel runs a general-purpose model request.
 func RunModel(prompt string) (string, error) {
 	return RunModelWithConfig(prompt, DefaultModelConfig())
 }
 
-// RunModelWithConfig runs the model with custom parameters
+// RunPlannerModel runs a planner-specific request.
+// This must never truncate JSON output.
+func RunPlannerModel(prompt string) (string, error) {
+	return RunModelWithConfig(prompt, PlannerModelConfig())
+}
+
+// RunModelWithConfig runs the active provider with explicit inference settings.
 func RunModelWithConfig(prompt string, config ModelConfig) (string, error) {
-	// Clean prompt once, for both local & OpenAI
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", fmt.Errorf("empty prompt")
 	}
 
-	// If we're using OpenAI, route there instead of local llama.cpp
+	// Prevent zero/negative max tokens from reaching providers.
+	if config.MaxTokens <= 0 {
+		config.MaxTokens = DefaultModelConfig().MaxTokens
+	}
+
+	// Remote OpenAI path.
 	if GetProvider() == ProviderOpenAI {
 		return runWithOpenAI(prompt, config)
 	}
 
-	// Local model path (llama.cpp)
+	// Local llama.cpp path.
 	if model == nil {
 		return "", fmt.Errorf("model not loaded")
 	}
 
-	// ACTUALLY USE the config parameter instead of hardcoded values
 	opts := []llama.PredictOption{
 		llama.SetTemperature(config.Temperature),
 		llama.SetTopP(config.TopP),
 		llama.SetTopK(config.TopK),
 		llama.SetTokens(config.MaxTokens),
-		llama.SetStopWords("\n", "```", "`"),
+	}
+
+	// Only set stop words when explicitly requested.
+	// Planner mode intentionally uses none.
+	if len(config.StopWords) > 0 {
+		opts = append(opts, llama.SetStopWords(config.StopWords...))
 	}
 
 	out, err := model.Predict(prompt, opts...)
@@ -88,18 +120,9 @@ func RunModelWithConfig(prompt string, config ModelConfig) (string, error) {
 		return "", fmt.Errorf("prediction failed: %w", err)
 	}
 
-	// Less aggressive cleaning - preserve meaningful responses
 	out = strings.TrimSpace(out)
 
-	// Only take first line if response is very long
-	if len(out) > 200 {
-		lines := strings.Split(out, "\n")
-		if len(lines) > 0 {
-			out = strings.TrimSpace(lines[0])
-		}
-	}
-
-	// Remove common prefixes but be more lenient
+	// Remove common assistant prefixes, but never truncate structured output.
 	prefixes := []string{"Assistant:", "AI:", "Response:"}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(out, prefix) {
@@ -111,20 +134,20 @@ func RunModelWithConfig(prompt string, config ModelConfig) (string, error) {
 	return out, nil
 }
 
-// CloseModel frees resources
+// CloseModel releases local model resources.
 func CloseModel() {
 	if model != nil {
 		model = nil
 	}
 }
 
-// ModelIsLoaded checks if the model is ready
+// ModelIsLoaded reports whether a local model is loaded.
 func ModelIsLoaded() bool {
 	return model != nil
 }
 
+// TestModelWithSimplePrompt is a lightweight runtime sanity check.
 func TestModelWithSimplePrompt() (string, error) {
-	// If using OpenAI, just send a tiny prompt
 	if GetProvider() == ProviderOpenAI {
 		prompt := "Say 'Hello world' in one short sentence."
 		return runWithOpenAI(prompt, DefaultModelConfig())
@@ -134,10 +157,8 @@ func TestModelWithSimplePrompt() (string, error) {
 		return "", fmt.Errorf("model not loaded")
 	}
 
-	// Very simple, constrained prompt
 	prompt := "User: Say 'Hello world'\nAssistant: Hello world"
 
-	// Very restrictive parameters
 	opts := []llama.PredictOption{
 		llama.SetTemperature(0.1),
 		llama.SetTopP(0.5),
