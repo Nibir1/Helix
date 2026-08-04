@@ -12,6 +12,17 @@ import (
 	"github.com/fatih/color"
 )
 
+type TerminalModeRequest struct {
+	Active bool
+	Shell  string
+}
+
+func (ux *UX) RequestTerminalMode(active bool, shell string) {
+	if ux.eventHandler != nil {
+		ux.eventHandler(TerminalModeRequest{Active: active, Shell: shell})
+	}
+}
+
 // ConfirmationRequest is sent to the TUI when the Agent needs user input.
 // This allows the Agent to pause and wait for a UI response (Y/N).
 type ConfirmationRequest struct {
@@ -397,7 +408,7 @@ func (ux *UX) PrintTable(headers []string, rows [][]string) {
 	// Headers
 	b.WriteString("│")
 	for i, header := range headers {
-		b.WriteString(fmt.Sprintf(" %-*s │", widths[i], ux.colors.Primary(header)))
+		fmt.Fprintf(&b, " %-*s │", widths[i], ux.colors.Primary(header))
 	}
 	b.WriteString("\n")
 
@@ -415,7 +426,7 @@ func (ux *UX) PrintTable(headers []string, rows [][]string) {
 	for _, row := range rows {
 		b.WriteString("│")
 		for i, cell := range row {
-			b.WriteString(fmt.Sprintf(" %-*s │", widths[i], cell))
+			fmt.Fprintf(&b, " %-*s │", widths[i], cell)
 		}
 		b.WriteString("\n")
 	}

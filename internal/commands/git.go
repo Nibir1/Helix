@@ -376,7 +376,7 @@ func (gm *GitManager) executeCommitWithMessage(targetBranch string, message stri
 		color.Yellow("Could not write commit message file, using git editor instead")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
 	}
-	defer os.Remove(absPath)
+	defer func() { _ = os.Remove(absPath) }()
 
 	// Use the relative path in the command so there is no absolute path for the sandbox to reject.
 	commitCmd := fmt.Sprintf("git commit -F %s", relPath)

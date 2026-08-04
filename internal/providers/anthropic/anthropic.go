@@ -52,7 +52,7 @@ func (p *Provider) Capabilities() providers.Capabilities {
 // Chat sends a streaming Anthropic Messages request.
 func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan providers.StreamChunk, error) {
 	if p.apiKey == "" {
-		return nil, fmt.Errorf("Anthropic API key not configured")
+		return nil, fmt.Errorf("anthropic API key not configured")
 	}
 
 	if len(req.Messages) == 0 {
@@ -101,7 +101,7 @@ func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan 
 
 	go func() {
 		defer close(ch)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		parseAnthropicStream(resp.Body, ch)
 	}()
 
@@ -111,7 +111,7 @@ func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan 
 // ListModels lists Anthropic models.
 func (p *Provider) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
 	if p.apiKey == "" {
-		return nil, fmt.Errorf("Anthropic API key not configured")
+		return nil, fmt.Errorf("anthropic API key not configured")
 	}
 
 	headers := map[string]string{

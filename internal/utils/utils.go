@@ -74,7 +74,7 @@ func IsOnline(timeout time.Duration) bool {
 	for _, endpoint := range endpoints {
 		resp, err := client.Get(endpoint)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == 204 || resp.StatusCode == 200 {
 				return true
 			}

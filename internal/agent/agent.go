@@ -131,7 +131,7 @@ func (a *Agent) HandleInput(userInput string) {
 			var sb strings.Builder
 			sb.WriteString("Relevant system commands (from the knowledge base):\n")
 			for _, cmd := range cmds {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", cmd.Name, cmd.Description))
+				fmt.Fprintf(&sb, "- %s: %s\n", cmd.Name, cmd.Description)
 			}
 			ragContext = sb.String()
 		} else if err != nil {

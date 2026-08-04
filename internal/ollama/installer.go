@@ -67,7 +67,7 @@ func EnsureRunning(ctx context.Context) error {
 	cmd.Stderr = logFile
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		_ = logFile.Close()
 		return fmt.Errorf("failed to start ollama serve: %w", err)
 	}
 

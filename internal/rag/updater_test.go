@@ -2,6 +2,7 @@
 package rag
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,7 +61,7 @@ func TestUpdateNVDSuccess(t *testing.T) {
 		nvdRetryBaseDelay = oldDelay
 	})
 
-	if err := updateNVD(db); err != nil {
+	if err := updateNVD(context.Background(), db); err != nil {
 		t.Fatalf("updateNVD failed: %v", err)
 	}
 
@@ -97,7 +98,7 @@ func TestUpdateNVD404(t *testing.T) {
 		nvdRetryBaseDelay = oldDelay
 	})
 
-	err := updateNVD(db)
+	err := updateNVD(context.Background(), db)
 	if err == nil {
 		t.Fatal("expected error for 404 response")
 	}

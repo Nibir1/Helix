@@ -89,7 +89,7 @@ func EnsureModel(ctx context.Context, m Model) (string, error) {
 	}
 
 	if err := verifySHA(tmpPath, m.SHA256); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return "", err
 	}
 
@@ -146,7 +146,7 @@ func downloadFile(ctx context.Context, url, path string) error {
 	if err != nil {
 		return fmt.Errorf("download request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed with HTTP %d", resp.StatusCode)
@@ -156,7 +156,7 @@ func downloadFile(ctx context.Context, url, path string) error {
 	if err != nil {
 		return fmt.Errorf("create download file: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if _, err := io.Copy(out, resp.Body); err != nil {
 		return fmt.Errorf("write download file: %w", err)
@@ -175,7 +175,7 @@ func verifySHA(path, expected string) error {
 	if err != nil {
 		return fmt.Errorf("open model for checksum: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 

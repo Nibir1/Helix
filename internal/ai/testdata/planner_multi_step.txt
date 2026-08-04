@@ -8,23 +8,17 @@
     {
       "tool": "git",
       "action": "add",
-      "args": {
-        "paths": ["README.md"]
-      }
+      "args": { "paths": ["README.md"] }
     },
     {
       "tool": "git",
       "action": "commit",
-      "args": {
-        "message": "Update version to 1.1.0"
-      }
+      "args": { "message": "Update version in README to 1.1.0" }
     },
     {
       "tool": "git",
       "action": "tag",
-      "args": {
-        "name": "v1.1.0"
-      }
+      "args": { "name": "v1.1.0" }
     }
   ]
 }

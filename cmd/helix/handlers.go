@@ -77,11 +77,26 @@ func handleSlashCommand(input string) bool {
 		handleProviderCommand(parts)
 	case "/model":
 		handleModelCommand(parts)
+	case "/shell":
+		handleShellCommand(parts)
 	default:
 		return false
 	}
 
 	return true
+}
+
+func handleShellCommand(args []string) {
+	if len(args) < 2 {
+		color.Cyan("Usage: /shell <zsh|bash|fish|powershell>")
+		color.Cyan("Current shell: %s", env.Shell)
+		return
+	}
+
+	shell := strings.ToLower(args[1])
+	if agentCore != nil {
+		agentCore.GetUX().RequestTerminalMode(true, shell)
+	}
 }
 
 // -------------------------------------------------------

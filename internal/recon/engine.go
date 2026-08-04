@@ -330,10 +330,10 @@ func SummarizeResults(results []*ReconResult) string {
 	b.WriteString("=== Reconnaissance Summary ===\n")
 
 	for _, r := range results {
-		b.WriteString(fmt.Sprintf("[%s] %s (took %v)\n", r.Tool, r.Target, r.Elapsed))
+		fmt.Fprintf(&b, "[%s] %s (took %v)\n", r.Tool, r.Target, r.Elapsed)
 
 		if r.Error != nil {
-			b.WriteString(fmt.Sprintf("  Error: %v\n", r.Error))
+			fmt.Fprintf(&b, "  Error: %v\n", r.Error)
 			continue
 		}
 
@@ -342,7 +342,7 @@ func SummarizeResults(results []*ReconResult) string {
 			if ok {
 				b.WriteString("  Open ports:\n")
 				for _, p := range openPorts {
-					b.WriteString(fmt.Sprintf("    - %s/%s\n", p["port"], p["service"]))
+					fmt.Fprintf(&b, "    - %s/%s\n", p["port"], p["service"])
 				}
 			}
 		} else {

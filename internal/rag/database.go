@@ -144,7 +144,7 @@ func OpenDB(homeDir string) (*sql.DB, error) {
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err := migrate(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return db, nil
@@ -182,7 +182,7 @@ func ReindexKnowledgeFTS(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`DELETE FROM knowledge_fts`); err != nil {
 		return err

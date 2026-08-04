@@ -175,7 +175,7 @@ func setupOllamaProvider() error {
 
 	if !ollama.IsInstalled() {
 		if !commands.AskForConfirmation("Ollama not found. Install Ollama now?") {
-			return fmt.Errorf("Ollama is not installed")
+			return fmt.Errorf("ollama is not installed")
 		}
 
 		installCtx, installCancel := context.WithTimeout(context.Background(), 20*time.Minute)

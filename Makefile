@@ -38,6 +38,11 @@ windows:
 build-all: all
 	./$(SCRIPTS_DIR)/build.sh all
 
+# Lint the codebase using golangci-lint
+lint:
+	@echo "Running golangci-lint..."
+	@golangci-lint run ./... --timeout=5m || (echo "Install golangci-lint: https://golangci-lint.run/usage/install/" && exit 1)
+
 # Clean build artifacts AND generated data (but keep models)
 clean:
 	$(fix-perms)
@@ -98,4 +103,4 @@ test:
 	@echo "Running all tests..."
 	go test ./... -v -count=1
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint

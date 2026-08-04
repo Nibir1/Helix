@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"strings"
 	"time"
@@ -80,7 +81,7 @@ func main() {
 		color.Red("Database error: %v", err)
 		return
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	color.Green("Knowledge database ready")
 
@@ -219,13 +220,13 @@ func runKnowledgeUpdate() {
 		color.Red("Database error: %v", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
-	if err := rag.UpdateAll(db); err != nil {
+	// Phase 0 Hardening: Pass background context for CLI binary updates
+	if err := rag.UpdateAll(context.Background(), db); err != nil {
 		color.Red("Update failed: %v", err)
 		os.Exit(1)
 	}
-
 	color.Green("Knowledge base updated successfully.")
 }
 

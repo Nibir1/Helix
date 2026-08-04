@@ -94,7 +94,7 @@ func (rs *RAGSystem) Initialize() error {
 		// 2) Load vector index if it exists
 	} else if rs.tryLoadExistingIndex() {
 		rs.initialized = true
-		rs.saveSystemState()
+		_ = rs.saveSystemState()
 		color.Green("RAG system loaded from existing index")
 
 		// 3) No index → first run → full indexing
@@ -215,7 +215,7 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 	if count == 0 {
 		color.Red("No usable MAN pages indexed")
 		rs.initialized = false
-		rs.saveSystemState()
+		_ = rs.saveSystemState()
 		return nil
 	}
 
@@ -230,7 +230,7 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 	if len(pages) == 0 {
 		color.Red("No pages available for vector indexing")
 		rs.initialized = false
-		rs.saveSystemState()
+		_ = rs.saveSystemState()
 		return nil
 	}
 
@@ -238,7 +238,7 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 	if err := rs.vectorStore.IndexMANPages(pages); err != nil {
 		color.Yellow("Vector store indexing failed: %v", err)
 		rs.initialized = true
-		rs.saveSystemState()
+		_ = rs.saveSystemState()
 		return nil
 	}
 
@@ -289,10 +289,10 @@ func (rs *RAGSystem) GetSystemStats() map[string]interface{} {
 	// Add database stats if available
 	if rs.db != nil {
 		var cveCount, exploitCount, kevCount, mitreCount int
-		rs.db.QueryRow("SELECT COUNT(*) FROM cve").Scan(&cveCount)
-		rs.db.QueryRow("SELECT COUNT(*) FROM exploit").Scan(&exploitCount)
-		rs.db.QueryRow("SELECT COUNT(*) FROM kev").Scan(&kevCount)
-		rs.db.QueryRow("SELECT COUNT(*) FROM mitre_technique").Scan(&mitreCount)
+		_ = rs.db.QueryRow("SELECT COUNT(*) FROM cve").Scan(&cveCount)
+		_ = rs.db.QueryRow("SELECT COUNT(*) FROM exploit").Scan(&exploitCount)
+		_ = rs.db.QueryRow("SELECT COUNT(*) FROM kev").Scan(&kevCount)
+		_ = rs.db.QueryRow("SELECT COUNT(*) FROM mitre_technique").Scan(&mitreCount)
 		stats["db_cves"] = cveCount
 		stats["db_exploits"] = exploitCount
 		stats["db_kev"] = kevCount
@@ -603,13 +603,14 @@ func (rs *RAGSystem) SemanticSearch(query string, limit int) ([]KnowledgeEntry, 
 	return nil, nil
 }
 
+// internal/rag/system.go
 // UpdateKnowledge triggers a full update of the SQLite knowledge base.
-// It assumes rs.db is set.
 func (rs *RAGSystem) UpdateKnowledge() error {
 	if rs.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	return UpdateAll(rs.db)
+	// Phase 0 Hardening: Pass background context for CLI slash-command updates
+	return UpdateAll(context.Background(), rs.db)
 }
 
 // GetDB returns the underlying database handle (for direct queries if needed).

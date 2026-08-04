@@ -71,7 +71,7 @@ func DefaultConfig() (*Config, error) {
 		ExecuteConfig: commands.DefaultExecuteConfig(),
 	}
 
-	cfg.LoadPreferences()
+	_ = cfg.LoadPreferences()
 
 	return cfg, nil
 }

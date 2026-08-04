@@ -107,7 +107,7 @@ func LookupVulnByID(db *sql.DB, raw string) ([]VulnIntel, error) {
 			WHERE cve_id=?
 		`, id)
 		if err == nil {
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 
 			for rows.Next() {
 				var edbID, cveID, description, platform, typ string

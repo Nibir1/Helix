@@ -95,7 +95,7 @@ func (s *Server) Start(ctx context.Context) error {
 	cmd.Stderr = logFile
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		_ = logFile.Close()
 		return fmt.Errorf("failed to start llama-server: %w", err)
 	}
 
@@ -137,7 +137,7 @@ func (s *Server) Stop() error {
 	}
 
 	if s.logFile != nil {
-		s.logFile.Close()
+		_ = s.logFile.Close()
 		s.logFile = nil
 	}
 
@@ -176,7 +176,7 @@ func (s *Server) waitReady(ctx context.Context) error {
 				continue
 			}
 
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			if resp.StatusCode == http.StatusOK {
 				return nil

@@ -5,7 +5,6 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/fatih/color"
@@ -54,10 +53,6 @@ type rawPlanStep struct {
 	Action  string                 `json:"action,omitempty"`
 	Args    map[string]interface{} `json:"args,omitempty"`
 }
-
-var (
-	jsonObjectRegex = regexp.MustCompile(`(?s)\{.*\}`)
-)
 
 // ──────────────────────────────────────────────────────────────
 // BuildPlannerPrompt — ULTRA-STRICT Version (now with optional RAG context)

@@ -121,7 +121,7 @@ func runCmd(ctx context.Context, dir string, name string, args ...string) error 
 	if err != nil {
 		return fmt.Errorf("open llama.cpp build log: %w", err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir

@@ -38,7 +38,7 @@ func HijackStdio(outChan chan tea.Msg) func() {
 	// Return cleanup function
 	return func() {
 		// Close the write end of the pipe to stop the scanner
-		w.Close()
+		_ = w.Close()
 
 		// Restore original file descriptors
 		os.Stdout = origStdout

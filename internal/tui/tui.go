@@ -1,5 +1,4 @@
 // internal/tui/tui.go
-
 package tui
 
 import (
@@ -11,8 +10,9 @@ import (
 	"time"
 
 	"helix/internal/agent"
-	"helix/internal/audio" // NEW: Import Audio Engine
+	"helix/internal/audio"
 	"helix/internal/config"
+	"helix/internal/terminal"
 	"helix/internal/ux"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -75,6 +75,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if len(m.history) > 0 {
 			m.viewport.GotoBottom()
+		}
+
+		// FIX: Resize PTY and Grid when window changes
+		if m.terminalMode && m.termSession != nil {
+			rows := uint16(m.viewport.Height)
+			cols := uint16(m.viewport.Width)
+			go func() { _ = m.termSession.Resize(rows, cols) }()
 		}
 
 	// ---------------------------------------------------------
@@ -206,11 +213,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 
 	case tea.KeyMsg:
-		if msg.Type == tea.KeyCtrlC {
-			return m, tea.Quit
-		}
-		if m.uiState == StateLoading {
-			m.uiState = StateMain
+		// TERMINAL MODE: Route all keys to PTY
+		if m.terminalMode {
+			// Ctrl+Q exits terminal mode back to AI Chat
+			if msg.Type == tea.KeyCtrlQ {
+				m.terminalMode = false
+				m.textInput.Focus()
+				return m, textinput.Blink
+			}
+
+			// Translate and send to PTY
+			b := keyToTerminalBytes(msg)
+			if len(b) > 0 && m.termSession != nil {
+				go func() { _, _ = m.termSession.Write(b) }()
+			}
 			return m, nil
 		}
 
@@ -333,6 +349,44 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, tickTypewriter()
 
+	case TerminalModeMsg:
+		m.terminalMode = msg.Active
+		m.selectedShell = msg.Shell
+		if m.terminalMode {
+			if m.termSession == nil {
+				rows := uint16(m.viewport.Height)
+				cols := uint16(m.viewport.Width)
+				session, err := terminal.NewSession(m.selectedShell, int(rows), int(cols))
+				if err != nil {
+					m.history = append(m.history, LogEntry{Type: LogTypeError, Content: "Failed to start terminal: " + err.Error(), Timestamp: time.Now()})
+					m.terminalMode = false
+					return m, nil
+				}
+				m.termSession = session
+			}
+			m.textInput.Blur()
+			return m, waitForTerminalOutput(m.termSession)
+		} else {
+			m.textInput.Focus()
+			return m, textinput.Blink
+		}
+
+	case TerminalOutputMsg:
+		if m.termSession != nil {
+			m.termSession.Process(msg.Data)
+			m.viewport.SetContent(m.renderTerminalView())
+			m.viewport.GotoBottom()
+			return m, waitForTerminalOutput(m.termSession)
+		}
+		return m, nil
+
+	case TerminalExitMsg:
+		m.terminalMode = false
+		m.textInput.Focus()
+		m.history = append(m.history, LogEntry{Type: LogTypeInfo, Content: "Terminal session ended.", Timestamp: time.Now()})
+		m.viewport.SetContent(m.renderHistory())
+		return m, textinput.Blink
+
 	case SessionDoneMsg:
 		m.textInput.Focus()
 		return m, textinput.Blink
@@ -445,6 +499,14 @@ func (m AppModel) renderHistory() string {
 	}
 
 	return b.String()
+}
+
+// renderTerminalView renders the VT100 grid state
+func (m AppModel) renderTerminalView() string {
+	if m.termSession == nil {
+		return "Terminal not active"
+	}
+	return m.termSession.Grid().Render()
 }
 
 func (m AppModel) headerView() string {
@@ -586,9 +648,17 @@ func (m AppModel) View() string {
 
 	// 2. Main Dashboard
 	header := m.headerView()
-	content := m.styles.Viewport.Render(m.viewport.View())
-	footer := m.inputView()
 
+	var content string
+	if m.terminalMode && m.termSession != nil {
+		// Render Terminal Grid inside the Viewport styling
+		content = m.styles.Viewport.Render(m.renderTerminalView())
+	} else {
+		// Render AI Chat Viewport
+		content = m.styles.Viewport.Render(m.viewport.View())
+	}
+
+	footer := m.inputView()
 	baseView := lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 
 	if m.uiState == StateText {
@@ -650,4 +720,15 @@ func (m AppModel) textView(base string) string {
 		dialog,
 		lipgloss.WithWhitespaceChars(" "),
 	)
+}
+
+func waitForTerminalOutput(session *terminal.Session) tea.Cmd {
+	return func() tea.Msg {
+		buf := make([]byte, 4096)
+		n, err := session.Read(buf)
+		if err != nil {
+			return TerminalExitMsg{Err: err}
+		}
+		return TerminalOutputMsg{Data: buf[:n]}
+	}
 }

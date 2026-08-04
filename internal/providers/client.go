@@ -45,7 +45,7 @@ func (c *HTTPClient) DoJSON(
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 	if err != nil {
@@ -75,7 +75,7 @@ func (c *HTTPClient) DoStream(
 
 	go func() {
 		defer close(ch)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		parseOpenAIStream(resp.Body, ch)
 	}()
 
@@ -140,7 +140,7 @@ func (c *HTTPClient) do(
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(errBody))
 
@@ -153,7 +153,7 @@ func (c *HTTPClient) do(
 
 		if resp.StatusCode >= 400 {
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(errBody))
 		}

@@ -14,8 +14,7 @@ func AppendHistory(path, line string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
+	defer func() { _ = f.Close() }()
 	_, err = fmt.Fprintln(f, line)
 	return err
 }
@@ -27,7 +26,7 @@ func LoadHistory(path string) ([]string, error) {
 		// Not fatal — return empty history
 		return []string{}, nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var lines []string
 	scanner := bufio.NewScanner(f)

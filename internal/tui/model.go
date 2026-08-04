@@ -7,6 +7,8 @@ import (
 
 	"helix/internal/agent"
 
+	"helix/internal/terminal"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -62,7 +64,7 @@ type AppModel struct {
 	memUsage    string
 	activeProcs int
 
-	// NEW: Typing Effect Data
+	// Typing Effect Data
 	isTyping    bool      // Are we currently streaming text?
 	pendingText string    // The full message waiting to be typed
 	typedSoFar  string    // What has been typed on screen so far
@@ -73,7 +75,7 @@ type AppModel struct {
 	confirmMsg   string
 	confirmReply chan bool
 
-	// Phase 0: free-form text modal state.
+	// Free-form text modal state.
 	textPrompt string
 	textReply  chan string
 	modalInput textinput.Model
@@ -85,6 +87,11 @@ type AppModel struct {
 	textInput textinput.Model
 	spinner   spinner.Model
 	styles    *Styles
+
+	// Terminal Emulator State
+	terminalMode  bool
+	termSession   *terminal.Session
+	selectedShell string // "zsh", "bash", "powershell", etc.
 
 	// History is now structured
 	history []LogEntry

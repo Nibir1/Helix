@@ -76,7 +76,7 @@ func fts5Search(db *sql.DB, query string, limit int) []KnowledgeEntry {
 		// Invalid MATCH syntax or FTS issue: fall back safely.
 		return keywordSearch(db, query, limit)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []KnowledgeEntry
 
@@ -200,7 +200,7 @@ func keywordSearch(db *sql.DB, query string, limit int) []KnowledgeEntry {
 	if err != nil {
 		return nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []KnowledgeEntry
 

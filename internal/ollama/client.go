@@ -45,7 +45,7 @@ func (c *Client) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ollama health request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ollama health returned HTTP %d", resp.StatusCode)
@@ -65,7 +65,7 @@ func (c *Client) ListModels(ctx context.Context) ([]providers.ModelInfo, error) 
 	if err != nil {
 		return nil, fmt.Errorf("ollama list request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ollama list returned HTTP %d", resp.StatusCode)
@@ -104,7 +104,7 @@ func (c *Client) PullModel(ctx context.Context, model string, progress func(stri
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	scanner := bufio.NewScanner(resp.Body)
 	buf := make([]byte, 0, 64*1024)
@@ -190,7 +190,7 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 
 	go func() {
 		defer close(ch)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		scanner := bufio.NewScanner(resp.Body)
 		buf := make([]byte, 0, 64*1024)
@@ -257,7 +257,7 @@ func (c *Client) post(ctx context.Context, path string, body interface{}) (*http
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		return nil, fmt.Errorf("ollama returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
