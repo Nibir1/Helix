@@ -28,3 +28,16 @@ type TerminalOutputMsg struct {
 type TerminalExitMsg struct {
 	Err error
 }
+
+// TerminalTitleMsg updates the HUD with the current shell title.
+type TerminalTitleMsg struct {
+	Title string
+}
+
+// TerminalBellMsg triggers audio and visual bell.
+type TerminalBellMsg struct{}
+
+// TerminalClipboardMsg writes text to the system clipboard.
+type TerminalClipboardMsg struct {
+	Text string
+}

@@ -2,7 +2,11 @@
 
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"fmt"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // keyToTerminalBytes translates Bubble Tea key events to terminal byte sequences.
 func keyToTerminalBytes(msg tea.KeyMsg) []byte {
@@ -66,4 +70,47 @@ func keyToTerminalBytes(msg tea.KeyMsg) []byte {
 	}
 
 	return nil
+}
+
+// mouseToTerminalBytes translates Bubble Tea mouse events to SGR mouse tracking sequences.
+func mouseToTerminalBytes(msg tea.MouseMsg) []byte {
+	var cb int
+	switch msg.Button {
+	case tea.MouseButtonLeft:
+		cb = 0
+	case tea.MouseButtonMiddle:
+		cb = 1
+	case tea.MouseButtonRight:
+		cb = 2
+	case tea.MouseButtonWheelUp:
+		cb = 64
+	case tea.MouseButtonWheelDown:
+		cb = 65
+	default:
+		cb = 3 // Release/Unknown
+	}
+
+	if msg.Shift {
+		cb += 4
+	}
+	if msg.Alt {
+		cb += 8
+	}
+	if msg.Ctrl {
+		cb += 16
+	}
+
+	x := msg.X + 1
+	y := msg.Y + 1
+
+	var action byte
+	if msg.Action == tea.MouseActionPress {
+		action = 'M'
+	} else if msg.Action == tea.MouseActionRelease {
+		action = 'm'
+	} else {
+		action = 'M'
+	}
+
+	return []byte(fmt.Sprintf("\x1b[<%d;%d;%d%c", cb, x, y, action))
 }

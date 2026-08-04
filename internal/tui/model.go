@@ -91,7 +91,8 @@ type AppModel struct {
 	// Terminal Emulator State
 	terminalMode  bool
 	termSession   *terminal.Session
-	selectedShell string // "zsh", "bash", "powershell", etc.
+	selectedShell string
+	terminalTitle string // NEW: Tracks OSC 0/1/2 title updates
 
 	// History is now structured
 	history []LogEntry

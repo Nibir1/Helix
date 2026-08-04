@@ -8,12 +8,13 @@ import (
 
 // Session represents a single interactive terminal session.
 type Session struct {
-	pty  PTY
-	grid *Grid
+	pty         PTY
+	grid        *Grid
+	interceptor *Interceptor
 }
 
-// NewSession starts a new shell session with the given shell.
-func NewSession(shell string, rows, cols int) (*Session, error) {
+// NewSession starts a new shell session with the given shell and interceptor callbacks.
+func NewSession(shell string, rows, cols int, cb InterceptorCallbacks) (*Session, error) {
 	if shell == "" {
 		shell = os.Getenv("SHELL")
 		if shell == "" {
@@ -24,20 +25,29 @@ func NewSession(shell string, rows, cols int) (*Session, error) {
 			}
 		}
 	}
-
 	env := os.Environ()
 	p, err := StartPTY(shell, env)
 	if err != nil {
 		return nil, err
 	}
-
 	return &Session{
-		pty:  p,
-		grid: NewGrid(rows, cols),
+		pty:         p,
+		grid:        NewGrid(rows, cols),
+		interceptor: NewInterceptor(cb),
 	}, nil
 }
 
-func (s *Session) Read(b []byte) (int, error)  { return s.pty.Read(b) }
+// Read intercepts raw PTY output, triggers side-effects, and returns clean data.
+func (s *Session) Read(b []byte) (int, error) {
+	n, err := s.pty.Read(b)
+	if n > 0 {
+		cleaned := s.interceptor.Process(b[:n])
+		copy(b, cleaned)
+		return len(cleaned), err
+	}
+	return n, err
+}
+
 func (s *Session) Write(b []byte) (int, error) { return s.pty.Write(b) }
 func (s *Session) Close() error                { return s.pty.Close() }
 

@@ -15,6 +15,7 @@ import (
 	"helix/internal/terminal"
 	"helix/internal/ux"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -212,6 +213,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, textinput.Blink
 
+	// ---------------------------------------------------------
+	// TERMINAL MODE BRIDGE
+	// ---------------------------------------------------------
+	case ux.TerminalModeRequest:
+		// Bridge the UX layer's terminal request to the TUI's internal state machine
+		return m, func() tea.Msg {
+			return TerminalModeMsg{Active: msg.Active, Shell: msg.Shell}
+		}
+
 	case tea.KeyMsg:
 		// TERMINAL MODE: Route all keys to PTY
 		if m.terminalMode {
@@ -303,6 +313,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tea.MouseMsg:
+		if m.terminalMode {
+			b := mouseToTerminalBytes(msg)
+			if len(b) > 0 && m.termSession != nil {
+				go func() { _, _ = m.termSession.Write(b) }()
+			}
+			return m, nil
+		}
+
 	// ---------------------------------------------------------
 	// AGENT MESSAGES (Parsed & Categorized & Streamed)
 	// ---------------------------------------------------------
@@ -356,7 +375,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.termSession == nil {
 				rows := uint16(m.viewport.Height)
 				cols := uint16(m.viewport.Width)
-				session, err := terminal.NewSession(m.selectedShell, int(rows), int(cols))
+
+				// Wire interceptor callbacks to Bubble Tea channel
+				cb := terminal.InterceptorCallbacks{
+					OnTitleChange: func(title string) {
+						m.agentCh <- TerminalTitleMsg{Title: title}
+					},
+					OnClipboard: func(text string) {
+						m.agentCh <- TerminalClipboardMsg{Text: text}
+					},
+					OnBell: func() {
+						m.agentCh <- TerminalBellMsg{}
+					},
+					OnShellPrompt: func() {
+						// Future: Mark command boundary for "Jump to Prompt"
+					},
+				}
+
+				session, err := terminal.NewSession(m.selectedShell, int(rows), int(cols), cb)
 				if err != nil {
 					m.history = append(m.history, LogEntry{Type: LogTypeError, Content: "Failed to start terminal: " + err.Error(), Timestamp: time.Now()})
 					m.terminalMode = false
@@ -386,6 +422,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.history = append(m.history, LogEntry{Type: LogTypeInfo, Content: "Terminal session ended.", Timestamp: time.Now()})
 		m.viewport.SetContent(m.renderHistory())
 		return m, textinput.Blink
+
+	case TerminalTitleMsg:
+		m.terminalTitle = msg.Title
+		return m, nil
+
+	case TerminalBellMsg:
+		go audio.PlayAlert()
+		// Trigger a strong visual glitch spike for the "Visual Flash" effect
+		m.glitchProb = 0.30
+		return m, resetGlitch()
+
+	case TerminalClipboardMsg:
+		go func() { _ = clipboard.WriteAll(msg.Text) }()
+		return m, nil
 
 	case SessionDoneMsg:
 		m.textInput.Focus()
@@ -512,6 +562,9 @@ func (m AppModel) renderTerminalView() string {
 func (m AppModel) headerView() string {
 	// LEFT: Title with Glitch
 	baseText := " HELIX // RED TEAM // Nahasat Nibir ^;;^"
+	if m.terminalMode && m.terminalTitle != "" {
+		baseText = " " + m.terminalTitle + " "
+	}
 	glitchedText := Glitch(baseText, m.glitchProb)
 	title := m.styles.Header.Render(fmt.Sprintf("%s %s", m.spinner.View(), glitchedText))
 

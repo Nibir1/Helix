@@ -4,9 +4,13 @@ module helix
 go 1.25.1
 
 require (
+	github.com/ActiveState/vt10x v1.3.1
+	github.com/UserExistsError/conpty v0.1.4
+	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbles v0.21.1
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/creack/pty v1.1.24
 	github.com/fatih/color v1.18.0
 	github.com/gopxl/beep/v2 v2.1.1
 	golang.org/x/text v0.14.0
@@ -14,10 +18,7 @@ require (
 )
 
 require (
-	github.com/ActiveState/vt10x v1.3.1 // indirect
 	github.com/Netflix/go-expect v0.0.0-20180615182759-c93bf25de8e8 // indirect
-	github.com/UserExistsError/conpty v0.1.4 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/x/ansi v0.11.5 // indirect
@@ -26,7 +27,6 @@ require (
 	github.com/clipperhouse/displaywidth v0.9.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/oto/v3 v3.3.2 // indirect
 	github.com/ebitengine/purego v0.8.0 // indirect
