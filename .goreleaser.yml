@@ -1,5 +1,6 @@
 # .goreleaser.yml
-# Purpose: GoReleaser configuration for cross-platform Helix binaries.
+# Purpose: GoReleaser configuration for cross-platform Helix binaries with
+# curated, professional release notes.
 version: 2
 
 before:
@@ -43,12 +44,13 @@ archives:
       - scripts/install.sh
       - scripts/install.ps1
 
+# PROFESSIONAL RELEASE NOTES:
+# The raw commit dump is disabled. Release bodies are curated by humans in
+# docs/RELEASE_NOTES.md (updated before every tag) and embedded verbatim via
+# the release header template.
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-      - '^ci:'
-      - Merge pull request
-      - Merge branch
+  disable: true
+
+release:
+  header: |
+    {{ readFile "docs/RELEASE_NOTES.md" }}
