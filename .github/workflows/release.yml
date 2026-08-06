@@ -1,6 +1,4 @@
 # .github/workflows/release.yml
-# Purpose: Continuous Deployment pipeline for Helix releases.
-# Triggers on version tags and uses GoReleaser to build and publish assets.
 name: Release
 
 on:
@@ -24,6 +22,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+
+      # FIX: Ensure dependencies are cached before GoReleaser builds
+      - name: Download Dependencies
+        run: go mod download
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5

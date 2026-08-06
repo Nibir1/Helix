@@ -1,6 +1,4 @@
 # .github/workflows/ci.yml
-# Purpose: Continuous Integration pipeline for Helix.
-# Enforces linting, testing, and cross-platform builds on every PR and push.
 name: CI
 
 on:
@@ -26,6 +24,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+
+      # FIX: Download all dependencies into the runner's module cache
+      # so golangci-lint can perform deep typechecking.
+      - name: Download Dependencies
+        run: go mod download
 
       - name: Install golangci-lint (Linux/macOS)
         if: runner.os != 'Windows'
