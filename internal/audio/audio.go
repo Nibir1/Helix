@@ -1,18 +1,15 @@
 // internal/audio/audio.go
 //
-// Purpose: Tonal feedback engine for Helix. Restores the proven strong voice
-// set (350Hz data tap, 880Hz alert ping, 110Hz error buzz) on the proven
-// 50ms speaker buffer, plus a typewriter tick that reuses the strong tap
-// voice so typing feels powerful and on-time.
+// Purpose: Tonal feedback engine API for Helix. Owns enable/ready state and
+// typewriter throttling, and delegates actual synthesis to a platform backend:
+//   - backend_beep.go : real synthesis (non-Linux, or Linux with -tags audio_cgo)
+//   - backend_noop.go : silent fallback (Linux without ALSA/cgo) so every
+//     build — CI, GoReleaser, contributor machines — compiles first try.
 package audio
 
 import (
-	"math"
 	"sync"
 	"time"
-
-	"github.com/gopxl/beep/v2"
-	"github.com/gopxl/beep/v2/speaker"
 )
 
 // SampleRate defines CD-quality audio.
@@ -22,7 +19,7 @@ var (
 	// mu protects all mutable audio engine state.
 	mu sync.Mutex
 
-	// initialized is true only after speaker.Init has succeeded.
+	// initialized is true only after backendInit has succeeded.
 	initialized bool
 
 	// enabled is the user-facing /audio on|off toggle.
@@ -56,7 +53,7 @@ func IsEnabled() bool {
 	return enabled
 }
 
-// IsReady reports whether the speaker has been successfully initialized.
+// IsReady reports whether the backend has been successfully initialized.
 //
 // Args: none.
 // Returns: bool.
@@ -67,33 +64,12 @@ func IsReady() bool {
 	return initialized
 }
 
-// Init initializes the speaker during normal startup.
+// Init initializes the platform audio backend once at startup.
 //
 // Args: none.
-// Returns: error if speaker initialization fails.
+// Returns: error if backend initialization fails.
 // Complexity: O(1), plus OS audio-device initialization time.
 func Init() error {
-	return initSpeaker()
-}
-
-// EnsureReady initializes or retries speaker initialization.
-//
-// Args:
-//   - force: retained for API compatibility with /audio on.
-//
-// Returns: error if speaker initialization fails.
-// Complexity: O(1), plus OS audio-device initialization time.
-func EnsureReady(force bool) error {
-	_ = force // explicit user action always retries via initSpeaker
-	return initSpeaker()
-}
-
-// initSpeaker performs guarded speaker initialization.
-//
-// Args: none.
-// Returns: error if initialization fails.
-// Complexity: O(1), plus OS audio-device initialization time.
-func initSpeaker() error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -101,21 +77,24 @@ func initSpeaker() error {
 		return nil
 	}
 
-	sr := beep.SampleRate(SampleRate)
-
-	// PROVEN VALUE: 50ms buffer (time.Second/20).
-	// The 20ms experiment regressed device initialization on real hardware
-	// and silenced the whole engine. 50ms is the value the original Helix
-	// audio shipped with and that CoreAudio accepts reliably. A constant
-	// 50ms offset is below the perception threshold for rhythm sync, so
-	// ticks still feel locked to the typewriter.
-	err := speaker.Init(sr, sr.N(time.Second/20))
-	if err != nil {
+	if err := backendInit(); err != nil {
 		return err
 	}
 
 	initialized = true
 	return nil
+}
+
+// EnsureReady retries backend initialization (used by /audio on).
+//
+// Args:
+//   - force: retained for API compatibility.
+//
+// Returns: error if backend initialization fails.
+// Complexity: O(1), plus OS audio-device initialization time.
+func EnsureReady(force bool) error {
+	_ = force // explicit user action always retries via Init
+	return Init()
 }
 
 // playbackAllowed gates normal sound effects.
@@ -128,14 +107,14 @@ func playbackAllowed() bool {
 		return false
 	}
 
-	if err := initSpeaker(); err != nil {
+	if err := Init(); err != nil {
 		return false
 	}
 
 	return IsReady()
 }
 
-// PlayClick generates the original clean "Sci-Fi Data Tap" sound.
+// PlayClick generates the clean "Sci-Fi Data Tap" sound.
 //
 // Args: none.
 // Returns: none.
@@ -145,36 +124,16 @@ func PlayClick() {
 		return
 	}
 
-	// 350Hz = solid "Terminal" sound.
-	sine := &SineWave{Freq: 350, Phase: 0}
+	backendPlayClick()
 
-	// Very short duration: 25ms.
-	duration := beep.Take(SampleRate/40, sine)
-	start := time.Now()
-
-	// Envelope: sharp attack, fast percussive decay.
-	click := beep.StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
-		n, ok = duration.Stream(samples)
-		for i := range samples[:n] {
-			elapsed := time.Since(start).Seconds()
-			vol := math.Max(0, 1.0-(elapsed*40))
-
-			// Original strong volume: 15%.
-			samples[i][0] *= (0.15 * vol)
-			samples[i][1] *= (0.15 * vol)
-		}
-		return n, ok
-	})
-
-	speaker.Play(click)
+	// Let the percussive tap land before the prompt continues.
 	time.Sleep(50 * time.Millisecond)
 }
 
-// PlayType plays the typewriter tick using the SAME strong voice as
-// PlayClick so typing feels powerful and immediate.
+// PlayType plays the typewriter tick synchronized with text rendering.
 //
-// This function is non-blocking and never retries speaker initialization,
-// so typing can never stall on audio.
+// Non-blocking and never retries backend initialization, so typing can
+// never stall on audio.
 //
 // Args: none.
 // Returns: none.
@@ -198,27 +157,10 @@ func PlayType() {
 	lastType = time.Now()
 	mu.Unlock()
 
-	// Identical voice to the original PlayClick: strong, percussive.
-	sine := &SineWave{Freq: 350, Phase: 0}
-	duration := beep.Take(SampleRate/40, sine)
-	start := time.Now()
-
-	tick := beep.StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
-		n, ok = duration.Stream(samples)
-		for i := range samples[:n] {
-			elapsed := time.Since(start).Seconds()
-			vol := math.Max(0, 1.0-(elapsed*40))
-
-			samples[i][0] *= (0.15 * vol)
-			samples[i][1] *= (0.15 * vol)
-		}
-		return n, ok
-	})
-
-	speaker.Play(tick)
+	backendPlayTick()
 }
 
-// PlayAlert generates the original strong high-tech sine ping.
+// PlayAlert generates the strong high-tech sine ping.
 //
 // Args: none.
 // Returns: none.
@@ -228,31 +170,11 @@ func PlayAlert() {
 		return
 	}
 
-	// 880Hz Sine Wave (High A) - sharp attention grabber.
-	sine := &SineWave{Freq: 880, Phase: 0}
-
-	// Full 200ms body.
-	beepSound := beep.Take(SampleRate/5, sine)
-	start := time.Now()
-
-	alert := beep.StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
-		n, ok = beepSound.Stream(samples)
-		for i := range samples[:n] {
-			elapsed := time.Since(start).Seconds()
-			vol := math.Max(0, 1.0-(elapsed*3))
-
-			// Original strong volume: 80% with slow decay.
-			samples[i][0] = samples[i][0] * 0.8 * vol
-			samples[i][1] = samples[i][1] * 0.8 * vol
-		}
-		return n, ok
-	})
-
-	speaker.Play(alert)
+	backendPlayAlert()
 	time.Sleep(50 * time.Millisecond)
 }
 
-// PlayError generates the original low buzz (Sawtooth-ish).
+// PlayError generates the low buzz (Sawtooth-ish).
 //
 // Args: none.
 // Returns: none.
@@ -262,104 +184,6 @@ func PlayError() {
 		return
 	}
 
-	// 110Hz low buzz.
-	saw := &SawWave{Freq: 110}
-
-	// 200ms duration.
-	buzz := beep.Take(SampleRate/5, saw)
-	start := time.Now()
-
-	errorSound := beep.StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
-		n, ok = buzz.Stream(samples)
-		for i := range samples[:n] {
-			elapsed := time.Since(start).Seconds()
-			vol := math.Max(0, 1.0-(elapsed*4))
-
-			samples[i][0] *= (0.2 * vol)
-			samples[i][1] *= (0.2 * vol)
-		}
-		return n, ok
-	})
-
-	speaker.Play(errorSound)
+	backendPlayError()
 	time.Sleep(50 * time.Millisecond)
 }
-
-// SineWave generates a simple sine tone.
-type SineWave struct {
-	Freq  float64
-	Phase float64
-}
-
-// Stream implements beep.Streamer.
-//
-// Args:
-//   - samples: output sample buffer.
-//
-// Returns:
-//   - int: number of samples written.
-//   - bool: true while the stream is active.
-//
-// Complexity: O(len(samples)).
-func (s *SineWave) Stream(samples [][2]float64) (int, bool) {
-	step := s.Freq * 2 * math.Pi / float64(SampleRate)
-
-	for i := range samples {
-		v := math.Sin(s.Phase)
-
-		samples[i][0] = v
-		samples[i][1] = v
-
-		s.Phase += step
-	}
-
-	return len(samples), true
-}
-
-// Err implements beep.Streamer.
-//
-// Args: none.
-// Returns: nil.
-// Complexity: O(1).
-func (s *SineWave) Err() error { return nil }
-
-// SawWave generates a simple sawtooth tone.
-type SawWave struct {
-	Freq  float64
-	Phase float64
-}
-
-// Stream implements beep.Streamer.
-//
-// Args:
-//   - samples: output sample buffer.
-//
-// Returns:
-//   - int: number of samples written.
-//   - bool: true while the stream is active.
-//
-// Complexity: O(len(samples)).
-func (s *SawWave) Stream(samples [][2]float64) (int, bool) {
-	step := s.Freq / float64(SampleRate)
-
-	for i := range samples {
-		v := (s.Phase * 2.0) - 1.0
-
-		samples[i][0] = v
-		samples[i][1] = v
-
-		s.Phase += step
-		if s.Phase > 1.0 {
-			s.Phase -= 1.0
-		}
-	}
-
-	return len(samples), true
-}
-
-// Err implements beep.Streamer.
-//
-// Args: none.
-// Returns: nil.
-// Complexity: O(1).
-func (s *SawWave) Err() error { return nil }
