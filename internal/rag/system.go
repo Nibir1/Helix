@@ -1,6 +1,4 @@
 // internal/rag/system.go
-// Package rag provides retrieval-augmented generation components.
-
 package rag
 
 import (
@@ -20,10 +18,6 @@ import (
 	"github.com/fatih/color"
 )
 
-// -----------------------------------------------------------------------------
-// Constants & State
-// -----------------------------------------------------------------------------
-
 const (
 	stateFileName   = "rag_state.json"
 	indexVersion    = "1.0"
@@ -38,10 +32,6 @@ type SystemState struct {
 	TotalCommands int       `json:"total_commands"`
 }
 
-// -----------------------------------------------------------------------------
-// RAG System
-// -----------------------------------------------------------------------------
-
 type RAGSystem struct {
 	env            shell.Env
 	indexer        *MANIndexer
@@ -49,21 +39,18 @@ type RAGSystem struct {
 	initialized    bool
 	indexDir       string
 	stateFile      string
-	exploitEntries map[string]ExploitEntry // hardcoded fallback (Phase 3)
-	db             *sql.DB                 // SQLite knowledge base (Phase 3.5)
+	exploitEntries map[string]ExploitEntry
+	db             *sql.DB
+	silent         bool // NEW: Suppress stdout during background init
 }
 
-// NewSystem constructs a new RAG system.
-// The database connection is mandatory for the scalable backend.
 func NewSystem(env shell.Env, db *sql.DB) *RAGSystem {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "/tmp"
 	}
-
 	indexDir := filepath.Join(home, ".helix", "rag_index")
 	stateFile := filepath.Join(indexDir, stateFileName)
-
 	return &RAGSystem{
 		env:            env,
 		indexDir:       indexDir,
@@ -75,61 +62,68 @@ func NewSystem(env shell.Env, db *sql.DB) *RAGSystem {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// PUBLIC ENTRY POINT — used by startup + /rag-rebuild
-// -----------------------------------------------------------------------------
+func (rs *RAGSystem) SetSilent(s bool) {
+	rs.silent = s
+	rs.vectorStore.SetSilent(s)
+	rs.indexer.SetSilent(s)
+}
+
+func (rs *RAGSystem) logCyan(format string, args ...interface{}) {
+	if !rs.silent {
+		color.Cyan(format, args...)
+	}
+}
+func (rs *RAGSystem) logGreen(format string, args ...interface{}) {
+	if !rs.silent {
+		color.Green(format, args...)
+	}
+}
+func (rs *RAGSystem) logBlue(format string, args ...interface{}) {
+	if !rs.silent {
+		color.Blue(format, args...)
+	}
+}
+func (rs *RAGSystem) logYellow(format string, args ...interface{}) {
+	if !rs.silent {
+		color.Yellow(format, args...)
+	}
+}
+func (rs *RAGSystem) logRed(format string, args ...interface{}) {
+	if !rs.silent {
+		color.Red(format, args...)
+	}
+}
 
 func (rs *RAGSystem) Initialize() error {
-	color.Cyan("RAG System Has Been Initialized...")
-
-	// Make directory
+	rs.logCyan("RAG System Has Been Initialized...")
 	if err := rs.ensureIndexDir(); err != nil {
 		return err
 	}
-
-	// 1) Load saved state if possible
 	if rs.loadSystemState() {
-		color.Green("RAG system loaded from existing state")
-
-		// 2) Load vector index if it exists
+		rs.logGreen("RAG system loaded from existing state")
 	} else if rs.tryLoadExistingIndex() {
 		rs.initialized = true
 		_ = rs.saveSystemState()
-		color.Green("RAG system loaded from existing index")
-
-		// 3) No index → first run → full indexing
+		rs.logGreen("RAG system loaded from existing index")
 	} else {
 		if err := rs.fullIndexWithTimeout(); err != nil {
 			return err
 		}
 	}
-
-	// After vector store is ready, ensure MITRE techniques are indexed once
 	if rs.initialized && !rs.hasMitreIndex() {
 		rs.indexMitre()
 	}
-
-	// Ensure exploit entries are loaded into memory (always, for fallback)
 	rs.loadExploitEntries()
 	if rs.initialized && !rs.hasExploitIndex() {
 		rs.indexExploits()
 	}
-
 	return nil
 }
 
-// Blocks only during startup; same as Initialize() for now.
-func (rs *RAGSystem) InitializeBlocking() error {
-	return rs.Initialize()
-}
-
-// -----------------------------------------------------------------------------
-// FULL INDEXING WITH TIMEOUT + PROGRESS BAR
-// -----------------------------------------------------------------------------
+func (rs *RAGSystem) InitializeBlocking() error { return rs.Initialize() }
 
 func (rs *RAGSystem) fullIndexWithTimeout() error {
-	color.Blue("Starting MAN page indexing (first time setup)...")
-
+	rs.logBlue("Starting MAN page indexing (first time setup)...")
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), maxIndexingTime)
 	defer cancel()
@@ -139,17 +133,13 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 
 	indexingDone := make(chan error, 1)
 	completedFlag := make(chan struct{}, 1)
-
-	// Estimated total pages for progress bar
 	const estimatedTotal = 900
 
-	// MAIN INDEXING GOROUTINE
 	go func() {
 		err := rs.indexer.IndexAvailableManPages()
 		indexingDone <- err
 	}()
 
-	// PROGRESS GOROUTINE — only prints one line repeatedly
 	go func() {
 		for {
 			select {
@@ -157,121 +147,99 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 				if rs.initialized {
 					return
 				}
-
+				if rs.silent {
+					continue // Skip progress bar if silent
+				}
 				count := rs.indexer.GetIndexedCount()
 				elapsed := time.Since(start)
 				if elapsed <= 0 {
 					elapsed = time.Millisecond
 				}
-
 				rate := float64(count) / elapsed.Seconds()
 				total := estimatedTotal
 				if count > total {
 					total = count
 				}
-
 				var eta time.Duration
 				if rate > 0 && total > count {
 					eta = time.Duration(float64(total-count)/rate) * time.Second
 				}
-
-				renderProgressBarD(
-					"Indexing MAN pages",
-					count,
-					total,
-					rate,
-					eta,
-				)
-
+				renderProgressBarD("Indexing MAN pages", count, total, rate, eta)
 			case <-ctx.Done():
 				select {
 				case <-completedFlag:
 					return
 				default:
-					EndProgressBar()
-					color.Yellow("Indexing timeout after %v", utils.FormatDuration(time.Since(start)))
+					if !rs.silent {
+						EndProgressBar()
+						rs.logYellow("Indexing timeout after %v", utils.FormatDuration(time.Since(start)))
+					}
 					return
 				}
 			}
 		}
 	}()
 
-	// WAIT FOR INDEXING RESULT
 	var indexErr error
-
 	select {
 	case indexErr = <-indexingDone:
 		completedFlag <- struct{}{}
-		EndProgressBar()
-
+		if !rs.silent {
+			EndProgressBar()
+		}
 	case <-ctx.Done():
 		completedFlag <- struct{}{}
-		EndProgressBar()
+		if !rs.silent {
+			EndProgressBar()
+		}
 		indexErr = fmt.Errorf("indexing timeout")
 	}
 
-	// Evaluate result
 	count := rs.indexer.GetIndexedCount()
 	if count == 0 {
-		color.Red("No usable MAN pages indexed")
+		rs.logRed("No usable MAN pages indexed")
 		rs.initialized = false
 		_ = rs.saveSystemState()
 		return nil
 	}
-
 	if indexErr != nil {
-		color.Yellow("Indexing completed with issues: %v", indexErr)
+		rs.logYellow("Indexing completed with issues: %v", indexErr)
 	}
+	rs.logGreen("MAN page indexing completed with %d pages", count)
 
-	color.Green("MAN page indexing completed with %d pages", count)
-
-	// Build vector index
 	pages := rs.indexer.GetAllIndexedPages()
 	if len(pages) == 0 {
-		color.Red("No pages available for vector indexing")
+		rs.logRed("No pages available for vector indexing")
 		rs.initialized = false
 		_ = rs.saveSystemState()
 		return nil
 	}
-
-	color.Blue("🔧 Building vector index with %d pages...", len(pages))
+	rs.logBlue("🔧 Building vector index with %d pages...", len(pages))
 	if err := rs.vectorStore.IndexMANPages(pages); err != nil {
-		color.Yellow("Vector store indexing failed: %v", err)
+		rs.logYellow("Vector store indexing failed: %v", err)
 		rs.initialized = true
 		_ = rs.saveSystemState()
 		return nil
 	}
-
 	rs.initialized = true
-	color.Green("RAG fully initialized in %s", utils.FormatDuration(time.Since(start)))
+	rs.logGreen("RAG fully initialized in %s", utils.FormatDuration(time.Since(start)))
 	return rs.saveSystemState()
 }
-
-// -----------------------------------------------------------------------------
-// RETRIEVAL (MAN pages via vector store)
-// -----------------------------------------------------------------------------
 
 func (rs *RAGSystem) Retrieve(query string) ([]CommandInfo, error) {
 	if !rs.initialized {
 		return nil, nil
 	}
-
 	start := time.Now()
 	relevant, err := rs.vectorStore.GetRelevantCommands(query, 3)
 	if err != nil {
-		color.Yellow("RAG search failed: %v", err)
+		rs.logYellow("RAG search failed: %v", err)
 		return nil, nil
 	}
-
-	color.Green("RAG retrieved %d commands in %s",
-		len(relevant), utils.FormatDuration(time.Since(start)))
-
+	// SILENT: Do not print "RAG retrieved X commands" in native shell.
+	_ = start
 	return relevant, nil
 }
-
-// -----------------------------------------------------------------------------
-// PUBLIC GETTERS — used by /rag-status and others
-// -----------------------------------------------------------------------------
 
 func (rs *RAGSystem) GetSystemStats() map[string]interface{} {
 	stats := map[string]interface{}{
@@ -279,14 +247,11 @@ func (rs *RAGSystem) GetSystemStats() map[string]interface{} {
 		"indexed_pages": rs.indexer.GetIndexedCount(),
 		"status":        rs.GetInitializationStatus(),
 	}
-
 	if rs.initialized {
 		for k, v := range rs.vectorStore.GetStats() {
 			stats[k] = v
 		}
 	}
-
-	// Add database stats if available
 	if rs.db != nil {
 		var cveCount, exploitCount, kevCount, mitreCount int
 		_ = rs.db.QueryRow("SELECT COUNT(*) FROM cve").Scan(&cveCount)
@@ -298,7 +263,6 @@ func (rs *RAGSystem) GetSystemStats() map[string]interface{} {
 		stats["db_kev"] = kevCount
 		stats["db_mitre"] = mitreCount
 	}
-
 	return stats
 }
 
@@ -306,32 +270,20 @@ func (rs *RAGSystem) GetInitializationStatus() string {
 	if rs.initialized {
 		return "COMPLETED"
 	}
-
 	count := rs.indexer.GetIndexedCount()
 	if count > 0 {
 		return fmt.Sprintf("PROCESSING (%d pages)", count)
 	}
-
 	return "SCANNING"
 }
 
-func (rs *RAGSystem) IsInitialized() bool {
-	return rs.initialized
-}
-
-// -----------------------------------------------------------------------------
-// STATE + INDEX LOADING
-// -----------------------------------------------------------------------------
-
-func (rs *RAGSystem) ensureIndexDir() error {
-	return os.MkdirAll(rs.indexDir, 0755)
-}
+func (rs *RAGSystem) IsInitialized() bool   { return rs.initialized }
+func (rs *RAGSystem) ensureIndexDir() error { return os.MkdirAll(rs.indexDir, 0755) }
 
 func (rs *RAGSystem) tryLoadExistingIndex() bool {
 	if err := rs.vectorStore.loadVectorIndex(); err != nil {
 		return false
 	}
-
 	return rs.vectorStore.IsInitialized()
 }
 
@@ -340,23 +292,19 @@ func (rs *RAGSystem) loadSystemState() bool {
 	if err != nil {
 		return false
 	}
-
 	var state SystemState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return false
 	}
-
 	if state.Version != indexVersion {
 		return false
 	}
-
 	if state.Initialized {
 		if err := rs.vectorStore.loadVectorIndex(); err == nil {
 			rs.initialized = true
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -376,7 +324,6 @@ func (rs *RAGSystem) saveSystemState() error {
 			}
 		}
 	}
-
 	state := SystemState{
 		Version:       indexVersion,
 		Initialized:   rs.initialized,
@@ -384,18 +331,12 @@ func (rs *RAGSystem) saveSystemState() error {
 		TotalPages:    rs.indexer.GetIndexedCount(),
 		TotalCommands: total,
 	}
-
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
-
 	return os.WriteFile(rs.stateFile, data, 0644)
 }
-
-// -----------------------------------------------------------------------------
-// PROGRESS BAR
-// -----------------------------------------------------------------------------
 
 var lastProgressLen = 0
 
@@ -406,48 +347,34 @@ func renderProgressBarD(stage string, current, total int, rate float64, eta time
 	if total == 0 {
 		return
 	}
-
 	percent := float64(current) / float64(total)
 	if percent > 1 {
 		percent = 1
 	}
-
 	percentInt := int(percent * 100)
 	barWidth := 26
 	filled := int(percent * float64(barWidth))
-
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 	etaStr := "N/A"
 	if eta > 0 {
 		etaStr = utils.FormatDuration(eta)
 	}
-
-	out := fmt.Sprintf(
-		"%s… %d / %d (%d%%) | %.1f/sec | ETA %s  ╢%s╟",
-		stage, current, total, percentInt, rate, etaStr, bar,
-	)
-
+	out := fmt.Sprintf("%s… %d / %d (%d%%) | %.1f/sec | ETA %s  ╢%s╟", stage, current, total, percentInt, rate, etaStr, bar)
 	if lastProgressLen == 0 {
-		fmt.Print("\033[?25l") // hide cursor
+		fmt.Print("\033[?25l")
 	}
-
 	padding := ""
 	if lastProgressLen > len(out) {
 		padding = strings.Repeat(" ", lastProgressLen-len(out))
 	}
-
 	fmt.Printf("\r%s%s", out, padding)
 	lastProgressLen = len(out)
 }
 
 func EndProgressBar() {
-	fmt.Print("\033[?25h\n") // show cursor
+	fmt.Print("\033[?25h\n")
 	lastProgressLen = 0
 }
-
-// -----------------------------------------------------------------------------
-// MITRE TECHNIQUES INDEXING (hardcoded fallback)
-// -----------------------------------------------------------------------------
 
 func (rs *RAGSystem) hasMitreIndex() bool {
 	docs, _ := rs.vectorStore.SearchBySource("T1059", "mitre", 1)
@@ -460,9 +387,9 @@ func (rs *RAGSystem) indexMitre() {
 		return
 	}
 	if err := rs.vectorStore.IndexMitreTechniques(techniques); err != nil {
-		color.Yellow("MITRE indexing warning: %v", err)
+		rs.logYellow("MITRE indexing warning: %v", err)
 	} else {
-		color.Green("MITRE ATT&CK knowledge base indexed (%d techniques)", len(techniques))
+		rs.logGreen("MITRE ATT&CK knowledge base indexed (%d techniques)", len(techniques))
 	}
 }
 
@@ -514,20 +441,14 @@ func (rs *RAGSystem) RetrieveMitreContext(query string, max int) ([]string, erro
 	return contexts, nil
 }
 
-// -----------------------------------------------------------------------------
-// EXPLOIT ENTRIES INDEXING (hardcoded fallback)
-// -----------------------------------------------------------------------------
-
 func (rs *RAGSystem) hasExploitIndex() bool {
 	docs, _ := rs.vectorStore.SearchBySource("EDB-", "exploit", 1)
 	return len(docs) > 0
 }
 
-// loadExploitEntries populates the in-memory exploitEntries map from hardcoded data.
-// It should be called on every startup regardless of vector index status.
 func (rs *RAGSystem) loadExploitEntries() {
 	if len(rs.exploitEntries) > 0 {
-		return // already loaded
+		return
 	}
 	entries := loadExploitEntries()
 	for _, e := range entries {
@@ -535,16 +456,15 @@ func (rs *RAGSystem) loadExploitEntries() {
 	}
 }
 
-// indexExploits now only indexes into the vector store.
 func (rs *RAGSystem) indexExploits() {
 	entries := loadExploitEntries()
 	if len(entries) == 0 {
 		return
 	}
 	if err := rs.vectorStore.IndexExploitEntries(entries); err != nil {
-		color.Yellow("Exploit indexing warning: %v", err)
+		rs.logYellow("Exploit indexing warning: %v", err)
 	} else {
-		color.Green("Exploit knowledge base indexed (%d entries)", len(entries))
+		rs.logGreen("Exploit knowledge base indexed (%d entries)", len(entries))
 	}
 }
 
@@ -584,36 +504,94 @@ func (rs *RAGSystem) GetAllExploitEntries() []ExploitEntry {
 	return entries
 }
 
-// -----------------------------------------------------------------------------
-// PHASE 3.5 – SQLite-Backed Semantic Search & Update
-// -----------------------------------------------------------------------------
-
-// SemanticSearch uses the SQLite database (FTS5 + embeddings) to find relevant
-// knowledge entries. Falls back to hardcoded vector store if DB not available.
 func (rs *RAGSystem) SemanticSearch(query string, limit int) ([]KnowledgeEntry, error) {
 	if rs.db != nil {
-		return SemanticSearch(rs.db, query, limit) // from search.go
+		return SemanticSearch(rs.db, query, limit)
 	}
-	// Fallback to old keyword search via vector store (if initialized)
 	if !rs.initialized {
 		return nil, nil
 	}
-	// We can approximate by fetching exploit context and MITRE context, but it's not ideal.
-	// For now, return empty.
 	return nil, nil
 }
 
-// internal/rag/system.go
-// UpdateKnowledge triggers a full update of the SQLite knowledge base.
 func (rs *RAGSystem) UpdateKnowledge() error {
 	if rs.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	// Phase 0 Hardening: Pass background context for CLI slash-command updates
 	return UpdateAll(context.Background(), rs.db)
 }
 
-// GetDB returns the underlying database handle (for direct queries if needed).
-func (rs *RAGSystem) GetDB() *sql.DB {
-	return rs.db
+func (rs *RAGSystem) GetDB() *sql.DB { return rs.db }
+
+// RebuildWithProgress performs a FULL foreground rebuild of the MAN, vector,
+// MITRE, and exploit indexes with a live Helix progress bar.
+//
+// CRITICAL FIX: wipes ALL index artifacts (rag_index, vector_index, man_index)
+// so Initialize-style short-circuits can never skip the rebuild again.
+func (rs *RAGSystem) RebuildWithProgress() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "/tmp"
+	}
+	for _, dir := range []string{
+		rs.indexDir,
+		filepath.Join(home, ".helix", "vector_index"),
+		filepath.Join(home, ".helix", "man_index"),
+	} {
+		_ = os.RemoveAll(dir)
+	}
+
+	rs.initialized = false
+	rs.indexer = NewMANIndexer(rs.env)
+	rs.vectorStore = NewVectorStore(rs.env)
+	rs.SetSilent(true) // the progress bar owns the line
+
+	prog := NewProgress()
+	prog.Set("INDEXING MAN PAGES", 0, 900)
+	prog.Start()
+
+	poll := make(chan struct{})
+	go func() {
+		tick := time.NewTicker(200 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-poll:
+				return
+			case <-tick.C:
+				prog.Set("INDEXING MAN PAGES", rs.indexer.GetIndexedCount(), 900)
+			}
+		}
+	}()
+
+	idxErr := rs.indexer.IndexAvailableManPages()
+	close(poll)
+
+	pages := rs.indexer.GetAllIndexedPages()
+	if idxErr == nil && len(pages) == 0 {
+		prog.Stop()
+		return fmt.Errorf("no MAN pages discovered; check MANPATH")
+	}
+
+	prog.SetStage("BUILDING VECTOR INDEX")
+	vecErr := rs.vectorStore.IndexMANPages(pages)
+
+	prog.SetStage("INDEXING MITRE ATT&CK")
+	rs.initialized = true
+	if !rs.hasMitreIndex() {
+		rs.indexMitre()
+	}
+
+	prog.SetStage("INDEXING EXPLOITS")
+	rs.loadExploitEntries()
+	if !rs.hasExploitIndex() {
+		rs.indexExploits()
+	}
+	_ = rs.saveSystemState()
+
+	prog.Stop()
+	if idxErr != nil {
+		return idxErr
+	}
+	return vecErr
 }

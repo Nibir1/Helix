@@ -10,7 +10,6 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/commands"
-	"helix/internal/config"
 	"helix/internal/llamacpp"
 	"helix/internal/ollama"
 	"helix/internal/providers"
@@ -45,55 +44,6 @@ func normalizeProviderName(name string) string {
 		return name
 	default:
 		return name
-	}
-}
-
-func isRemoteProvider(provider string) bool {
-	provider = normalizeProviderName(provider)
-
-	switch provider {
-	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "custom":
-		return true
-	default:
-		return false
-	}
-}
-
-func chooseProviderWithSaved(cfg *config.Config) string {
-	saved := normalizeProviderName(cfg.Provider)
-
-	if saved != "" && commands.AskForConfirmation(fmt.Sprintf("Use saved provider %q?", saved)) {
-		return saved
-	}
-
-	return askForAIProvider()
-}
-
-func askForAIProvider() string {
-	for {
-		color.Cyan("Choose AI provider:")
-
-		for i, option := range providerOptions {
-			color.Cyan("  %d) %s", i+1, option.Label)
-		}
-
-		line := strings.ToLower(strings.TrimSpace(commands.AskLine("Provider number or name")))
-
-		if line == "" {
-			continue
-		}
-
-		if idx, err := parseProviderNumber(line); err == nil {
-			return providerOptions[idx].ID
-		}
-
-		for _, option := range providerOptions {
-			if strings.EqualFold(option.ID, line) {
-				return option.ID
-			}
-		}
-
-		color.Yellow("Unknown provider. Try again.")
 	}
 }
 

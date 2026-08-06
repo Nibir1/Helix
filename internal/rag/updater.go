@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"helix/internal/ai"
+	"helix/internal/utils"
 
 	"github.com/fatih/color"
 )
@@ -188,49 +189,57 @@ func setMeta(db *sql.DB, key, value string) {
 	_, _ = db.Exec("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", key, value)
 }
 
-// ----------------------------------------------------------
-
 // UpdateAll fetches all data sources and updates the database.
-// Phase 0 Hardening: Accepts context to allow cancellation of long-running network calls.
+// Phase 4: internet-gated, fast-sources-first, stage-hooked, silent unless
+// HELIX_DEBUG=1.
 func UpdateAll(ctx context.Context, db *sql.DB) error {
-	color.Blue("Starting knowledge base update...")
+	notifyStage("STARTING KNOWLEDGE UPDATE")
 	start := time.Now()
 
-	// Fetch NVD CVEs (incremental)
-	if err := updateNVD(ctx, db); err != nil {
-		color.Yellow("NVD update skipped/failed: %v", err)
+	// INTERNET GATE: every fetch in this pipeline is network-backed.
+	// Fail fast instead of burning per-source network errors while offline.
+	if !utils.IsOnline(3 * time.Second) {
+		notifyStage("OFFLINE - SKIPPING NETWORK FETCHES")
+		return ErrOffline
 	}
 
-	// Fetch CISA KEV
-	color.Blue("Fetching CISA KEV...")
-	if err := updateKEV(ctx, db); err != nil {
+	// Fast, high-value sources FIRST.
+	notifyStage("FETCHING CISA KEV")
+	if err := updateKEV(ctx, db); err != nil && utils.IsDebugMode() {
 		color.Yellow("KEV update failed: %v", err)
 	}
 
-	// Fetch Exploit-DB
-	color.Blue("Fetching Exploit-DB...")
-	if err := updateExploitDB(ctx, db); err != nil {
+	notifyStage("FETCHING EXPLOIT-DB")
+	if err := updateExploitDB(ctx, db); err != nil && utils.IsDebugMode() {
 		color.Yellow("Exploit-DB update failed: %v", err)
 	}
 
-	// Fetch MITRE ATT&CK
-	color.Blue("Fetching MITRE ATT&CK...")
-	if err := updateMITRE(ctx, db); err != nil {
+	notifyStage("FETCHING MITRE ATT&CK")
+	if err := updateMITRE(ctx, db); err != nil && utils.IsDebugMode() {
 		color.Yellow("MITRE update failed: %v", err)
 	}
 
-	// Generate embeddings for new entries (if OpenAI key configured)
-	if err := generateEmbeddings(ctx, db); err != nil {
+	// NVD last: it is the slowest feed (rate-limited) and checkpoints itself,
+	// so a cancellation resumes on the next run.
+	notifyStage("FETCHING NVD CVES")
+	if err := updateNVD(ctx, db); err != nil && utils.IsDebugMode() {
+		color.Yellow("NVD update skipped/failed: %v", err)
+	}
+
+	notifyStage("GENERATING EMBEDDINGS")
+	if err := generateEmbeddings(ctx, db); err != nil && utils.IsDebugMode() {
 		color.Yellow("Embedding generation failed: %v", err)
 	}
 
-	// Explicit FTS reindex to ensure search works immediately
-	color.Blue("Rebuilding FTS index...")
-	if err := ReindexKnowledgeFTS(db); err != nil {
+	notifyStage("REBUILDING FTS INDEX")
+	if err := ReindexKnowledgeFTS(db); err != nil && utils.IsDebugMode() {
 		color.Yellow("FTS reindex failed: %v", err)
 	}
 
-	color.Green("Knowledge base update completed in %v", time.Since(start))
+	notifyStage("KNOWLEDGE UPDATE COMPLETE")
+	if utils.IsDebugMode() {
+		color.Green("Knowledge base update completed in %v", time.Since(start))
+	}
 	return nil
 }
 
@@ -285,7 +294,10 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			"%s?lastModStartDate=%s&lastModEndDate=%s&resultsPerPage=2000&startIndex=%d",
 			nvdBaseURL, lastModStart, lastModEnd, startIndex,
 		)
-		color.Blue("NVD: fetching page %d (start: %s)...", page, lastModStart)
+		notifyStage(fmt.Sprintf("FETCHING NVD CVES · PAGE %d", page))
+		if utils.IsDebugMode() {
+			color.Blue("NVD: fetching page %d (start: %s)...", page, lastModStart)
+		}
 
 		// HARDENING: Use NewRequestWithContext
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
@@ -308,7 +320,10 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 		_ = resp.Body.Close()
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
-			color.Yellow("NVD rate limited on page %d; sleeping 30s and retrying...", page)
+			notifyStage(fmt.Sprintf("NVD RATE LIMITED · RETRY PAGE %d", page))
+			if utils.IsDebugMode() {
+				color.Yellow("NVD rate limited on page %d; sleeping 30s and retrying...", page)
+			}
 			time.Sleep(30 * time.Second)
 			startIndex -= 2000 // Retry this page
 			continue
@@ -550,4 +565,14 @@ func updateMITRE(ctx context.Context, db *sql.DB) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// OnUpdateStage is an optional hook invoked at each update stage so callers
+// (e.g. /knowledge-update) can drive a live Helix progress bar. Nil-safe.
+var OnUpdateStage func(stage string)
+
+func notifyStage(stage string) {
+	if OnUpdateStage != nil {
+		OnUpdateStage(stage)
+	}
 }

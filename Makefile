@@ -84,6 +84,12 @@ run: dev
 # Generic build target that defaults to the current platform
 build: current
 
+# Install Helix as a system shell
+install: current
+	@echo "Running Helix installer..."
+	@chmod +x $(SCRIPTS_DIR)/install.sh
+	@./$(SCRIPTS_DIR)/install.sh
+
 # Show build info
 info:
 	@echo "Build Information:"

@@ -1,5 +1,4 @@
 // internal/utils/syntax.go
-
 package utils
 
 import (
@@ -9,12 +8,10 @@ import (
 	"github.com/fatih/color"
 )
 
-// SyntaxHighlighter handles command parsing and colorization
 type SyntaxHighlighter struct {
 	colors *SyntaxColors
 }
 
-// SyntaxColors holds color configurations for different command components
 type SyntaxColors struct {
 	Command     *color.Color
 	Option      *color.Color
@@ -28,19 +25,18 @@ type SyntaxColors struct {
 	Punctuation *color.Color
 }
 
-// NewSyntaxHighlighter creates a new syntax highlighter
 func NewSyntaxHighlighter() *SyntaxHighlighter {
 	return &SyntaxHighlighter{
 		colors: &SyntaxColors{
-			Command:     color.New(color.FgGreen, color.Bold),
-			Option:      color.New(color.FgCyan),
-			Flag:        color.New(color.FgYellow),
-			String:      color.New(color.FgMagenta),
-			Number:      color.New(color.FgBlue),
+			Command:     color.New(color.FgHiCyan, color.Bold), // Electric Cyan
+			Option:      color.New(color.FgHiYellow),           // Orange/Yellow
+			Flag:        color.New(color.FgHiYellow),
+			String:      color.New(color.FgHiMagenta), // Neon Magenta
+			Number:      color.New(color.FgHiCyan),
 			Path:        color.New(color.FgWhite, color.Underline),
-			Variable:    color.New(color.FgHiBlue),
+			Variable:    color.New(color.FgHiYellow),
 			Comment:     color.New(color.FgHiBlack),
-			Operator:    color.New(color.FgHiRed),
+			Operator:    color.New(color.FgHiRed), // Rectifier Red
 			Punctuation: color.New(color.FgWhite),
 		},
 	}

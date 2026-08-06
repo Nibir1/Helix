@@ -1,42 +1,38 @@
 // cmd/helix/main.go
-// Purpose: Entry point for Helix – AI-powered CLI assistant.
 package main
 
 import (
-	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
-
 	"helix/internal/agent"
 	"helix/internal/ai"
+	"helix/internal/audio"
 	"helix/internal/commands"
 	"helix/internal/config"
 	"helix/internal/rag"
 	"helix/internal/recon"
 	"helix/internal/shell"
 	"helix/internal/stealth"
-	"helix/internal/tui"
 	"helix/internal/utils"
 	"helix/internal/ux"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 )
 
 var (
-	cfg        *config.Config
-	env        shell.Env
-	online     bool
-	execConfig commands.ExecuteConfig
-	gitManager *commands.GitManager
-	sandbox    *commands.DirectorySandbox
-	ragSystem  *rag.RAGSystem
-	agentCore  *agent.Agent
+	cfg         *config.Config
+	env         shell.Env
+	execConfig  commands.ExecuteConfig
+	gitManager  *commands.GitManager
+	sandbox     *commands.DirectorySandbox
+	ragSystem   *rag.RAGSystem
+	agentCore   *agent.Agent
+	highlighter *utils.SyntaxHighlighter
 )
 
 func main() {
@@ -45,176 +41,169 @@ func main() {
 		return
 	}
 
-	color.Cyan("Helix v%s - AI-powered CLI Agent", config.HelixVersion)
+	if handled, code := maybeRunNonInteractive(); handled {
+		os.Exit(code)
+	}
 
 	var err error
-
 	cfg, err = config.DefaultConfig()
 	if err != nil {
-		color.Red("Config error: %v", err)
+		fmt.Fprintf(os.Stderr, "Config error: %v\n", err)
 		return
 	}
 
-	env = shell.DetectEnvironment()
-
-	caser := cases.Title(language.Und)
-	color.Blue("%s (%s shell)", caser.String(env.OSName), env.Shell)
-
-	online = utils.IsOnline(5 * time.Second)
-
-	if online {
-		color.Green("Online mode enabled")
-	} else {
-		color.Yellow("Offline mode - local providers recommended")
+	// Apply persisted debug mode
+	if cfg.UserPrefs.DebugMode {
+		_ = os.Setenv("HELIX_DEBUG", "1")
 	}
 
+	// Apply persisted user name
+	if cfg.UserPrefs.UserName != "" {
+		shell.SetUserName(cfg.UserPrefs.UserName)
+	}
+
+	env = shell.DetectEnvironment()
 	sandbox = commands.NewDirectorySandbox()
 	execConfig = commands.DefaultExecuteConfig()
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
+	homeDir, _ := os.UserHomeDir()
+	if homeDir == "" {
 		homeDir = "/tmp"
 	}
 
 	db, err := rag.OpenDB(homeDir)
 	if err != nil {
-		color.Red("Database error: %v", err)
+		fmt.Fprintf(os.Stderr, "Database error: %v\n", err)
 		return
 	}
 	defer func() { _ = db.Close() }()
 
-	color.Green("Knowledge database ready")
-
-	if err := ai.InitProviders(ai.ProviderSettings{
+	_ = ai.InitProviders(ai.ProviderSettings{
 		Provider:      normalizeProviderName(cfg.Provider),
 		Model:         cfg.ProviderModel,
 		CustomBaseURL: cfg.CustomProviderBaseURL,
-	}); err != nil {
-		color.Red("Provider initialization failed: %v", err)
-		return
-	}
+	})
 	defer ai.StopLocalRuntimes()
 
-	selectedProvider := ""
+	needsSetup := cfg.Provider == "" || !ai.ModelIsLoaded()
+	if !needsSetup {
+		_ = ai.UseProvider(cfg.Provider)
+		ai.UseModel(cfg.ProviderModel)
+	} else {
+		if err := runNativeSetup(); err != nil {
+			color.Red("Setup failed: %v", err)
+			return
+		}
+		cfg.Provider = ai.ActiveProviderName()
+		cfg.ProviderModel = ai.ActiveModel()
+		_ = cfg.SavePreferences()
+	}
+
+	ragSystem = rag.NewSystem(env, db)
+	ragSystem.SetSilent(true)
+	go func() {
+		_ = ragSystem.Initialize()
+		// FIRST-RUN KNOWLEDGE BOOTSTRAP: fresh users automatically receive the
+		// CVE / KEV / Exploit-DB / MITRE knowledge base in the background.
+		// Silent by design; skips gracefully offline and retries next boot.
+		if err := rag.KnowledgeBootstrap(context.Background(), db); err != nil &&
+			os.Getenv("HELIX_DEBUG") == "1" {
+			fmt.Fprintf(os.Stderr, "[boot] knowledge bootstrap: %v\n", err)
+		}
+	}()
+
+	gui := ux.NewUX()
+
+	dbg := os.Getenv("HELIX_DEBUG") == "1"
+	audioDone := make(chan error, 1)
+	go func() { audioDone <- audio.Init() }()
+	select {
+	case aerr := <-audioDone:
+		if aerr != nil && dbg {
+			fmt.Fprintf(os.Stderr, "[boot] audio init failed: %v\n", aerr)
+		}
+	case <-time.After(2 * time.Second):
+		if dbg {
+			fmt.Fprintln(os.Stderr, "[boot] audio init timeout; continuing silent")
+		}
+	}
+
+	commands.SetPrompter(gui)
+	highlighter = utils.NewSyntaxHighlighter()
+	commands.SetSyntaxHighlighter(highlighter)
+
+	stealthExec := stealth.NewStealthExecutor(stealth.DefaultStealthConfig())
+	reconEng := recon.NewReconEngine(env, recon.DefaultReconConfig())
+
+	agentCore = agent.NewAgent(env, ragSystem, sandbox, execConfig, cfg.UserPrefs.TypingEffect, gui, stealthExec, reconEng)
+	agentCore.OnSlashCommand = func(input string) bool { return handleSlashCommand(input) }
+
+	histPath := homeDir + "/.helix_history"
+	history, _ := utils.LoadHistory(histPath)
+
+	fmt.Println("⚡ Helix Native Shell. Type '/help' for SOS or 'exit' to quit.")
 
 	for {
-		selectedProvider = chooseProviderWithSaved(cfg)
-
-		if isRemoteProvider(selectedProvider) && !online {
-			color.Yellow("No internet detected for remote provider %q.", selectedProvider)
-
-			if commands.AskForConfirmation("Continue anyway?") {
+		input, err := shell.ReadLine(shell.GetContext(), highlighter, history)
+		if err != nil {
+			if err.Error() == "EOF" || err.Error() == "interrupted" {
 				break
 			}
-
 			continue
 		}
 
-		break
+		input = strings.TrimSpace(input)
+		if input == "" {
+			continue
+		}
+
+		if input == "exit" || input == "quit" {
+			break
+		}
+
+		_ = utils.AppendHistory(histPath, input)
+		history = append(history, input)
+
+		shell.PrintTransient(input)
+
+		agentCore.HandleInput(input)
+
+		// UNIVERSAL RULE: every operation ends with the grid-status line.
+		gui.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
+
+		fmt.Print("\x1b]133;D;0\x07")
+	}
+}
+
+func runNativeSetup() error {
+	color.Cyan("⚡ HELIX NEURAL LINK CONFIGURATION")
+	color.Cyan("Select AI Provider:")
+	for i, p := range providerOptions {
+		fmt.Printf("%d) %s\n", i+1, p.Label)
 	}
 
-	if err := setupProvider(selectedProvider); err != nil {
-		color.Red("Provider setup failed: %v", err)
-		runEnhancedMockMode()
-		return
+	choiceStr := commands.AskLine("Enter provider number")
+	var choice int
+	if _, err := fmt.Sscanf(choiceStr, "%d", &choice); err != nil {
+		return fmt.Errorf("invalid selection: %w", err)
+	}
+	if choice < 1 || choice > len(providerOptions) {
+		return fmt.Errorf("invalid selection")
 	}
 
-	// FIX: Activate provider BEFORE selecting model so ListProviderModels works
-	if err := ai.UseProvider(selectedProvider); err != nil {
-		color.Red("Failed to activate provider: %v", err)
-		runEnhancedMockMode()
-		return
+	prov := providerOptions[choice-1].ID
+	if err := useProviderInteractive(prov); err != nil {
+		return err
 	}
-
-	if err := selectModelForProvider(selectedProvider); err != nil {
-		color.Red("Model selection failed: %v", err)
-		runEnhancedMockMode()
-		return
-	}
-
-	cfg.Provider = selectedProvider
-	cfg.ProviderModel = ai.ActiveModel()
-
-	if err := cfg.SavePreferences(); err != nil {
-		color.Yellow("Could not save preferences: %v", err)
-	}
-
-	color.Green("AI provider ready: %s", selectedProvider)
-	color.Green("AI model ready: %s", ai.ActiveModel())
-
-	color.Blue("Initializing RAG system...")
-
-	ragSystem = rag.NewSystem(env, db)
-
-	if err := ragSystem.InitializeBlocking(); err != nil {
-		color.Red("RAG initialization failed: %v", err)
-	} else if ragSystem.IsInitialized() {
-		color.Green("RAG system fully initialized")
-	} else {
-		color.Yellow("RAG system did not fully initialize; Helix will run without RAG.")
-	}
-
-	color.Blue("Running quick AI response test...")
-
-	resp, err := ai.RunModel("hello")
-	if err != nil || strings.TrimSpace(resp) == "" {
-		color.Red("Basic AI test failed")
-	} else {
-		color.Green("AI operational")
-	}
-
-	color.Cyan("Connecting Neural Grid Interface...")
-
-	tuiChan := make(chan tea.Msg, 100)
-
-	gui := ux.NewUX()
-	gui.SetEventHandler(func(evt interface{}) {
-		tuiChan <- evt
-	})
-
-	commands.SetPrompter(gui)
-
-	originalStdout := os.Stdout
-	restoreStdio := utils.HijackStdio(tuiChan)
-	defer restoreStdio()
-
-	color.Output = os.Stdout
-
-	stealthExec := stealth.NewStealthExecutor(stealth.DefaultStealthConfig())
-
-	reconConfig := recon.DefaultReconConfig()
-	reconEng := recon.NewReconEngine(env, reconConfig)
-
-	agentCore = agent.NewAgent(
-		env,
-		ragSystem,
-		sandbox,
-		execConfig,
-		cfg.UserPrefs.TypingEffect,
-		gui,
-		stealthExec,
-		reconEng,
-	)
-
-	agentCore.OnSlashCommand = func(input string) bool {
-		return handleSlashCommand(input)
-	}
-
-	if err := tui.Start(agentCore, tuiChan, originalStdout); err != nil {
-		restoreStdio()
-		color.Red("TUI Critical Failure: %v", err)
-		os.Exit(1)
-	}
+	return nil
 }
 
 func runKnowledgeUpdate() {
 	color.Cyan("Helix Knowledge Update Tool")
-
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "/tmp"
 	}
-
 	db, err := rag.OpenDB(homeDir)
 	if err != nil {
 		color.Red("Database error: %v", err)
@@ -222,33 +211,13 @@ func runKnowledgeUpdate() {
 	}
 	defer func() { _ = db.Close() }()
 
-	// Phase 0 Hardening: Pass background context for CLI binary updates
 	if err := rag.UpdateAll(context.Background(), db); err != nil {
+		if errors.Is(err, rag.ErrOffline) {
+			color.Yellow("Offline — knowledge update requires internet connectivity.")
+			os.Exit(1)
+		}
 		color.Red("Update failed: %v", err)
 		os.Exit(1)
 	}
 	color.Green("Knowledge base updated successfully.")
-}
-
-func runEnhancedMockMode() {
-	color.Yellow("Mock mode enabled - no real AI")
-
-	env = shell.DetectEnvironment()
-	execConfig.DryRun = true
-
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		color.Cyan("[mock]› ")
-
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-
-		if input == "/exit" {
-			color.Green("Goodbye!")
-			return
-		}
-
-		color.Yellow("Mock response: %s", input)
-	}
 }

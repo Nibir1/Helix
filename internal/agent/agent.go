@@ -8,6 +8,8 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -40,20 +42,9 @@ type Agent struct {
 }
 
 // NewAgent creates a new Agent instance.
-//
-// Args:
-//
-//	env          – detected shell environment
-//	rag          – RAG system (may be nil if not initialized)
-//	sandbox      – directory confinement manager
-//	execConfig   – execution preferences (dry‑run, safe‑mode, etc.)
-//	typingEffect – whether to animate AI responses
-//	gui          – UX layer (may be nil)
-//	stealthExec  – optional memory‑only executor (may be nil)
-//	reconEng     – optional reconnaissance orchestrator (may be nil)
 func NewAgent(
 	env shell.Env,
-	ragSystem *rag.RAGSystem, // CHANGED: concrete type instead of interface{}
+	ragSystem *rag.RAGSystem,
 	sandbox *commands.DirectorySandbox,
 	execConfig commands.ExecuteConfig,
 	typingEffect bool,
@@ -63,14 +54,13 @@ func NewAgent(
 ) *Agent {
 	gm := commands.NewGitManager(env, execConfig, sandbox)
 
-	// Fallback if nil (e.g. tests)
 	if gui == nil {
 		gui = ux.NewUX()
 	}
 
 	return &Agent{
 		env:            env,
-		rag:            ragSystem, // NEW: store RAG reference
+		rag:            ragSystem,
 		sandbox:        sandbox,
 		execConfig:     execConfig,
 		gitManager:     gm,
@@ -83,10 +73,6 @@ func NewAgent(
 }
 
 // EnableStealth toggles local private-history mode.
-// Phase 0 safety quarantine:
-//   - no log wiping,
-//   - no anti-forensic behavior,
-//   - only local shell-history suppression for privacy.
 func (a *Agent) EnableStealth(on bool) {
 	if a.stealth == nil && on {
 		a.ux.PrintWarning("Private execution engine not available")
@@ -108,19 +94,32 @@ func (a *Agent) IsStealthEnabled() bool {
 }
 
 // HandleInput is the main entry point for Agent Mode.
-// It intercepts slash‑prefixed commands before the planner if an
-// OnSlashCommand callback is set.
 func (a *Agent) HandleInput(userInput string) {
 	userInput = strings.TrimSpace(userInput)
 	if userInput == "" {
 		return
 	}
 
-	// --- Slash‑command interception ---
+	// --- Slash-command interception ---
 	if strings.HasPrefix(userInput, "/") && a.OnSlashCommand != nil {
 		if a.OnSlashCommand(userInput) {
 			return
 		}
+	}
+
+	// --- Unified shell input classification ---
+	classification := shell.Classify(userInput)
+	a.ux.PrintDebug(fmt.Sprintf(
+		"shell.classify: kind=%s confidence=%.2f root=%q reason=%q",
+		classification.Kind, classification.Confidence,
+		classification.RootCommand, classification.Reason,
+	))
+	if classification.Kind == shell.KindShellCommand && classification.Confidence >= shell.HighConfidence {
+		if err := a.runDirectShellCommand(userInput); err != nil {
+			a.ux.PrintError(fmt.Sprintf("Command failed: %v", err))
+			return
+		}
+		return
 	}
 
 	// --- RAG retrieval (if available) ---
@@ -140,16 +139,19 @@ func (a *Agent) HandleInput(userInput string) {
 	}
 
 	// --- Standard planning ---
+	// FIX: Feed the LIVE CWD to the planner, not just the sandbox root.
+	cwd := a.sandbox.GetCurrentDirectory()
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		cwd = wd
+	}
 	envDesc := fmt.Sprintf(
 		"OS: %s, Shell: %s, CWD: %s",
 		a.env.OSName,
 		a.env.Shell,
-		a.sandbox.GetCurrentDirectory(),
+		cwd,
 	)
-
 	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
 
-	// 1) Call planner model
 	rawPlanOutput, err := ai.RunPlannerWithRetry(plannerPrompt)
 	if err != nil {
 		a.ux.PrintError(fmt.Sprintf("Planner model error: %v", err))
@@ -161,25 +163,20 @@ func (a *Agent) HandleInput(userInput string) {
 		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		return
 	}
-
 	rawPlanOutput = strings.TrimSpace(rawPlanOutput)
 
-	// 2) Parse / validate plan
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
 	if err != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Planner parse error: %v", err))
-
 		resp, chatErr := ai.RunModel(userInput)
 		if chatErr != nil {
 			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
 			return
 		}
-
 		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		return
 	}
 
-	// 3) Safety layer enhancement
 	safePlan, err := a.prepareSafePlan(userInput, plan)
 	if err != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Safety layer error: %v", err))
@@ -188,62 +185,57 @@ func (a *Agent) HandleInput(userInput string) {
 		plan = safePlan
 	}
 
-	// 4) Execute each step
 	for i, step := range plan.Steps {
 		if len(plan.Steps) > 1 {
 			a.ux.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
 		}
-
 		switch step.Tool {
-
 		case "response":
 			a.handleResponseStep(step)
-
 		case "shell":
 			if err := a.handleShellStep(step); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Shell step failed: %v", err))
 				return
 			}
-
 		case "git":
 			if err := a.handleGitStep(step); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Git step failed: %v", err))
 				return
 			}
-
 		case "package":
 			if err := a.handlePackageStep(step); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Package step failed: %v", err))
 				return
 			}
-
 		case "recon":
 			if err := a.handleReconStep(step); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Recon step failed: %v", err))
 				return
 			}
-
 		default:
 			a.ux.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
 		}
 	}
 
-	// Mission complete – Red Team aesthetic
 	a.ux.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 }
 
-//
+// runDirectShellCommand executes a user-typed shell command through the full safety pipeline.
+func (a *Agent) runDirectShellCommand(command string) error {
+	a.ux.PrintDebug("shell.classify: direct shell execution (AI bypass)")
+	step := ai.PlanStep{Tool: "shell", Command: command}
+	return a.handleShellStep(step)
+}
+
 // ──────────────────────────────────────────────────────────────
 // SAFETY LAYER
 // ──────────────────────────────────────────────────────────────
-//
 
 func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("nil plan")
 	}
 
-	// Deep copy
 	safe := *plan
 	safe.Steps = make([]ai.PlanStep, len(plan.Steps))
 	copy(safe.Steps, plan.Steps)
@@ -254,20 +246,15 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 	hasGitCommit := false
 	hasGitAdd := false
 
-	// Scan + modify commands
 	for i, s := range safe.Steps {
 		switch s.Tool {
-
 		case "shell":
 			cmd := strings.TrimSpace(s.Command)
-
-			// Replace version placeholders
 			if requestedVersion != "" {
 				for _, ph := range []string{"NEW_VERSION", "new_version", "VERSION_HERE"} {
 					cmd = strings.ReplaceAll(cmd, ph, requestedVersion)
 				}
 			}
-
 			s.Command = cmd
 			safe.Steps[i] = s
 
@@ -276,7 +263,6 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 					mutatedPaths = append(mutatedPaths, "README.md")
 				}
 			}
-
 		case "git":
 			action := strings.ToLower(s.Action)
 			if action == "commit" {
@@ -285,19 +271,13 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 			if action == "add" {
 				hasGitAdd = true
 			}
-
 			if action == "tag" && requestedVersion != "" {
 				name := strings.TrimSpace(s.Args["name"])
-				if name == "" ||
-					name == "NEW_VERSION" ||
-					name == "new_version" ||
-					name == "VERSION_HERE" {
-
+				if name == "" || name == "NEW_VERSION" || name == "new_version" || name == "VERSION_HERE" {
 					tag := requestedVersion
 					if strings.Contains(userInput, "v"+requestedVersion) {
 						tag = "v" + requestedVersion
 					}
-
 					s.Args["name"] = tag
 					safe.Steps[i] = s
 				}
@@ -307,7 +287,6 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 
 	mutatedPaths = uniqueStrings(mutatedPaths)
 
-	// Auto-insert git add
 	if hasGitCommit && len(mutatedPaths) > 0 && !hasGitAdd {
 		addStep := ai.PlanStep{
 			Tool:   "git",
@@ -359,11 +338,9 @@ func uniqueStrings(in []string) []string {
 	return out
 }
 
-//
 // ──────────────────────────────────────────────────────────────
 // TOOL HANDLERS
 // ──────────────────────────────────────────────────────────────
-//
 
 func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	msg := strings.TrimSpace(step.Message)
@@ -373,39 +350,39 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	a.ux.PrintAIMessage(msg, a.typingEffect)
 }
 
-// SHELL — includes risk scoring and stealth toggle
+// SHELL — includes risk scoring, stealth toggle, and native cd interception
 func (a *Agent) handleShellStep(step ai.PlanStep) error {
 	cmd := strings.TrimSpace(step.Command)
 	if cmd == "" {
 		return fmt.Errorf("empty shell command")
 	}
 
+	// NATIVE CD INTERCEPTION: a `cd` run in a child shell vanishes when the
+	// child exits. Apply it to the live Helix process instead.
+	if segments := splitShellChain(cmd); len(segments) > 0 && isCdCommand(segments[0]) {
+		return a.executeNativeCd(cmd, segments)
+	}
+
 	a.ux.PrintCommand(cmd)
 
-	// Hard safety validation
 	validCmd, err := commands.ValidateAndCleanCommand(cmd)
 	if err != nil {
 		return fmt.Errorf("invalid shell command: %w", err)
 	}
 
-	// Soft risk layer
 	risk, reasons := commands.AnalyzeShellRisk(validCmd)
 	switch risk {
-
 	case commands.ShellRiskLow:
 		// execute directly
-
 	case commands.ShellRiskMedium:
 		a.ux.PrintWarning("Medium risk shell command:")
 		for _, r := range reasons {
 			a.ux.PrintWarning(fmt.Sprintf("   • %s", r))
 		}
-
 		if !a.ux.AskYesNo("Execute anyway?") {
 			a.ux.PrintWarning("Command skipped")
 			return nil
 		}
-
 	case commands.ShellRiskHigh:
 		a.ux.PrintError("HIGH RISK — blocked")
 		for _, r := range reasons {
@@ -414,7 +391,6 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		return fmt.Errorf("high-risk shell command blocked")
 	}
 
-	// Stealth execution if enabled and engine available
 	if a.stealthEnabled && a.stealth != nil {
 		a.ux.PrintDebug("Stealth mode: running command from memory")
 		output, err := a.stealth.Execute(validCmd)
@@ -427,15 +403,142 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		return nil
 	}
 
-	// Default sandbox execution
-	return a.sandbox.WrapCommand(validCmd, a.execConfig, a.env)
+	if a.execConfig.DryRun {
+		a.ux.PrintWarning(fmt.Sprintf("[Dry Run] Would execute: %s", validCmd))
+		return nil
+	}
+
+	if ok, reason := a.sandbox.ValidateCommand(validCmd); !ok {
+		return fmt.Errorf("sandbox violation: %s", reason)
+	}
+
+	// FIX: execute child commands in the LIVE working directory, not the
+	// sandbox root, so prior `cd` calls affect subsequent commands.
+	wd, wdErr := os.Getwd()
+	if wdErr != nil || wd == "" {
+		wd = a.sandbox.GetCurrentDirectory()
+	}
+	return a.ux.RunShellCommand(validCmd, wd, a.env.Shell)
+}
+
+// executeNativeCd applies every `cd` segment to the live Helix process and
+// runs any remaining chained commands through the normal safety pipeline.
+func (a *Agent) executeNativeCd(original string, segments []string) error {
+	a.ux.PrintCommand(original)
+
+	var rest []string
+	for _, seg := range segments {
+		if !isCdCommand(seg) {
+			rest = append(rest, seg)
+			continue
+		}
+		if a.execConfig.DryRun {
+			a.ux.PrintWarning(fmt.Sprintf("[Dry Run] Would change directory: %s", cdTarget(seg)))
+			continue
+		}
+		if err := a.changeWorkingDir(cdTarget(seg)); err != nil {
+			return err
+		}
+	}
+
+	if len(rest) == 0 {
+		return nil
+	}
+	return a.handleShellStep(ai.PlanStep{Tool: "shell", Command: strings.Join(rest, " && ")})
+}
+
+// changeWorkingDir moves the live Helix process, routed through the sandbox.
+func (a *Agent) changeWorkingDir(target string) error {
+	if target == "-" {
+		return fmt.Errorf("cd - is not supported; use an explicit path")
+	}
+	if target == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		target = home
+	}
+	if strings.HasPrefix(target, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			if target == "~" {
+				target = home
+			} else if strings.HasPrefix(target, "~/") {
+				target = filepath.Join(home, target[2:])
+			}
+		}
+	}
+	if a.sandbox != nil {
+		if err := a.sandbox.ChangeDirectory(target); err != nil {
+			a.ux.PrintWarning(fmt.Sprintf("cd blocked by sandbox confinement (%v). Use /sandbox off to roam freely.", err))
+			return err
+		}
+		return nil
+	}
+	return os.Chdir(target)
+}
+
+func isCdCommand(seg string) bool {
+	return seg == "cd" || strings.HasPrefix(seg, "cd ") || strings.HasPrefix(seg, "cd\t")
+}
+
+func cdTarget(seg string) string {
+	t := strings.TrimSpace(seg)
+	if t == "cd" {
+		return ""
+	}
+	t = strings.TrimSpace(strings.TrimPrefix(t, "cd"))
+	return strings.Trim(t, `"'`)
+}
+
+func splitShellChain(cmd string) []string {
+	var parts []string
+	var cur strings.Builder
+	inSingle, inDouble := false, false
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		switch c {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+			cur.WriteByte(c)
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+			cur.WriteByte(c)
+		case ';':
+			if !inSingle && !inDouble {
+				parts = append(parts, cur.String())
+				cur.Reset()
+			} else {
+				cur.WriteByte(c)
+			}
+		case '&':
+			if !inSingle && !inDouble && i+1 < len(cmd) && cmd[i+1] == '&' {
+				parts = append(parts, cur.String())
+				cur.Reset()
+				i++
+			} else {
+				cur.WriteByte(c)
+			}
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	parts = append(parts, cur.String())
+
+	var out []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			out = append(out, strings.TrimSpace(p))
+		}
+	}
+	return out
 }
 
 // handleReconStep processes planner recon steps.
-// Phase 0 safety quarantine:
-//   - target must be explicitly authorized before scanning,
-//   - missing tools can still be installed with user permission,
-//   - unauthorized targets are rejected.
 func (a *Agent) handleReconStep(step ai.PlanStep) error {
 	toolName := strings.TrimSpace(step.Action)
 	if toolName == "" {
@@ -451,7 +554,6 @@ func (a *Agent) handleReconStep(step ai.PlanStep) error {
 		return fmt.Errorf("recon engine not available")
 	}
 
-	// Authorization gate.
 	if !a.recon.IsTargetAuthorized(target) {
 		a.ux.PrintError(fmt.Sprintf("Recon target %q is not authorized", target))
 		a.ux.PrintWarning(fmt.Sprintf("Authorize first: /scan authorize %s --reason \"<written scope>\"", target))
@@ -471,7 +573,6 @@ func (a *Agent) handleReconStep(step ai.PlanStep) error {
 		return err
 	}
 
-	// Missing tool handling.
 	if result.Error != nil && strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
 		a.ux.PrintInfo(fmt.Sprintf("Recon tool %q is not installed.", toolName))
 
@@ -540,8 +641,7 @@ func (a *Agent) RunReconTool(tool, flags, target string) (*recon.ReconResult, er
 	return a.recon.RunTool(tool, args...)
 }
 
-// installPackage attempts to install a single package using the detected
-// system package manager, after running the normal safety checks.
+// installPackage attempts to install a single package using the detected system package manager.
 func (a *Agent) installPackage(pkg string) error {
 	if err := commands.IsPackageActionSafe("install", pkg, a.env); err != nil {
 		return fmt.Errorf("package safety check failed: %w", err)
@@ -555,7 +655,6 @@ func (a *Agent) installPackage(pkg string) error {
 	installCmd := pm.InstallCommand(pkg)
 	a.ux.PrintInfo(fmt.Sprintf("Running: %s", installCmd))
 
-	// Execute through the sandbox (respects dry‑run, safe‑mode, etc.).
 	return a.sandbox.WrapCommand(installCmd, a.execConfig, a.env)
 }
 
@@ -610,7 +709,7 @@ func (a *Agent) handlePackageStep(step ai.PlanStep) error {
 	return nil
 }
 
-// GetUX returns the UX layer (useful for slash commands outside HandleInput).
+// GetUX returns the UX layer.
 func (a *Agent) GetUX() *ux.UX {
 	return a.ux
 }

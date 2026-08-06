@@ -33,6 +33,8 @@ type UserPrefs struct {
 	TypingEffect bool   `json:"typing_effect"`
 	DefaultMode  string `json:"default_mode"`
 	SafeMode     bool   `json:"safe_mode"`
+	UserName     string `json:"user_name"`
+	DebugMode    bool   `json:"debug_mode"`
 }
 
 // DefaultConfig returns sane default paths for Helix.
@@ -41,16 +43,13 @@ func DefaultConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	modelDir := os.Getenv("HELIX_MODEL_DIR")
 	if modelDir == "" {
 		modelDir = filepath.Join(home, ".helix", "models")
 	}
-
 	configDir := filepath.Join(home, ".helix")
 	openAIKeyPath := filepath.Join(configDir, "openai_api_key")
 	modelFile := filepath.Join(modelDir, "tinyllama-1.1b-chat-v1.0.Q4_0.gguf")
-
 	cfg := &Config{
 		ModelDir:              modelDir,
 		ModelFile:             modelFile,
@@ -66,13 +65,13 @@ func DefaultConfig() (*Config, error) {
 			TypingEffect: true,
 			DefaultMode:  "ask",
 			SafeMode:     true,
+			UserName:     "", // Defaults to Nahasat Nibir in prompt.go if empty
+			DebugMode:    false,
 		},
 		ModelConfig:   ai.DefaultModelConfig(),
 		ExecuteConfig: commands.DefaultExecuteConfig(),
 	}
-
 	_ = cfg.LoadPreferences()
-
 	return cfg, nil
 }
 
@@ -92,31 +91,23 @@ func (cfg *Config) LoadPreferences() error {
 	if err != nil {
 		return nil
 	}
-
 	var prefs Config
-
 	if err := json.Unmarshal(data, &prefs); err != nil {
 		return fmt.Errorf("error parsing config file: %w", err)
 	}
-
 	cfg.UserPrefs = prefs.UserPrefs
-
 	if prefs.ModelConfig.MaxTokens > 0 {
 		cfg.ModelConfig = prefs.ModelConfig
 	}
-
 	if prefs.Provider != "" {
 		cfg.Provider = prefs.Provider
 	}
-
 	if prefs.ProviderModel != "" {
 		cfg.ProviderModel = prefs.ProviderModel
 	}
-
 	if prefs.CustomProviderBaseURL != "" {
 		cfg.CustomProviderBaseURL = prefs.CustomProviderBaseURL
 	}
-
 	return nil
 }
 
@@ -125,19 +116,16 @@ func (cfg *Config) SavePreferences() error {
 	if err := cfg.EnsureConfigDir(); err != nil {
 		return err
 	}
-
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-
 	return os.WriteFile(cfg.ConfigPath, data, 0o644)
 }
 
 // Versioning and model metadata.
 const (
-	HelixVersion = "0.6.0"
-
+	HelixVersion  = "1.0.0"
 	ModelName     = "TinyLlama-1.1B-Chat-v1.0-GGUF"
 	ModelURL      = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf"
 	ModelChecksum = "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556"
