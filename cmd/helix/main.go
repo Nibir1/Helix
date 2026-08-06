@@ -115,16 +115,26 @@ func main() {
 	gui := ux.NewUX()
 
 	dbg := os.Getenv("HELIX_DEBUG") == "1"
+
 	audioDone := make(chan error, 1)
 	go func() { audioDone <- audio.Init() }()
+
 	select {
 	case aerr := <-audioDone:
-		if aerr != nil && dbg {
-			fmt.Fprintf(os.Stderr, "[boot] audio init failed: %v\n", aerr)
+		if aerr != nil {
+			color.Yellow("Audio engine unavailable: %v", aerr)
+			color.Yellow("Helix will stay silent. Try /audio on after checking your sound device.")
+
+			if dbg {
+				color.Yellow("Audio debug: speaker initialization failed at startup.")
+			}
 		}
 	case <-time.After(2 * time.Second):
+		color.Yellow("Audio engine init timeout; continuing silent")
+		color.Yellow("Use /audio on to retry once your sound device is available.")
+
 		if dbg {
-			fmt.Fprintln(os.Stderr, "[boot] audio init timeout; continuing silent")
+			color.Yellow("Audio debug: startup initialization exceeded 2s.")
 		}
 	}
 

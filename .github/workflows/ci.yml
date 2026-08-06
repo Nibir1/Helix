@@ -1,46 +1,47 @@
 # .github/workflows/ci.yml
-name: Helix CI/CD Pipeline
+# Purpose: Continuous Integration pipeline for Helix.
+# Enforces linting, testing, and cross-platform builds on every PR and push.
+name: CI
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
 
 jobs:
   build-and-test:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    name: Test & Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ['1.25']
+
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
-          cache: true
+          go-version: ${{ matrix.go-version }}
 
-      - name: Run Unit & Integration Tests
+      - name: Install golangci-lint (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.59.1
+          
+      - name: Install golangci-lint (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
+
+      - name: Run Linter
+        run: make lint
+
+      - name: Run Tests
         run: make test
 
       - name: Build Binary
         run: make current
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.x'
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.60.1
-          args: --timeout=5m

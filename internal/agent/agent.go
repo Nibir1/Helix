@@ -216,8 +216,6 @@ func (a *Agent) HandleInput(userInput string) {
 			a.ux.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
 		}
 	}
-
-	a.ux.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 }
 
 // runDirectShellCommand executes a user-typed shell command through the full safety pipeline.

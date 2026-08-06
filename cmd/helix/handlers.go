@@ -67,9 +67,6 @@ func handleSlashCommand(input string) bool {
 		handleExplainCommand(input)
 	case "/vuln", "/intel":
 		handleVulnCommand(input)
-	case "/exploit":
-		color.Yellow("/exploit is deprecated. Use /vuln for defensive vulnerability intelligence.")
-		handleVulnCommand(strings.Replace(input, "/exploit", "/vuln", 1))
 	case "/knowledge-update":
 		handleKnowledgeUpdate()
 	case "/knowledge-stats":
@@ -278,9 +275,7 @@ func handleHelp() {
 
 	fmt.Println(rule)
 	fmt.Println("  " + shell.Fg(shell.HexTertiary, "TIP ") + shell.Fg(shell.HexText, " Just type natural language — e.g. 'find large files and delete them'"))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "NOTE  /exploit is deprecated → use /vuln for defensive intelligence"))
 	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexPrimary, "Helix :: GRID STATUS :: CLEAR"))
 }
 
 func helpSection(title string) {
@@ -867,23 +862,49 @@ func listAvailableModels() {
 	}
 }
 
+// handleAudioCommand processes /audio and verifies the sound engine is
+// actually ready, so silence can never be invisible again.
+//
+// Args:
+//   - input: raw user input line.
+//
+// Returns: none.
+// Complexity: O(1), plus possible audio-device initialization time.
 func handleAudioCommand(input string) {
 	args := strings.Fields(input)
+
 	if len(args) < 2 {
 		current := "ON"
 		if !audio.IsEnabled() {
 			current = "OFF"
 		}
-		color.Cyan("Audio is currently: %s", current)
+
+		ready := "READY"
+		if !audio.IsReady() {
+			ready = "NOT READY"
+		}
+
+		color.Cyan("Audio is currently: %s (%s)", current, ready)
 		color.Yellow("Usage: /audio <on|off>")
 		return
 	}
+
 	switch strings.ToLower(args[1]) {
 	case "on", "enable":
 		audio.SetEnabled(true)
+
+		// Explicit user action: force a retry of speaker initialization.
+		if err := audio.EnsureReady(true); err != nil {
+			color.Yellow("Audio enabled, but the sound engine is unavailable: %v", err)
+			color.Yellow("Check your system output device and volume.")
+			color.Yellow("SSH, Docker, and headless sessions have no local speaker.")
+			return
+		}
+
 		color.Green("Audio enabled")
 		audio.PlayAlert()
 		time.Sleep(100 * time.Millisecond)
+
 	case "off", "disable":
 		audio.SetEnabled(false)
 		color.Yellow("Audio disabled")
