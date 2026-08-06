@@ -1,4 +1,6 @@
 # .github/workflows/release.yml
+# Purpose: Continuous Deployment pipeline for Helix releases.
+# Triggers on version tags and uses GoReleaser v2 to build and publish assets.
 name: Release
 
 on:
@@ -23,15 +25,17 @@ jobs:
         with:
           go-version: '1.25'
 
-      # FIX: Ensure dependencies are cached before GoReleaser builds
       - name: Download Dependencies
         run: go mod download
 
+      # FIX: Upgraded to goreleaser-action@v6 and explicitly pinned to v2.
+      # This resolves the "version: 2 not supported" error and the Node 20
+      # deprecation warning for this step.
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          version: '~> v2'
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
