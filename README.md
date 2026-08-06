@@ -25,6 +25,45 @@ It combines:
 It’s built as a **portfolio‑grade systems project** in Go, demonstrating real‑world skills in AI integration, sandboxed execution, strict JSON planner protocols, memory-only stealth execution, and live threat intelligence pipelines.
 
 ---
+## Quick Start & Installation
+
+### Option 1: Automated Installer (macOS / Linux)
+The fastest way to get Helix running. This one-liner clones the repository, builds the optimized binary, initializes your `~/.helix` configuration directories, and prompts you to set Helix as your default system shell.
+
+```bash
+git clone https://github.com/Nibir1/Helix.git && cd Helix && ./scripts/install.sh
+```
+
+### Option 2: Windows (PowerShell)
+Open PowerShell as Administrator and run the automated Windows setup script. This will build the binary, add it to your system `PATH`, and optionally bootstrap Ollama.
+
+```powershell
+git clone https://github.com/Nibir1/Helix.git; cd Helix; .\scripts\install.ps1
+```
+
+### Option 3: Go Install (Cross-Platform)
+If you already have Go 1.25+ installed and just want the binary in your `$GOPATH/bin`:
+
+```bash
+go install github.com/Nibir1/Helix/cmd/helix@latest
+```
+
+### Option 4: Pre-compiled Binaries (No Build Required)
+Don't want to build from source? Download the latest pre-compiled binary, checksums, and archives for your OS directly from the **[Releases Page](https://github.com/Nibir1/Helix/releases)**.
+
+---
+
+### Manual Build (For Developers)
+If you prefer to build and run Helix locally without installing it globally:
+
+```bash
+git clone https://github.com/Nibir1/Helix.git
+cd Helix
+make current   # Builds the optimized binary
+./dist/helix   # Launches Helix
+```
+
+---
 
 ## The "Helix Inversion": One Prompt to Rule Them All
 
@@ -292,33 +331,15 @@ Helix/
 
 ---
 
-## Quick Start
-
-### Prerequisites
-- Go **1.25+**
-- macOS / Linux / Windows
-- ~4 GB RAM recommended for local inference
-- Disk space for model weights (if using llama.cpp/Ollama)
-
-### Clone & Build
+### Manual Build (For Developers)
+If you prefer to build and run Helix locally without installing it globally:
 
 ```bash
 git clone https://github.com/Nibir1/Helix.git
 cd Helix
-make current   # Optimized build
-./dist/helix
+make current   # Builds the optimized binary
+./dist/helix   # Launches Helix
 ```
-
-For a dev build (auto-rebuilds and runs):
-```bash
-make start
-```
-
-### Install as System Shell (Optional)
-```bash
-make install
-```
-*(Registers Helix in `/etc/shells` and optionally sets it as your default login shell).*
 
 ---
 
