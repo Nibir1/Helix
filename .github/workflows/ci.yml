@@ -1,4 +1,6 @@
 # .github/workflows/ci.yml
+# Purpose: Continuous Integration pipeline for Helix.
+# Enforces linting, testing, and cross-platform builds on every PR and push.
 name: CI
 
 on:
@@ -12,6 +14,8 @@ jobs:
     name: Test & Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      # Let every OS report its own result instead of cancelling siblings.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go-version: ['1.25']
@@ -25,26 +29,24 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
-      # FIX: Download all dependencies into the runner's module cache
-      # so golangci-lint can perform deep typechecking.
       - name: Download Dependencies
         run: go mod download
 
-      - name: Install golangci-lint (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.59.1
-          
-      - name: Install golangci-lint (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
+      # ROOT-CAUSE FIX: golangci-lint v1.59.1 predates Go 1.25 and cannot read
+      # its type information, which produced bogus
+      # "undefined: beep / isatty / runewidth (typecheck)" errors even with all
+      # modules downloaded. The v2 release line is the first with full Go 1.25
+      # support. `go install` works identically on bash and PowerShell runners.
+      - name: Install golangci-lint (Go 1.25-compatible)
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
 
+      # Direct tool invocations (instead of make) keep the pipeline identical
+      # on PowerShell, bash, and zsh runners (no chmod/Make dependency).
       - name: Run Linter
-        run: make lint
+        run: golangci-lint run ./... --timeout=5m
 
       - name: Run Tests
-        run: make test
+        run: go test ./... -count=1
 
       - name: Build Binary
-        run: make current
+        run: go build -o dist/helix ./cmd/helix
