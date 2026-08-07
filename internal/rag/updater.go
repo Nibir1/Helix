@@ -2,6 +2,7 @@
 package rag
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/csv"
@@ -19,20 +20,30 @@ import (
 	"github.com/fatih/color"
 )
 
-const (
-	kevURL         = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-	exploitCSVURL  = "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"
-	mitreSTIXURL   = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
-	defaultTimeout = 120 * time.Second
-)
-
 var (
+	// Feed URLs are vars so tests can point them at local servers.
+	kevURL        = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+	exploitCSVURL = "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"
+	mitreSTIXURL  = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
+
 	// nvdBaseURL is mutable for tests.
 	nvdBaseURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
 	// Retry tuning, mutable for tests.
 	nvdRetryAttempts  = 3
 	nvdRetryBaseDelay = 2 * time.Second
+)
+
+const (
+	defaultTimeout = 120 * time.Second
+
+	// Phase 3.5c: meta keys for conditional-GET (ETag) caching.
+	metaETagKEV     = "etag_kev"
+	metaETagExploit = "etag_exploitdb"
+	metaETagMitre   = "etag_mitre"
+
+	// Polite identification for threat-intel feeds.
+	threatUserAgent = "Helix/1.0 (defensive threat intelligence; https://github.com/Nibir1/Helix)"
 )
 
 // APIError is a structured upstream API error.
@@ -48,7 +59,6 @@ func (e *APIError) Error() string {
 	if e.StatusCode == 0 {
 		return fmt.Sprintf("%s request failed: %s", e.Source, e.Body)
 	}
-
 	return fmt.Sprintf("%s API returned %d: %s", e.Source, e.StatusCode, errorSnippet(e.Body, 300))
 }
 
@@ -58,11 +68,10 @@ func errorSnippet(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-
 	return s[:max] + "..."
 }
 
-// Helper to convert []interface{} to []string
+// interfaceSliceToString converts []interface{} to []string
 func interfaceSliceToString(in []interface{}) []string {
 	out := make([]string, len(in))
 	for i, v := range in {
@@ -72,11 +81,18 @@ func interfaceSliceToString(in []interface{}) []string {
 }
 
 // generateEmbeddings batches and stores OpenAI embeddings for new records.
-func generateEmbeddings(ctx context.Context, db *sql.DB) error {
+func generateEmbeddings(ctx context.Context, db *sql.DB, interactive bool) error {
 	if !ai.HasOpenAIKey() {
-		color.Yellow("No OpenAI key configured; skipping embedding generation.")
+		// FIX: Route the skip message through the progress bar hook if it exists,
+		// otherwise print to stdout only if we are in an interactive session.
+		if OnUpdateStage != nil {
+			notifyStage("EMBEDDINGS SKIPPED")
+		} else if interactive {
+			color.Yellow("No OpenAI key configured; skipping embedding generation.")
+		}
 		return nil
 	}
+
 	sources := []string{"cve", "kev", "exploit", "mitre_technique"}
 	for _, src := range sources {
 		// Get up to 50 rows without embedding
@@ -106,6 +122,7 @@ func generateEmbeddings(ctx context.Context, db *sql.DB) error {
 			continue
 		}
 
+		notifyProgress("EMBEDDING "+strings.ToUpper(src), len(ids), len(ids))
 		embeddings, err := ai.GetEmbeddings(batch)
 		if err != nil {
 			return fmt.Errorf("get embeddings for %s: %w", src, err)
@@ -149,7 +166,7 @@ func descColumn(src string) string {
 	return "description"
 }
 
-// NVD response structures – careful to match actual API 2.0 response.
+// nvdResponse matches actual NVD API 2.0 response.
 type nvdResponse struct {
 	TotalResults    int `json:"totalResults"`
 	Vulnerabilities []struct {
@@ -192,7 +209,7 @@ func setMeta(db *sql.DB, key, value string) {
 // UpdateAll fetches all data sources and updates the database.
 // Phase 4: internet-gated, fast-sources-first, stage-hooked, silent unless
 // HELIX_DEBUG=1.
-func UpdateAll(ctx context.Context, db *sql.DB) error {
+func UpdateAll(ctx context.Context, db *sql.DB, interactive bool) error {
 	notifyStage("STARTING KNOWLEDGE UPDATE")
 	start := time.Now()
 
@@ -226,13 +243,17 @@ func UpdateAll(ctx context.Context, db *sql.DB) error {
 		color.Yellow("NVD update skipped/failed: %v", err)
 	}
 
+	// FIX: Pass the interactive flag down to the embedding generator.
 	notifyStage("GENERATING EMBEDDINGS")
-	if err := generateEmbeddings(ctx, db); err != nil && utils.IsDebugMode() {
+	if err := generateEmbeddings(ctx, db, interactive); err != nil && utils.IsDebugMode() {
 		color.Yellow("Embedding generation failed: %v", err)
 	}
 
 	notifyStage("REBUILDING FTS INDEX")
-	if err := ReindexKnowledgeFTS(db); err != nil && utils.IsDebugMode() {
+	// FIX: Pass the progress callback to satisfy the new database.go signature.
+	if err := ReindexKnowledgeFTS(db, func(current, total int) {
+		notifyStage(fmt.Sprintf("REBUILDING FTS INDEX (%d/%d)", current, total))
+	}); err != nil && utils.IsDebugMode() {
 		color.Yellow("FTS reindex failed: %v", err)
 	}
 
@@ -243,8 +264,38 @@ func UpdateAll(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// fetchConditional performs an ETag-aware GET against a threat feed.
+func fetchConditional(ctx context.Context, client *http.Client, url, storedETag string) ([]byte, string, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", false, err
+	}
+	req.Header.Set("User-Agent", threatUserAgent)
+	if storedETag != "" {
+		req.Header.Set("If-None-Match", storedETag)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotModified {
+		return nil, "", false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", false, fmt.Errorf("%s returned %d", url, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return nil, "", false, err
+	}
+	return body, resp.Header.Get("ETag"), true, nil
+}
+
 // updateNVD uses NVD API 2.0 with strict timeouts, browser spoofing, rate-limiting, and checkpointing.
-// Phase 0 Hardening: Uses http.NewRequestWithContext for cancellation support.
 func updateNVD(ctx context.Context, db *sql.DB) error {
 	lastMod := getMeta(db, "nvd_last_mod_date")
 	layout := "2006-01-02T15:04:05.000"
@@ -275,7 +326,6 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 	latestModDateSeen := startTime
 
 	for startIndex := 0; ; startIndex += 2000 {
-		// Check for context cancellation before starting a new page
 		select {
 		case <-ctx.Done():
 			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
@@ -294,12 +344,8 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			"%s?lastModStartDate=%s&lastModEndDate=%s&resultsPerPage=2000&startIndex=%d",
 			nvdBaseURL, lastModStart, lastModEnd, startIndex,
 		)
-		notifyStage(fmt.Sprintf("FETCHING NVD CVES · PAGE %d", page))
-		if utils.IsDebugMode() {
-			color.Blue("NVD: fetching page %d (start: %s)...", page, lastModStart)
-		}
+		notifyStage(fmt.Sprintf("NVD · PAGE %d", page))
 
-		// HARDENING: Use NewRequestWithContext
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 		if err != nil {
 			return fmt.Errorf("NVD request creation: %w", err)
@@ -313,24 +359,21 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 		resp, err := client.Do(req)
 		if err != nil {
 			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
-			return fmt.Errorf("NVD network error: %w. Checkpoint saved at %s", err, latestModDateSeen.Format(layout))
+			return fmt.Errorf("NVD network error: %w", err)
 		}
 
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
 		_ = resp.Body.Close()
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
-			notifyStage(fmt.Sprintf("NVD RATE LIMITED · RETRY PAGE %d", page))
-			if utils.IsDebugMode() {
-				color.Yellow("NVD rate limited on page %d; sleeping 30s and retrying...", page)
-			}
+			notifyStage("NVD · RATE LIMITED")
 			time.Sleep(30 * time.Second)
-			startIndex -= 2000 // Retry this page
+			startIndex -= 2000
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
-			return fmt.Errorf("NVD API returned %d: %s", resp.StatusCode, string(bodyBytes[:min(len(bodyBytes), 200)]))
+			return fmt.Errorf("NVD API returned %d", resp.StatusCode)
 		}
 
 		var nvdResp nvdResponse
@@ -344,7 +387,6 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			if cveID == "" {
 				continue
 			}
-
 			if vuln.CVE.LastModified != "" {
 				if t, err := time.Parse(layout, vuln.CVE.LastModified); err == nil {
 					if t.After(latestModDateSeen) {
@@ -352,7 +394,6 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 					}
 				}
 			}
-
 			desc := ""
 			if len(vuln.CVE.Descriptions) > 0 {
 				desc = vuln.CVE.Descriptions[0].Value
@@ -361,7 +402,6 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			if len(vuln.CVE.Metrics.CVSSMetricV31) > 0 {
 				cvss = vuln.CVE.Metrics.CVSSMetricV31[0].CVSSData.BaseScore
 			}
-
 			raw, _ := json.Marshal(vuln)
 			_, err := db.Exec(`INSERT OR REPLACE INTO cve(id, description, cvss_score, published_date, last_modified_date, raw_json) VALUES(?,?,?,?,?,?)`,
 				cveID, desc, cvss, vuln.CVE.Published, vuln.CVE.LastModified, string(raw))
@@ -371,6 +411,10 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			total++
 		}
 
+		if nvdResp.TotalResults > 0 {
+			notifyProgress(fmt.Sprintf("NVD · PAGE %d", page), total, nvdResp.TotalResults)
+		}
+
 		if nvdResp.TotalResults == 0 || startIndex+2000 >= nvdResp.TotalResults {
 			break
 		}
@@ -378,40 +422,37 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 	}
 
 	setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
-	color.Green("NVD: %d CVEs updated successfully", total)
+	if OnUpdateStage != nil {
+		notifyProgress("NVD SYNCED", total, total)
+	} else {
+		color.Green("NVD: %d CVEs updated successfully", total)
+	}
 	return nil
 }
 
 // updateKEV fetches and replaces KEV entries.
-// Phase 0 Hardening: Context-aware HTTP request.
 func updateKEV(ctx context.Context, db *sql.DB) error {
 	client := &http.Client{Timeout: defaultTimeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, kevURL, nil)
+	body, newETag, changed, err := fetchConditional(ctx, client, kevURL, getMeta(db, metaETagKEV))
 	if err != nil {
 		return err
 	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("KEV API returned %d", resp.StatusCode)
+	if !changed {
+		notifyStage("KEV UNCHANGED (HTTP 304)")
+		return nil
 	}
 
 	var kevData struct {
 		Vulnerabilities []struct {
 			CVEID          string `json:"cveID"`
-			VendorProduct  string `json:"vendorProject"`
+			VendorProject  string `json:"vendorProject"`
 			DateAdded      string `json:"dateAdded"`
 			RequiredAction string `json:"requiredAction"`
 			DueDate        string `json:"dueDate"`
 			Notes          string `json:"notes"`
 		} `json:"vulnerabilities"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&kevData); err != nil {
+	if err := json.Unmarshal(body, &kevData); err != nil {
 		return err
 	}
 
@@ -421,37 +462,36 @@ func updateKEV(ctx context.Context, db *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, _ = tx.Exec("DELETE FROM kev")
-
 	for _, v := range kevData.Vulnerabilities {
 		_, err := tx.Exec(`INSERT OR REPLACE INTO kev(cve_id, title, date_added, required_action, due_date, notes) VALUES(?,?,?,?,?,?)`,
-			v.CVEID, v.VendorProduct, v.DateAdded, v.RequiredAction, v.DueDate, v.Notes)
+			v.CVEID, v.VendorProject, v.DateAdded, v.RequiredAction, v.DueDate, v.Notes)
 		if err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if newETag != "" {
+		setMeta(db, metaETagKEV, newETag)
+	}
+	notifyProgress("KEV SYNCED", len(kevData.Vulnerabilities), len(kevData.Vulnerabilities))
+	return nil
 }
 
 // updateExploitDB parses the CSV and replaces all exploit entries.
-// Phase 0 Hardening: Context-aware HTTP request.
 func updateExploitDB(ctx context.Context, db *sql.DB) error {
 	client := &http.Client{Timeout: defaultTimeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, exploitCSVURL, nil)
+	body, newETag, changed, err := fetchConditional(ctx, client, exploitCSVURL, getMeta(db, metaETagExploit))
 	if err != nil {
 		return err
 	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Exploit-DB CSV returned %d", resp.StatusCode)
+	if !changed {
+		notifyStage("EXPLOIT-DB UNCHANGED (HTTP 304)")
+		return nil
 	}
 
-	reader := csv.NewReader(resp.Body)
+	reader := csv.NewReader(bytes.NewReader(body))
 	reader.Comma = ','
 	reader.LazyQuotes = true
 	records, err := reader.ReadAll()
@@ -461,7 +501,6 @@ func updateExploitDB(ctx context.Context, db *sql.DB) error {
 	if len(records) < 2 {
 		return fmt.Errorf("empty CSV")
 	}
-
 	header := records[0]
 	idx := map[string]int{}
 	for i, h := range header {
@@ -475,6 +514,7 @@ func updateExploitDB(ctx context.Context, db *sql.DB) error {
 	defer func() { _ = tx.Rollback() }()
 	_, _ = tx.Exec("DELETE FROM exploit")
 
+	rows := 0
 	for _, row := range records[1:] {
 		get := func(col string) string {
 			if i, ok := idx[col]; ok && i < len(row) {
@@ -486,39 +526,39 @@ func updateExploitDB(ctx context.Context, db *sql.DB) error {
 		if edbID == "" {
 			continue
 		}
-
 		_, err := tx.Exec(`INSERT OR REPLACE INTO exploit(edb_id, cve_id, description, platform, type, date_published, author, raw_text) VALUES(?,?,?,?,?,?,?,?)`,
 			edbID, get("cve_id"), get("description"), get("platform"), get("type"), get("date_published"), get("author"), get("description"))
 		if err != nil {
 			return err
 		}
+		rows++
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if newETag != "" {
+		setMeta(db, metaETagExploit, newETag)
+	}
+	notifyProgress("EDB SYNCED", rows, rows)
+	return nil
 }
 
 // updateMITRE fetches and parses MITRE ATT&CK STIX.
-// Phase 0 Hardening: Context-aware HTTP request.
 func updateMITRE(ctx context.Context, db *sql.DB) error {
 	client := &http.Client{Timeout: defaultTimeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mitreSTIXURL, nil)
+	body, newETag, changed, err := fetchConditional(ctx, client, mitreSTIXURL, getMeta(db, metaETagMitre))
 	if err != nil {
 		return err
 	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("MITRE STIX returned %d", resp.StatusCode)
+	if !changed {
+		notifyStage("MITRE UNCHANGED (HTTP 304)")
+		return nil
 	}
 
 	var bundle struct {
 		Objects []json.RawMessage `json:"objects"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 50<<20)).Decode(&bundle); err != nil {
+	if err := json.Unmarshal(body, &bundle); err != nil {
 		return err
 	}
 
@@ -529,6 +569,7 @@ func updateMITRE(ctx context.Context, db *sql.DB) error {
 	defer func() { _ = tx.Rollback() }()
 	_, _ = tx.Exec("DELETE FROM mitre_technique")
 
+	techs := 0
 	for _, obj := range bundle.Objects {
 		var objMap map[string]interface{}
 		if err := json.Unmarshal(obj, &objMap); err != nil {
@@ -550,29 +591,38 @@ func updateMITRE(ctx context.Context, db *sql.DB) error {
 			if techID == "" {
 				continue
 			}
-
 			name, _ := objMap["name"].(string)
 			desc, _ := objMap["description"].(string)
 			xPlatforms, _ := objMap["x_mitre_platforms"].([]interface{})
 			platforms := strings.Join(interfaceSliceToString(xPlatforms), ",")
 			detection, _ := objMap["x_mitre_detection"].(string)
-
 			_, err := tx.Exec(`INSERT OR REPLACE INTO mitre_technique(technique_id, name, description, platform, detection) VALUES(?,?,?,?,?)`,
 				techID, name, desc, platforms, detection)
 			if err != nil {
 				return err
 			}
+			techs++
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if newETag != "" {
+		setMeta(db, metaETagMitre, newETag)
+	}
+	notifyProgress("MITRE SYNCED", techs, techs)
+	return nil
 }
 
-// OnUpdateStage is an optional hook invoked at each update stage so callers
-// (e.g. /knowledge-update) can drive a live Helix progress bar. Nil-safe.
-var OnUpdateStage func(stage string)
+// OnUpdateStage is an optional hook invoked at each update stage.
+var OnUpdateStage func(stage string, current, total int)
 
-func notifyStage(stage string) {
+// notifyStage reports an indeterminate stage transition.
+func notifyStage(stage string) { notifyProgress(stage, 0, 0) }
+
+// notifyProgress reports a determinate progress snapshot.
+func notifyProgress(stage string, current, total int) {
 	if OnUpdateStage != nil {
-		OnUpdateStage(stage)
+		OnUpdateStage(stage, current, total)
 	}
 }

@@ -154,6 +154,11 @@ Helix exposes a rich set of slash commands for system control, intelligence gath
 | :--- | :--- |
 | `/git <request>` | Natural language git operations with safety confirmations. |
 
+### DANGER ZONE
+| Command | Description |
+| :--- | :--- |
+| `/purge` | Wipe ALL Helix data (keys, DBs, caches) for a fresh start. |
+
 ---
 
 ## AI & Planner System (Phase 3.x)

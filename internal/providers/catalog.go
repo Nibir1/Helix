@@ -106,7 +106,7 @@ func CapabilitiesFor(provider, model string) Capabilities {
 	return Capabilities{
 		Chat:       true,
 		Planner:    GetContextLimit(model) >= 8_192,
-		Embeddings: provider == "openai",
+		Embeddings: provider == "openai" || provider == "ollama",
 		Vision:     strings.Contains(model, "vision") || strings.Contains(model, "gemma3"),
 		Local:      local,
 		Remote:     !local,

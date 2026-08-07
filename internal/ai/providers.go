@@ -299,26 +299,43 @@ func SaveOpenAIKeyToDisk(key string) error {
 	return registry.SetAPIKey("openai", key)
 }
 
-// GetEmbeddings uses the active provider or falls back to OpenAI.
+// GetEmbeddings produces embeddings with the best available backend:
+// OpenAI when a key exists, then the active provider, then local Ollama.
+//
+// Args:
+//   - texts: input strings.
+//
+// Returns: one embedding per input text, or an error when no backend exists.
+// Complexity: O(1) HTTP round trip(s) depending on backend.
 func GetEmbeddings(texts []string) ([][]float32, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("provider registry not initialized")
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	// 1) OpenAI when a key exists (highest-quality embeddings).
+	if registry.HasAPIKey("openai") {
+		if p, err := registry.Get("openai"); err == nil {
+			if ep, ok := p.(providers.EmbeddingProvider); ok {
+				return ep.Embed(ctx, texts, "")
+			}
+		}
+	}
+
+	// 2) Active provider when it supports embeddings (e.g. Ollama).
 	if activeProvider != nil {
 		if ep, ok := activeProvider.(providers.EmbeddingProvider); ok {
 			return ep.Embed(ctx, texts, "")
 		}
 	}
 
-	if p, err := registry.Get("openai"); err == nil {
+	// 3) Local Ollama fallback (no OpenAI key required).
+	if p, err := registry.Get("ollama"); err == nil {
 		if ep, ok := p.(providers.EmbeddingProvider); ok {
 			return ep.Embed(ctx, texts, "")
 		}
 	}
 
-	return nil, fmt.Errorf("embeddings are not supported by the active provider")
+	return nil, fmt.Errorf("embeddings are not supported by any available provider")
 }

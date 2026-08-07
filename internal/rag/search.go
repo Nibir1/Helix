@@ -1,10 +1,5 @@
 // internal/rag/search.go
 // Purpose: FTS5 + optional embedding search for the Helix knowledge base.
-// Phase 0 fixes:
-//   - sanitize FTS5 MATCH queries,
-//   - add LIKE fallback search,
-//   - deterministic ranking,
-//   - correct hybrid sorting.
 package rag
 
 import (
@@ -30,11 +25,9 @@ type KnowledgeEntry struct {
 var ftsQuerySanitizer = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
 // SemanticSearch searches the knowledge base.
-// It uses FTS5 first, falls back to LIKE search, and optionally blends embeddings.
 func SemanticSearch(db *sql.DB, query string, limit int) ([]KnowledgeEntry, error) {
 	results := fts5Search(db, query, limit*2)
 
-	// If FTS returns nothing, try direct keyword search.
 	if len(results) == 0 {
 		results = keywordSearch(db, query, limit*2)
 	}
@@ -43,11 +36,12 @@ func SemanticSearch(db *sql.DB, query string, limit int) ([]KnowledgeEntry, erro
 		return []KnowledgeEntry{}, nil
 	}
 
-	// Optional embedding augmentation.
-	if ai.HasOpenAIKey() {
+	// Optional embedding augmentation (OpenAI OR local Ollama).
+	if EmbeddingsAvailable() {
 		queryEmb, err := ai.GetEmbeddings([]string{query})
 		if err == nil && len(queryEmb) > 0 {
-			return hybridSearch(db, queryEmb[0], results, limit)
+			return hybridSearch(db, queryEmb[0], results, limit,
+				embeddingModelName(currentEmbeddingBackend()))
 		}
 	}
 
@@ -73,7 +67,6 @@ func fts5Search(db *sql.DB, query string, limit int) []KnowledgeEntry {
 		LIMIT ?
 	`, sanitized, limit)
 	if err != nil {
-		// Invalid MATCH syntax or FTS issue: fall back safely.
 		return keywordSearch(db, query, limit)
 	}
 	defer func() { _ = rows.Close() }()
@@ -88,9 +81,7 @@ func fts5Search(db *sql.DB, query string, limit int) []KnowledgeEntry {
 			continue
 		}
 
-		// FTS5 rank is lower-is-better; convert to higher-is-better.
 		k.Score = -rank
-
 		results = append(results, k)
 	}
 
@@ -115,9 +106,7 @@ func sanitizeFTSQuery(query string) string {
 			continue
 		}
 
-		// Remove double quotes to avoid breaking FTS5 quoted strings.
 		token = strings.ReplaceAll(token, `"`, ``)
-
 		quoted = append(quoted, `"`+token+`"`)
 	}
 
@@ -226,15 +215,13 @@ func sanitizeLIKE(s string) string {
 }
 
 // hybridSearch blends FTS rank and embedding similarity.
-func hybridSearch(db *sql.DB, queryEmb []float32, fts []KnowledgeEntry, limit int) ([]KnowledgeEntry, error) {
+// FIX: Added `model string` parameter to prevent cross-backend vector mixing.
+func hybridSearch(db *sql.DB, queryEmb []float32, fts []KnowledgeEntry, limit int, model string) ([]KnowledgeEntry, error) {
 	combined := append([]KnowledgeEntry(nil), fts...)
-
 	for i := range combined {
 		entry := &combined[i]
-
 		ftsScore := 1.0 / (1.0 + float64(i))
-
-		emb := loadEmbedding(db, entry.SourceType, entry.SourceID)
+		emb := loadEmbedding(db, entry.SourceType, entry.SourceID, model)
 		if len(emb) > 0 {
 			sim := cosineSimilarity(queryEmb, emb)
 			entry.Score = 0.3*ftsScore + 0.7*float64(sim)
@@ -262,24 +249,26 @@ func hybridSearch(db *sql.DB, queryEmb []float32, fts []KnowledgeEntry, limit in
 	return combined, nil
 }
 
-// loadEmbedding loads a stored embedding.
-func loadEmbedding(db *sql.DB, sourceType, sourceID string) []float32 {
+// loadEmbedding loads a stored embedding, only when it was produced by the
+// same model/backend as the current query embedding.
+func loadEmbedding(db *sql.DB, sourceType, sourceID, model string) []float32 {
 	var blob []byte
-
+	var storedModel string
 	err := db.QueryRow(`
-		SELECT embedding
-		FROM embeddings
-		WHERE source_type=? AND source_id=?
-	`, sourceType, sourceID).Scan(&blob)
+SELECT model, embedding
+FROM embeddings
+WHERE source_type=? AND source_id=?
+`, sourceType, sourceID).Scan(&storedModel, &blob)
 	if err != nil {
 		return nil
 	}
-
+	if model != "" && storedModel != model {
+		return nil // never compare vectors from different backends
+	}
 	var emb []float32
 	if err := json.Unmarshal(blob, &emb); err != nil {
 		return nil
 	}
-
 	return emb
 }
 

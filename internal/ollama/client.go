@@ -264,3 +264,64 @@ func (c *Client) post(ctx context.Context, path string, body interface{}) (*http
 
 	return resp, nil
 }
+
+// DefaultEmbeddingModel is the recommended local embedding model.
+const DefaultEmbeddingModel = "nomic-embed-text"
+
+// Embed produces vector embeddings for one or more texts using Ollama's
+// native API. It prefers the modern batch endpoint /api/embed and falls back
+// to the legacy single-prompt /api/embeddings endpoint on older daemons.
+//
+// Args:
+//   - ctx: cancellation/timeout context.
+//   - model: embedding model ("" → DefaultEmbeddingModel).
+//   - texts: input strings.
+//
+// Returns: one embedding per input text, or an error.
+// Complexity: O(len(texts)) HTTP round trips in the legacy path only.
+func (c *Client) Embed(ctx context.Context, model string, texts []string) ([][]float32, error) {
+	if model == "" {
+		model = DefaultEmbeddingModel
+	}
+	if len(texts) == 0 {
+		return [][]float32{}, nil
+	}
+
+	// Modern batch endpoint.
+	resp, err := c.post(ctx, "/api/embed", map[string]interface{}{
+		"model": model,
+		"input": texts,
+	})
+	if err == nil {
+		var parsed struct {
+			Embeddings [][]float32 `json:"embeddings"`
+		}
+		decodeErr := json.NewDecoder(resp.Body).Decode(&parsed)
+		_ = resp.Body.Close()
+		if decodeErr == nil && len(parsed.Embeddings) == len(texts) {
+			return parsed.Embeddings, nil
+		}
+	}
+
+	// Legacy per-prompt endpoint (older Ollama daemons).
+	out := make([][]float32, 0, len(texts))
+	for _, text := range texts {
+		resp, err := c.post(ctx, "/api/embeddings", map[string]interface{}{
+			"model":  model,
+			"prompt": text,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var parsed struct {
+			Embedding []float32 `json:"embedding"`
+		}
+		decodeErr := json.NewDecoder(resp.Body).Decode(&parsed)
+		_ = resp.Body.Close()
+		if decodeErr != nil {
+			return nil, fmt.Errorf("parse ollama embedding: %w", decodeErr)
+		}
+		out = append(out, parsed.Embedding)
+	}
+	return out, nil
+}

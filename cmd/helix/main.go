@@ -52,12 +52,10 @@ func main() {
 		return
 	}
 
-	// Apply persisted debug mode
 	if cfg.UserPrefs.DebugMode {
 		_ = os.Setenv("HELIX_DEBUG", "1")
 	}
 
-	// Apply persisted user name
 	if cfg.UserPrefs.UserName != "" {
 		shell.SetUserName(cfg.UserPrefs.UserName)
 	}
@@ -103,9 +101,6 @@ func main() {
 	ragSystem.SetSilent(true)
 	go func() {
 		_ = ragSystem.Initialize()
-		// FIRST-RUN KNOWLEDGE BOOTSTRAP: fresh users automatically receive the
-		// CVE / KEV / Exploit-DB / MITRE knowledge base in the background.
-		// Silent by design; skips gracefully offline and retries next boot.
 		if err := rag.KnowledgeBootstrap(context.Background(), db); err != nil &&
 			os.Getenv("HELIX_DEBUG") == "1" {
 			fmt.Fprintf(os.Stderr, "[boot] knowledge bootstrap: %v\n", err)
@@ -178,7 +173,6 @@ func main() {
 
 		agentCore.HandleInput(input)
 
-		// UNIVERSAL RULE: every operation ends with the grid-status line.
 		gui.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 
 		fmt.Print("\x1b]133;D;0\x07")
@@ -221,7 +215,8 @@ func runKnowledgeUpdate() {
 	}
 	defer func() { _ = db.Close() }()
 
-	if err := rag.UpdateAll(context.Background(), db); err != nil {
+	// FIX: Pass `true` for interactive (user explicitly ran `helix update`).
+	if err := rag.UpdateAll(context.Background(), db, true); err != nil {
 		if errors.Is(err, rag.ErrOffline) {
 			color.Yellow("Offline — knowledge update requires internet connectivity.")
 			os.Exit(1)

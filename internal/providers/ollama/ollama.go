@@ -49,3 +49,17 @@ func (p *Provider) HealthCheck(ctx context.Context) error {
 
 	return p.client.Health(ctx)
 }
+
+// Embed implements providers.EmbeddingProvider using the native Ollama client,
+// making local embeddings available without any API key.
+//
+// Args:
+//   - ctx: cancellation/timeout context.
+//   - texts: input strings.
+//   - model: embedding model ("" → ollama.DefaultEmbeddingModel).
+//
+// Returns: one embedding per input text, or an error.
+// Complexity: O(1) HTTP round trip on modern daemons.
+func (p *Provider) Embed(ctx context.Context, texts []string, model string) ([][]float32, error) {
+	return p.client.Embed(ctx, model, texts)
+}

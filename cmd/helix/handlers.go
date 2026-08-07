@@ -85,6 +85,8 @@ func handleSlashCommand(input string) bool {
 		handleStatus()
 	case "/audio":
 		handleAudioCommand(input)
+	case "/purge":
+		handlePurgeCommand()
 	default:
 		return false
 	}
@@ -265,6 +267,9 @@ func handleHelp() {
 	helpSection("UTILITIES & GIT")
 	helpLine(colWidth, "/git <request>", "Natural language git operations with safety")
 	helpLine(colWidth, "/audio <on|off>", "Toggle tonal audio feedback")
+
+	helpSection("DANGER ZONE")
+	helpLine(colWidth, "/purge", "Wipe ALL Helix data (keys, DBs, caches) for a fresh start")
 
 	helpSection("PROMPT ANATOMY")
 	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
@@ -574,6 +579,7 @@ Given the user's command or technique description, produce a structured defensiv
 1. Technique(s): Which MITRE ATT&CK techniques are relevant? List IDs and names.
 2. Expected Detections: What logs, telemetry, or security controls may detect this activity?
 3. Mitigation Controls: What defensive mitigations, hardening steps, or patches reduce risk?
+4. Safer Operational Alternatives: Which supported, lower-risk commands or workflows achieve the same operational goal?
 MITRE Context: %s
 User Request: %s
 FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lines.`, mitreContext, args)
@@ -592,7 +598,12 @@ FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lin
 
 func cleanDebrief(text string) string {
 	text = strings.ReplaceAll(text, "**", "")
-	headers := []string{"1. Technique(s):", "2. Expected Detections:", "3. Mitigation Controls:"}
+	headers := []string{
+		"1. Technique(s):",
+		"2. Expected Detections:",
+		"3. Mitigation Controls:",
+		"4. Safer Operational Alternatives:",
+	}
 	for _, h := range headers {
 		coloured := color.New(color.FgCyan, color.Bold).Sprint(h)
 		text = strings.Replace(text, h, coloured, 1)
@@ -600,9 +611,9 @@ func cleanDebrief(text string) string {
 	return text
 }
 
-// -------------------------------------------------------
-// /knowledge-update – staged fetch with live progress
-// -------------------------------------------------------
+// handleKnowledgeUpdate runs a staged fetch with a live progress bar that
+// politely pauses whenever the pipeline needs to ask the user something
+// (e.g. the Ollama embedding bootstrap).
 func handleKnowledgeUpdate() {
 	if ragSystem == nil || ragSystem.GetDB() == nil {
 		color.Red("Knowledge database not available.")
@@ -611,10 +622,28 @@ func handleKnowledgeUpdate() {
 	prog := rag.NewProgress()
 	prog.SetStage("STARTING KNOWLEDGE UPDATE")
 	prog.Start()
-	rag.OnUpdateStage = func(stage string) { prog.SetStage(stage) }
+
+	rag.OnUpdateStage = func(stage string, current, total int) {
+		if total > 0 {
+			prog.Set(stage, current, total)
+		} else {
+			prog.SetStage(stage)
+		}
+	}
+	rag.OnInteractivePrompt = func(active bool) {
+		if active {
+			prog.Stop()
+		} else {
+			prog.Start()
+		}
+	}
+
 	err := ragSystem.UpdateKnowledge()
+
 	rag.OnUpdateStage = nil
+	rag.OnInteractivePrompt = nil
 	prog.Stop()
+
 	if err != nil {
 		if errors.Is(err, rag.ErrOffline) {
 			color.Yellow("You appear to be OFFLINE — knowledge update requires internet connectivity.")
@@ -728,7 +757,14 @@ func handleKnowledgeReindex() {
 	prog := rag.NewProgress()
 	prog.SetStage("REBUILDING FTS INDEX")
 	prog.Start()
-	err := rag.ReindexKnowledgeFTS(db)
+
+	// FIX: Pass the progress callback to drive the determinate bar.
+	err := rag.ReindexKnowledgeFTS(db, func(current, total int) {
+		if total > 0 {
+			prog.Set("REBUILDING FTS INDEX", current, total)
+		}
+	})
+
 	prog.Stop()
 	if err != nil {
 		color.Red("FTS reindex failed: %v", err)
@@ -762,6 +798,7 @@ func handleDoctor() {
 		} else {
 			color.Green("Database connection OK")
 		}
+		color.Cyan("Knowledge schema version: v%d", rag.SchemaVersion(db))
 	}
 	color.Cyan("Provider: %s", ai.GetProvider())
 	color.Cyan("Local model loaded: %v", ai.ModelIsLoaded())

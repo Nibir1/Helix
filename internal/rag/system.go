@@ -41,7 +41,7 @@ type RAGSystem struct {
 	stateFile      string
 	exploitEntries map[string]ExploitEntry
 	db             *sql.DB
-	silent         bool // NEW: Suppress stdout during background init
+	silent         bool
 }
 
 func NewSystem(env shell.Env, db *sql.DB) *RAGSystem {
@@ -135,10 +135,7 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 	completedFlag := make(chan struct{}, 1)
 	const estimatedTotal = 900
 
-	go func() {
-		err := rs.indexer.IndexAvailableManPages()
-		indexingDone <- err
-	}()
+	go func() { indexingDone <- rs.indexer.IndexAvailableManPages() }()
 
 	go func() {
 		for {
@@ -148,7 +145,7 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 					return
 				}
 				if rs.silent {
-					continue // Skip progress bar if silent
+					continue
 				}
 				count := rs.indexer.GetIndexedCount()
 				elapsed := time.Since(start)
@@ -230,14 +227,10 @@ func (rs *RAGSystem) Retrieve(query string) ([]CommandInfo, error) {
 	if !rs.initialized {
 		return nil, nil
 	}
-	start := time.Now()
 	relevant, err := rs.vectorStore.GetRelevantCommands(query, 3)
 	if err != nil {
-		rs.logYellow("RAG search failed: %v", err)
 		return nil, nil
 	}
-	// SILENT: Do not print "RAG retrieved X commands" in native shell.
-	_ = start
 	return relevant, nil
 }
 
@@ -508,26 +501,19 @@ func (rs *RAGSystem) SemanticSearch(query string, limit int) ([]KnowledgeEntry, 
 	if rs.db != nil {
 		return SemanticSearch(rs.db, query, limit)
 	}
-	if !rs.initialized {
-		return nil, nil
-	}
 	return nil, nil
 }
 
+// FIX: Pass `true` for interactive (user explicitly requested update via slash command).
 func (rs *RAGSystem) UpdateKnowledge() error {
 	if rs.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	return UpdateAll(context.Background(), rs.db)
+	return UpdateAll(context.Background(), rs.db, true)
 }
 
 func (rs *RAGSystem) GetDB() *sql.DB { return rs.db }
 
-// RebuildWithProgress performs a FULL foreground rebuild of the MAN, vector,
-// MITRE, and exploit indexes with a live Helix progress bar.
-//
-// CRITICAL FIX: wipes ALL index artifacts (rag_index, vector_index, man_index)
-// so Initialize-style short-circuits can never skip the rebuild again.
 func (rs *RAGSystem) RebuildWithProgress() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -544,7 +530,7 @@ func (rs *RAGSystem) RebuildWithProgress() error {
 	rs.initialized = false
 	rs.indexer = NewMANIndexer(rs.env)
 	rs.vectorStore = NewVectorStore(rs.env)
-	rs.SetSilent(true) // the progress bar owns the line
+	rs.SetSilent(true)
 
 	prog := NewProgress()
 	prog.Set("INDEXING MAN PAGES", 0, 900)

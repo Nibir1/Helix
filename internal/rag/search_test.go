@@ -57,7 +57,8 @@ func TestFTSReindexAndSearch(t *testing.T) {
 		t.Fatalf("failed to insert exploit: %v", err)
 	}
 
-	if err := ReindexKnowledgeFTS(db); err != nil {
+	// FIX: Pass nil for the progress callback in tests.
+	if err := ReindexKnowledgeFTS(db, nil); err != nil {
 		t.Fatalf("failed to reindex FTS: %v", err)
 	}
 
