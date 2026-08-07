@@ -133,7 +133,7 @@ Helix exposes a rich set of slash commands for system control, intelligence gath
 | `/vuln <query>` | Defensive vulnerability intel (CVE/EDB/MITRE lookup). |
 | `/explain <cmd>` | AI-powered defensive analysis of a command or technique. |
 | `/knowledge-update` | Fetch latest CVEs, CISA KEV, Exploits, and MITRE data. |
-| `/knowledge-stats` | Show knowledge database row counts. |
+| `/knowledge-status` | Show knowledge database row counts. |
 | `/rag-status` | Show RAG indexing progress and vector stats. |
 | `/rag-reindex` | Trigger background RAG reindex. |
 | `/rag-rebuild` | Force full RAG knowledge base rebuild (with live progress). |

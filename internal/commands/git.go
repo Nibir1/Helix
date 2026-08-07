@@ -12,6 +12,7 @@ import (
 	"helix/internal/ai"
 	"helix/internal/shell"
 	"helix/internal/utils"
+	"helix/internal/ux"
 
 	"github.com/fatih/color"
 )
@@ -469,8 +470,11 @@ Rules:
 
 Command:`, request, gm.workingDir, currentBranch)
 
-	color.Blue("Generating git command with AI...")
+	think := ux.NewThinker("HELIX :: REASONING")
+	think.Start()
 	response, err := ai.RunModel(prompt)
+	think.Stop()
+
 	if err != nil {
 		return fmt.Errorf("AI git command generation failed: %w", err)
 	}

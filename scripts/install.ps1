@@ -43,10 +43,15 @@ if ($CurrentPath -notlike "*$InstallDir*") {
     Write-Host "Added to PATH. You may need to restart your terminal."
 }
 
-# 5. Optional Bootstrapping
+# 5. Optional Bootstrapping (interactive ONLY, never fatal)
 Write-Host ""
-Write-Host "AI Runtime Bootstrapping"
-$installOllama = Read-Host "Install Ollama for local AI inference via Winget? (y/N)"
+Write-Host "🤖 AI Runtime Bootstrapping"
+$installOllama = ""
+if (-not [Console]::IsInputRedirected) {
+    $installOllama = Read-Host "Install Ollama for local AI inference via Winget? (y/N)"
+} else {
+    Write-Host "   (non-interactive stdin detected — skipping Ollama bootstrap)"
+}
 if ($installOllama -match '^[Yy]$') {
     if (-Not (Get-Command ollama -ErrorAction SilentlyContinue)) {
         Write-Host "Installing Ollama via Winget..."

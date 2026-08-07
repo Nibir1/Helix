@@ -17,6 +17,7 @@ import (
 	"helix/internal/rag"
 	"helix/internal/shell"
 	"helix/internal/utils"
+	"helix/internal/ux"
 
 	"github.com/fatih/color"
 )
@@ -69,7 +70,7 @@ func handleSlashCommand(input string) bool {
 		handleVulnCommand(input)
 	case "/knowledge-update":
 		handleKnowledgeUpdate()
-	case "/knowledge-stats":
+	case "/knowledge-status":
 		handleKnowledgeStats()
 	case "/knowledge-reindex":
 		handleKnowledgeReindex()
@@ -88,7 +89,13 @@ func handleSlashCommand(input string) bool {
 	case "/purge":
 		handlePurgeCommand()
 	default:
-		return false
+		// Absolute-path executables (e.g. /usr/bin/git) are NOT Helix
+		// control commands; let the normal pipeline handle them exactly
+		// as before. Real Helix commands never contain a second slash.
+		if strings.Contains(cmd[1:], "/") {
+			return false
+		}
+		handleUnknownSlashCommand(parts[0])
 	}
 	return true
 }
@@ -253,7 +260,7 @@ func handleHelp() {
 	helpLine(colWidth, "/rag-rebuild", "Force full RAG knowledge base rebuild")
 	helpLine(colWidth, "/rag-reset", "Wipe all RAG vector data")
 	helpLine(colWidth, "/knowledge-update", "Fetch latest CVEs, CISA KEV, Exploits, MITRE")
-	helpLine(colWidth, "/knowledge-stats", "Show knowledge database row counts")
+	helpLine(colWidth, "/knowledge-status", "Show knowledge database row counts")
 	helpLine(colWidth, "/knowledge-reindex", "Rebuild FTS5 search index")
 
 	helpSection("SECURITY, RECON & STEALTH")
@@ -299,6 +306,25 @@ func helpLine(colWidth int, cmd, desc string) {
 		strings.Repeat(" ", pad),
 		shell.Fg(shell.HexText, desc),
 	)
+}
+
+// -------------------------------------------------------
+// Unknown slash command — graceful, aesthetic rejection.
+// Guarantees Helix NEVER hangs or misroutes a typo'd /command:
+// immediate feedback, no shell execution, no planner call.
+// -------------------------------------------------------
+func handleUnknownSlashCommand(cmd string) {
+	audio.PlayError()
+	fmt.Println()
+	fmt.Println("  " + shell.Fg(shell.HexRectifier, "⚠ UNRECOGNIZED SIGNAL") +
+		" " + shell.Fg(shell.HexSubtle, "::") +
+		" " + shell.Fg(shell.HexText, cmd))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
+		" " + shell.Fg(shell.HexText, "That command does not exist in the Helix grid."))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
+		" " + shell.Fg(shell.HexTertiary, "Execute /help") +
+		" " + shell.Fg(shell.HexText, "for the SOS protocol and full command menu."))
+	fmt.Println()
 }
 
 // -------------------------------------------------------
@@ -482,7 +508,10 @@ func checkOnlineStatus() {
 
 func testBasicAI() {
 	color.Cyan("Testing basic AI model responses…")
+	think := ux.NewThinker("HELIX :: SMOKE TEST")
+	think.Start()
 	resp1, err := ai.RunModel("Say 'hello world'")
+	think.Stop()
 	if err != nil {
 		color.Red("Test 1 failed: %v", err)
 	} else {
@@ -566,7 +595,7 @@ func handleExplainCommand(input string) {
 		color.Red("Usage: /explain <command or technique description>")
 		return
 	}
-	color.Cyan("Explainable defensive analysis — analysing request...")
+
 	mitreContext := ""
 	if ragSystem != nil && ragSystem.IsInitialized() {
 		snippets, err := ragSystem.RetrieveMitreContext(args, 3)
@@ -574,6 +603,7 @@ func handleExplainCommand(input string) {
 			mitreContext = "MITRE ATT&CK knowledge:\n" + strings.Join(snippets, "\n")
 		}
 	}
+
 	prompt := fmt.Sprintf(`You are Helix's defensive explainability module.
 Given the user's command or technique description, produce a structured defensive debrief with these sections:
 1. Technique(s): Which MITRE ATT&CK techniques are relevant? List IDs and names.
@@ -585,14 +615,44 @@ User Request: %s
 FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lines.`, mitreContext, args)
 
 	explainConfig := ai.ModelConfig{Temperature: 0.7, TopP: 0.9, TopK: 40, MaxTokens: 512}
+
+	think := ux.NewThinker("HELIX :: REASONING")
+	think.Start()
 	resp, err := ai.RunModelWithConfig(prompt, explainConfig)
+	think.Stop()
+
 	if err != nil {
 		color.Red("AI call failed: %v", err)
 		return
 	}
+
 	cleaned := cleanDebrief(strings.TrimSpace(resp))
 	if agentCore != nil {
 		agentCore.GetUX().PrintAIMessage(cleaned, agentCore.GetTypingEffect())
+	}
+}
+
+func listAvailableModels() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	think := ux.NewThinker("HELIX :: REASONING")
+	think.Start()
+	models, err := ai.ListProviderModels(ctx)
+	think.Stop()
+
+	if err != nil {
+		color.Red("Could not list models: %v", err)
+		return
+	}
+
+	color.Cyan("Available models:")
+	for i, model := range models {
+		if i >= 50 {
+			color.Cyan("... and %d more", len(models)-50)
+			break
+		}
+		color.Cyan("  %s", model.ID)
 	}
 }
 
@@ -878,24 +938,6 @@ func displayProviderStatus() {
 	color.Cyan("=== Provider Status ===")
 	for _, line := range lines {
 		color.Cyan(line)
-	}
-}
-
-func listAvailableModels() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	models, err := ai.ListProviderModels(ctx)
-	if err != nil {
-		color.Red("Could not list models: %v", err)
-		return
-	}
-	color.Cyan("Available models:")
-	for i, model := range models {
-		if i >= 50 {
-			color.Cyan("... and %d more", len(models)-50)
-			break
-		}
-		color.Cyan("  %s", model.ID)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"helix/internal/ai"
@@ -19,6 +20,7 @@ import (
 	"helix/internal/recon"
 	"helix/internal/shell"
 	"helix/internal/stealth"
+	"helix/internal/utils"
 	"helix/internal/ux"
 )
 
@@ -152,10 +154,17 @@ func (a *Agent) HandleInput(userInput string) {
 	)
 	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
 
+	// HELIX THINKER: animate the neural link while the planner reasons,
+	// so the user always sees Helix thinking instead of a frozen prompt.
+	think := ux.NewThinker("HELIX :: REASONING")
+	think.Start()
 	rawPlanOutput, err := ai.RunPlannerWithRetry(plannerPrompt)
+	think.Stop()
 	if err != nil {
 		a.ux.PrintError(fmt.Sprintf("Planner model error: %v", err))
+		think.Start()
 		resp, chatErr := ai.RunModel(userInput)
+		think.Stop()
 		if chatErr != nil {
 			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
 			return
@@ -164,11 +173,12 @@ func (a *Agent) HandleInput(userInput string) {
 		return
 	}
 	rawPlanOutput = strings.TrimSpace(rawPlanOutput)
-
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
 	if err != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Planner parse error: %v", err))
+		think.Start()
 		resp, chatErr := ai.RunModel(userInput)
+		think.Stop()
 		if chatErr != nil {
 			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
 			return
@@ -359,6 +369,13 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 	// child exits. Apply it to the live Helix process instead.
 	if segments := splitShellChain(cmd); len(segments) > 0 && isCdCommand(segments[0]) {
 		return a.executeNativeCd(cmd, segments)
+	}
+
+	// NATIVE HISTORY INTERCEPTION: `history`, `fc`, and `!!` run in a child
+	// shell will only see the child's empty history. Intercept them and read
+	// Helix's actual persistent history file.
+	if isHistoryQuery(cmd) {
+		return a.executeNativeHistory(cmd)
 	}
 
 	a.ux.PrintCommand(cmd)
@@ -744,4 +761,49 @@ func (a *Agent) ListAuthorizedReconTargets() map[string]string {
 	}
 
 	return a.recon.AuthorizedTargets()
+}
+
+// isHistoryQuery reports whether a command is asking for shell history.
+func isHistoryQuery(cmd string) bool {
+	c := strings.TrimSpace(strings.ToLower(cmd))
+	return c == "history" || strings.HasPrefix(c, "history ") ||
+		c == "fc -ln -1" || c == "fc -l" || c == "!!" ||
+		strings.HasPrefix(c, "fc ")
+}
+
+// executeNativeHistory reads the persistent Helix history file and prints
+// the last N entries, bypassing the child-shell history isolation.
+func (a *Agent) executeNativeHistory(cmd string) error {
+	a.ux.PrintCommand(cmd)
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot resolve home directory")
+	}
+
+	histPath := filepath.Join(home, ".helix_history")
+	lines, err := utils.LoadHistory(histPath)
+	if err != nil || len(lines) == 0 {
+		a.ux.PrintInfo("No command history found.")
+		return nil
+	}
+
+	// Default to last 15 lines, parse limit if provided (e.g., "history 20")
+	limit := 15
+	parts := strings.Fields(cmd)
+	if len(parts) > 1 {
+		if n, err := strconv.Atoi(parts[len(parts)-1]); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	start := len(lines) - limit
+	if start < 0 {
+		start = 0
+	}
+
+	for i := start; i < len(lines); i++ {
+		fmt.Printf("%5d  %s\n", i+1, lines[i])
+	}
+	return nil
 }
