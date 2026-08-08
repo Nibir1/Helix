@@ -38,6 +38,18 @@ mkdir -p "$HELIX_HOME/rag_index"
 mkdir -p "$HELIX_HOME/vector_index"
 mkdir -p "$HELIX_HOME/man_index"
 
+# FIX: Detect and save the underlying shell preference BEFORE chsh changes it.
+# This ensures Helix always knows to use zsh/bash for child processes,
+# even if Helix becomes the default login shell.
+UNDERLYING_SHELL="$SHELL"
+if [[ "$UNDERLYING_SHELL" == *"helix"* ]] || [[ -z "$UNDERLYING_SHELL" ]]; then
+    if [ -f "/bin/zsh" ]; then UNDERLYING_SHELL="/bin/zsh"
+    elif [ -f "/bin/bash" ]; then UNDERLYING_SHELL="/bin/bash"
+    else UNDERLYING_SHELL="/bin/sh"; fi
+fi
+echo "$UNDERLYING_SHELL" > "$HELIX_HOME/shell_pref"
+echo "🧠 Saved underlying shell preference: $UNDERLYING_SHELL"
+
 # 4. Optional Ollama bootstrap — interactive ONLY, never fatal.
 echo ""
 echo "AI Runtime Bootstrapping"

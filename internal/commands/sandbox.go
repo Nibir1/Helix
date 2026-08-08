@@ -1,5 +1,4 @@
 // internal/commands/sandbox.go
-
 package commands
 
 import (
@@ -38,7 +37,6 @@ func NewDirectorySandbox() *DirectorySandbox {
 	}
 
 	// FIX: Immediately resolve symlinks to establish the "Canonical Root"
-	// This prevents issues where /var/tmp vs /private/var/tmp causes blocks.
 	realCwd, err := filepath.EvalSymlinks(cwd)
 	if err == nil {
 		cwd = realCwd
@@ -79,7 +77,6 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 				continue
 			}
 
-			// FIX: Use the robust ValidateSafePath instead of simple string checks
 			if _, err := ds.ValidateSafePath(arg); err != nil {
 				return false, fmt.Sprintf(
 					"sandbox violation: write/delete/edit operation outside sandbox: %s", arg)
@@ -96,26 +93,31 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 }
 
 // ================================================================
-// ROBUST PATH VALIDATION (The Fix for your Error)
+// ROBUST PATH VALIDATION
 // ================================================================
 
 // ValidateSafePath checks if a target path is inside the sandbox.
 // It handles Symlinks, Case-Sensitivity (macOS/Windows), and Non-Existent files.
+// FIX: Resolves relative paths against the CURRENT working directory,
+// but validates them against the ORIGINAL sandbox root (the jail cell).
 func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) {
 	if ds.mode == SandboxDisabled {
 		return targetPath, nil
 	}
 
-	// 1. Absolutize
+	// 1. Absolutize against the CURRENT working directory (not just sandbox root)
 	if !filepath.IsAbs(targetPath) {
-		targetPath = filepath.Join(ds.allowedDir, targetPath)
+		cwd, err := os.Getwd()
+		if err != nil {
+			cwd = ds.allowedDir // Fallback to cached root if os.Getwd fails
+		}
+		targetPath = filepath.Join(cwd, targetPath)
 	}
 
 	// 2. Clean
 	cleanTarget := filepath.Clean(targetPath)
 
 	// 3. Resolve Symlinks (Target)
-	// If the file doesn't exist (e.g. creating "danger.txt"), we resolve its PARENT.
 	realTarget, err := filepath.EvalSymlinks(cleanTarget)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -125,7 +127,6 @@ func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) 
 			if err == nil {
 				realTarget = filepath.Join(realParent, filepath.Base(cleanTarget))
 			} else {
-				// If parent also fails, we stick to the clean path
 				realTarget = cleanTarget
 			}
 		} else {
@@ -139,8 +140,7 @@ func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) 
 		realRoot = ds.allowedDir
 	}
 
-	// 5. Case-Insensitive Comparison
-	// This fixes the /Users vs /users issue on macOS
+	// 5. Case-Insensitive Comparison (fixes /Users vs /users on macOS)
 	rootCheck := strings.ToLower(realRoot)
 	targetCheck := strings.ToLower(realTarget)
 
@@ -160,9 +160,8 @@ func (ds *DirectorySandbox) isDangerousWriteOperation(cmd string) bool {
 	dangerous := []string{
 		"rm ", "rm -rf", "mv ", "cp ", "dd ", "truncate",
 		"chmod", "chown", "tee ", "echo " + ">",
-		"sed -i", "perl -pi", "> ", ">> ",
+		"sed -i", "perl -pi", "> ", ">> ", "git clone",
 	}
-
 	for _, d := range dangerous {
 		if strings.Contains(cmd, d) {
 			return true
@@ -195,29 +194,21 @@ func (ds *DirectorySandbox) containsDirectoryEscape(cmd string) bool {
 func (ds *DirectorySandbox) extractFileArguments(cmd string) []string {
 	var out []string
 
-	// Basic cleaning to handle quotes roughly
 	cleanCmd := strings.ReplaceAll(cmd, "\"", "")
 	cleanCmd = strings.ReplaceAll(cleanCmd, "'", "")
 
 	words := strings.Fields(cleanCmd)
 
 	for _, w := range words {
-		// skip flags
 		if strings.HasPrefix(w, "-") {
 			continue
 		}
-
-		// skip pure URLs or tokens
 		if ds.isCommonNonFileArgument(w) {
 			continue
 		}
-
-		// skip operators
 		if w == "|" || w == ">" || w == ">>" || w == "echo" {
 			continue
 		}
-
-		// possible file path
 		out = append(out, w)
 	}
 
@@ -248,7 +239,6 @@ func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
 		return os.Chdir(newDir)
 	}
 
-	// Use our robust validator for CD as well
 	safePath, err := ds.ValidateSafePath(newDir)
 	if err != nil {
 		return fmt.Errorf("directory change outside sandbox: %s", newDir)
@@ -258,24 +248,15 @@ func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
 		return err
 	}
 
-	// Update allowedDir to the new path?
-	// NO. In strict sandbox, the root should usually stay the same,
-	// but in "CurrentDir" mode, we might allow drilling down.
-	// For "Mode C" (Root Lock), we do NOT update allowedDir (The Jail Cell),
-	// we just allow moving *inside* it.
-
-	// NOTE: If you want to restrict them to the INITIAL dir always, don't update ds.allowedDir.
-	// If you want to let them drill down, but not up past original, compare against originalDir.
-
 	color.Green("📁 Changed directory: %s", safePath)
 	return nil
 }
 
 // WrapCommand executes the command strictly within the sandbox logic.
-// It wires the output to os.Stdout so the TUI Hijacker can see it.
-// Non‑zero exit codes are treated as non‑fatal: the mission continues.
+// FIX: Decouples execution context from the jail boundary. Commands execute
+// in the dynamic CWD, but paths are validated against the original root.
 func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell.Env) error {
-	// 1. Validate
+	// 1. Validate against the sandbox boundary
 	if ok, reason := ds.ValidateCommand(cmd); !ok {
 		return fmt.Errorf("sandbox violation: %s", reason)
 	}
@@ -287,7 +268,7 @@ func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell
 
 	// 2. Prepare Execution
 	shellBin := "/bin/sh"
-	if env.Shell != "" {
+	if env.Shell != "" && env.Shell != "unknown" {
 		shellBin = env.Shell
 	}
 
@@ -300,17 +281,29 @@ func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell
 
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	c.Dir = ds.allowedDir
 
-	err := c.Run()
+	// FIX: Use the dynamic current working directory for execution context.
+	// The sandbox's job is to VALIDATE paths against allowedDir, not to FORCE
+	// execution in the original launch directory.
+	cwd, err := os.Getwd()
+	if err == nil {
+		c.Dir = cwd
+	} else {
+		c.Dir = ds.allowedDir // Fallback to cached root if os.Getwd fails
+	}
+
+	err = c.Run()
 	if err != nil {
-		// If it's an exit error, the command ran but returned non‑zero.
-		// This is not a mission‑fatal error – just log and continue.
-		if _, ok := err.(*exec.ExitError); ok {
-			color.Yellow("Command exited with non‑zero status, continuing…")
-			return nil
+		// FIX: Stop blindly swallowing all non-zero exit codes.
+		// Only ignore exits for known informational tools (grep, diff, find).
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			code := exitErr.ExitCode()
+			if isNonFatalExit(cmd, code) {
+				color.Yellow("Non-fatal exit (%d) — continuing", code)
+				return nil
+			}
+			return fmt.Errorf("command execution failed (exit %d): %w", code, err)
 		}
-		// Real error (couldn't start the process, etc.)
 		return fmt.Errorf("command execution failed: %w", err)
 	}
 	return nil
@@ -352,7 +345,6 @@ func (ds *DirectorySandbox) ModeString() string {
 }
 
 func (ds *DirectorySandbox) ResetToOriginal() error {
-	// Validate against original dir logic if needed
 	if err := os.Chdir(ds.originalDir); err != nil {
 		return err
 	}

@@ -116,14 +116,13 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 		cmd = exec.Command("cmd", "/C", command)
 	default:
 		shellToUse := env.Shell
-		if shellToUse == "" {
+		if shellToUse == "" || shellToUse == "unknown" {
 			if runtime.GOOS == "windows" {
 				shellToUse = "cmd"
 			} else {
 				shellToUse = "sh"
 			}
 		}
-
 		cmd = exec.Command(shellToUse, "-c", command)
 	}
 

@@ -278,6 +278,29 @@ func handleHelp() {
 	helpSection("DANGER ZONE")
 	helpLine(colWidth, "/purge", "Wipe ALL Helix data (keys, DBs, caches) for a fresh start")
 
+	// NEW: Tips & Acceleration section
+	helpSection("TIPS & ACCELERATION")
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
+		shell.Fg(shell.HexTertiary, "⚡ NVD API KEY") + " " +
+		shell.Fg(shell.HexSubtle, "—") + " " +
+		shell.Fg(shell.HexText, "Accelerate knowledge sync from 40min → 10min"))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + "   " +
+		shell.Fg(shell.HexSubtle, "Get free key: ") +
+		shell.Fg(shell.HexSecondary, "https://nvd.nist.gov/developers/request-an-api-key"))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + "   " +
+		shell.Fg(shell.HexSubtle, "Set environment: ") +
+		shell.Fg(shell.HexSecondary, "export NVD_API_KEY=\"your-key-here\""))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
+		shell.Fg(shell.HexTertiary, "💡 NATURAL LANGUAGE") + " " +
+		shell.Fg(shell.HexSubtle, "—") + " " +
+		shell.Fg(shell.HexText, "Just type plain English"))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + "   " +
+		shell.Fg(shell.HexSubtle, "Example: ") +
+		shell.Fg(shell.HexSecondary, "\"find large files and delete them\""))
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
+
 	helpSection("PROMPT ANATOMY")
 	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
 		shell.Seg(shell.HexPrimary, shell.HexVoid, " HELIX ") + shell.Fg(shell.HexSubtle, " identity  ") +
@@ -286,7 +309,6 @@ func handleHelp() {
 		shell.Fg(shell.HexRectifier, "❯") + shell.Fg(shell.HexSubtle, " interactive"))
 
 	fmt.Println(rule)
-	fmt.Println("  " + shell.Fg(shell.HexTertiary, "TIP ") + shell.Fg(shell.HexText, " Just type natural language — e.g. 'find large files and delete them'"))
 	fmt.Println()
 }
 

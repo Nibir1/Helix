@@ -109,4 +109,8 @@ test:
 	@echo "Running all tests..."
 	go test ./... -v -count=1
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint
+# Run all tasks: lint, build, test, install
+work: lint build test install
+
+
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work

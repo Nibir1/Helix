@@ -312,6 +312,11 @@ func BuildShellCommand(command string, shellName string) *exec.Cmd {
 	shellName = strings.TrimSpace(shellName)
 	lower := strings.ToLower(shellName)
 
+	// Fallback for "unknown" shell detection to prevent exec failures
+	if lower == "unknown" {
+		lower = ""
+	}
+
 	if runtime.GOOS == "windows" {
 		switch lower {
 		case "powershell", "powershell.exe":
@@ -331,7 +336,6 @@ func BuildShellCommand(command string, shellName string) *exec.Cmd {
 		if shellName != "" {
 			bin = shellName
 		}
-
 		return exec.Command(bin, "-NoProfile", "-Command", command)
 	case "", "sh":
 		return exec.Command("/bin/sh", "-c", command)

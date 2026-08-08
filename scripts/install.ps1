@@ -35,6 +35,17 @@ foreach ($dir in $Dirs) {
     }
 }
 
+# FIX: Detect and save the underlying shell preference.
+# This ensures Helix always knows to use PowerShell or cmd for child processes,
+# even if Helix is set as the default Windows Terminal profile.
+$UnderlyingShell = "powershell.exe"
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+    $UnderlyingShell = "pwsh.exe"
+}
+$ShellPrefPath = Join-Path $HelixHome "shell_pref"
+Set-Content -Path $ShellPrefPath -Value $UnderlyingShell -Force
+Write-Host "🧠 Saved underlying shell preference: $UnderlyingShell"
+
 # 4. Add to PATH
 $CurrentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
 if ($CurrentPath -notlike "*$InstallDir*") {

@@ -1,18 +1,9 @@
 ## Helix v1.0.0 — The AI-Native Shell
 
-Helix inverts the terminal paradigm: instead of forcing humans to speak
-machine, the machine learns to speak human. A single prompt accepts raw shell
-commands, natural-language requests, git workflows, package operations, and
-defensive threat-intelligence queries with zero mode switching. Every action
-flows through a multi-layer safety pipeline (Unicode-aware validation → risk
-tiering → directory sandbox → typed confirmations), delivering power without
-recklessness.
+Helix inverts the terminal paradigm: instead of forcing humans to speak machine, the machine learns to speak human. A single prompt accepts raw shell commands, natural-language requests, git workflows, package operations, and defensive threat-intelligence queries with zero mode switching. Every action flows through a multi-layer safety pipeline (Unicode-aware validation → risk tiering → directory sandbox → typed confirmations), delivering power without recklessness.
 
-Helix is knowledge sovereign. Hundreds of thousands of CVEs, tens of thousands 
-of exploit references, the full CISA KEV catalog, MITRE ATT&CK, and ~479 MAN pages 
-living as ~1,000 vector documents — all in a SQLite file on your disk, searchable 
-offline, synced with checkpointed, rate-limit-respecting patience. 
-No cloud. No telemetry. Keys in a 0600 file. 
+Helix is knowledge sovereign. Hundreds of thousands of CVEs, tens of thousands of exploit references, the full CISA KEV catalog, MITRE ATT&CK, and ~479 MAN pages living as ~1,000 vector documents — all in a SQLite file on your disk, searchable offline, synced with checkpointed, rate-limit-respecting patience. No cloud. No telemetry. Keys in a 0600 file. 
+
 In an age when intelligence is treated as a subscription, Helix has made it a possession.
 
 ### Highlights
@@ -58,5 +49,56 @@ go install github.com/Nibir1/Helix/cmd/helix@latest
 ### Option 4: Pre-compiled Binaries (No Build Required)
 Don't want to build from source? Download the latest pre-compiled binary, checksums, and archives for your OS directly from this **Releases Page**.
 
+### Manual Build (For Developers)
+If you prefer to build and run Helix locally without installing it globally:
+
+```bash
+git clone https://github.com/Nibir1/Helix.git
+cd Helix
+make current   # Builds the optimized binary
+./dist/helix   # Launches Helix
+```
+
 ---
 
+### ⚡ Accelerating Threat Intel: NVD API Key
+
+Helix operates on a **local-first architecture**, downloading and indexing the National Vulnerability Database (NVD), CISA KEV, Exploit-DB, and MITRE ATT&CK directly into your local SQLite knowledge base. This allows `/vuln` and `/explain` queries to run instantly with full context, even when completely offline.
+
+However, the NVD enforces strict rate limits on unauthenticated API requests to prevent server overload. 
+
+| Configuration | Initial Sync Time (119-day window) | Subsequent Syncs |
+| :--- | :--- | :--- |
+| **Without API Key** | **25 - 40 minutes** (6.5s delay per page) | ~10 seconds |
+| **With API Key** | **10 - 15 minutes** (1.0s delay per page) | ~2 seconds |
+
+While the initial sync runs silently in the background on first boot, providing an API key dramatically accelerates the hydration of your local threat intelligence database.
+
+#### 1. Request a Free API Key
+1. Navigate to the [NVD API Key Request Page](https://nvd.nist.gov/developers/request-an-api-key).
+2. Enter your email address and complete the captcha.
+3. Check your inbox and click the activation link to reveal your API key.
+
+#### 2. Configure Helix
+To make the API key permanently available to Helix, add it to your shell's environment variables.
+
+**For Zsh (macOS default):**
+```bash
+echo 'export NVD_API_KEY="your-actual-api-key-here"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**For Bash (Linux default):**
+```bash
+echo 'export NVD_API_KEY="your-actual-api-key-here"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### 3. Verify Acceleration
+Launch Helix and execute the knowledge update command:
+```text
+/knowledge-update
+```
+The live TrueColor progress bar will now reflect the accelerated sync speed, bypassing the 6.5-second rate limit and fully indexing ~290,000 CVEs in a fraction of the time.
+
+---

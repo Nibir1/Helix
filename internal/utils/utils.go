@@ -217,26 +217,31 @@ func IsMostlyEnglish(text string) bool {
 //
 
 // HasBalancedQuotes — strict validator (used in ValidateAndCleanCommand)
+// FIX: Respects shell quoting rules. Double quotes inside single quotes are
+// literal characters and do not toggle the double-quote state (and vice versa).
+// Backslash escapes only apply outside of single quotes.
 func HasBalancedQuotes(text string) bool {
 	var inSingle, inDouble bool
-
 	for i := 0; i < len(text); i++ {
 		ch := text[i]
 
-		// Skip escaped quotes like '\''
-		if ch == '\\' && i+1 < len(text) && (text[i+1] == '"' || text[i+1] == '\'') {
-			i++
+		// Backslash escapes only work outside of single quotes.
+		// Inside single quotes, backslashes are literal characters.
+		if ch == '\\' && !inSingle && i+1 < len(text) {
+			i++ // skip the escaped character
 			continue
 		}
 
-		if ch == '"' {
-			inDouble = !inDouble
-		}
-		if ch == '\'' {
+		if ch == '\'' && !inDouble {
 			inSingle = !inSingle
+			continue
+		}
+
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
 		}
 	}
-
 	return !inSingle && !inDouble
 }
 

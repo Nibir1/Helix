@@ -1,5 +1,4 @@
 // internal/commands/safety/risk.go
-
 package safety
 
 import (
@@ -35,8 +34,19 @@ func AnalyzeShellRisk(cmd string) (ShellRiskLevel, []string) {
 		reasons = append(reasons, "removes almost everything with 'rm -rf'")
 	}
 
-	if strings.Contains(lc, "| sh") || strings.Contains(lc, "| bash") || strings.Contains(lc, "| zsh") {
-		reasons = append(reasons, "pipes output directly into a shell")
+	// FIX (helm-incident): share the hardened regex from shell.go so
+	// "| sudo bash", "| env sh", "| /bin/bash", etc. are correctly
+	// classified as HIGH risk instead of slipping through as LOW risk.
+	if pipeIntoShellRe.MatchString(lc) {
+		reasons = append(reasons, "pipes output directly into a shell (possibly via sudo/env)")
+	}
+
+	// FIX (AI Workaround Loophole): Catch sudo bash/sh and /tmp/ execution.
+	if regexp.MustCompile(`(?i)sudo\s+(?:/[a-z0-9_./-]+/)?(bash|sh|zsh|dash|ksh|ash|fish)\b`).MatchString(lc) {
+		reasons = append(reasons, "executes a shell interpreter with sudo (e.g., 'sudo bash')")
+	}
+	if regexp.MustCompile(`(?i)(bash|sh|zsh|dash|ksh|ash|fish)\s+(/tmp/|/var/tmp/|/dev/shm/)`).MatchString(lc) {
+		reasons = append(reasons, "executes a script from a temporary directory")
 	}
 
 	if strings.Contains(lc, "eval ") {

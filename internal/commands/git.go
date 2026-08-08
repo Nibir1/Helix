@@ -1,5 +1,4 @@
 // internal/commands/git.go
-
 package commands
 
 import (
@@ -21,7 +20,7 @@ import (
 type GitManager struct {
 	env        shell.Env
 	execConfig ExecuteConfig
-	workingDir string
+	workingDir string // Cached at startup; used ONLY as a fallback.
 	sandbox    *DirectorySandbox
 }
 
@@ -38,6 +37,17 @@ func NewGitManager(env shell.Env, execConfig ExecuteConfig, sandbox *DirectorySa
 		workingDir: wd,
 		sandbox:    sandbox,
 	}
+}
+
+// getCurrentDir dynamically fetches the current working directory at execution time.
+// This ensures git commands run in the correct directory even after the user
+// uses the `cd` command inside Helix.
+func (gm *GitManager) getCurrentDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return gm.workingDir // Fallback to cached dir if os.Getwd fails
+	}
+	return cwd
 }
 
 // GitOperation represents a git operation with safety checks
@@ -57,7 +67,7 @@ func (gm *GitManager) HandleGitRequest(request string) error {
 	// First, validate we're in a git repository
 	if !gm.isGitRepository() {
 		color.Red("Not a git repository")
-		color.Yellow("Current directory: %s", gm.workingDir)
+		color.Yellow("Current directory: %s", gm.getCurrentDir())
 		color.Yellow("Navigate to a git repository first or run 'git init'")
 		return fmt.Errorf("not a git repository")
 	}
@@ -71,16 +81,22 @@ func (gm *GitManager) HandleGitRequest(request string) error {
 	return gm.handleAIGitRequest(request)
 }
 
-// isGitRepository checks if current directory is a git repository
+// isGitRepository checks if current directory (or any parent) is a git repository.
+// ENHANCED: Uses `git rev-parse` instead of just checking for `.git` folder,
+// which correctly handles subdirectories inside a git repo.
 func (gm *GitManager) isGitRepository() bool {
-	// Check if .git directory exists
-	if _, err := os.Stat(filepath.Join(gm.workingDir, ".git")); err == nil {
+	cwd := gm.getCurrentDir()
+
+	// Fast path: check for .git directory in current dir
+	if _, err := os.Stat(filepath.Join(cwd, ".git")); err == nil {
 		return true
 	}
 
-	// Alternative: try running git command
-	cmd := exec.Command("git", "status")
-	cmd.Dir = gm.workingDir
+	// Robust path: ask git itself if we are inside a work tree
+	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	cmd.Dir = cwd
+	cmd.Stdout = nil
+	cmd.Stderr = nil
 	err := cmd.Run()
 	return err == nil
 }
@@ -88,7 +104,7 @@ func (gm *GitManager) isGitRepository() bool {
 // getCurrentBranch gets the current git branch
 func (gm *GitManager) getCurrentBranch() (string, error) {
 	cmd := exec.Command("git", "branch", "--show-current")
-	cmd.Dir = gm.workingDir
+	cmd.Dir = gm.getCurrentDir()
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -99,7 +115,7 @@ func (gm *GitManager) getCurrentBranch() (string, error) {
 // getAvailableBranches gets list of available branches
 func (gm *GitManager) getAvailableBranches() ([]string, error) {
 	cmd := exec.Command("git", "branch", "-a")
-	cmd.Dir = gm.workingDir
+	cmd.Dir = gm.getCurrentDir()
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -110,7 +126,6 @@ func (gm *GitManager) getAvailableBranches() ([]string, error) {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.Contains(line, "HEAD") {
-			// Remove the * from current branch and remote prefixes
 			line = strings.TrimPrefix(line, "* ")
 			line = strings.TrimPrefix(line, "remotes/")
 			branches = append(branches, line)
@@ -215,7 +230,7 @@ func (gm *GitManager) executeGitOperation(operation *GitOperation) error {
 	if err == nil {
 		color.Blue("Current branch: %s", currentBranch)
 	}
-	color.Blue("Repository: %s", gm.workingDir)
+	color.Blue("Repository: %s", gm.getCurrentDir())
 
 	// Show risks
 	if len(operation.Risks) > 0 {
@@ -244,7 +259,6 @@ func (gm *GitManager) executeGitOperation(operation *GitOperation) error {
 		if err != nil {
 			return err
 		}
-		// Use unquoted branch name - let the command execution handle escaping
 		finalCommand = strings.ReplaceAll(finalCommand, "${BRANCH}", branch)
 		color.Green("Target branch: %s", branch)
 	}
@@ -302,7 +316,6 @@ func (gm *GitManager) executeMultiCommandOperation(operation *GitOperation) erro
 
 		// SPECIAL HANDLING: For commit step, use a completely different approach
 		if i == len(commands)-1 && strings.Contains(rawCommand, "${COMMIT_CMD}") {
-			// This is the commit step - handle it specially
 			if err := gm.executeCommitStep(targetBranch); err != nil {
 				color.Red("Commit failed: %v", err)
 				color.Yellow("Operation incomplete. Check git status.")
@@ -331,13 +344,11 @@ func (gm *GitManager) executeCommitStep(targetBranch string) error {
 	color.Cyan(" 1. Use default message ('Merge %s with squash')", targetBranch)
 	color.Cyan(" 2. Enter custom message")
 	color.Cyan(" 3. Open editor for message")
-
 	choice := strings.TrimSpace(AskLine("Choose option (1/2/3)"))
-
 	switch choice {
 	case "1":
+		// FIX: Removed unused targetBranch argument
 		return gm.executeCommitWithMessage(
-			targetBranch,
 			fmt.Sprintf("Merge %s with squash", targetBranch),
 		)
 	case "2":
@@ -345,8 +356,8 @@ func (gm *GitManager) executeCommitStep(targetBranch string) error {
 		if message == "" {
 			message = fmt.Sprintf("Merge %s with squash", targetBranch)
 		}
-
-		return gm.executeCommitWithMessage(targetBranch, message)
+		// FIX: Removed unused targetBranch argument
+		return gm.executeCommitWithMessage(message)
 	case "3":
 		color.Blue("Opening commit editor...")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
@@ -358,7 +369,8 @@ func (gm *GitManager) executeCommitStep(targetBranch string) error {
 
 // executeCommitWithMessage executes git commit using a relative commit-message file
 // to avoid absolute paths (which are blocked by the sandbox).
-func (gm *GitManager) executeCommitWithMessage(targetBranch string, message string) error {
+// FIX: Removed unused targetBranch parameter to satisfy linter.
+func (gm *GitManager) executeCommitWithMessage(message string) error {
 	color.Blue("Committing with message: %s", message)
 
 	// Safety: skip commit if nothing is staged
@@ -366,27 +378,42 @@ func (gm *GitManager) executeCommitWithMessage(targetBranch string, message stri
 	if err != nil {
 		color.Yellow("Could not detect staged changes: %v", err)
 	} else if !hasChanges {
-		color.Yellow("No staged changes detected; skipping git commit.")
-		return nil
+		// PRODUCTION READY: Check if the working directory is completely clean.
+		// If it's clean, the desired state may already be achieved (idempotent run).
+		statusCmd := exec.Command("git", "status", "--porcelain")
+		statusCmd.Dir = gm.getCurrentDir()
+		statusOut, _ := statusCmd.Output()
+		isClean := len(strings.TrimSpace(string(statusOut))) == 0
+
+		if isClean {
+			color.Yellow("⚠️  No staged changes detected, and working directory is clean.")
+			color.Yellow("    The requested changes may already be committed.")
+			color.Yellow("    Proceeding with pipeline (subsequent tags will apply to current HEAD).")
+			return nil // Graceful success for idempotent production pipelines
+		}
+
+		color.Yellow("⚠️  No staged changes detected, but unstaged changes remain.")
+		color.Yellow("    Possible reasons:")
+		color.Yellow("    • Files weren't actually modified (e.g., version already updated)")
+		color.Yellow("    • `git add` didn't find the specified files")
+		color.Yellow("    Skipping git commit to avoid tagging the wrong commit.")
+		return fmt.Errorf("no staged changes to commit (unstaged changes remain)")
 	}
 
 	relPath := ".helix-commit-msg.txt"
-	absPath := filepath.Join(gm.workingDir, relPath)
-
+	absPath := filepath.Join(gm.getCurrentDir(), relPath)
 	if err := os.WriteFile(absPath, []byte(message), 0o600); err != nil {
 		color.Yellow("Could not write commit message file, using git editor instead")
 		return ExecuteCommand("git commit", gm.execConfig, gm.env)
 	}
 	defer func() { _ = os.Remove(absPath) }()
 
-	// Use the relative path in the command so there is no absolute path for the sandbox to reject.
 	commitCmd := fmt.Sprintf("git commit -F %s", relPath)
 	return gm.sandbox.WrapCommand(commitCmd, gm.execConfig, gm.env)
 }
 
 // parseMultiCommands splits a multi-command string into individual commands
 func (gm *GitManager) parseMultiCommands(multiCommand string) []string {
-	// Split by semicolons first (more reliable than && for complex commands)
 	commands := strings.Split(multiCommand, ";")
 
 	var result []string
@@ -455,6 +482,7 @@ func (gm *GitManager) isDestructiveOperation(operation *GitOperation) bool {
 func (gm *GitManager) handleAIGitRequest(request string) error {
 	// Get current branch info for context
 	currentBranch, _ := gm.getCurrentBranch()
+	cwd := gm.getCurrentDir()
 
 	prompt := fmt.Sprintf(`You are a git expert. Provide a single git command for: "%s"
 
@@ -468,7 +496,7 @@ Rules:
 - Make it safe and appropriate
 - Include necessary flags but avoid destructive options unless clearly requested
 
-Command:`, request, gm.workingDir, currentBranch)
+Command:`, request, cwd, currentBranch)
 
 	think := ux.NewThinker("HELIX :: REASONING")
 	think.Start()
@@ -492,7 +520,7 @@ Command:`, request, gm.workingDir, currentBranch)
 	}
 
 	// Show current directory context
-	color.Blue("Executing in: %s", gm.workingDir)
+	color.Blue("Executing in: %s", cwd)
 
 	// Ask for confirmation
 	if AskForConfirmation("Execute this git command?") {
@@ -520,9 +548,6 @@ func (gm *GitManager) CommonGitOperations() map[string]string {
 
 // ExecutePlannedAction executes a git action coming from the planner
 // without asking AI again or generating raw shell commands.
-//
-// This is the critical path for Agent Mode. It supports both safe
-// and dangerous actions. Dangerous actions require typed confirmation.
 func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string) error {
 	action = strings.ToLower(strings.TrimSpace(action))
 	if args == nil {
@@ -545,7 +570,8 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 			msg = "Helix: automated commit"
 		}
 		color.Blue("Git commit (planner): %s", msg)
-		return gm.executeCommitWithMessage("<planner>", msg)
+		// FIX: Removed unused "<planner>" argument
+		return gm.executeCommitWithMessage(msg)
 
 	case "tag":
 		nameRaw := strings.TrimSpace(args["name"])
@@ -553,18 +579,50 @@ func (gm *GitManager) ExecutePlannedAction(action string, args map[string]string
 		if err != nil {
 			return fmt.Errorf("invalid tag name %q: %w", nameRaw, err)
 		}
-		color.Blue("Git tag (planner): %s", name)
-		cmd := fmt.Sprintf("git tag %s", name)
+
+		// FIX: Support annotated tags via an optional message parameter.
+		msg := strings.TrimSpace(args["message"])
+		var cmd string
+		if msg != "" {
+			relPath := ".helix-tag-msg.txt"
+			absPath := filepath.Join(gm.getCurrentDir(), relPath)
+			if err := os.WriteFile(absPath, []byte(msg), 0o600); err != nil {
+				return fmt.Errorf("failed to write tag message: %w", err)
+			}
+			defer func() { _ = os.Remove(absPath) }()
+			cmd = fmt.Sprintf("git tag -a %s -F %s", name, relPath)
+			color.Blue("Git tag (planner, annotated): %s", name)
+		} else {
+			cmd = fmt.Sprintf("git tag %s", name)
+			color.Blue("Git tag (planner, lightweight): %s", name)
+		}
 		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
 
 	case "add":
 		paths := strings.TrimSpace(args["paths"])
 		if paths == "" {
-			return fmt.Errorf("git add action missing 'paths'")
+			paths = "."
 		}
 		color.Blue("Git add (planner): %s", paths)
+
+		// Try adding the specified paths first
 		cmd := fmt.Sprintf("git add %s", paths)
-		return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+		err := gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+		if err != nil {
+			// If it fails (e.g., pathspec did not match), fall back to staging all modifications
+			color.Yellow("⚠️  git add %s failed or matched no files. Falling back to 'git add -u'...", paths)
+			cmd = "git add -u"
+			return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+		}
+
+		// Verify something was actually staged
+		hasChanges, _ := gm.hasStagedChanges()
+		if !hasChanges {
+			color.Yellow("⚠️  Specified files had no changes. Attempting to stage all modified files (git add -u)...")
+			cmd = "git add -u"
+			return gm.sandbox.WrapCommand(cmd, gm.execConfig, gm.env)
+		}
+		return nil
 
 	case "checkout":
 		branchRaw := strings.TrimSpace(args["branch"])
@@ -620,7 +678,6 @@ func (gm *GitManager) executePlannerPush(args map[string]string) error {
 
 	branch := strings.TrimSpace(args["branch"])
 	if branch == "" {
-		// fallback to current branch
 		if cur, err := gm.getCurrentBranch(); err == nil && cur != "" {
 			branch = cur
 		}
@@ -738,16 +795,14 @@ func (gm *GitManager) executePlannerDeleteBranch(args map[string]string) error {
 // hasStagedChanges returns true if there are staged changes.
 func (gm *GitManager) hasStagedChanges() (bool, error) {
 	cmd := exec.Command("git", "diff", "--cached", "--quiet")
-	cmd.Dir = gm.workingDir
+	cmd.Dir = gm.getCurrentDir()
 	err := cmd.Run()
 	if err == nil {
-		// exit code 0: no staged changes
 		return false, nil
 	}
 
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		if exitErr.ExitCode() == 1 {
-			// exit code 1: there are staged changes
 			return true, nil
 		}
 	}
@@ -756,7 +811,6 @@ func (gm *GitManager) hasStagedChanges() (bool, error) {
 }
 
 // isPlannerGitActionSafe validates planner→git actions structurally.
-// It does NOT block actions by type (Option C); it only prevents obvious injection.
 func isPlannerGitActionSafe(action string, args map[string]string) error {
 	action = strings.ToLower(strings.TrimSpace(action))
 

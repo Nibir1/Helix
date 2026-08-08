@@ -296,6 +296,7 @@ func fetchConditional(ctx context.Context, client *http.Client, url, storedETag 
 }
 
 // updateNVD uses NVD API 2.0 with strict timeouts, browser spoofing, rate-limiting, and checkpointing.
+// ENHANCED: Includes real-time ETA calculation for progress transparency.
 func updateNVD(ctx context.Context, db *sql.DB) error {
 	lastMod := getMeta(db, "nvd_last_mod_date")
 	layout := "2006-01-02T15:04:05.000"
@@ -324,6 +325,10 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 	var total int
 	page := 0
 	latestModDateSeen := startTime
+
+	// ETA tracking
+	syncStart := time.Now()
+	var totalPages int
 
 	for startIndex := 0; ; startIndex += 2000 {
 		select {
@@ -382,6 +387,11 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("decode NVD: %w", err)
 		}
 
+		// Capture total pages for ETA calculation
+		if totalPages == 0 && nvdResp.TotalResults > 0 {
+			totalPages = (nvdResp.TotalResults + 1999) / 2000 // Ceiling division
+		}
+
 		for _, vuln := range nvdResp.Vulnerabilities {
 			cveID := vuln.CVE.ID
 			if cveID == "" {
@@ -411,8 +421,10 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			total++
 		}
 
+		// ENHANCED: Progress with ETA
 		if nvdResp.TotalResults > 0 {
-			notifyProgress(fmt.Sprintf("NVD · PAGE %d", page), total, nvdResp.TotalResults)
+			etaStr := calculateETA(syncStart, page, totalPages)
+			notifyProgress(fmt.Sprintf("NVD · PAGE %d (ETA: %s)", page, etaStr), total, nvdResp.TotalResults)
 		}
 
 		if nvdResp.TotalResults == 0 || startIndex+2000 >= nvdResp.TotalResults {
@@ -428,6 +440,35 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 		color.Green("NVD: %d CVEs updated successfully", total)
 	}
 	return nil
+}
+
+// calculateETA computes a human-readable ETA based on progress rate.
+func calculateETA(syncStart time.Time, currentPage, totalPages int) string {
+	if currentPage == 0 || totalPages == 0 || currentPage >= totalPages {
+		return "calculating..."
+	}
+
+	elapsed := time.Since(syncStart)
+	rate := float64(currentPage) / elapsed.Seconds()
+	if rate <= 0 {
+		return "calculating..."
+	}
+
+	remainingPages := totalPages - currentPage
+	remainingSeconds := float64(remainingPages) / rate
+
+	eta := time.Duration(remainingSeconds * float64(time.Second))
+
+	// Format ETA nicely
+	if eta < time.Minute {
+		return fmt.Sprintf("%ds", int(eta.Seconds()))
+	} else if eta < time.Hour {
+		return fmt.Sprintf("%dm%ds", int(eta.Minutes()), int(eta.Seconds())%60)
+	} else {
+		hours := int(eta.Hours())
+		mins := int(eta.Minutes()) % 60
+		return fmt.Sprintf("%dh%dm", hours, mins)
+	}
 }
 
 // updateKEV fetches and replaces KEV entries.

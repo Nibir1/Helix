@@ -5,6 +5,7 @@ package shell
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -86,29 +87,62 @@ func DetectPackageManager(env Env) PackageManagerInfo {
 }
 
 func detectShellFromEnv() (string, string) {
-	// Check SHELL environment variable
 	shell := os.Getenv("SHELL")
-	if shell == "" {
-		return "unknown", ""
+
+	// 1. If SHELL is set and is NOT helix, use it.
+	if shell != "" && !strings.Contains(strings.ToLower(shell), "helix") {
+		return resolveShellName(shell), shell
 	}
 
-	shell = strings.ToLower(shell)
-	shellName := "unknown"
+	// 2. SHELL is helix (login shell) or empty (GUI launcher).
+	// Check for a saved underlying shell preference.
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		prefPath := filepath.Join(home, ".helix", "shell_pref")
+		if data, err := os.ReadFile(prefPath); err == nil {
+			savedShell := strings.TrimSpace(string(data))
+			if savedShell != "" && !strings.Contains(savedShell, "helix") {
+				return resolveShellName(savedShell), savedShell
+			}
+		}
+	}
 
+	// 3. Fallback: Probe for common interactive shells.
+	// Prefer zsh on macOS, bash on Linux.
+	candidates := []string{"/bin/zsh", "/bin/bash", "/usr/bin/zsh", "/usr/bin/bash"}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			// Save this preference for next time so we never probe again.
+			if home != "" {
+				prefPath := filepath.Join(home, ".helix", "shell_pref")
+				_ = os.MkdirAll(filepath.Dir(prefPath), 0755)
+				_ = os.WriteFile(prefPath, []byte(candidate), 0644)
+			}
+			return resolveShellName(candidate), candidate
+		}
+	}
+
+	// 4. Ultimate fallback
+	return "sh", "/bin/sh"
+}
+
+// resolveShellName extracts the shell name from a path.
+func resolveShellName(shellPath string) string {
+	shell := strings.ToLower(shellPath)
 	switch {
 	case strings.Contains(shell, "bash"):
-		shellName = "bash"
+		return "bash"
 	case strings.Contains(shell, "zsh"):
-		shellName = "zsh"
+		return "zsh"
 	case strings.Contains(shell, "fish"):
-		shellName = "fish"
+		return "fish"
 	case strings.Contains(shell, "powershell"):
-		shellName = "powershell"
+		return "powershell"
 	case strings.Contains(shell, "cmd"):
-		shellName = "cmd"
+		return "cmd"
+	default:
+		return "sh"
 	}
-
-	return shellName, shell
 }
 
 func isPowerShellAvailable() bool {
