@@ -1,4 +1,9 @@
 // internal/rag/system.go
+// Purpose: RAG orchestration — MAN indexing, vector store, state persistence,
+// and cancellable rebuild/update pipelines.
+// Hardening: UpdateKnowledgeCtx / RebuildWithProgressCtx accept caller contexts
+// so the interrupt manager can abort long pipelines on Ctrl+C; the first-boot
+// indexer now receives the timeout context as well.
 package rag
 
 import (
@@ -73,21 +78,25 @@ func (rs *RAGSystem) logCyan(format string, args ...interface{}) {
 		color.Cyan(format, args...)
 	}
 }
+
 func (rs *RAGSystem) logGreen(format string, args ...interface{}) {
 	if !rs.silent {
 		color.Green(format, args...)
 	}
 }
+
 func (rs *RAGSystem) logBlue(format string, args ...interface{}) {
 	if !rs.silent {
 		color.Blue(format, args...)
 	}
 }
+
 func (rs *RAGSystem) logYellow(format string, args ...interface{}) {
 	if !rs.silent {
 		color.Yellow(format, args...)
 	}
 }
+
 func (rs *RAGSystem) logRed(format string, args ...interface{}) {
 	if !rs.silent {
 		color.Red(format, args...)
@@ -122,21 +131,20 @@ func (rs *RAGSystem) Initialize() error {
 
 func (rs *RAGSystem) InitializeBlocking() error { return rs.Initialize() }
 
+// fullIndexWithTimeout performs first-time MAN indexing under a hard timeout.
+// FIX (interrupt hardening): the timeout context is now passed INTO the
+// indexer so a cancellation drains workers promptly instead of orphaning them.
 func (rs *RAGSystem) fullIndexWithTimeout() error {
 	rs.logBlue("Starting MAN page indexing (first time setup)...")
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), maxIndexingTime)
 	defer cancel()
-
 	progressTicker := time.NewTicker(1 * time.Second)
 	defer progressTicker.Stop()
-
 	indexingDone := make(chan error, 1)
 	completedFlag := make(chan struct{}, 1)
 	const estimatedTotal = 900
-
-	go func() { indexingDone <- rs.indexer.IndexAvailableManPages() }()
-
+	go func() { indexingDone <- rs.indexer.IndexAvailableManPages(ctx) }()
 	go func() {
 		for {
 			select {
@@ -176,7 +184,6 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 			}
 		}
 	}()
-
 	var indexErr error
 	select {
 	case indexErr = <-indexingDone:
@@ -191,7 +198,6 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 		}
 		indexErr = fmt.Errorf("indexing timeout")
 	}
-
 	count := rs.indexer.GetIndexedCount()
 	if count == 0 {
 		rs.logRed("No usable MAN pages indexed")
@@ -203,7 +209,6 @@ func (rs *RAGSystem) fullIndexWithTimeout() error {
 		rs.logYellow("Indexing completed with issues: %v", indexErr)
 	}
 	rs.logGreen("MAN page indexing completed with %d pages", count)
-
 	pages := rs.indexer.GetAllIndexedPages()
 	if len(pages) == 0 {
 		rs.logRed("No pages available for vector indexing")
@@ -369,6 +374,10 @@ func EndProgressBar() {
 	lastProgressLen = 0
 }
 
+// -------------------------------------------------------
+// MITRE / EXPLOIT knowledge
+// -------------------------------------------------------
+
 func (rs *RAGSystem) hasMitreIndex() bool {
 	docs, _ := rs.vectorStore.SearchBySource("T1059", "mitre", 1)
 	return len(docs) > 0
@@ -504,17 +513,49 @@ func (rs *RAGSystem) SemanticSearch(query string, limit int) ([]KnowledgeEntry, 
 	return nil, nil
 }
 
-// FIX: Pass `true` for interactive (user explicitly requested update via slash command).
-func (rs *RAGSystem) UpdateKnowledge() error {
+// -------------------------------------------------------
+// KNOWLEDGE UPDATE + CANCELLABLE REBUILD
+// -------------------------------------------------------
+
+// UpdateKnowledgeCtx runs the full knowledge sync under a caller-controlled
+// context so Ctrl+C (via the interrupt manager) aborts it cleanly.
+//
+// Args:
+//   - ctx: cancellation context.
+//
+// Returns: error (context.Canceled when interrupted).
+// Complexity: O(network sync time).
+func (rs *RAGSystem) UpdateKnowledgeCtx(ctx context.Context) error {
 	if rs.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	return UpdateAll(context.Background(), rs.db, true)
+	// Interactive: the user explicitly requested the update, so consented
+	// embedding bootstraps may prompt.
+	return UpdateAll(ctx, rs.db, true)
+}
+
+// UpdateKnowledge retains backward compatibility for callers without a ctx.
+func (rs *RAGSystem) UpdateKnowledge() error {
+	return rs.UpdateKnowledgeCtx(context.Background())
 }
 
 func (rs *RAGSystem) GetDB() *sql.DB { return rs.db }
 
+// RebuildWithProgress retains backward compatibility (non-cancellable).
 func (rs *RAGSystem) RebuildWithProgress() error {
+	return rs.RebuildWithProgressCtx(context.Background())
+}
+
+// RebuildWithProgressCtx is the cancellable full rebuild. Cancellation is
+// checked at every phase boundary so Ctrl+C returns to the prompt promptly
+// and the progress bar always heals.
+//
+// Args:
+//   - ctx: cancellation context.
+//
+// Returns: error (context.Canceled when interrupted).
+// Complexity: O(indexing time).
+func (rs *RAGSystem) RebuildWithProgressCtx(ctx context.Context) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "/tmp"
@@ -526,16 +567,13 @@ func (rs *RAGSystem) RebuildWithProgress() error {
 	} {
 		_ = os.RemoveAll(dir)
 	}
-
 	rs.initialized = false
 	rs.indexer = NewMANIndexer(rs.env)
 	rs.vectorStore = NewVectorStore(rs.env)
 	rs.SetSilent(true)
-
 	prog := NewProgress()
 	prog.Set("INDEXING MAN PAGES", 0, 900)
 	prog.Start()
-
 	poll := make(chan struct{})
 	go func() {
 		tick := time.NewTicker(200 * time.Millisecond)
@@ -549,32 +587,34 @@ func (rs *RAGSystem) RebuildWithProgress() error {
 			}
 		}
 	}()
-
-	idxErr := rs.indexer.IndexAvailableManPages()
+	idxErr := rs.indexer.IndexAvailableManPages(ctx)
 	close(poll)
-
+	if ctx.Err() != nil {
+		prog.Stop()
+		return ctx.Err()
+	}
 	pages := rs.indexer.GetAllIndexedPages()
 	if idxErr == nil && len(pages) == 0 {
 		prog.Stop()
 		return fmt.Errorf("no MAN pages discovered; check MANPATH")
 	}
-
 	prog.SetStage("BUILDING VECTOR INDEX")
 	vecErr := rs.vectorStore.IndexMANPages(pages)
-
+	if ctx.Err() != nil {
+		prog.Stop()
+		return ctx.Err()
+	}
 	prog.SetStage("INDEXING MITRE ATT&CK")
 	rs.initialized = true
 	if !rs.hasMitreIndex() {
 		rs.indexMitre()
 	}
-
 	prog.SetStage("INDEXING EXPLOITS")
 	rs.loadExploitEntries()
 	if !rs.hasExploitIndex() {
 		rs.indexExploits()
 	}
 	_ = rs.saveSystemState()
-
 	prog.Stop()
 	if idxErr != nil {
 		return idxErr

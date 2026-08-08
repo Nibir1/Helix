@@ -1,5 +1,7 @@
 // internal/ai/providers.go
 // Purpose: Global provider registry and active provider state.
+// Hardening: GetEmbeddings registers its cancel func with the interrupt
+// manager so Ctrl+C aborts embedding HTTP calls instead of killing Helix.
 package ai
 
 import (
@@ -18,6 +20,7 @@ import (
 	openaiprovider "helix/internal/providers/openai"
 	openaicompatible "helix/internal/providers/openai_compatible"
 	qwenprovider "helix/internal/providers/qwen"
+	"helix/internal/utils"
 )
 
 // ProviderType is retained for backward compatibility.
@@ -48,10 +51,8 @@ func InitProviders(settings ProviderSettings) error {
 	if err != nil {
 		return fmt.Errorf("initialize keystore: %w", err)
 	}
-
 	client := providers.NewHTTPClient(60 * time.Second)
 	registry = providers.NewRegistry(keys, client)
-
 	registry.Register(openaiprovider.New(keys.Get("openai"), client))
 	registry.Register(anthropicprovider.New(keys.Get("anthropic"), client))
 	registry.Register(deepseekprovider.New(keys.Get("deepseek"), client))
@@ -60,24 +61,20 @@ func InitProviders(settings ProviderSettings) error {
 	registry.Register(glmprovider.New(keys.Get("glm"), client))
 	registry.Register(ollamaprovider.New(ollamaClient))
 	registry.Register(llamacppprovider.New(client))
-
 	if settings.CustomBaseURL != "" {
 		if err := RegisterCustomProvider(settings.CustomBaseURL, keys.Get("custom")); err != nil {
 			return err
 		}
 	}
-
 	if settings.Provider != "" {
 		if p, err := registry.Get(settings.Provider); err == nil {
 			activeProvider = p
 			activeModel = settings.Model
-
 			if activeModel == "" {
 				activeModel = p.DefaultModel()
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -86,11 +83,9 @@ func RegisterCustomProvider(baseURL, apiKey string) error {
 	if registry == nil {
 		return fmt.Errorf("provider registry not initialized")
 	}
-
 	if baseURL == "" {
 		return fmt.Errorf("custom provider base URL is empty")
 	}
-
 	registry.Register(openaicompatible.New(openaicompatible.Config{
 		Name:         "custom",
 		DisplayName:  "Custom OpenAI-Compatible",
@@ -99,7 +94,6 @@ func RegisterCustomProvider(baseURL, apiKey string) error {
 		DefaultModel: "custom",
 		Local:        false,
 	}, registry.Client()))
-
 	return nil
 }
 
@@ -108,18 +102,14 @@ func UseProvider(name string) error {
 	if registry == nil {
 		return fmt.Errorf("provider registry not initialized")
 	}
-
 	p, err := registry.Get(name)
 	if err != nil {
 		return err
 	}
-
 	activeProvider = p
-
 	if activeModel == "" {
 		activeModel = p.DefaultModel()
 	}
-
 	return nil
 }
 
@@ -138,7 +128,6 @@ func ActiveProviderName() string {
 	if activeProvider == nil {
 		return ""
 	}
-
 	return activeProvider.Name()
 }
 
@@ -147,7 +136,6 @@ func HasProvider(name string) bool {
 	if registry == nil {
 		return false
 	}
-
 	_, err := registry.Get(name)
 	return err == nil
 }
@@ -157,7 +145,6 @@ func ListProviders() []string {
 	if registry == nil {
 		return []string{}
 	}
-
 	return registry.Names()
 }
 
@@ -166,13 +153,11 @@ func ListProviderModels(ctx context.Context) ([]providers.ModelInfo, error) {
 	if activeProvider == nil {
 		return nil, fmt.Errorf("no active provider")
 	}
-
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 	}
-
 	return activeProvider.ListModels(ctx)
 }
 
@@ -181,12 +166,10 @@ func DefaultModelForProvider(name string) string {
 	if registry == nil {
 		return ""
 	}
-
 	p, err := registry.Get(name)
 	if err != nil {
 		return ""
 	}
-
 	return p.DefaultModel()
 }
 
@@ -195,7 +178,6 @@ func SaveProviderKey(provider, key string) error {
 	if registry == nil {
 		return fmt.Errorf("provider registry not initialized")
 	}
-
 	return registry.SetAPIKey(provider, key)
 }
 
@@ -204,7 +186,6 @@ func ProviderHasSavedKey(provider string) bool {
 	if registry == nil {
 		return false
 	}
-
 	return registry.HasAPIKey(provider)
 }
 
@@ -213,17 +194,13 @@ func ProviderStatus() []string {
 	if registry == nil {
 		return []string{"provider registry not initialized"}
 	}
-
 	lines := make([]string, 0)
-
 	for _, name := range registry.Names() {
 		p, err := registry.Get(name)
 		if err != nil {
 			continue
 		}
-
 		keyStatus := "local/no key"
-
 		if p.RequiresAPIKey() {
 			if registry.HasAPIKey(name) {
 				keyStatus = "API key configured"
@@ -231,12 +208,10 @@ func ProviderStatus() []string {
 				keyStatus = "API key missing"
 			}
 		}
-
 		active := ""
 		if activeProvider != nil && activeProvider.Name() == name {
 			active = " (active)"
 		}
-
 		lines = append(lines, fmt.Sprintf(
 			"%s - %s - %s%s",
 			name,
@@ -245,7 +220,6 @@ func ProviderStatus() []string {
 			active,
 		))
 	}
-
 	return lines
 }
 
@@ -254,7 +228,6 @@ func GetProvider() ProviderType {
 	if activeProvider == nil {
 		return ProviderType("none")
 	}
-
 	return ProviderType(activeProvider.Name())
 }
 
@@ -268,7 +241,6 @@ func ConfigureOpenAIKey(key string) {
 	if registry == nil {
 		return
 	}
-
 	_ = registry.SetAPIKey("openai", key)
 }
 
@@ -277,7 +249,6 @@ func HasOpenAIKey() bool {
 	if registry == nil {
 		return false
 	}
-
 	return registry.HasAPIKey("openai")
 }
 
@@ -286,7 +257,6 @@ func LoadOpenAIKeyFromDisk() (string, error) {
 	if registry == nil {
 		return "", fmt.Errorf("provider registry not initialized")
 	}
-
 	return registry.Keys().Get("openai"), nil
 }
 
@@ -295,7 +265,6 @@ func SaveOpenAIKeyToDisk(key string) error {
 	if registry == nil {
 		return fmt.Errorf("provider registry not initialized")
 	}
-
 	return registry.SetAPIKey("openai", key)
 }
 
@@ -313,7 +282,10 @@ func GetEmbeddings(texts []string) ([][]float32, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-
+	// FIX (interrupt hardening): Ctrl+C while waiting on embedding HTTP calls
+	// cancels the request and returns control to the prompt.
+	unreg := utils.RegisterOperation(cancel)
+	defer unreg()
 	// 1) OpenAI when a key exists (highest-quality embeddings).
 	if registry.HasAPIKey("openai") {
 		if p, err := registry.Get("openai"); err == nil {
@@ -322,20 +294,17 @@ func GetEmbeddings(texts []string) ([][]float32, error) {
 			}
 		}
 	}
-
 	// 2) Active provider when it supports embeddings (e.g. Ollama).
 	if activeProvider != nil {
 		if ep, ok := activeProvider.(providers.EmbeddingProvider); ok {
 			return ep.Embed(ctx, texts, "")
 		}
 	}
-
 	// 3) Local Ollama fallback (no OpenAI key required).
 	if p, err := registry.Get("ollama"); err == nil {
 		if ep, ok := p.(providers.EmbeddingProvider); ok {
 			return ep.Embed(ctx, texts, "")
 		}
 	}
-
 	return nil, fmt.Errorf("embeddings are not supported by any available provider")
 }

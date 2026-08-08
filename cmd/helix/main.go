@@ -1,4 +1,9 @@
 // cmd/helix/main.go
+// Purpose: Helix entrypoint — interactive REPL, non-interactive bridge,
+// provider bootstrap, and the `helix update` subcommand.
+// Hardening: process-wide SIGINT routing so Ctrl+C cancels the running
+// operation instead of killing the shell; Ctrl+C at the prompt behaves like
+// a real shell (fresh prompt, never exits).
 package main
 
 import (
@@ -40,10 +45,14 @@ func main() {
 		runKnowledgeUpdate()
 		return
 	}
-
 	if handled, code := maybeRunNonInteractive(); handled {
 		os.Exit(code)
 	}
+
+	// FIX (interrupt hardening): Ctrl+C during any cooked-mode operation must
+	// cancel the operation, not kill the shell. Installed before any
+	// long-running work can start.
+	utils.InstallInterruptHandler()
 
 	var err error
 	cfg, err = config.DefaultConfig()
@@ -51,38 +60,31 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Config error: %v\n", err)
 		return
 	}
-
 	if cfg.UserPrefs.DebugMode {
 		_ = os.Setenv("HELIX_DEBUG", "1")
 	}
-
 	if cfg.UserPrefs.UserName != "" {
 		shell.SetUserName(cfg.UserPrefs.UserName)
 	}
-
 	env = shell.DetectEnvironment()
 	sandbox = commands.NewDirectorySandbox()
 	execConfig = commands.DefaultExecuteConfig()
-
 	homeDir, _ := os.UserHomeDir()
 	if homeDir == "" {
 		homeDir = "/tmp"
 	}
-
 	db, err := rag.OpenDB(homeDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Database error: %v\n", err)
 		return
 	}
 	defer func() { _ = db.Close() }()
-
 	_ = ai.InitProviders(ai.ProviderSettings{
 		Provider:      normalizeProviderName(cfg.Provider),
 		Model:         cfg.ProviderModel,
 		CustomBaseURL: cfg.CustomProviderBaseURL,
 	})
 	defer ai.StopLocalRuntimes()
-
 	needsSetup := cfg.Provider == "" || !ai.ModelIsLoaded()
 	if !needsSetup {
 		_ = ai.UseProvider(cfg.Provider)
@@ -96,7 +98,6 @@ func main() {
 		cfg.ProviderModel = ai.ActiveModel()
 		_ = cfg.SavePreferences()
 	}
-
 	ragSystem = rag.NewSystem(env, db)
 	ragSystem.SetSilent(true)
 	go func() {
@@ -106,20 +107,15 @@ func main() {
 			fmt.Fprintf(os.Stderr, "[boot] knowledge bootstrap: %v\n", err)
 		}
 	}()
-
 	gui := ux.NewUX()
-
 	dbg := os.Getenv("HELIX_DEBUG") == "1"
-
 	audioDone := make(chan error, 1)
 	go func() { audioDone <- audio.Init() }()
-
 	select {
 	case aerr := <-audioDone:
 		if aerr != nil {
 			color.Yellow("Audio engine unavailable: %v", aerr)
 			color.Yellow("Helix will stay silent. Try /audio on after checking your sound device.")
-
 			if dbg {
 				color.Yellow("Audio debug: speaker initialization failed at startup.")
 			}
@@ -127,54 +123,43 @@ func main() {
 	case <-time.After(2 * time.Second):
 		color.Yellow("Audio engine init timeout; continuing silent")
 		color.Yellow("Use /audio on to retry once your sound device is available.")
-
 		if dbg {
 			color.Yellow("Audio debug: startup initialization exceeded 2s.")
 		}
 	}
-
 	commands.SetPrompter(gui)
 	highlighter = utils.NewSyntaxHighlighter()
 	commands.SetSyntaxHighlighter(highlighter)
-
 	stealthExec := stealth.NewStealthExecutor(stealth.DefaultStealthConfig())
 	reconEng := recon.NewReconEngine(env, recon.DefaultReconConfig())
-
 	agentCore = agent.NewAgent(env, ragSystem, sandbox, execConfig, cfg.UserPrefs.TypingEffect, gui, stealthExec, reconEng)
 	agentCore.OnSlashCommand = func(input string) bool { return handleSlashCommand(input) }
-
 	histPath := homeDir + "/.helix_history"
 	history, _ := utils.LoadHistory(histPath)
-
 	fmt.Println("⚡ Helix Native Shell. Type '/help' for SOS or 'exit' to quit.")
-
 	for {
 		input, err := shell.ReadLine(shell.GetContext(), highlighter, history)
 		if err != nil {
-			if err.Error() == "EOF" || err.Error() == "interrupted" {
-				break
+			if err.Error() == "EOF" {
+				break // Ctrl+D on empty line / closed stdin still exits.
 			}
+			// FIX (interrupt hardening): Ctrl+C at the prompt behaves like a
+			// real shell: clear the line and redraw a fresh prompt. It must
+			// NEVER exit Helix.
 			continue
 		}
-
 		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
 		}
-
 		if input == "exit" || input == "quit" {
 			break
 		}
-
 		_ = utils.AppendHistory(histPath, input)
 		history = append(history, input)
-
 		shell.PrintTransient(input)
-
 		agentCore.HandleInput(input)
-
 		gui.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
-
 		fmt.Print("\x1b]133;D;0\x07")
 	}
 }
@@ -185,7 +170,6 @@ func runNativeSetup() error {
 	for i, p := range providerOptions {
 		fmt.Printf("%d) %s\n", i+1, p.Label)
 	}
-
 	choiceStr := commands.AskLine("Enter provider number")
 	var choice int
 	if _, err := fmt.Sscanf(choiceStr, "%d", &choice); err != nil {
@@ -194,7 +178,6 @@ func runNativeSetup() error {
 	if choice < 1 || choice > len(providerOptions) {
 		return fmt.Errorf("invalid selection")
 	}
-
 	prov := providerOptions[choice-1].ID
 	if err := useProviderInteractive(prov); err != nil {
 		return err
@@ -202,6 +185,9 @@ func runNativeSetup() error {
 	return nil
 }
 
+// runKnowledgeUpdate implements the `helix update` subcommand.
+// FIX (interrupt hardening): the subcommand is cancellable via Ctrl+C and
+// exits with 130 (standard SIGINT code) instead of dying mid-write.
 func runKnowledgeUpdate() {
 	color.Cyan("Helix Knowledge Update Tool")
 	homeDir, err := os.UserHomeDir()
@@ -215,8 +201,17 @@ func runKnowledgeUpdate() {
 	}
 	defer func() { _ = db.Close() }()
 
-	// FIX: Pass `true` for interactive (user explicitly ran `helix update`).
-	if err := rag.UpdateAll(context.Background(), db, true); err != nil {
+	utils.InstallInterruptHandler()
+	ctx, cancel := context.WithCancel(context.Background())
+	unreg := utils.RegisterOperation(cancel)
+	err = rag.UpdateAll(ctx, db, true)
+	unreg()
+	cancel()
+	if err != nil {
+		if ctx.Err() != nil {
+			color.Yellow("Update cancelled.")
+			os.Exit(130)
+		}
 		if errors.Is(err, rag.ErrOffline) {
 			color.Yellow("Offline — knowledge update requires internet connectivity.")
 			os.Exit(1)

@@ -1,7 +1,14 @@
 // internal/rag/manindexer.go
+// Purpose: MAN page discovery, parsing, and in-memory indexing with parallel
+// workers feeding the vector store.
+// Hardening: IndexAvailableManPages and its workers now accept a context. On
+// cancellation the workers drain the discovery channel without exec'ing `man`,
+// so the producer never blocks and the whole indexing pipeline unwinds within
+// milliseconds of Ctrl+C.
 package rag
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,7 +40,7 @@ type MANIndexer struct {
 	mu              sync.RWMutex
 	categories      []string
 	discoveredTotal int
-	silent          bool // NEW
+	silent          bool
 }
 
 func NewMANIndexer(env shell.Env) *MANIndexer {
@@ -57,28 +64,41 @@ func (mi *MANIndexer) logBlue(format string, args ...interface{}) {
 		color.Blue(format, args...)
 	}
 }
+
 func (mi *MANIndexer) logCyan(format string, args ...interface{}) {
 	if !mi.silent {
 		color.Cyan(format, args...)
 	}
 }
+
 func (mi *MANIndexer) logGreen(format string, args ...interface{}) {
 	if !mi.silent {
 		color.Green(format, args...)
 	}
 }
+
 func (mi *MANIndexer) logYellow(format string, args ...interface{}) {
 	if !mi.silent {
 		color.Yellow(format, args...)
 	}
 }
+
 func (mi *MANIndexer) logRed(format string, args ...interface{}) {
 	if !mi.silent {
 		color.Red(format, args...)
 	}
 }
 
-func (mi *MANIndexer) IndexAvailableManPages() error {
+// IndexAvailableManPages discovers and indexes MAN pages under a caller
+// context so Ctrl+C (via the interrupt manager) aborts indexing promptly.
+//
+// Args:
+//   - ctx: cancellation context.
+//
+// Returns: error (filesystem/index errors; context.Canceled is absorbed by the
+// drain-on-cancel workers and surfaces as a fast, clean unwind).
+// Complexity: O(number of discovered pages × man exec time) when not cancelled.
+func (mi *MANIndexer) IndexAvailableManPages(ctx context.Context) error {
 	mi.logBlue("Scanning for MAN pages...")
 	if err := mi.ensureIndexDir(); err != nil {
 		return fmt.Errorf("failed to create index directory: %w", err)
@@ -91,7 +111,7 @@ func (mi *MANIndexer) IndexAvailableManPages() error {
 	workerCount := 6
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
-		go mi.manPageWorker(&wg, pageChan, resultChan)
+		go mi.manPageWorker(ctx, &wg, pageChan, resultChan)
 	}
 	go func() {
 		wg.Wait()
@@ -204,9 +224,16 @@ func (mi *MANIndexer) tryDirectoryScan(ch chan<- string) int {
 	return count
 }
 
-func (mi *MANIndexer) manPageWorker(wg *sync.WaitGroup, pageChan <-chan string, resultChan chan<- MANPage) {
+// manPageWorker consumes discovery candidates and renders MAN pages.
+// FIX (interrupt hardening): on cancellation the worker keeps draining the
+// channel (so the producer never blocks on a full buffer) but skips the
+// expensive `man` exec, letting the pipeline unwind within milliseconds.
+func (mi *MANIndexer) manPageWorker(ctx context.Context, wg *sync.WaitGroup, pageChan <-chan string, resultChan chan<- MANPage) {
 	defer wg.Done()
 	for command := range pageChan {
+		if ctx.Err() != nil {
+			continue // drain fast, do no work
+		}
 		if !mi.isUsefulCommand(command) {
 			continue
 		}

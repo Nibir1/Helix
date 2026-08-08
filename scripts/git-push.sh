@@ -3,35 +3,25 @@ set -e
 
 echo "⚡ Helix v1.0.0 Release Pipeline"
 
-# 1. Stage and commit the final production hardening
+# 1. Stage and commit the recent interrupt-hardening changes only
 git add .
 git commit -m "$(cat <<'EOF'
-feat(release): finalize v1.0.0 production hardening, UX polish, and resilient git pipeline
+feat(release): v1.0.0 interrupt hardening — cancellable Ctrl+C pipelines
 
-UX & Shell Hardening:
-- Add "HELIX :: REASONING" animated TrueColor thinker for AI latency
-- Intercept history/fc/!! natively to bypass child-shell isolation
-- Guard unknown slash commands to prevent stdin black-hole hangs
-- Harden install.sh/install.ps1 against non-interactive stdin EOF crashes
-- Fix shell-aware quote balancing (literal quotes inside opposing types)
+Interrupt & Signal Hardening:
+- Add process-wide SIGINT manager (internal/utils/interrupt.go) that cancels
+  the running operation instead of killing the shell
+- Ctrl+C now aborts /knowledge-update, /rag-reindex, /rag-rebuild, planner
+  waits, and embedding calls, then returns to a live prompt
+- Ctrl+C at the prompt redraws a fresh prompt (shell-like, never exits)
+- `helix update` is cancellable and exits 130 on interrupt
+- AI HTTP waits and embedding resolution register interrupt scopes
 
-Resilient Git Pipeline (Production-Ready):
-- Implement idempotent git commit (graceful skip on clean working tree)
-- Add resilient git add fallback (auto-stages modified files on pathspec miss)
-- Fix silent error swallowing in sandbox execution (non-zero exits halt pipeline)
-- Add full annotated tag support via secure temporary message files
-- Remove unused parameters and satisfy strict linter rules
-
-Knowledge Base & RAG (Phase 3.5c):
-- Implement schema versioning and transactional migrations
-- Add ETag conditional-GET caching for NVD, KEV, Exploit-DB, MITRE
-- Complete defensive /explain triad with "Safer Operational Alternatives"
-- Add OpenAI -> Ollama zero-key embedding fallback chain
-
-System & Infrastructure:
-- Add /purge command for full local data wipe with double confirmation
-- Wire determinate progress bars with exact row counts for all fetches
-- Finalize CI/CD matrix, GoReleaser v2, and cross-platform installers
+Cancellable RAG Pipelines:
+- UpdateAll checks the caller context between every threat-feed stage
+- MAN indexer workers drain-on-cancel so rebuilds unwind in milliseconds
+- UpdateKnowledgeCtx / RebuildWithProgressCtx add phase-boundary checkpoints
+- Progress bars and cursor always heal on cancellation exit paths
 EOF
 )" || echo "⚠️  No changes to commit, continuing..."
 

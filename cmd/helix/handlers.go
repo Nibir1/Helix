@@ -1,4 +1,8 @@
 // cmd/helix/handlers.go
+// Purpose: Master slash-command dispatcher and all Helix control handlers.
+// Hardening: /knowledge-update, /rag-reindex, and /rag-rebuild now register
+// cancellable contexts with the interrupt manager so Ctrl+C aborts the running
+// pipeline and returns to a live prompt instead of killing Helix.
 package main
 
 import (
@@ -25,6 +29,7 @@ import (
 // -------------------------------------------------------
 // MASTER DISPATCHER
 // -------------------------------------------------------
+
 func handleSlashCommand(input string) bool {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
@@ -103,9 +108,9 @@ func handleSlashCommand(input string) bool {
 // -------------------------------------------------------
 // /about — Helix philosophy & the creation
 // -------------------------------------------------------
+
 func handleAbout() {
 	shell.RenderAbout(config.HelixVersion)
-
 	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ THE PHILOSOPHY"))
 	philosophy := []string{
 		"Helix inverts the terminal: instead of forcing humans to speak",
@@ -123,7 +128,6 @@ func handleAbout() {
 	for _, l := range philosophy {
 		fmt.Printf("  %s %s\n", shell.Fg(shell.HexSubtle, "│"), shell.Fg(shell.HexText, l))
 	}
-
 	fmt.Println()
 	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ THE CREATION"))
 	creation := []string{
@@ -148,6 +152,7 @@ func handleAbout() {
 // -------------------------------------------------------
 // /setup — Unified Setup Wizard
 // -------------------------------------------------------
+
 func handleSetup() {
 	for {
 		fmt.Println()
@@ -157,7 +162,6 @@ func handleSetup() {
 		fmt.Printf("  %s %s\n", shell.Fg(shell.HexTertiary, "2)"), shell.Fg(shell.HexText, "Configure AI Provider"))
 		fmt.Printf("  %s %s\n", shell.Fg(shell.HexTertiary, "3)"), shell.Fg(shell.HexText, "Exit Setup"))
 		fmt.Println()
-
 		choice := strings.TrimSpace(commands.AskLine("  Select option (1-3)"))
 		switch choice {
 		case "1":
@@ -196,6 +200,7 @@ func handleSetup() {
 // -------------------------------------------------------
 // /debug — Toggle Debug Logging
 // -------------------------------------------------------
+
 func handleDebugCommand(input string) {
 	args := strings.Fields(input)
 	if len(args) < 2 {
@@ -227,16 +232,14 @@ func handleDebugCommand(input string) {
 // -------------------------------------------------------
 // /help — SOS Protocol
 // -------------------------------------------------------
+
 func handleHelp() {
 	const colWidth = 24
-
 	rule := "  " + shell.Fg(shell.HexSubtle, strings.Repeat("─", 70))
-
 	fmt.Println()
 	fmt.Println("  " + shell.Fg(shell.HexPrimary, "⚡ HELIX NATIVE SHELL") + " " + shell.Fg(shell.HexRectifier, "// SOS PROTOCOL"))
 	fmt.Println(rule)
 	fmt.Println("  " + shell.Fg(shell.HexSubtle, "AI-native shell · natural language · MAN pages · threat intelligence"))
-
 	helpSection("CORE & NAVIGATION")
 	helpLine(colWidth, "/about", "Helix philosophy, banner & creator")
 	helpLine(colWidth, "/help", "Show this SOS menu")
@@ -246,14 +249,12 @@ func handleHelp() {
 	helpLine(colWidth, "/status", "Check background RAG and AI provider status")
 	helpLine(colWidth, "/doctor", "Run full system diagnostics")
 	helpLine(colWidth, "/online", "Check internet connectivity")
-
 	helpSection("AI & PROVIDERS")
 	helpLine(colWidth, "/provider <name>", "Switch AI provider (openai, anthropic, ollama…)")
 	helpLine(colWidth, "/provider-status", "Show detailed provider health and API keys")
 	helpLine(colWidth, "/model <id>", "Switch active AI model")
 	helpLine(colWidth, "/test-basic-ai", "Smoke test the active AI model")
 	helpLine(colWidth, "/explain <cmd>", "AI-powered defensive analysis of a command")
-
 	helpSection("RAG & KNOWLEDGE BASE")
 	helpLine(colWidth, "/rag-status", "Show RAG indexing progress and vector stats")
 	helpLine(colWidth, "/rag-reindex", "Trigger background RAG reindex")
@@ -262,7 +263,6 @@ func handleHelp() {
 	helpLine(colWidth, "/knowledge-update", "Fetch latest CVEs, CISA KEV, Exploits, MITRE")
 	helpLine(colWidth, "/knowledge-status", "Show knowledge database row counts")
 	helpLine(colWidth, "/knowledge-reindex", "Rebuild FTS5 search index")
-
 	helpSection("SECURITY, RECON & STEALTH")
 	helpLine(colWidth, "/vuln <query>", "Defensive vulnerability intel (CVE/EDB/MITRE)")
 	helpLine(colWidth, "/scan authorize <ip>", "Authorize recon target (written scope)")
@@ -270,15 +270,11 @@ func handleHelp() {
 	helpLine(colWidth, "/sandbox <mode>", "Directory confinement (off, current, strict)")
 	helpLine(colWidth, "/stealth <on|off>", "Private history mode (suppresses shell history)")
 	helpLine(colWidth, "/dry-run", "Toggle command execution preview mode")
-
 	helpSection("UTILITIES & GIT")
 	helpLine(colWidth, "/git <request>", "Natural language git operations with safety")
 	helpLine(colWidth, "/audio <on|off>", "Toggle tonal audio feedback")
-
 	helpSection("DANGER ZONE")
 	helpLine(colWidth, "/purge", "Wipe ALL Helix data (keys, DBs, caches) for a fresh start")
-
-	// NEW: Tips & Acceleration section
 	helpSection("TIPS & ACCELERATION")
 	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
 	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
@@ -300,14 +296,12 @@ func handleHelp() {
 		shell.Fg(shell.HexSubtle, "Example: ") +
 		shell.Fg(shell.HexSecondary, "\"find large files and delete them\""))
 	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
-
 	helpSection("PROMPT ANATOMY")
 	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
 		shell.Seg(shell.HexPrimary, shell.HexVoid, " HELIX ") + shell.Fg(shell.HexSubtle, " identity  ") +
 		shell.Seg(shell.HexSecondary, shell.HexText, " ~/path ") + shell.Fg(shell.HexSubtle, " context  ") +
 		shell.Seg(shell.HexGrid, shell.HexTertiary, " main ") + shell.Fg(shell.HexSubtle, " telemetry  ") +
 		shell.Fg(shell.HexRectifier, "❯") + shell.Fg(shell.HexSubtle, " interactive"))
-
 	fmt.Println(rule)
 	fmt.Println()
 }
@@ -335,6 +329,7 @@ func helpLine(colWidth int, cmd, desc string) {
 // Guarantees Helix NEVER hangs or misroutes a typo'd /command:
 // immediate feedback, no shell execution, no planner call.
 // -------------------------------------------------------
+
 func handleUnknownSlashCommand(cmd string) {
 	audio.PlayError()
 	fmt.Println()
@@ -350,7 +345,7 @@ func handleUnknownSlashCommand(cmd string) {
 }
 
 // -------------------------------------------------------
-// [ALL OTHER EXISTING HANDLERS REMAIN UNCHANGED BELOW]
+// STATUS / SANDBOX / CD / GIT
 // -------------------------------------------------------
 
 func handleStatus() {
@@ -424,6 +419,10 @@ func handleGitCommand(input string) {
 	}
 }
 
+// -------------------------------------------------------
+// RAG STATUS / REINDEX / RESET / REBUILD
+// -------------------------------------------------------
+
 func handleRAGStatus() {
 	color.Cyan("RAG System Status:")
 	if ragSystem == nil {
@@ -458,16 +457,25 @@ func handleRAGStatus() {
 	}
 }
 
-// -------------------------------------------------------
-// /rag-reindex – FULL foreground rebuild with live progress
-// -------------------------------------------------------
+// handleRAGReindex performs a FULL foreground rebuild with live progress.
+// FIX (interrupt hardening): Ctrl+C cancels the rebuild and returns to the
+// prompt instead of killing Helix.
 func handleRAGReindex() {
 	if ragSystem == nil {
 		color.Red("RAG system not initialized")
 		return
 	}
 	color.Cyan("Forcing full RAG reindex…")
-	if err := ragSystem.RebuildWithProgress(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	unreg := utils.RegisterOperation(cancel)
+	err := ragSystem.RebuildWithProgressCtx(ctx)
+	unreg()
+	cancel()
+	if err != nil {
+		if ctx.Err() != nil {
+			color.Yellow("RAG reindex cancelled.")
+			return
+		}
 		color.Red("RAG reindex failed: %v", err)
 		return
 	}
@@ -489,9 +497,9 @@ func handleRAGReset() {
 	color.Green("RAG reset completed.")
 }
 
-// -------------------------------------------------------
-// /rag-rebuild – confirmed full rebuild with live progress
-// -------------------------------------------------------
+// handleRAGRebuild performs a confirmed full rebuild with live progress.
+// FIX (interrupt hardening): Ctrl+C cancels the rebuild and returns to the
+// prompt instead of killing Helix.
 func handleRAGRebuild() {
 	if ragSystem == nil {
 		color.Red("RAG system not initialized")
@@ -503,12 +511,25 @@ func handleRAGRebuild() {
 		color.Yellow("RAG rebuild cancelled by user")
 		return
 	}
-	if err := ragSystem.RebuildWithProgress(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	unreg := utils.RegisterOperation(cancel)
+	err := ragSystem.RebuildWithProgressCtx(ctx)
+	unreg()
+	cancel()
+	if err != nil {
+		if ctx.Err() != nil {
+			color.Yellow("RAG rebuild cancelled.")
+			return
+		}
 		color.Red("RAG rebuild failed: %v", err)
 		return
 	}
 	color.Green("RAG rebuild completed successfully and is now ACTIVE.")
 }
+
+// -------------------------------------------------------
+// TOGGLES / SMOKE TESTS
+// -------------------------------------------------------
 
 func toggleDryRun() {
 	execConfig.DryRun = !execConfig.DryRun
@@ -562,6 +583,10 @@ func handleStealthCommand(input string) {
 	}
 }
 
+// -------------------------------------------------------
+// RECON
+// -------------------------------------------------------
+
 func handleQuickScan(args []string) {
 	if len(args) < 2 {
 		color.Cyan("Usage: /scan authorize <target> --reason \"<written scope>\"")
@@ -611,13 +636,16 @@ func handleQuickScan(args []string) {
 	}
 }
 
+// -------------------------------------------------------
+// /explain — defensive debrief
+// -------------------------------------------------------
+
 func handleExplainCommand(input string) {
 	args := strings.TrimSpace(strings.TrimPrefix(input, "/explain"))
 	if args == "" {
 		color.Red("Usage: /explain <command or technique description>")
 		return
 	}
-
 	mitreContext := ""
 	if ragSystem != nil && ragSystem.IsInitialized() {
 		snippets, err := ragSystem.RetrieveMitreContext(args, 3)
@@ -625,7 +653,6 @@ func handleExplainCommand(input string) {
 			mitreContext = "MITRE ATT&CK knowledge:\n" + strings.Join(snippets, "\n")
 		}
 	}
-
 	prompt := fmt.Sprintf(`You are Helix's defensive explainability module.
 Given the user's command or technique description, produce a structured defensive debrief with these sections:
 1. Technique(s): Which MITRE ATT&CK techniques are relevant? List IDs and names.
@@ -635,19 +662,15 @@ Given the user's command or technique description, produce a structured defensiv
 MITRE Context: %s
 User Request: %s
 FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lines.`, mitreContext, args)
-
 	explainConfig := ai.ModelConfig{Temperature: 0.7, TopP: 0.9, TopK: 40, MaxTokens: 512}
-
 	think := ux.NewThinker("HELIX :: REASONING")
 	think.Start()
 	resp, err := ai.RunModelWithConfig(prompt, explainConfig)
 	think.Stop()
-
 	if err != nil {
 		color.Red("AI call failed: %v", err)
 		return
 	}
-
 	cleaned := cleanDebrief(strings.TrimSpace(resp))
 	if agentCore != nil {
 		agentCore.GetUX().PrintAIMessage(cleaned, agentCore.GetTypingEffect())
@@ -657,17 +680,14 @@ FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lin
 func listAvailableModels() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	think := ux.NewThinker("HELIX :: REASONING")
 	think.Start()
 	models, err := ai.ListProviderModels(ctx)
 	think.Stop()
-
 	if err != nil {
 		color.Red("Could not list models: %v", err)
 		return
 	}
-
 	color.Cyan("Available models:")
 	for i, model := range models {
 		if i >= 50 {
@@ -693,9 +713,15 @@ func cleanDebrief(text string) string {
 	return text
 }
 
+// -------------------------------------------------------
+// KNOWLEDGE BASE
+// -------------------------------------------------------
+
 // handleKnowledgeUpdate runs a staged fetch with a live progress bar that
 // politely pauses whenever the pipeline needs to ask the user something
 // (e.g. the Ollama embedding bootstrap).
+// FIX (interrupt hardening): Ctrl+C cancels the update and returns to the
+// prompt instead of killing Helix.
 func handleKnowledgeUpdate() {
 	if ragSystem == nil || ragSystem.GetDB() == nil {
 		color.Red("Knowledge database not available.")
@@ -704,7 +730,6 @@ func handleKnowledgeUpdate() {
 	prog := rag.NewProgress()
 	prog.SetStage("STARTING KNOWLEDGE UPDATE")
 	prog.Start()
-
 	rag.OnUpdateStage = func(stage string, current, total int) {
 		if total > 0 {
 			prog.Set(stage, current, total)
@@ -720,13 +745,20 @@ func handleKnowledgeUpdate() {
 		}
 	}
 
-	err := ragSystem.UpdateKnowledge()
+	ctx, cancel := context.WithCancel(context.Background())
+	unreg := utils.RegisterOperation(cancel)
+	err := ragSystem.UpdateKnowledgeCtx(ctx)
+	unreg()
+	cancel()
 
 	rag.OnUpdateStage = nil
 	rag.OnInteractivePrompt = nil
-	prog.Stop()
-
+	prog.Stop() // always heals the line + cursor, even after cancellation
 	if err != nil {
+		if ctx.Err() != nil {
+			color.Yellow("Knowledge update cancelled.")
+			return
+		}
 		if errors.Is(err, rag.ErrOffline) {
 			color.Yellow("You appear to be OFFLINE — knowledge update requires internet connectivity.")
 			return
@@ -827,9 +859,7 @@ func displayVulnEntries(entries []rag.VulnIntel) {
 	color.Yellow("Defensive use only: prioritize patching and detection.")
 }
 
-// -------------------------------------------------------
-// /knowledge-reindex – FTS rebuild with live progress
-// -------------------------------------------------------
+// handleKnowledgeReindex rebuilds the FTS index with live progress.
 func handleKnowledgeReindex() {
 	if ragSystem == nil || ragSystem.GetDB() == nil {
 		color.Red("Knowledge database not available.")
@@ -839,14 +869,11 @@ func handleKnowledgeReindex() {
 	prog := rag.NewProgress()
 	prog.SetStage("REBUILDING FTS INDEX")
 	prog.Start()
-
-	// FIX: Pass the progress callback to drive the determinate bar.
 	err := rag.ReindexKnowledgeFTS(db, func(current, total int) {
 		if total > 0 {
 			prog.Set("REBUILDING FTS INDEX", current, total)
 		}
 	})
-
 	prog.Stop()
 	if err != nil {
 		color.Red("FTS reindex failed: %v", err)
@@ -859,6 +886,10 @@ func handleKnowledgeReindex() {
 	}
 	color.Green("FTS index rebuilt successfully. Rows indexed: %d", count)
 }
+
+// -------------------------------------------------------
+// DOCTOR / PROVIDERS / MODELS
+// -------------------------------------------------------
 
 func handleDoctor() {
 	color.Cyan("=== Helix Doctor ===")
@@ -973,27 +1004,22 @@ func displayProviderStatus() {
 // Complexity: O(1), plus possible audio-device initialization time.
 func handleAudioCommand(input string) {
 	args := strings.Fields(input)
-
 	if len(args) < 2 {
 		current := "ON"
 		if !audio.IsEnabled() {
 			current = "OFF"
 		}
-
 		ready := "READY"
 		if !audio.IsReady() {
 			ready = "NOT READY"
 		}
-
 		color.Cyan("Audio is currently: %s (%s)", current, ready)
 		color.Yellow("Usage: /audio <on|off>")
 		return
 	}
-
 	switch strings.ToLower(args[1]) {
 	case "on", "enable":
 		audio.SetEnabled(true)
-
 		// Explicit user action: force a retry of speaker initialization.
 		if err := audio.EnsureReady(true); err != nil {
 			color.Yellow("Audio enabled, but the sound engine is unavailable: %v", err)
@@ -1001,11 +1027,9 @@ func handleAudioCommand(input string) {
 			color.Yellow("SSH, Docker, and headless sessions have no local speaker.")
 			return
 		}
-
 		color.Green("Audio enabled")
 		audio.PlayAlert()
 		time.Sleep(100 * time.Millisecond)
-
 	case "off", "disable":
 		audio.SetEnabled(false)
 		color.Yellow("Audio disabled")

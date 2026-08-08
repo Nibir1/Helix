@@ -2,11 +2,14 @@
 // Package agent provides the core Agent Mode orchestrator.
 // It accepts natural language input, plans steps via the AI planner,
 // and executes them through a safety‑first pipeline.
-
+// Hardening: Ctrl+C aborts planning gracefully with a clean cancellation
+// message instead of a raw provider error.
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,7 +39,6 @@ type Agent struct {
 	stealth        *stealth.StealthExecutor // stealth engine (memory‑only, log‑free)
 	stealthEnabled bool                     // runtime toggle; if true, use stealth execution
 	recon          *recon.ReconEngine
-
 	// OnSlashCommand is called when input starts with "/".
 	// It receives the full raw input line.  Return true if the command was
 	// handled internally; false to pass it to the AI planner.
@@ -55,11 +57,9 @@ func NewAgent(
 	reconEng *recon.ReconEngine,
 ) *Agent {
 	gm := commands.NewGitManager(env, execConfig, sandbox)
-
 	if gui == nil {
 		gui = ux.NewUX()
 	}
-
 	return &Agent{
 		env:            env,
 		rag:            ragSystem,
@@ -80,9 +80,7 @@ func (a *Agent) EnableStealth(on bool) {
 		a.ux.PrintWarning("Private execution engine not available")
 		return
 	}
-
 	a.stealthEnabled = on
-
 	if on {
 		a.ux.PrintSuccess("Private history mode ENABLED — commands avoid writing shell history")
 	} else {
@@ -101,14 +99,12 @@ func (a *Agent) HandleInput(userInput string) {
 	if userInput == "" {
 		return
 	}
-
 	// --- Slash-command interception ---
 	if strings.HasPrefix(userInput, "/") && a.OnSlashCommand != nil {
 		if a.OnSlashCommand(userInput) {
 			return
 		}
 	}
-
 	// --- Unified shell input classification ---
 	classification := shell.Classify(userInput)
 	a.ux.PrintDebug(fmt.Sprintf(
@@ -123,7 +119,6 @@ func (a *Agent) HandleInput(userInput string) {
 		}
 		return
 	}
-
 	// --- RAG retrieval (if available) ---
 	ragContext := ""
 	if a.rag != nil && a.rag.IsInitialized() {
@@ -139,7 +134,6 @@ func (a *Agent) HandleInput(userInput string) {
 			a.ux.PrintDebug(fmt.Sprintf("RAG retrieval skipped: %v", err))
 		}
 	}
-
 	// --- Standard planning ---
 	// FIX: Feed the LIVE CWD to the planner, not just the sandbox root.
 	cwd := a.sandbox.GetCurrentDirectory()
@@ -153,7 +147,6 @@ func (a *Agent) HandleInput(userInput string) {
 		cwd,
 	)
 	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
-
 	// HELIX THINKER: animate the neural link while the planner reasons,
 	// so the user always sees Helix thinking instead of a frozen prompt.
 	think := ux.NewThinker("HELIX :: REASONING")
@@ -161,6 +154,12 @@ func (a *Agent) HandleInput(userInput string) {
 	rawPlanOutput, err := ai.RunPlannerWithRetry(plannerPrompt)
 	think.Stop()
 	if err != nil {
+		// FIX (interrupt hardening): Ctrl+C aborts planning gracefully with a
+		// clean message instead of a raw provider error.
+		if errors.Is(err, context.Canceled) {
+			a.ux.PrintWarning("Operation cancelled.")
+			return
+		}
 		a.ux.PrintError(fmt.Sprintf("Planner model error: %v", err))
 		think.Start()
 		resp, chatErr := ai.RunModel(userInput)
@@ -186,7 +185,6 @@ func (a *Agent) HandleInput(userInput string) {
 		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		return
 	}
-
 	safePlan, err := a.prepareSafePlan(userInput, plan)
 	if err != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Safety layer error: %v", err))
@@ -194,7 +192,6 @@ func (a *Agent) HandleInput(userInput string) {
 	} else {
 		plan = safePlan
 	}
-
 	for i, step := range plan.Steps {
 		if len(plan.Steps) > 1 {
 			a.ux.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
@@ -243,17 +240,13 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 	if plan == nil {
 		return nil, fmt.Errorf("nil plan")
 	}
-
 	safe := *plan
 	safe.Steps = make([]ai.PlanStep, len(plan.Steps))
 	copy(safe.Steps, plan.Steps)
-
 	requestedVersion := extractSemanticVersion(userInput)
-
 	var mutatedPaths []string
 	hasGitCommit := false
 	hasGitAdd := false
-
 	for i, s := range safe.Steps {
 		switch s.Tool {
 		case "shell":
@@ -265,7 +258,6 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 			}
 			s.Command = cmd
 			safe.Steps[i] = s
-
 			if isFileMutatingShell(cmd) {
 				if strings.Contains(cmd, "README.md") {
 					mutatedPaths = append(mutatedPaths, "README.md")
@@ -292,16 +284,13 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 			}
 		}
 	}
-
 	mutatedPaths = uniqueStrings(mutatedPaths)
-
 	if hasGitCommit && len(mutatedPaths) > 0 && !hasGitAdd {
 		addStep := ai.PlanStep{
 			Tool:   "git",
 			Action: "add",
 			Args:   map[string]string{"paths": strings.Join(mutatedPaths, " ")},
 		}
-
 		insertIndex := len(safe.Steps)
 		for i, st := range safe.Steps {
 			if st.Tool == "git" && st.Action == "commit" {
@@ -309,14 +298,11 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 				break
 			}
 		}
-
 		safe.Steps = append(safe.Steps, ai.PlanStep{})
 		copy(safe.Steps[insertIndex+1:], safe.Steps[insertIndex:])
 		safe.Steps[insertIndex] = addStep
-
 		a.ux.PrintSuccess(fmt.Sprintf("Safety layer inserted git add for: %s", strings.Join(mutatedPaths, " ")))
 	}
-
 	return &safe, nil
 }
 
@@ -364,27 +350,22 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 	if cmd == "" {
 		return fmt.Errorf("empty shell command")
 	}
-
 	// NATIVE CD INTERCEPTION: a `cd` run in a child shell vanishes when the
 	// child exits. Apply it to the live Helix process instead.
 	if segments := splitShellChain(cmd); len(segments) > 0 && isCdCommand(segments[0]) {
 		return a.executeNativeCd(cmd, segments)
 	}
-
 	// NATIVE HISTORY INTERCEPTION: `history`, `fc`, and `!!` run in a child
 	// shell will only see the child's empty history. Intercept them and read
 	// Helix's actual persistent history file.
 	if isHistoryQuery(cmd) {
 		return a.executeNativeHistory(cmd)
 	}
-
 	a.ux.PrintCommand(cmd)
-
 	validCmd, err := commands.ValidateAndCleanCommand(cmd)
 	if err != nil {
 		return fmt.Errorf("invalid shell command: %w", err)
 	}
-
 	risk, reasons := commands.AnalyzeShellRisk(validCmd)
 	switch risk {
 	case commands.ShellRiskLow:
@@ -405,7 +386,6 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		}
 		return fmt.Errorf("high-risk shell command blocked")
 	}
-
 	if a.stealthEnabled && a.stealth != nil {
 		a.ux.PrintDebug("Stealth mode: running command from memory")
 		output, err := a.stealth.Execute(validCmd)
@@ -417,16 +397,13 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		}
 		return nil
 	}
-
 	if a.execConfig.DryRun {
 		a.ux.PrintWarning(fmt.Sprintf("[Dry Run] Would execute: %s", validCmd))
 		return nil
 	}
-
 	if ok, reason := a.sandbox.ValidateCommand(validCmd); !ok {
 		return fmt.Errorf("sandbox violation: %s", reason)
 	}
-
 	// FIX: execute child commands in the LIVE working directory, not the
 	// sandbox root, so prior `cd` calls affect subsequent commands.
 	wd, wdErr := os.Getwd()
@@ -440,7 +417,6 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 // runs any remaining chained commands through the normal safety pipeline.
 func (a *Agent) executeNativeCd(original string, segments []string) error {
 	a.ux.PrintCommand(original)
-
 	var rest []string
 	for _, seg := range segments {
 		if !isCdCommand(seg) {
@@ -455,7 +431,6 @@ func (a *Agent) executeNativeCd(original string, segments []string) error {
 			return err
 		}
 	}
-
 	if len(rest) == 0 {
 		return nil
 	}
@@ -543,7 +518,6 @@ func splitShellChain(cmd string) []string {
 		}
 	}
 	parts = append(parts, cur.String())
-
 	var out []string
 	for _, p := range parts {
 		if strings.TrimSpace(p) != "" {
@@ -559,87 +533,68 @@ func (a *Agent) handleReconStep(step ai.PlanStep) error {
 	if toolName == "" {
 		return fmt.Errorf("recon step missing action (tool name)")
 	}
-
 	target := strings.TrimSpace(step.Args["target"])
 	if target == "" {
 		return fmt.Errorf("recon step missing args.target")
 	}
-
 	if a.recon == nil {
 		return fmt.Errorf("recon engine not available")
 	}
-
 	if !a.recon.IsTargetAuthorized(target) {
 		a.ux.PrintError(fmt.Sprintf("Recon target %q is not authorized", target))
 		a.ux.PrintWarning(fmt.Sprintf("Authorize first: /scan authorize %s --reason \"<written scope>\"", target))
 		return fmt.Errorf("unauthorized recon target: %s", target)
 	}
-
 	args := make([]string, 0)
 	if flags, ok := step.Args["flags"]; ok {
 		args = append(args, strings.Fields(flags)...)
 	}
 	args = append(args, target)
-
 	a.ux.PrintCommand(fmt.Sprintf("Recon %s %s", toolName, strings.Join(args, " ")))
-
 	result, err := a.recon.RunTool(toolName, args...)
 	if err != nil {
 		return err
 	}
-
 	if result.Error != nil && strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
 		a.ux.PrintInfo(fmt.Sprintf("Recon tool %q is not installed.", toolName))
-
 		if a.ux.AskYesNo(fmt.Sprintf("Install %s now?", toolName)) {
 			if installErr := a.installPackage(toolName); installErr != nil {
 				a.ux.PrintError(fmt.Sprintf("Installation failed: %v", installErr))
 				return nil
 			}
-
 			a.ux.PrintSuccess(fmt.Sprintf("%s installed successfully — retrying scan…", toolName))
-
 			result2, err2 := a.recon.RunTool(toolName, args...)
 			if err2 != nil {
 				a.ux.PrintError(fmt.Sprintf("Recon retry failed: %v", err2))
 				return nil
 			}
-
 			if result2.Error != nil {
 				a.ux.PrintWarning(fmt.Sprintf("Recon retry issue: %v", result2.Error))
 				return nil
 			}
-
 			a.ux.PrintSuccess(fmt.Sprintf("Recon completed in %v", result2.Elapsed))
-
 			if len(result2.Parsed) > 0 {
 				summary, _ := json.MarshalIndent(result2.Parsed, "", "  ")
 				a.ux.PrintData(string(summary))
 			} else {
 				a.ux.PrintInfo("No open ports or interesting results found.")
 			}
-
 			return nil
 		}
-
 		a.ux.PrintInfo(fmt.Sprintf("Skipping recon step with %s (not installed).", toolName))
 		return nil
 	}
-
 	if result.Error != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Recon tool %q issue: %v", toolName, result.Error))
 		return nil
 	}
-
 	a.ux.PrintSuccess(fmt.Sprintf("Recon completed in %v", result.Elapsed))
-
 	if len(result.Parsed) > 0 {
 		summary, _ := json.MarshalIndent(result.Parsed, "", "  ")
 		a.ux.PrintData(string(summary))
 	} else {
 		a.ux.PrintInfo("No open ports or interesting results found.")
 	}
-
 	return nil
 }
 
@@ -661,15 +616,12 @@ func (a *Agent) installPackage(pkg string) error {
 	if err := commands.IsPackageActionSafe("install", pkg, a.env); err != nil {
 		return fmt.Errorf("package safety check failed: %w", err)
 	}
-
 	pm := commands.PackageManagerFactory(a.env)
 	if pm == nil {
 		return fmt.Errorf("no supported package manager found")
 	}
-
 	installCmd := pm.InstallCommand(pkg)
 	a.ux.PrintInfo(fmt.Sprintf("Running: %s", installCmd))
-
 	return a.sandbox.WrapCommand(installCmd, a.execConfig, a.env)
 }
 
@@ -679,7 +631,6 @@ func (a *Agent) handleGitStep(step ai.PlanStep) error {
 	if action == "" {
 		return fmt.Errorf("missing git action")
 	}
-
 	a.ux.PrintCommand(fmt.Sprintf("git action: %s", action))
 	return a.gitManager.ExecutePlannedAction(action, step.Args)
 }
@@ -690,37 +641,30 @@ func (a *Agent) handlePackageStep(step ai.PlanStep) error {
 	if action == "" {
 		return fmt.Errorf("package step missing action")
 	}
-
 	switch action {
 	case "install", "update", "remove":
 	default:
 		return fmt.Errorf("unsupported package action: %s", action)
 	}
-
 	rawName := step.Args["name"]
 	name := strings.TrimSpace(rawName)
 	if name == "" {
 		return fmt.Errorf("package step missing args.name")
 	}
-
 	if strings.TrimSpace(step.Command) != "" {
 		return fmt.Errorf("invalid package step: must not have 'command'")
 	}
-
 	if err := commands.IsPackageActionSafe(action, name, a.env); err != nil {
 		a.ux.PrintError(fmt.Sprintf("Package safety violation: %v", err))
 		return err
 	}
-
 	a.ux.PrintCommand(fmt.Sprintf("Package: %s %s", action, name))
-
 	commands.HandlePackageCommand(
 		[]string{action, name},
 		a.env,
 		false,
 		a.execConfig,
 	)
-
 	return nil
 }
 
@@ -740,7 +684,6 @@ func (a *Agent) AuthorizeRecon(target, reason string) {
 		a.ux.PrintError("Recon engine not available")
 		return
 	}
-
 	a.recon.AuthorizeTarget(target, reason)
 	a.ux.PrintSuccess(fmt.Sprintf("Recon target authorized: %s", target))
 }
@@ -750,7 +693,6 @@ func (a *Agent) IsReconTargetAuthorized(target string) bool {
 	if a.recon == nil {
 		return false
 	}
-
 	return a.recon.IsTargetAuthorized(target)
 }
 
@@ -759,7 +701,6 @@ func (a *Agent) ListAuthorizedReconTargets() map[string]string {
 	if a.recon == nil {
 		return map[string]string{}
 	}
-
 	return a.recon.AuthorizedTargets()
 }
 
@@ -775,19 +716,16 @@ func isHistoryQuery(cmd string) bool {
 // the last N entries, bypassing the child-shell history isolation.
 func (a *Agent) executeNativeHistory(cmd string) error {
 	a.ux.PrintCommand(cmd)
-
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("cannot resolve home directory")
 	}
-
 	histPath := filepath.Join(home, ".helix_history")
 	lines, err := utils.LoadHistory(histPath)
 	if err != nil || len(lines) == 0 {
 		a.ux.PrintInfo("No command history found.")
 		return nil
 	}
-
 	// Default to last 15 lines, parse limit if provided (e.g., "history 20")
 	limit := 15
 	parts := strings.Fields(cmd)
@@ -796,12 +734,10 @@ func (a *Agent) executeNativeHistory(cmd string) error {
 			limit = n
 		}
 	}
-
 	start := len(lines) - limit
 	if start < 0 {
 		start = 0
 	}
-
 	for i := start; i < len(lines); i++ {
 		fmt.Printf("%5d  %s\n", i+1, lines[i])
 	}

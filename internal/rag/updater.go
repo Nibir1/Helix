@@ -1,4 +1,10 @@
 // internal/rag/updater.go
+// Purpose: Live threat-intelligence sync pipeline (NVD, CISA KEV, Exploit-DB,
+// MITRE ATT&CK) with ETag conditional-GET caching, checkpointing, retries,
+// and stage/progress hooks for the live TrueColor bar.
+// Hardening: UpdateAll now checks the caller context between every stage so
+// Ctrl+C (via the interrupt manager) aborts the pipeline promptly instead of
+// continuing to fetch the remaining feeds.
 package rag
 
 import (
@@ -25,10 +31,8 @@ var (
 	kevURL        = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 	exploitCSVURL = "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv"
 	mitreSTIXURL  = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
-
 	// nvdBaseURL is mutable for tests.
 	nvdBaseURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-
 	// Retry tuning, mutable for tests.
 	nvdRetryAttempts  = 3
 	nvdRetryBaseDelay = 2 * time.Second
@@ -36,12 +40,10 @@ var (
 
 const (
 	defaultTimeout = 120 * time.Second
-
 	// Phase 3.5c: meta keys for conditional-GET (ETag) caching.
 	metaETagKEV     = "etag_kev"
 	metaETagExploit = "etag_exploitdb"
 	metaETagMitre   = "etag_mitre"
-
 	// Polite identification for threat-intel feeds.
 	threatUserAgent = "Helix/1.0 (defensive threat intelligence; https://github.com/Nibir1/Helix)"
 )
@@ -92,18 +94,16 @@ func generateEmbeddings(ctx context.Context, db *sql.DB, interactive bool) error
 		}
 		return nil
 	}
-
 	sources := []string{"cve", "kev", "exploit", "mitre_technique"}
 	for _, src := range sources {
 		// Get up to 50 rows without embedding
 		query := fmt.Sprintf(`SELECT %s.id, %s.description FROM %s
-			LEFT JOIN embeddings e ON e.source_type=? AND e.source_id=%s.id
-			WHERE e.embedding IS NULL LIMIT 50`, idColumn(src), descColumn(src), src, idColumn(src))
+LEFT JOIN embeddings e ON e.source_type=? AND e.source_id=%s.id
+WHERE e.embedding IS NULL LIMIT 50`, idColumn(src), descColumn(src), src, idColumn(src))
 		rows, err := db.Query(query, src)
 		if err != nil {
 			continue
 		}
-
 		var batch []string
 		var ids []string
 		for rows.Next() {
@@ -121,7 +121,6 @@ func generateEmbeddings(ctx context.Context, db *sql.DB, interactive bool) error
 		if len(batch) == 0 {
 			continue
 		}
-
 		notifyProgress("EMBEDDING "+strings.ToUpper(src), len(ids), len(ids))
 		embeddings, err := ai.GetEmbeddings(batch)
 		if err != nil {
@@ -133,7 +132,7 @@ func generateEmbeddings(ctx context.Context, db *sql.DB, interactive bool) error
 			}
 			blob, _ := json.Marshal(emb)
 			_, err := db.Exec(`INSERT OR REPLACE INTO embeddings(source_type, source_id, model, embedding)
-				VALUES(?,?,?,?)`, src, ids[i], "text-embedding-3-small", blob)
+VALUES(?,?,?,?)`, src, ids[i], "text-embedding-3-small", blob)
 			if err != nil {
 				return fmt.Errorf("insert embedding: %w", err)
 			}
@@ -209,46 +208,71 @@ func setMeta(db *sql.DB, key, value string) {
 // UpdateAll fetches all data sources and updates the database.
 // Phase 4: internet-gated, fast-sources-first, stage-hooked, silent unless
 // HELIX_DEBUG=1.
+// FIX (interrupt hardening): the caller context is checked between every
+// stage, so a Ctrl+C cancellation aborts the pipeline promptly and unwinds
+// all registered interrupt scopes back to the live prompt.
+//
+// Args:
+//   - ctx: cancellation/timeout context (registered by the caller).
+//   - db: open knowledge database handle.
+//   - interactive: whether consented embedding bootstraps may prompt.
+//
+// Returns: error (context.Canceled when interrupted; ErrOffline when offline).
+// Complexity: O(network sync time).
 func UpdateAll(ctx context.Context, db *sql.DB, interactive bool) error {
 	notifyStage("STARTING KNOWLEDGE UPDATE")
 	start := time.Now()
-
 	// INTERNET GATE: every fetch in this pipeline is network-backed.
 	// Fail fast instead of burning per-source network errors while offline.
 	if !utils.IsOnline(3 * time.Second) {
 		notifyStage("OFFLINE - SKIPPING NETWORK FETCHES")
 		return ErrOffline
 	}
-
 	// Fast, high-value sources FIRST.
 	notifyStage("FETCHING CISA KEV")
 	if err := updateKEV(ctx, db); err != nil && utils.IsDebugMode() {
 		color.Yellow("KEV update failed: %v", err)
 	}
-
+	// FIX: Ctrl+C aborts the pipeline between stages.
+	if ctx.Err() != nil {
+		notifyStage("KNOWLEDGE UPDATE CANCELLED")
+		return ctx.Err()
+	}
 	notifyStage("FETCHING EXPLOIT-DB")
 	if err := updateExploitDB(ctx, db); err != nil && utils.IsDebugMode() {
 		color.Yellow("Exploit-DB update failed: %v", err)
 	}
-
+	if ctx.Err() != nil {
+		notifyStage("KNOWLEDGE UPDATE CANCELLED")
+		return ctx.Err()
+	}
 	notifyStage("FETCHING MITRE ATT&CK")
 	if err := updateMITRE(ctx, db); err != nil && utils.IsDebugMode() {
 		color.Yellow("MITRE update failed: %v", err)
 	}
-
+	if ctx.Err() != nil {
+		notifyStage("KNOWLEDGE UPDATE CANCELLED")
+		return ctx.Err()
+	}
 	// NVD last: it is the slowest feed (rate-limited) and checkpoints itself,
 	// so a cancellation resumes on the next run.
 	notifyStage("FETCHING NVD CVES")
 	if err := updateNVD(ctx, db); err != nil && utils.IsDebugMode() {
 		color.Yellow("NVD update skipped/failed: %v", err)
 	}
-
+	if ctx.Err() != nil {
+		notifyStage("KNOWLEDGE UPDATE CANCELLED")
+		return ctx.Err()
+	}
 	// FIX: Pass the interactive flag down to the embedding generator.
 	notifyStage("GENERATING EMBEDDINGS")
 	if err := generateEmbeddings(ctx, db, interactive); err != nil && utils.IsDebugMode() {
 		color.Yellow("Embedding generation failed: %v", err)
 	}
-
+	if ctx.Err() != nil {
+		notifyStage("KNOWLEDGE UPDATE CANCELLED")
+		return ctx.Err()
+	}
 	notifyStage("REBUILDING FTS INDEX")
 	// FIX: Pass the progress callback to satisfy the new database.go signature.
 	if err := ReindexKnowledgeFTS(db, func(current, total int) {
@@ -256,7 +280,6 @@ func UpdateAll(ctx context.Context, db *sql.DB, interactive bool) error {
 	}); err != nil && utils.IsDebugMode() {
 		color.Yellow("FTS reindex failed: %v", err)
 	}
-
 	notifyStage("KNOWLEDGE UPDATE COMPLETE")
 	if utils.IsDebugMode() {
 		color.Green("Knowledge base update completed in %v", time.Since(start))
@@ -274,20 +297,17 @@ func fetchConditional(ctx context.Context, client *http.Client, url, storedETag 
 	if storedETag != "" {
 		req.Header.Set("If-None-Match", storedETag)
 	}
-
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode == http.StatusNotModified {
 		return nil, "", false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", false, fmt.Errorf("%s returned %d", url, resp.StatusCode)
 	}
-
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
 		return nil, "", false, err
@@ -312,24 +332,19 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			startTime = time.Now().UTC().AddDate(0, 0, -119)
 		}
 	}
-
 	client := &http.Client{Timeout: 90 * time.Second}
 	userAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	apiKey := os.Getenv("NVD_API_KEY")
-
 	sleepDuration := 6500 * time.Millisecond
 	if apiKey != "" {
 		sleepDuration = 1 * time.Second
 	}
-
 	var total int
 	page := 0
 	latestModDateSeen := startTime
-
 	// ETA tracking
 	syncStart := time.Now()
 	var totalPages int
-
 	for startIndex := 0; ; startIndex += 2000 {
 		select {
 		case <-ctx.Done():
@@ -337,7 +352,6 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			return ctx.Err()
 		default:
 		}
-
 		page++
 		endTime := time.Now().UTC()
 		if endTime.Sub(startTime) > 119*24*time.Hour {
@@ -350,7 +364,6 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			nvdBaseURL, lastModStart, lastModEnd, startIndex,
 		)
 		notifyStage(fmt.Sprintf("NVD · PAGE %d", page))
-
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 		if err != nil {
 			return fmt.Errorf("NVD request creation: %w", err)
@@ -360,16 +373,13 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 		if apiKey != "" {
 			req.Header.Set("apiKey", apiKey)
 		}
-
 		resp, err := client.Do(req)
 		if err != nil {
 			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
 			return fmt.Errorf("NVD network error: %w", err)
 		}
-
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
 		_ = resp.Body.Close()
-
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
 			notifyStage("NVD · RATE LIMITED")
 			time.Sleep(30 * time.Second)
@@ -380,18 +390,15 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
 			return fmt.Errorf("NVD API returned %d", resp.StatusCode)
 		}
-
 		var nvdResp nvdResponse
 		if err := json.Unmarshal(bodyBytes, &nvdResp); err != nil {
 			setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
 			return fmt.Errorf("decode NVD: %w", err)
 		}
-
 		// Capture total pages for ETA calculation
 		if totalPages == 0 && nvdResp.TotalResults > 0 {
 			totalPages = (nvdResp.TotalResults + 1999) / 2000 // Ceiling division
 		}
-
 		for _, vuln := range nvdResp.Vulnerabilities {
 			cveID := vuln.CVE.ID
 			if cveID == "" {
@@ -420,19 +427,16 @@ func updateNVD(ctx context.Context, db *sql.DB) error {
 			}
 			total++
 		}
-
 		// ENHANCED: Progress with ETA
 		if nvdResp.TotalResults > 0 {
 			etaStr := calculateETA(syncStart, page, totalPages)
 			notifyProgress(fmt.Sprintf("NVD · PAGE %d (ETA: %s)", page, etaStr), total, nvdResp.TotalResults)
 		}
-
 		if nvdResp.TotalResults == 0 || startIndex+2000 >= nvdResp.TotalResults {
 			break
 		}
 		time.Sleep(sleepDuration)
 	}
-
 	setMeta(db, "nvd_last_mod_date", latestModDateSeen.Format(layout))
 	if OnUpdateStage != nil {
 		notifyProgress("NVD SYNCED", total, total)
@@ -447,18 +451,14 @@ func calculateETA(syncStart time.Time, currentPage, totalPages int) string {
 	if currentPage == 0 || totalPages == 0 || currentPage >= totalPages {
 		return "calculating..."
 	}
-
 	elapsed := time.Since(syncStart)
 	rate := float64(currentPage) / elapsed.Seconds()
 	if rate <= 0 {
 		return "calculating..."
 	}
-
 	remainingPages := totalPages - currentPage
 	remainingSeconds := float64(remainingPages) / rate
-
 	eta := time.Duration(remainingSeconds * float64(time.Second))
-
 	// Format ETA nicely
 	if eta < time.Minute {
 		return fmt.Sprintf("%ds", int(eta.Seconds()))
@@ -482,7 +482,6 @@ func updateKEV(ctx context.Context, db *sql.DB) error {
 		notifyStage("KEV UNCHANGED (HTTP 304)")
 		return nil
 	}
-
 	var kevData struct {
 		Vulnerabilities []struct {
 			CVEID          string `json:"cveID"`
@@ -496,7 +495,6 @@ func updateKEV(ctx context.Context, db *sql.DB) error {
 	if err := json.Unmarshal(body, &kevData); err != nil {
 		return err
 	}
-
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -531,7 +529,6 @@ func updateExploitDB(ctx context.Context, db *sql.DB) error {
 		notifyStage("EXPLOIT-DB UNCHANGED (HTTP 304)")
 		return nil
 	}
-
 	reader := csv.NewReader(bytes.NewReader(body))
 	reader.Comma = ','
 	reader.LazyQuotes = true
@@ -547,14 +544,12 @@ func updateExploitDB(ctx context.Context, db *sql.DB) error {
 	for i, h := range header {
 		idx[strings.TrimSpace(h)] = i
 	}
-
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, _ = tx.Exec("DELETE FROM exploit")
-
 	rows := 0
 	for _, row := range records[1:] {
 		get := func(col string) string {
@@ -595,21 +590,18 @@ func updateMITRE(ctx context.Context, db *sql.DB) error {
 		notifyStage("MITRE UNCHANGED (HTTP 304)")
 		return nil
 	}
-
 	var bundle struct {
 		Objects []json.RawMessage `json:"objects"`
 	}
 	if err := json.Unmarshal(body, &bundle); err != nil {
 		return err
 	}
-
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, _ = tx.Exec("DELETE FROM mitre_technique")
-
 	techs := 0
 	for _, obj := range bundle.Objects {
 		var objMap map[string]interface{}
