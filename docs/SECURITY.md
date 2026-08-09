@@ -28,6 +28,14 @@ Helix treats AI-generated output as untrusted. To prevent catastrophic accidents
 - The `/scan` engine requires explicit target authorization with a written scope/reason before executing `nmap` or `masscan`.
 - Dangerous flags (e.g., `masscan --rate 1000000`) are blocked to prevent network floods.
 
+### 4. Instruction Firewall (Prompt-Injection Hardening)
+Retrieved knowledge is untrusted data with zero authority. Planner context is
+built only from sanitized structured fields inside `authority="data-only"`
+fences; a per-request canary detects context echo; a fail-closed critic
+validates every shell plan against the user request alone; and provenance
+escalation forces confirmation when plan commands carry retrieved-sourced
+tokens. See `docs/threat_model.md`.
+
 ## Secret Handling
 - API keys are stored in `~/.helix/secrets.json` with strict `0600` file permissions.
 - Helix preferentially reads secrets from environment variables to avoid disk persistence in ephemeral environments.

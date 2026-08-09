@@ -83,7 +83,14 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		switch r.URL.Path {
 		case "/chat/completions":
 			atomic.AddInt32(hits, 1)
-			contentJSON, err := json.Marshal(chatResponse)
+			reply := chatResponse
+			// Phase 12: the Instruction Firewall issues a critic call after any
+			// plan with shell steps. Answer it with a well-formed "yes" so the
+			// pre-firewall scenarios keep their original behavior.
+			if strings.Contains(extractPromptFromRequest(r), "plan critic") {
+				reply = `{"verdict":"yes"}`
+			}
+			contentJSON, err := json.Marshal(reply)
 			if err != nil {
 				http.Error(w, "marshal failed", http.StatusInternalServerError)
 				return
@@ -379,4 +386,22 @@ func TestE2E_PurgeCancelled(t *testing.T) {
 	if _, err := os.Stat(cfgPath); err != nil {
 		t.Fatalf("config.json must survive a declined purge: %v", err)
 	}
+}
+
+// extractPromptFromRequest pulls the first message content from an
+// OpenAI-compatible chat request body (used to route critic calls).
+func extractPromptFromRequest(r *http.Request) string {
+	var body struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	defer func() { _ = r.Body.Close() }()
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return ""
+	}
+	if len(body.Messages) == 0 {
+		return ""
+	}
+	return body.Messages[0].Content
 }

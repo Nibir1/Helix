@@ -1,9 +1,12 @@
 // internal/agent/agent.go
-// Package agent provides the core Agent Mode orchestrator.
-// It accepts natural language input, plans steps via the AI planner,
-// and executes them through a safety‑first pipeline.
+// Purpose: Core Agent Mode orchestrator for Helix. Accepts natural language
+// input, plans steps via the AI planner, and executes them through a
+// safety-first pipeline augmented by the Phase 12 Instruction Firewall.
 // Hardening: Ctrl+C aborts planning gracefully with a clean cancellation
 // message instead of a raw provider error.
+//
+// Author: Nahasat Nibir
+// Dependencies: helix/internal/ai, commands, rag, recon, shell, stealth, utils, ux.
 package agent
 
 import (
@@ -36,16 +39,28 @@ type Agent struct {
 	gitManager     *commands.GitManager
 	typingEffect   bool
 	ux             *ux.UX
-	stealth        *stealth.StealthExecutor // stealth engine (memory‑only, log‑free)
+	stealth        *stealth.StealthExecutor // stealth engine (memory-only, log-free)
 	stealthEnabled bool                     // runtime toggle; if true, use stealth execution
 	recon          *recon.ReconEngine
 	// OnSlashCommand is called when input starts with "/".
-	// It receives the full raw input line.  Return true if the command was
+	// It receives the full raw input line. Return true if the command was
 	// handled internally; false to pass it to the AI planner.
 	OnSlashCommand func(string) bool
 }
 
 // NewAgent creates a new Agent instance.
+//
+// Args:
+//   - env: detected shell environment.
+//   - ragSystem: RAG subsystem (may be nil).
+//   - sandbox: directory sandbox.
+//   - execConfig: execution preferences.
+//   - typingEffect: whether to animate AI output.
+//   - gui: terminal UX layer.
+//   - stealthExec: stealth executor (may be nil).
+//   - reconEng: recon engine (may be nil).
+//
+// Returns: *Agent. Complexity: O(1).
 func NewAgent(
 	env shell.Env,
 	ragSystem *rag.RAGSystem,
@@ -75,6 +90,9 @@ func NewAgent(
 }
 
 // EnableStealth toggles local private-history mode.
+//
+// Args: on: true to enable, false to disable.
+// Returns: none. Complexity: O(1).
 func (a *Agent) EnableStealth(on bool) {
 	if a.stealth == nil && on {
 		a.ux.PrintWarning("Private execution engine not available")
@@ -89,11 +107,16 @@ func (a *Agent) EnableStealth(on bool) {
 }
 
 // IsStealthEnabled returns the current state of the stealth toggle.
+//
+// Args: none. Returns: bool. Complexity: O(1).
 func (a *Agent) IsStealthEnabled() bool {
 	return a.stealthEnabled
 }
 
 // HandleInput is the main entry point for Agent Mode.
+//
+// Args: userInput: raw user input line.
+// Returns: none. Complexity: O(planner + execution time).
 func (a *Agent) HandleInput(userInput string) {
 	userInput = strings.TrimSpace(userInput)
 	if userInput == "" {
@@ -119,17 +142,13 @@ func (a *Agent) HandleInput(userInput string) {
 		}
 		return
 	}
-	// --- RAG retrieval (if available) ---
+	// --- RAG retrieval through the Instruction Firewall ---
 	ragContext := ""
+	canary := ""
 	if a.rag != nil && a.rag.IsInitialized() {
 		cmds, err := a.rag.Retrieve(userInput)
 		if err == nil && len(cmds) > 0 {
-			var sb strings.Builder
-			sb.WriteString("Relevant system commands (from the knowledge base):\n")
-			for _, cmd := range cmds {
-				fmt.Fprintf(&sb, "- %s: %s\n", cmd.Name, cmd.Description)
-			}
-			ragContext = sb.String()
+			ragContext, canary = BuildFirewallContext(cmds)
 		} else if err != nil {
 			a.ux.PrintDebug(fmt.Sprintf("RAG retrieval skipped: %v", err))
 		}
@@ -172,6 +191,14 @@ func (a *Agent) HandleInput(userInput string) {
 		return
 	}
 	rawPlanOutput = strings.TrimSpace(rawPlanOutput)
+
+	// FIREWALL 1: canary honeypot — echoing the canary proves the model copied
+	// retrieved data into its plan. Abort with an injection alert.
+	if canaryEchoed(canary, rawPlanOutput) {
+		a.ux.PrintError("INJECTION ALERT: retrieved-content canary echoed in plan; execution aborted.")
+		return
+	}
+
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
 	if err != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Planner parse error: %v", err))
@@ -185,6 +212,25 @@ func (a *Agent) HandleInput(userInput string) {
 		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		return
 	}
+
+	// FIREWALL 2: critic pass (sees the user request ALONE). NO quarantines
+	// the plan to a chat fallback instead of executing it.
+	if planHasShellSteps(plan) && !a.criticAllows(userInput, plan) {
+		a.ux.PrintWarning("Instruction Firewall: plan quarantined by critic; falling back to chat.")
+		think.Start()
+		resp, chatErr := ai.RunModel(userInput)
+		think.Stop()
+		if chatErr != nil {
+			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
+			return
+		}
+		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
+		return
+	}
+
+	// FIREWALL 3: provenance escalation set for this plan.
+	escalated := escalatedCommands(userInput, ragContext, plan)
+
 	safePlan, err := a.prepareSafePlan(userInput, plan)
 	if err != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Safety layer error: %v", err))
@@ -192,6 +238,7 @@ func (a *Agent) HandleInput(userInput string) {
 	} else {
 		plan = safePlan
 	}
+
 	for i, step := range plan.Steps {
 		if len(plan.Steps) > 1 {
 			a.ux.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
@@ -200,7 +247,7 @@ func (a *Agent) HandleInput(userInput string) {
 		case "response":
 			a.handleResponseStep(step)
 		case "shell":
-			if err := a.handleShellStep(step); err != nil {
+			if err := a.handleShellStepWithEscalation(step, escalated[step.Command]); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Shell step failed: %v", err))
 				return
 			}
@@ -226,6 +273,9 @@ func (a *Agent) HandleInput(userInput string) {
 }
 
 // runDirectShellCommand executes a user-typed shell command through the full safety pipeline.
+//
+// Args: command: raw shell command.
+// Returns: error if execution fails. Complexity: O(execution time).
 func (a *Agent) runDirectShellCommand(command string) error {
 	a.ux.PrintDebug("shell.classify: direct shell execution (AI bypass)")
 	step := ai.PlanStep{Tool: "shell", Command: command}
@@ -236,6 +286,10 @@ func (a *Agent) runDirectShellCommand(command string) error {
 // SAFETY LAYER
 // ──────────────────────────────────────────────────────────────
 
+// prepareSafePlan injects missing git add steps and normalizes versions.
+//
+// Args: userInput: raw user input; plan: parsed plan.
+// Returns: safe plan or error. Complexity: O(steps).
 func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("nil plan")
@@ -306,11 +360,13 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 	return &safe, nil
 }
 
+// extractSemanticVersion finds a semantic version string in text.
 func extractSemanticVersion(text string) string {
 	re := regexp.MustCompile(`\b\d+\.\d+\.\d+\b`)
 	return re.FindString(text)
 }
 
+// isFileMutatingShell reports whether a shell command mutates files.
 func isFileMutatingShell(cmd string) bool {
 	lc := strings.ToLower(cmd)
 	return strings.Contains(lc, "sed ") ||
@@ -320,6 +376,7 @@ func isFileMutatingShell(cmd string) bool {
 		strings.Contains(lc, " tee ")
 }
 
+// uniqueStrings removes duplicate strings from a slice.
 func uniqueStrings(in []string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -336,6 +393,7 @@ func uniqueStrings(in []string) []string {
 // TOOL HANDLERS
 // ──────────────────────────────────────────────────────────────
 
+// handleResponseStep prints an AI response step.
 func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	msg := strings.TrimSpace(step.Message)
 	if msg == "" {
@@ -344,8 +402,20 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	a.ux.PrintAIMessage(msg, a.typingEffect)
 }
 
-// SHELL — includes risk scoring, stealth toggle, and native cd interception
+// handleShellStep executes a planner/user shell step through the safety pipeline.
+//
+// Args: step: planner step.
+// Returns: error if execution fails. Complexity: O(execution time).
 func (a *Agent) handleShellStep(step ai.PlanStep) error {
+	return a.handleShellStepWithEscalation(step, false)
+}
+
+// handleShellStepWithEscalation is handleShellStep plus provenance escalation:
+// when escalated, a Low-risk command is promoted to Medium (mandatory confirm).
+//
+// Args: step: planner step; escalated: true if provenance escalation applies.
+// Returns: error if execution fails. Complexity: O(execution time).
+func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) error {
 	cmd := strings.TrimSpace(step.Command)
 	if cmd == "" {
 		return fmt.Errorf("empty shell command")
@@ -367,6 +437,13 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 		return fmt.Errorf("invalid shell command: %w", err)
 	}
 	risk, reasons := commands.AnalyzeShellRisk(validCmd)
+
+	// FIREWALL 5: provenance escalation forces confirmation.
+	if escalated && risk == commands.ShellRiskLow {
+		risk = commands.ShellRiskMedium
+		reasons = append(reasons, "provenance escalation: command carries tokens sourced from retrieved knowledge")
+	}
+
 	switch risk {
 	case commands.ShellRiskLow:
 		// execute directly
@@ -468,10 +545,12 @@ func (a *Agent) changeWorkingDir(target string) error {
 	return os.Chdir(target)
 }
 
+// isCdCommand reports whether a segment is a cd command.
 func isCdCommand(seg string) bool {
 	return seg == "cd" || strings.HasPrefix(seg, "cd ") || strings.HasPrefix(seg, "cd\t")
 }
 
+// cdTarget extracts the target directory from a cd segment.
 func cdTarget(seg string) string {
 	t := strings.TrimSpace(seg)
 	if t == "cd" {
@@ -481,6 +560,8 @@ func cdTarget(seg string) string {
 	return strings.Trim(t, `"'`)
 }
 
+// splitShellChain splits a shell command chain into individual segments,
+// respecting single and double quotes.
 func splitShellChain(cmd string) []string {
 	var parts []string
 	var cur strings.Builder
@@ -625,7 +706,7 @@ func (a *Agent) installPackage(pkg string) error {
 	return a.sandbox.WrapCommand(installCmd, a.execConfig, a.env)
 }
 
-// GIT — supports safe + dangerous (Option C)
+// handleGitStep processes planner git steps.
 func (a *Agent) handleGitStep(step ai.PlanStep) error {
 	action := strings.TrimSpace(step.Action)
 	if action == "" {
@@ -635,7 +716,7 @@ func (a *Agent) handleGitStep(step ai.PlanStep) error {
 	return a.gitManager.ExecutePlannedAction(action, step.Args)
 }
 
-// PACKAGE MANAGER
+// handlePackageStep processes planner package steps.
 func (a *Agent) handlePackageStep(step ai.PlanStep) error {
 	action := strings.ToLower(strings.TrimSpace(step.Action))
 	if action == "" {

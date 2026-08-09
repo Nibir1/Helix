@@ -60,3 +60,8 @@ the run fully offline). It proves, with zero real AI and zero network:
 - `/help` renders and `/purge` respects a declined confirmation.
 
 Run with `make e2e` (Linux/macOS only).
+
+### 7. Instruction Firewall (`internal/agent/firewall.go`, `internal/rag/sanitize_retrieved.go`)
+Prompt-injection hardening for RAG-augmented planning: provenance tiers,
+retrieved-text sanitization, data-only context fencing, canary honeypots, a
+fail-closed critic pass, and provenance-based risk escalation.

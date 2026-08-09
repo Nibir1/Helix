@@ -296,6 +296,8 @@ type CommandInfo struct {
 	Synopsis    string   `json:"synopsis"`
 	Options     []string `json:"options"`
 	Examples    []string `json:"examples"`
+	Source      string   `json:"source"`
+	Provenance  string   `json:"provenance"`
 }
 
 func (vs *VectorStore) GetCommandInfo(cmd string) (*CommandInfo, error) {
@@ -307,6 +309,8 @@ func (vs *VectorStore) GetCommandInfo(cmd string) (*CommandInfo, error) {
 
 	var info CommandInfo
 	info.Name = cmd
+	info.Source = "man"
+	info.Provenance = string(ProvMANLocal)
 	for _, doc := range vs.documents {
 		if doc.Metadata.Command != cmd {
 			continue
