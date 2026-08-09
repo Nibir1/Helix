@@ -18,6 +18,7 @@ import (
 	"helix/internal/audio"
 	"helix/internal/commands"
 	"helix/internal/config"
+	"helix/internal/confinement"
 	"helix/internal/rag"
 	"helix/internal/shell"
 	"helix/internal/utils"
@@ -891,6 +892,13 @@ func handleKnowledgeReindex() {
 // DOCTOR / PROVIDERS / MODELS
 // -------------------------------------------------------
 
+// handleDoctor prints full system diagnostics, including the Phase 13
+// kernel confinement backend so operators can verify which engine enforces
+// /sandbox strict on this host (seatbelt / bwrap / landlock / advisory).
+//
+// Args: none.
+// Returns: none.
+// Complexity: O(1) plus one bounded network probe (3s).
 func handleDoctor() {
 	color.Cyan("=== Helix Doctor ===")
 	home, err := os.UserHomeDir()
@@ -925,6 +933,9 @@ func handleDoctor() {
 	if sandbox != nil {
 		color.Cyan("Sandbox: %s", sandbox.ModeString())
 	}
+	// Phase 13: report the kernel-grade confinement engine enforcing
+	// /sandbox strict, or the advisory fallback when none is available.
+	color.Cyan("Confinement backend: %s", confinement.BackendName())
 }
 
 func handleProviderStatus() {

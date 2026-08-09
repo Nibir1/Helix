@@ -487,7 +487,8 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 	if wdErr != nil || wd == "" {
 		wd = a.sandbox.GetCurrentDirectory()
 	}
-	return a.ux.RunShellCommand(validCmd, wd, a.env.Shell)
+	// Phase 13: route through the sandbox so strict mode is kernel-enforced.
+	return a.sandbox.RunShellCommand(validCmd, wd, a.env.Shell)
 }
 
 // executeNativeCd applies every `cd` segment to the live Helix process and

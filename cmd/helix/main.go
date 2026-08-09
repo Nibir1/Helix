@@ -19,6 +19,7 @@ import (
 	"helix/internal/audio"
 	"helix/internal/commands"
 	"helix/internal/config"
+	"helix/internal/confinement"
 	"helix/internal/rag"
 	"helix/internal/recon"
 	"helix/internal/shell"
@@ -41,6 +42,11 @@ var (
 )
 
 func main() {
+	// Phase 13: Landlock re-exec child (Linux only). Confines itself with the
+	// kernel LSM, then runs the requested shell command.
+	if len(os.Args) > 1 && os.Args[1] == "--confined-child" {
+		os.Exit(confinement.RunConfinedChild(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "update" {
 		runKnowledgeUpdate()
 		return

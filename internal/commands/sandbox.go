@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
+	"helix/internal/confinement"
 	"helix/internal/shell"
 
 	"github.com/fatih/color"
@@ -275,54 +277,55 @@ func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
 	return nil
 }
 
-// WrapCommand executes the command strictly within the sandbox logic.
-// FIX: Decouples execution context from the jail boundary. Commands execute
-// in the dynamic CWD, but paths are validated against the original root.
-func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell.Env) error {
-	// 1. Validate against the sandbox boundary
-	if ok, reason := ds.ValidateCommand(cmd); !ok {
-		return fmt.Errorf("sandbox violation: %s", reason)
+// buildArgv converts a command + detected shell into an argv slice.
+// Mirrors the platform logic of ux.BuildShellCommand without importing ux.
+func buildArgv(cmd, shellName string) []string {
+	shellName = strings.TrimSpace(shellName)
+	lower := strings.ToLower(shellName)
+	if lower == "unknown" {
+		lower = ""
 	}
-
-	if cfg.DryRun {
-		color.Yellow("[Dry Run] Would execute: %s", cmd)
-		return nil
+	if runtime.GOOS == "windows" {
+		switch lower {
+		case "powershell", "powershell.exe":
+			return []string{"powershell", "-NoProfile", "-Command", cmd}
+		case "pwsh", "pwsh.exe":
+			return []string{"pwsh", "-NoProfile", "-Command", cmd}
+		case "cmd", "cmd.exe", "":
+			return []string{"cmd", "/C", cmd}
+		default:
+			return []string{shellName, "-c", cmd}
+		}
 	}
-
-	// 2. Prepare Execution
-	shellBin := "/bin/sh"
-	if env.Shell != "" && env.Shell != "unknown" {
-		shellBin = env.Shell
+	switch lower {
+	case "powershell", "pwsh":
+		bin := lower
+		if shellName != "" {
+			bin = shellName
+		}
+		return []string{bin, "-NoProfile", "-Command", cmd}
+	case "", "sh":
+		return []string{"/bin/sh", "-c", cmd}
+	default:
+		return []string{shellName, "-c", cmd}
 	}
+}
 
-	var c *exec.Cmd
-	if strings.Contains(strings.ToLower(env.OSName), "windows") {
-		c = exec.Command("cmd", "/C", cmd)
-	} else {
-		c = exec.Command(shellBin, "-c", cmd)
-	}
-
+// runArgv executes argv with inherited stdio. lenient=true treats any
+// non-zero exit as success (interactive shell semantics); lenient=false
+// preserves WrapCommand's historical isNonFatalExit behavior for git/pkg flows.
+func runArgv(argv []string, dir string, lenient bool) error {
+	c := exec.Command(argv[0], argv[1:]...)
+	c.Dir = dir
+	c.Env = os.Environ()
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-
-	// FIX: Use the dynamic current working directory for execution context.
-	// The sandbox's job is to VALIDATE paths against allowedDir, not to FORCE
-	// execution in the original launch directory.
-	cwd, err := os.Getwd()
-	if err == nil {
-		c.Dir = cwd
-	} else {
-		c.Dir = ds.allowedDir // Fallback to cached root if os.Getwd fails
-	}
-
-	err = c.Run()
+	c.Stdin = os.Stdin
+	err := c.Run()
 	if err != nil {
-		// FIX: Stop blindly swallowing all non-zero exit codes.
-		// Only ignore exits for known informational tools (grep, diff, find).
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
-			if isNonFatalExit(cmd, code) {
-				color.Yellow("Non-fatal exit (%d) — continuing", code)
+			if lenient || isNonFatalExit(strings.Join(argv, " "), code) {
 				return nil
 			}
 			return fmt.Errorf("command execution failed (exit %d): %w", code, err)
@@ -332,9 +335,54 @@ func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell
 	return nil
 }
 
+// confinedArgv applies kernel-grade confinement when strict mode is active.
+// Falls back silently to the advisory argv when no backend exists (the
+// user-visible warning is emitted once, at SetMode time).
+func (ds *DirectorySandbox) confinedArgv(argv []string, dir string) []string {
+	if ds.mode != SandboxStrict {
+		return argv
+	}
+	if wrapped, ok := confinement.WrapCommand(argv, confinement.Profile{Root: ds.allowedDir, Cwd: dir}); ok {
+		return wrapped
+	}
+	return argv
+}
+
+// RunShellCommand executes a validated shell command honoring strict
+// kernel confinement. Used by the Agent for direct/planner shell steps.
+//
+// Args: cmd: validated command; dir: working directory; shellName: shell.
+// Returns: error only for launch failures (non-zero exits are informational).
+// Complexity: O(command execution time).
+func (ds *DirectorySandbox) RunShellCommand(cmd, dir, shellName string) error {
+	return runArgv(ds.confinedArgv(buildArgv(cmd, shellName), dir), dir, true)
+}
+
+// WrapCommand executes the command strictly within the sandbox logic and, in
+// strict mode, under kernel-grade confinement.
+func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell.Env) error {
+	// 1. Validate against the sandbox boundary
+	if ok, reason := ds.ValidateCommand(cmd); !ok {
+		return fmt.Errorf("sandbox violation: %s", reason)
+	}
+	if cfg.DryRun {
+		color.Yellow("[Dry Run] Would execute: %s", cmd)
+		return nil
+	}
+	// 2. Prepare execution context (dynamic CWD, confinement-aware argv).
+	cwd, err := os.Getwd()
+	if err != nil || cwd == "" {
+		cwd = ds.allowedDir
+	}
+	return runArgv(ds.confinedArgv(buildArgv(cmd, env.Shell), cwd), cwd, false)
+}
+
 func (ds *DirectorySandbox) PrintStatus() {
 	color.Cyan("🔒 Sandbox Status:")
 	color.Cyan("  Mode: %s", ds.ModeString())
+	if ds.mode == SandboxStrict {
+		color.Cyan("  Confinement: %s", confinement.BackendName())
+	}
 	color.Cyan("  Allowed Directory: %s", ds.allowedDir)
 
 	cwd, _ := os.Getwd()
@@ -348,6 +396,13 @@ func (ds *DirectorySandbox) PrintStatus() {
 func (ds *DirectorySandbox) SetMode(mode SandboxMode) {
 	ds.mode = mode
 	color.Yellow("🔒 Sandbox mode set to: %s", ds.ModeString())
+	if mode == SandboxStrict {
+		if confinement.Supported() {
+			color.Green("🛡 kernel-grade confinement active: %s", confinement.BackendName())
+		} else {
+			color.Yellow("⚠ kernel confinement unavailable on this platform; strict mode remains advisory")
+		}
+	}
 }
 
 func (ds *DirectorySandbox) GetMode() SandboxMode {
