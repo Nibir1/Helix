@@ -55,6 +55,16 @@ func FuzzValidateSafePath(f *testing.F) {
 		tmpDir + "/../" + filepath.Base(tmpDir),
 		"~/outside",
 		"/etc/passwd",
+		// Windows-hostile malformed paths — regression seeds for the
+		// stdlib EvalSymlinks/toNorm panic class (golang/go#63703, #40966).
+		"//",
+		"///",
+		"//server",
+		"\\\\",
+		"\\\\server\\share",
+		"C:",
+		"C:/",
+		"\\??\\",
 	}
 	for _, seed := range seeds {
 		f.Add(seed)

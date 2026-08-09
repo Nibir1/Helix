@@ -29,19 +29,49 @@ type DirectorySandbox struct {
 	originalDir string
 }
 
+// evalSymlinksSafe wraps filepath.EvalSymlinks with panic recovery.
+//
+// The Go standard library's Windows symlink resolver (symlink_windows.go,
+// toNorm) has a documented history of panicking on malformed inputs such
+// as bare UNC prefixes and truncated drive specs (golang/go#63703,
+// golang/go#40966). ValidateSafePath feeds caller-controlled strings into
+// symlink resolution, so a hostile or fuzzed path could crash the whole
+// shell on Windows.
+//
+// A panic during resolution is converted into an error so the sandbox
+// FAILS CLOSED: an unresolvable path is simply not symlink-validated and
+// still must pass the lexical root-prefix check.
+//
+// Args:
+//   - path: candidate path to resolve.
+//
+// Returns:
+//   - string: resolved path ("" when a panic was recovered).
+//   - error: resolution error, or a synthesized error for a recovered panic.
+//
+// Complexity: O(len(path)) plus filesystem symlink traversal.
+func evalSymlinksSafe(path string) (resolved string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			resolved = ""
+			err = fmt.Errorf("path resolution aborted (treated as unsafe): %v", r)
+		}
+	}()
+	return filepath.EvalSymlinks(path)
+}
+
 // NewDirectorySandbox creates default sandbox
 func NewDirectorySandbox() *DirectorySandbox {
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
 	}
-
 	// FIX: Immediately resolve symlinks to establish the "Canonical Root"
-	realCwd, err := filepath.EvalSymlinks(cwd)
+	// (panic-safe: Windows stdlib can panic on malformed paths).
+	realCwd, err := evalSymlinksSafe(cwd)
 	if err == nil {
 		cwd = realCwd
 	}
-
 	return &DirectorySandbox{
 		allowedDir:  cwd,
 		mode:        SandboxCurrentDir,
@@ -104,7 +134,6 @@ func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) 
 	if ds.mode == SandboxDisabled {
 		return targetPath, nil
 	}
-
 	// 1. Absolutize against the CURRENT working directory (not just sandbox root)
 	if !filepath.IsAbs(targetPath) {
 		cwd, err := os.Getwd()
@@ -113,18 +142,16 @@ func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) 
 		}
 		targetPath = filepath.Join(cwd, targetPath)
 	}
-
 	// 2. Clean
 	cleanTarget := filepath.Clean(targetPath)
-
-	// 3. Resolve Symlinks (Target)
-	realTarget, err := filepath.EvalSymlinks(cleanTarget)
+	// 3. Resolve Symlinks (Target) — panic-safe on Windows.
+	realTarget, err := evalSymlinksSafe(cleanTarget)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// File doesn't exist; check parent directory instead
 			parent := filepath.Dir(cleanTarget)
-			realParent, err := filepath.EvalSymlinks(parent)
-			if err == nil {
+			realParent, perr := evalSymlinksSafe(parent)
+			if perr == nil {
 				realTarget = filepath.Join(realParent, filepath.Base(cleanTarget))
 			} else {
 				realTarget = cleanTarget
@@ -133,22 +160,18 @@ func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) 
 			realTarget = cleanTarget
 		}
 	}
-
 	// 4. Resolve Symlinks (Root) - Ensure base comparison is accurate
-	realRoot, err := filepath.EvalSymlinks(ds.allowedDir)
+	realRoot, err := evalSymlinksSafe(ds.allowedDir)
 	if err != nil {
 		realRoot = ds.allowedDir
 	}
-
 	// 5. Case-Insensitive Comparison (fixes /Users vs /users on macOS)
 	rootCheck := strings.ToLower(realRoot)
 	targetCheck := strings.ToLower(realTarget)
-
 	// 6. The Security Check
 	if !strings.HasPrefix(targetCheck, rootCheck) {
 		return "", fmt.Errorf("path %s is outside root %s", cleanTarget, ds.allowedDir)
 	}
-
 	return cleanTarget, nil
 }
 
