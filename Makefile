@@ -115,8 +115,34 @@ sec-scan:
 	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
 	@govulncheck ./...
 
+
+FUZZTIME ?= 30s
+
+# Run continuous fuzzing across all safety-critical parsers.
+# Go's native fuzzing only allows ONE -fuzz target per `go test` invocation,
+# so we explicitly list every target to avoid wildcard collisions.
+fuzz:
+	@echo "Fuzzing safety surface..."
+	@go test ./internal/commands/safety -run=^$$ -fuzz=FuzzValidateAndCleanShellCommand -fuzztime=$(FUZZTIME)
+	@go test ./internal/commands/safety -run=^$$ -fuzz=FuzzAnalyzeShellRisk -fuzztime=$(FUZZTIME)
+	@go test ./internal/shell -run=^$$ -fuzz=FuzzClassify -fuzztime=$(FUZZTIME)
+	@go test ./internal/ai -run=^$$ -fuzz=FuzzParsePlanFromModelOutput -fuzztime=$(FUZZTIME)
+	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=$(FUZZTIME)
+	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=$(FUZZTIME)
+
+# CI smoke test: shorter duration to keep the pipeline fast.
+fuzz-ci:
+	@echo "Running CI fuzz smoke test (20s per target)..."
+	@go test ./internal/commands/safety -run=^$$ -fuzz=FuzzValidateAndCleanShellCommand -fuzztime=20s
+	@go test ./internal/commands/safety -run=^$$ -fuzz=FuzzAnalyzeShellRisk -fuzztime=20s
+	@go test ./internal/shell -run=^$$ -fuzz=FuzzClassify -fuzztime=20s
+	@go test ./internal/ai -run=^$$ -fuzz=FuzzParsePlanFromModelOutput -fuzztime=20s
+	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=20s
+	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=20s
+
+
 # Run all tasks: lint, build, test, install
 work: lint sec-scan build test install
 
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci

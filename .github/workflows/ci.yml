@@ -47,6 +47,9 @@ jobs:
 
       - name: Run Tests
         run: go test ./... -count=1
-
+      
+      - name: Run Fuzzing Smoke Test
+        run: make fuzz-ci
+        
       - name: Build Binary
         run: go build -o dist/helix ./cmd/helix
