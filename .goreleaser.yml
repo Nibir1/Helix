@@ -54,3 +54,18 @@ changelog:
 release:
   header: |
     {{ readFile "docs/RELEASE_NOTES.md" }}
+    
+# Supply-Chain Security:
+# Generates SPDX SBOMs for all archives and cryptographically signs every
+# artifact using Sigstore keyless signing (OIDC from GitHub Actions).
+sboms:
+  - artifacts: archive
+    cmd: syft
+    args: ["$artifact", "-o", "spdx-json=$document"]
+signs:
+  - cmd: cosign
+    certificate: "{{ .Artifact }}.pem"
+    args: ["sign-blob", "--yes", "--output-certificate", "{{ .Certificate }}",
+           "--output-signature", "{{ .Signature }}", "{{ .Artifact }}"]
+    artifacts: all
+    output: true

@@ -39,3 +39,33 @@ If you discover a security vulnerability in Helix (e.g., a sandbox escape, a pla
 **Do not open a public GitHub issue for security vulnerabilities.**
 
 Instead, please email the maintainer or use the GitHub Security Advisories feature to report the issue privately. We will acknowledge receipt within 48 hours and work on a patch.
+
+## Supply-Chain Security & Release Integrity
+
+Every official Helix release is built with a verified supply chain. We generate a Software Bill of Materials (SBOM) in SPDX format and cryptographically sign every release artifact using [Sigstore](https://sigstore.dev/) keyless signing.
+
+### Verifying a Release
+
+You can verify the integrity and provenance of any downloaded Helix binary or archive using `cosign` and `syft`.
+
+**1. Install the tools:**
+- [Cosign](https://docs.sigstore.dev/cosign/installation)
+- [Syft](https://github.com/anchore/syft#installation)
+
+**2. Verify the signature (Sigstore Keyless):**
+```bash
+cosign verify-blob \
+  --certificate helix_Linux_x86_64.tar.gz.pem \
+  --signature helix_Linux_x86_64.tar.gz.sig \
+  --certificate-identity-regexp "https://github.com/Nibir1/Helix/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  helix_Linux_x86_64.tar.gz
+```
+
+**3. Inspect the SBOM:**
+```bash
+syft helix_Linux_x86_64.tar.gz
+```
+
+### Continuous Security Scanning
+Every commit and pull request is automatically scanned for known vulnerabilities in Go dependencies using `govulncheck` and for static application security testing (SAST) using GitHub CodeQL. See `.github/workflows/security.yml` for details. You can run these checks locally via `make sec-scan`.

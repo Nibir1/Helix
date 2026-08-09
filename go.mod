@@ -3,6 +3,8 @@ module helix
 
 go 1.25.1
 
+toolchain go1.26.5
+
 require (
 	github.com/fatih/color v1.18.0
 	github.com/gopxl/beep/v2 v2.1.1

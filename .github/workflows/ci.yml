@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.25']
+        go-version: ['1.26']
 
     steps:
       - name: Checkout code
@@ -35,7 +35,7 @@ jobs:
       # ROOT-CAUSE FIX: golangci-lint v1.59.1 predates Go 1.25 and cannot read
       # its type information, which produced bogus
       # "undefined: beep / isatty / runewidth (typecheck)" errors even with all
-      # modules downloaded. The v2 release line is the first with full Go 1.25
+      # modules downloaded. The v2 release line is the first with full Go 1.25+
       # support. `go install` works identically on bash and PowerShell runners.
       - name: Install golangci-lint (Go 1.25-compatible)
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0

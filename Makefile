@@ -109,8 +109,14 @@ test:
 	@echo "Running all tests..."
 	go test ./... -v -count=1
 
+# Run local security vulnerability scan using govulncheck
+sec-scan:
+	@echo "Running govulncheck..."
+	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
+	@govulncheck ./...
+
 # Run all tasks: lint, build, test, install
-work: lint build test install
+work: lint sec-scan build test install
 
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install
