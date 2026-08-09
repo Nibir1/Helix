@@ -101,21 +101,34 @@ var fastCreativeRe = regexp.MustCompile(`(?i)\b(?:interesting|creative|cool|some
 
 // buildFastLocalPlan attempts to build a deterministic local plan for simple
 // bash-script creation requests.
+//
+// Args:
+//   - userInput: raw user input.
+//
+// Returns:
+//   - *ai.Plan: generated plan when the request is safely recognized.
+//   - bool: true when the fast path should be used.
+//
+// Complexity: O(len(userInput)).
 func buildFastLocalPlan(userInput string) (*ai.Plan, bool) {
 	input := strings.TrimSpace(userInput)
 	if input == "" {
 		return nil, false
 	}
+	// Only handle script-creation style requests.
 	if !fastScriptCreateRe.MatchString(input) {
 		return nil, false
 	}
+	// Reject multi-line pastes and backticks outright.
 	if strings.Contains(input, "`") || strings.ContainsAny(input, "\r\n") {
 		return nil, false
 	}
+	// Reject dangerous keywords and shell operators.
 	if fastPathDangerRe.MatchString(input) {
 		return nil, false
 	}
 
+	// Extract filename.
 	filename := ""
 	if m := fastNamedScriptRe.FindStringSubmatch(input); m != nil {
 		filename = m[1]
@@ -127,15 +140,22 @@ func buildFastLocalPlan(userInput string) (*ai.Plan, bool) {
 	if filename == "" || filename == "." || filename == ".." {
 		return nil, false
 	}
-	if filepath.IsAbs(filename) {
+	// Phase 15 fix: platform-independent absolute-path rejection.
+	// filepath.IsAbs alone misses POSIX-style "/tmp/x" on Windows, where it
+	// is interpreted as drive-relative; the fast path must reject it on ALL
+	// platforms (leading "/", "\", and drive letters).
+	if isFastPathAbsPath(filename) {
 		return nil, false
 	}
+	// No traversal after cleaning.
 	if strings.Contains(filename, "..") {
 		return nil, false
 	}
+	// Keep names short and predictable.
 	if len(filename) > 200 {
 		return nil, false
 	}
+	// Bash scripts should have a .sh extension.
 	if !strings.HasSuffix(strings.ToLower(filename), ".sh") {
 		filename += ".sh"
 	}
@@ -218,6 +238,35 @@ func buildFastLocalPlan(userInput string) (*ai.Plan, bool) {
 		Intent: intent,
 		Steps:  steps,
 	}, true
+}
+
+// isFastPathAbsPath reports whether p is an absolute path on ANY supported
+// platform.
+//
+// Windows treats "/tmp/x" as drive-relative, so filepath.IsAbs returns false
+// there; the fast path must still reject it. We therefore also reject a
+// leading "/" or "\" and Windows drive-letter prefixes ("C:").
+//
+// Args:
+//   - p: cleaned candidate filename.
+//
+// Returns:
+//   - bool: true when the path is absolute anywhere.
+//
+// Complexity: O(len(p)).
+func isFastPathAbsPath(p string) bool {
+	if filepath.IsAbs(p) {
+		return true
+	}
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\") {
+		return true
+	}
+	if len(p) >= 2 &&
+		((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) &&
+		p[1] == ':' {
+		return true
+	}
+	return false
 }
 
 // fastWantsExecutable reports whether the user explicitly asked to make the
