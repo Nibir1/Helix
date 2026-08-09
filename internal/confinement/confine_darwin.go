@@ -11,8 +11,15 @@ package confinement
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
+
+// lookPath reports whether bin is available in PATH.
+func lookPath(bin string) bool {
+	_, err := exec.LookPath(bin)
+	return err == nil
+}
 
 func detectBackend() Backend {
 	if lookPath("sandbox-exec") {

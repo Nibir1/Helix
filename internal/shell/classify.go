@@ -4,9 +4,6 @@
 //	Helix behave as a single shell accepting both shell commands and
 //	natural language at one prompt, with no mode switching. This is the
 //	foundation of the "Helix-as-shell" inversion.
-//
-// Author:  Nahasat Nibir
-// Dependencies: standard library only (strings).
 package shell
 
 import "strings"

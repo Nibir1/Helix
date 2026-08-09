@@ -40,7 +40,7 @@ var (
 
 const (
 	defaultTimeout = 120 * time.Second
-	// Phase 3.5c: meta keys for conditional-GET (ETag) caching.
+	// meta keys for conditional-GET (ETag) caching.
 	metaETagKEV     = "etag_kev"
 	metaETagExploit = "etag_exploitdb"
 	metaETagMitre   = "etag_mitre"
@@ -206,7 +206,7 @@ func setMeta(db *sql.DB, key, value string) {
 }
 
 // UpdateAll fetches all data sources and updates the database.
-// Phase 4: internet-gated, fast-sources-first, stage-hooked, silent unless
+// internet-gated, fast-sources-first, stage-hooked, silent unless
 // HELIX_DEBUG=1.
 // FIX (interrupt hardening): the caller context is checked between every
 // stage, so a Ctrl+C cancellation aborts the pipeline promptly and unwinds

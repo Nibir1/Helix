@@ -84,10 +84,11 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		case "/chat/completions":
 			atomic.AddInt32(hits, 1)
 			reply := chatResponse
-			// Phase 12: the Instruction Firewall issues a critic call after any
+			// the Instruction Firewall issues a critic call after any
 			// plan with shell steps. Answer it with a well-formed "yes" so the
 			// pre-firewall scenarios keep their original behavior.
-			if strings.Contains(extractPromptFromRequest(r), "plan critic") {
+			promptText := extractPromptFromRequest(r)
+			if strings.Contains(promptText, "safety critic") || strings.Contains(promptText, "plan critic") {
 				reply = `{"verdict":"yes"}`
 			}
 			contentJSON, err := json.Marshal(reply)

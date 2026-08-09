@@ -124,8 +124,14 @@ var pipeIntoShellRe = regexp.MustCompile(
 func extraDangerousPatternChecks(cmd string) error {
 	lc := strings.ToLower(cmd)
 
-	// FIX (helm-incident): the old checks only matched "| sh" / "| bash" and
-	// missed "| sudo bash", "| env bash", "| /bin/sh", etc.
+	// Block sudo entirely in shell commands. Privilege escalation must
+	// go through the package manager or explicit typed confirmations, not raw shell sudo.
+	// This prevents sandbox escapes where sudo spawns a privileged child process
+	// that ignores the kernel confinement profile.
+	if regexp.MustCompile(`(?i)\bsudo\b`).MatchString(lc) {
+		return fmt.Errorf("command contains 'sudo', which is blocked for safety; use the package manager or explicit administrative tools")
+	}
+
 	if pipeIntoShellRe.MatchString(lc) {
 		if regexp.MustCompile(`\b(curl|wget|fetch)\b`).MatchString(lc) {
 			return fmt.Errorf("command appears to download a script and pipe it into a shell (possibly via sudo/env), which is blocked for safety")
@@ -133,15 +139,10 @@ func extraDangerousPatternChecks(cmd string) error {
 		return fmt.Errorf("command contains pipe into a shell (e.g. '| sh' or '| sudo bash'), which is too dangerous to run automatically")
 	}
 
-	// FIX (AI Workaround Loophole): Block executing shell interpreters with sudo.
-	// The AI planner will often try to bypass "| sudo bash" by downloading a
-	// script and running "sudo bash /tmp/script.sh". This is semantically identical
-	// in risk and must be hard-blocked.
 	if regexp.MustCompile(`(?i)sudo\s+(?:/[a-z0-9_./-]+/)?(bash|sh|zsh|dash|ksh|ash|fish)\b`).MatchString(lc) {
 		return fmt.Errorf("command attempts to run a shell interpreter with sudo (e.g., 'sudo bash'), which is blocked for safety")
 	}
 
-	// FIX: Block executing scripts from temporary or shared memory directories.
 	if regexp.MustCompile(`(?i)(bash|sh|zsh|dash|ksh|ash|fish)\s+(/tmp/|/var/tmp/|/dev/shm/)`).MatchString(lc) {
 		return fmt.Errorf("command attempts to execute a script from a temporary directory, which is blocked for safety")
 	}

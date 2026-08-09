@@ -53,8 +53,8 @@ func handlePurgeCommand() {
 		{filepath.Join(helixDir, ".helix_history"), "legacy command history"},
 	}
 
-	// Sweep log and temp artifacts from the Helix home.
-	for _, pattern := range []string{"*.log", "*.tmp"} {
+	// Sweep log, temp, and crash-report artifacts from the Helix home.
+	for _, pattern := range []string{"*.log", "*.tmp", "crash-*.json"} {
 		matches, _ := filepath.Glob(filepath.Join(helixDir, pattern))
 		for _, m := range matches {
 			targets = append(targets, purgeTarget{path: m, desc: "log/temp artifact"})

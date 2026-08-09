@@ -4,9 +4,6 @@
 // safety-first pipeline augmented by the Phase 12 Instruction Firewall.
 // Hardening: Ctrl+C aborts planning gracefully with a clean cancellation
 // message instead of a raw provider error.
-//
-// Author: Nahasat Nibir
-// Dependencies: helix/internal/ai, commands, rag, recon, shell, stealth, utils, ux.
 package agent
 
 import (
@@ -15,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -113,21 +111,33 @@ func (a *Agent) IsStealthEnabled() bool {
 	return a.stealthEnabled
 }
 
+// InstallTool exposes the internal package installer for manual tool installations
+// triggered by the UI layer (e.g. /scan missing nmap).
+func (a *Agent) InstallTool(pkg string) error {
+	return a.installPackage(pkg)
+}
+
 // HandleInput is the main entry point for Agent Mode.
 //
-// Args: userInput: raw user input line.
-// Returns: none. Complexity: O(planner + execution time).
+// Args:
+//   - userInput: raw user input line.
+//
+// Returns: none.
+// Complexity: O(planner + execution time), with a deterministic local fast
+// path for simple local script workflows.
 func (a *Agent) HandleInput(userInput string) {
 	userInput = strings.TrimSpace(userInput)
 	if userInput == "" {
 		return
 	}
+
 	// --- Slash-command interception ---
 	if strings.HasPrefix(userInput, "/") && a.OnSlashCommand != nil {
 		if a.OnSlashCommand(userInput) {
 			return
 		}
 	}
+
 	// --- Unified shell input classification ---
 	classification := shell.Classify(userInput)
 	a.ux.PrintDebug(fmt.Sprintf(
@@ -135,6 +145,7 @@ func (a *Agent) HandleInput(userInput string) {
 		classification.Kind, classification.Confidence,
 		classification.RootCommand, classification.Reason,
 	))
+
 	if classification.Kind == shell.KindShellCommand && classification.Confidence >= shell.HighConfidence {
 		if err := a.runDirectShellCommand(userInput); err != nil {
 			a.ux.PrintError(fmt.Sprintf("Command failed: %v", err))
@@ -142,6 +153,18 @@ func (a *Agent) HandleInput(userInput string) {
 		}
 		return
 	}
+
+	// --- Deterministic local fast path ---
+	//
+	// Simple local script/file workflows should not pay an AI round trip.
+	// The fast path is conservative and still routes every generated command
+	// through the full safety pipeline.
+	if fastPlan, ok := buildFastLocalPlan(userInput); ok {
+		a.ux.PrintDebug("fastpath: deterministic local plan (AI bypass)")
+		a.runFastPlan(fastPlan)
+		return
+	}
+
 	// --- RAG retrieval through the Instruction Firewall ---
 	ragContext := ""
 	canary := ""
@@ -153,43 +176,70 @@ func (a *Agent) HandleInput(userInput string) {
 			a.ux.PrintDebug(fmt.Sprintf("RAG retrieval skipped: %v", err))
 		}
 	}
+
 	// --- Standard planning ---
-	// FIX: Feed the LIVE CWD to the planner, not just the sandbox root.
+	//
+	// Feed the LIVE CWD to the planner, not just the sandbox root.
 	cwd := a.sandbox.GetCurrentDirectory()
 	if wd, err := os.Getwd(); err == nil && wd != "" {
 		cwd = wd
 	}
+
 	envDesc := fmt.Sprintf(
 		"OS: %s, Shell: %s, CWD: %s",
 		a.env.OSName,
 		a.env.Shell,
 		cwd,
 	)
+
 	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
-	// HELIX THINKER: animate the neural link while the planner reasons,
-	// so the user always sees Helix thinking instead of a frozen prompt.
+
+	// HELIX THINKER: animate the neural link while the planner reasons.
 	think := ux.NewThinker("HELIX :: REASONING")
 	think.Start()
+
 	rawPlanOutput, err := ai.RunPlannerWithRetry(plannerPrompt)
+
+	// PROVIDER FLAKE RESILIENCE: reasoning-only models sometimes burn their
+	// budget and return empty output. One compact retry before chat fallback.
+	if err != nil && strings.Contains(err.Error(), "empty output") {
+		a.ux.PrintDebug("planner returned empty output; retrying with compact prompt")
+		rawPlanOutput, err = ai.RunPlannerWithRetry(ai.BuildCompactPlannerPrompt(userInput, envDesc))
+	}
+
 	think.Stop()
+
 	if err != nil {
-		// FIX (interrupt hardening): Ctrl+C aborts planning gracefully with a
-		// clean message instead of a raw provider error.
+		// Ctrl+C aborts planning gracefully.
 		if errors.Is(err, context.Canceled) {
 			a.ux.PrintWarning("Operation cancelled.")
 			return
 		}
+
 		a.ux.PrintError(fmt.Sprintf("Planner model error: %v", err))
+
+		// If the planner deadline expired, do not start another long AI call.
+		// That previously caused the second hang: planner timeout followed by
+		// chat fallback timeout/cancellation.
+		if errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+
 		think.Start()
 		resp, chatErr := ai.RunModel(userInput)
 		think.Stop()
+
 		if chatErr != nil {
 			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
 			return
 		}
-		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
+
+		if !a.promoteFallbackScript(resp) {
+			a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
+		}
 		return
 	}
+
 	rawPlanOutput = strings.TrimSpace(rawPlanOutput)
 
 	// FIREWALL 1: canary honeypot — echoing the canary proves the model copied
@@ -202,33 +252,42 @@ func (a *Agent) HandleInput(userInput string) {
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
 	if err != nil {
 		a.ux.PrintWarning(fmt.Sprintf("Planner parse error: %v", err))
+
 		think.Start()
 		resp, chatErr := ai.RunModel(userInput)
 		think.Stop()
+
 		if chatErr != nil {
 			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
 			return
 		}
-		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
+
+		if !a.promoteFallbackScript(resp) {
+			a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
+		}
 		return
 	}
 
-	// FIREWALL 2: critic pass (sees the user request ALONE). NO quarantines
-	// the plan to a chat fallback instead of executing it.
-	if planHasShellSteps(plan) && !a.criticAllows(userInput, plan) {
+	// FIREWALL 2: risk-gated critic pass.
+	if RequiresCriticReview(userInput, plan) && !a.criticAllows(userInput, plan) {
 		a.ux.PrintWarning("Instruction Firewall: plan quarantined by critic; falling back to chat.")
+
 		think.Start()
 		resp, chatErr := ai.RunModel(userInput)
 		think.Stop()
+
 		if chatErr != nil {
 			a.ux.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
 			return
 		}
-		a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
+
+		if !a.promoteFallbackScript(resp) {
+			a.ux.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
+		}
 		return
 	}
 
-	// FIREWALL 3: provenance escalation set for this plan.
+	// FIREWALL 3: provenance escalation.
 	escalated := escalatedCommands(userInput, ragContext, plan)
 
 	safePlan, err := a.prepareSafePlan(userInput, plan)
@@ -243,33 +302,114 @@ func (a *Agent) HandleInput(userInput string) {
 		if len(plan.Steps) > 1 {
 			a.ux.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
 		}
+
+		// CRITICAL FIX: Trust AI-generated steps to stop nagging the user with
+		// medium-risk confirmations for standard file creation/editing. The only
+		// exception is if the firewall escalated the command due to provenance.
+		step.Trusted = !escalated[step.Command]
+
 		switch step.Tool {
 		case "response":
 			a.handleResponseStep(step)
+
 		case "shell":
 			if err := a.handleShellStepWithEscalation(step, escalated[step.Command]); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Shell step failed: %v", err))
 				return
 			}
+
 		case "git":
 			if err := a.handleGitStep(step); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Git step failed: %v", err))
 				return
 			}
+
 		case "package":
 			if err := a.handlePackageStep(step); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Package step failed: %v", err))
 				return
 			}
+
 		case "recon":
 			if err := a.handleReconStep(step); err != nil {
 				a.ux.PrintError(fmt.Sprintf("Recon step failed: %v", err))
 				return
 			}
+
 		default:
 			a.ux.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
 		}
 	}
+}
+
+// promoteFallbackScript offers to execute fenced shell blocks found in a chat
+// fallback through the FULL safety pipeline (validation → risk tiers →
+// sandbox), with explicit user consent. Multi-line blocks are passed to the
+// shell as a single unit so heredocs and loops execute correctly.
+//
+// Args: resp: fallback chat text. Returns: true when a script was handled.
+// Complexity: O(lines).
+func (a *Agent) promoteFallbackScript(resp string) bool {
+	blocks := extractFencedShellBlocks(resp)
+	if len(blocks) == 0 {
+		return false
+	}
+	a.ux.PrintWarning("Helix detected executable script block(s) in the fallback response:")
+	for i, b := range blocks {
+		// Show a preview of the block
+		lines := strings.Split(b, "\n")
+		preview := strings.TrimSpace(lines[0])
+		if len(lines) > 1 {
+			preview += " ..."
+		}
+		a.ux.PrintInfo(fmt.Sprintf("  %d. %s", i+1, preview))
+	}
+	if !a.ux.AskYesNo("Run it through the safety pipeline?") {
+		return false
+	}
+	for _, b := range blocks {
+		if err := a.handleShellStep(ai.PlanStep{Tool: "shell", Command: b}); err != nil {
+			a.ux.PrintError(fmt.Sprintf("Step failed: %v", err))
+			return true
+		}
+	}
+	return true
+}
+
+// extractFencedShellBlocks pulls complete ```bash/sh fenced blocks as single
+// executable strings. Multi-line constructs (heredocs, loops) require the
+// entire block to be passed to the shell at once.
+//
+// Args: text: markdown-ish response. Returns: block strings. Complexity: O(lines).
+func extractFencedShellBlocks(text string) []string {
+	var blocks []string
+	var current strings.Builder
+	inFence, shellFence := false, false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			if !inFence {
+				inFence = true
+				lang := strings.ToLower(strings.TrimPrefix(trimmed, "```"))
+				shellFence = lang == "" || lang == "bash" || lang == "sh" ||
+					lang == "shell" || lang == "zsh"
+				if shellFence {
+					current.Reset()
+				}
+			} else {
+				if shellFence && current.Len() > 0 {
+					blocks = append(blocks, strings.TrimSpace(current.String()))
+				}
+				inFence, shellFence = false, false
+			}
+			continue
+		}
+		if inFence && shellFence {
+			current.WriteString(line)
+			current.WriteString("\n")
+		}
+	}
+	return blocks
 }
 
 // runDirectShellCommand executes a user-typed shell command through the full safety pipeline.
@@ -285,11 +425,7 @@ func (a *Agent) runDirectShellCommand(command string) error {
 // ──────────────────────────────────────────────────────────────
 // SAFETY LAYER
 // ──────────────────────────────────────────────────────────────
-
 // prepareSafePlan injects missing git add steps and normalizes versions.
-//
-// Args: userInput: raw user input; plan: parsed plan.
-// Returns: safe plan or error. Complexity: O(steps).
 func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("nil plan")
@@ -297,10 +433,12 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 	safe := *plan
 	safe.Steps = make([]ai.PlanStep, len(plan.Steps))
 	copy(safe.Steps, plan.Steps)
+
 	requestedVersion := extractSemanticVersion(userInput)
 	var mutatedPaths []string
 	hasGitCommit := false
 	hasGitAdd := false
+
 	for i, s := range safe.Steps {
 		switch s.Tool {
 		case "shell":
@@ -312,6 +450,13 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 			}
 			s.Command = cmd
 			safe.Steps[i] = s
+
+			// Detect git add in shell commands to prevent duplicate safety layer insertions
+			if strings.HasPrefix(cmd, "git add ") || strings.HasPrefix(cmd, "git add\t") ||
+				cmd == "git add" || cmd == "git add -u" || cmd == "git add -A" || cmd == "git add ." {
+				hasGitAdd = true
+			}
+
 			if isFileMutatingShell(cmd) {
 				if strings.Contains(cmd, "README.md") {
 					mutatedPaths = append(mutatedPaths, "README.md")
@@ -338,6 +483,7 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 			}
 		}
 	}
+
 	mutatedPaths = uniqueStrings(mutatedPaths)
 	if hasGitCommit && len(mutatedPaths) > 0 && !hasGitAdd {
 		addStep := ai.PlanStep{
@@ -410,35 +556,30 @@ func (a *Agent) handleShellStep(step ai.PlanStep) error {
 	return a.handleShellStepWithEscalation(step, false)
 }
 
-// handleShellStepWithEscalation is handleShellStep plus provenance escalation:
-// when escalated, a Low-risk command is promoted to Medium (mandatory confirm).
-//
-// Args: step: planner step; escalated: true if provenance escalation applies.
-// Returns: error if execution fails. Complexity: O(execution time).
+// handleShellStepWithEscalation is handleShellStep plus provenance escalation.
 func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) error {
 	cmd := strings.TrimSpace(step.Command)
 	if cmd == "" {
 		return fmt.Errorf("empty shell command")
 	}
-	// NATIVE CD INTERCEPTION: a `cd` run in a child shell vanishes when the
-	// child exits. Apply it to the live Helix process instead.
+
+	// NATIVE CD INTERCEPTION
 	if segments := splitShellChain(cmd); len(segments) > 0 && isCdCommand(segments[0]) {
 		return a.executeNativeCd(cmd, segments)
 	}
-	// NATIVE HISTORY INTERCEPTION: `history`, `fc`, and `!!` run in a child
-	// shell will only see the child's empty history. Intercept them and read
-	// Helix's actual persistent history file.
+
+	// NATIVE HISTORY INTERCEPTION
 	if isHistoryQuery(cmd) {
 		return a.executeNativeHistory(cmd)
 	}
+
 	a.ux.PrintCommand(cmd)
 	validCmd, err := commands.ValidateAndCleanCommand(cmd)
 	if err != nil {
 		return fmt.Errorf("invalid shell command: %w", err)
 	}
-	risk, reasons := commands.AnalyzeShellRisk(validCmd)
 
-	// FIREWALL 5: provenance escalation forces confirmation.
+	risk, reasons := commands.AnalyzeShellRisk(validCmd)
 	if escalated && risk == commands.ShellRiskLow {
 		risk = commands.ShellRiskMedium
 		reasons = append(reasons, "provenance escalation: command carries tokens sourced from retrieved knowledge")
@@ -448,13 +589,17 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 	case commands.ShellRiskLow:
 		// execute directly
 	case commands.ShellRiskMedium:
-		a.ux.PrintWarning("Medium risk shell command:")
-		for _, r := range reasons {
-			a.ux.PrintWarning(fmt.Sprintf("   • %s", r))
-		}
-		if !a.ux.AskYesNo("Execute anyway?") {
-			a.ux.PrintWarning("Command skipped")
-			return nil
+		if step.Trusted {
+			a.ux.PrintDebug("Medium risk command auto-confirmed (trusted local source)")
+		} else {
+			a.ux.PrintWarning("Medium risk shell command:")
+			for _, r := range reasons {
+				a.ux.PrintWarning(fmt.Sprintf("   • %s", r))
+			}
+			if !a.ux.AskYesNo("Execute anyway?") {
+				a.ux.PrintWarning("Command skipped")
+				return nil
+			}
 		}
 	case commands.ShellRiskHigh:
 		a.ux.PrintError("HIGH RISK — blocked")
@@ -463,6 +608,15 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 		}
 		return fmt.Errorf("high-risk shell command blocked")
 	}
+
+	// Phase 15 Fix: Prevent double "sandbox violation:" prefix
+	if ok, reason := a.sandbox.ValidateCommand(validCmd); !ok {
+		if strings.HasPrefix(reason, "sandbox violation: ") {
+			return fmt.Errorf("%s", reason)
+		}
+		return fmt.Errorf("sandbox violation: %s", reason)
+	}
+
 	if a.stealthEnabled && a.stealth != nil {
 		a.ux.PrintDebug("Stealth mode: running command from memory")
 		output, err := a.stealth.Execute(validCmd)
@@ -474,21 +628,34 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 		}
 		return nil
 	}
+
 	if a.execConfig.DryRun {
 		a.ux.PrintWarning(fmt.Sprintf("[Dry Run] Would execute: %s", validCmd))
 		return nil
 	}
-	if ok, reason := a.sandbox.ValidateCommand(validCmd); !ok {
-		return fmt.Errorf("sandbox violation: %s", reason)
-	}
-	// FIX: execute child commands in the LIVE working directory, not the
-	// sandbox root, so prior `cd` calls affect subsequent commands.
+
 	wd, wdErr := os.Getwd()
 	if wdErr != nil || wd == "" {
 		wd = a.sandbox.GetCurrentDirectory()
 	}
-	// Phase 13: route through the sandbox so strict mode is kernel-enforced.
-	return a.sandbox.RunShellCommand(validCmd, wd, a.env.Shell)
+
+	err = a.sandbox.RunShellCommand(validCmd, wd, a.env.Shell)
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 127 {
+			missingCmd := strings.Fields(validCmd)[0]
+			a.ux.PrintWarning(fmt.Sprintf("Command %q not found.", missingCmd))
+			if a.ux.AskYesNo(fmt.Sprintf("Attempt to install %q using system package manager?", missingCmd)) {
+				if installErr := a.installPackage(missingCmd); installErr == nil {
+					a.ux.PrintSuccess(fmt.Sprintf("%s installed. Retrying command...", missingCmd))
+					return a.sandbox.RunShellCommand(validCmd, wd, a.env.Shell)
+				} else {
+					a.ux.PrintError(fmt.Sprintf("Installation failed: %v", installErr))
+				}
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 // executeNativeCd applies every `cd` segment to the live Helix process and
@@ -704,7 +871,20 @@ func (a *Agent) installPackage(pkg string) error {
 	}
 	installCmd := pm.InstallCommand(pkg)
 	a.ux.PrintInfo(fmt.Sprintf("Running: %s", installCmd))
-	return a.sandbox.WrapCommand(installCmd, a.execConfig, a.env)
+
+	err := a.sandbox.WrapCommand(installCmd, a.execConfig, a.env)
+	if err != nil {
+		// Post-install verification. Some package managers (like brew)
+		// exit non-zero if a dependency fails to link or cleanup fails, even if the
+		// target package was successfully installed.
+		info, checkErr := commands.CheckPackage(pkg, a.env)
+		if checkErr == nil && info.Installed {
+			a.ux.PrintWarning(fmt.Sprintf("Package manager reported an error, but %s was successfully installed.", pkg))
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // handleGitStep processes planner git steps.

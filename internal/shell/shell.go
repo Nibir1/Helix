@@ -195,6 +195,17 @@ func detectLinuxPackageManager() PackageManagerInfo {
 }
 
 func detectMacOSPackageManager() PackageManagerInfo {
+	// Phase 15 Fix: Check common Homebrew paths explicitly, as it might not be in PATH
+	// when Helix is launched from certain contexts (e.g., GUI launchers).
+	brewPaths := []string{
+		"/opt/homebrew/bin/brew",
+		"/usr/local/bin/brew",
+	}
+	for _, p := range brewPaths {
+		if _, err := os.Stat(p); err == nil {
+			return PackageManagerInfo{Name: "brew", Exists: true}
+		}
+	}
 	if commandExists("brew") {
 		return PackageManagerInfo{Name: "brew", Exists: true}
 	}

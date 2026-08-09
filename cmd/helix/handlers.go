@@ -3,14 +3,22 @@
 // Hardening: /knowledge-update, /rag-reindex, and /rag-rebuild now register
 // cancellable contexts with the interrupt manager so Ctrl+C aborts the running
 // pipeline and returns to a live prompt instead of killing Helix.
+// Phase 15: Added /typewrite-all, on-demand NVD fetch, auto-install for recon
+// tools, and animated Thinker progress bars for blocking operations.
 package main
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +27,7 @@ import (
 	"helix/internal/commands"
 	"helix/internal/config"
 	"helix/internal/confinement"
+	"helix/internal/diagnostics"
 	"helix/internal/rag"
 	"helix/internal/shell"
 	"helix/internal/utils"
@@ -92,8 +101,12 @@ func handleSlashCommand(input string) bool {
 		handleStatus()
 	case "/audio":
 		handleAudioCommand(input)
+	case "/typewrite-all":
+		handleTypewriteAllCommand(input)
 	case "/purge":
 		handlePurgeCommand()
+	case "/crash":
+		handleCrashCommand(parts)
 	default:
 		// Absolute-path executables (e.g. /usr/bin/git) are NOT Helix
 		// control commands; let the normal pipeline handle them exactly
@@ -205,9 +218,9 @@ func handleSetup() {
 func handleDebugCommand(input string) {
 	args := strings.Fields(input)
 	if len(args) < 2 {
-		current := "ON"
-		if !utils.IsDebugMode() {
-			current = "OFF"
+		current := "OFF"
+		if utils.IsDebugMode() {
+			current = "ON"
 		}
 		color.Cyan("Debug mode is currently: %s", current)
 		color.Yellow("Usage: /debug <on|off>")
@@ -215,10 +228,12 @@ func handleDebugCommand(input string) {
 	}
 	switch strings.ToLower(args[1]) {
 	case "on", "enable":
+		utils.SetDebugMode(true)
 		_ = os.Setenv("HELIX_DEBUG", "1")
 		cfg.UserPrefs.DebugMode = true
 		color.Green("Debug mode ENABLED")
 	case "off", "disable":
+		utils.SetDebugMode(false)
 		_ = os.Unsetenv("HELIX_DEBUG")
 		cfg.UserPrefs.DebugMode = false
 		color.Yellow("Debug mode DISABLED")
@@ -235,7 +250,7 @@ func handleDebugCommand(input string) {
 // -------------------------------------------------------
 
 func handleHelp() {
-	const colWidth = 24
+	const colWidth = 28
 	rule := "  " + shell.Fg(shell.HexSubtle, strings.Repeat("─", 70))
 	fmt.Println()
 	fmt.Println("  " + shell.Fg(shell.HexPrimary, "⚡ HELIX NATIVE SHELL") + " " + shell.Fg(shell.HexRectifier, "// SOS PROTOCOL"))
@@ -265,15 +280,17 @@ func handleHelp() {
 	helpLine(colWidth, "/knowledge-status", "Show knowledge database row counts")
 	helpLine(colWidth, "/knowledge-reindex", "Rebuild FTS5 search index")
 	helpSection("SECURITY, RECON & STEALTH")
-	helpLine(colWidth, "/vuln <query>", "Defensive vulnerability intel (CVE/EDB/MITRE)")
+	helpLine(colWidth, "/vuln <query>", "Defensive vulnerability intel (CVE/EDB/MITRE lookup)")
 	helpLine(colWidth, "/scan authorize <ip>", "Authorize recon target (written scope)")
 	helpLine(colWidth, "/scan <ip>", "Run nmap/masscan on an authorized target")
 	helpLine(colWidth, "/sandbox <mode>", "Directory confinement (off, current, strict)")
 	helpLine(colWidth, "/stealth <on|off>", "Private history mode (suppresses shell history)")
+	helpLine(colWidth, "/crash <list|view 1|clear>", "Inspect and manage local crash diagnostics")
 	helpLine(colWidth, "/dry-run", "Toggle command execution preview mode")
 	helpSection("UTILITIES & GIT")
 	helpLine(colWidth, "/git <request>", "Natural language git operations with safety")
 	helpLine(colWidth, "/audio <on|off>", "Toggle tonal audio feedback")
+	helpLine(colWidth, "/typewrite-all <on|off>", "Toggle typewriter effect for ALL output")
 	helpSection("DANGER ZONE")
 	helpLine(colWidth, "/purge", "Wipe ALL Helix data (keys, DBs, caches) for a fresh start")
 	helpSection("TIPS & ACCELERATION")
@@ -326,9 +343,7 @@ func helpLine(colWidth int, cmd, desc string) {
 }
 
 // -------------------------------------------------------
-// Unknown slash command — graceful, aesthetic rejection.
-// Guarantees Helix NEVER hangs or misroutes a typo'd /command:
-// immediate feedback, no shell execution, no planner call.
+// Unknown slash command
 // -------------------------------------------------------
 
 func handleUnknownSlashCommand(cmd string) {
@@ -351,6 +366,8 @@ func handleUnknownSlashCommand(cmd string) {
 
 func handleStatus() {
 	color.Cyan("⚡ HELIX BACKGROUND STATUS")
+
+	// RAG System
 	if ragSystem != nil {
 		stats := ragSystem.GetSystemStats()
 		statusText := ragSystem.GetInitializationStatus()
@@ -364,14 +381,69 @@ func handleStatus() {
 	} else {
 		color.Yellow("  RAG System: Not initialized")
 	}
+
+	// Knowledge Base
+	if ragSystem != nil && ragSystem.GetDB() != nil {
+		stats := ragSystem.GetSystemStats()
+		color.Cyan("  Knowledge Base:")
+		if cves, ok := stats["db_cves"]; ok {
+			color.Cyan("    └─ CVEs: %v", cves)
+		}
+		if exploits, ok := stats["db_exploits"]; ok {
+			color.Cyan("    └─ Exploits: %v", exploits)
+		}
+		if kev, ok := stats["db_kev"]; ok {
+			color.Cyan("    └─ KEV (CISA): %v", kev)
+		}
+		if mitre, ok := stats["db_mitre"]; ok {
+			color.Cyan("    └─ MITRE Techniques: %v", mitre)
+		}
+		if last := rag.KnowledgeLastUpdate(ragSystem.GetDB()); last != "" {
+			color.Cyan("    └─ Last Update: %s", last)
+		} else {
+			color.Yellow("    └─ Last Update: never")
+		}
+	} else {
+		color.Yellow("  Knowledge Base: Not initialized")
+	}
+
+	// AI Provider
 	color.Cyan("  AI Provider: %s (%s)", ai.ActiveProviderName(), ai.ActiveModel())
+
+	// Audio Engine
 	if audio.IsEnabled() {
 		color.Green("  Audio Engine: Active")
 	} else {
 		color.Yellow("  Audio Engine: Inactive (Use /audio on)")
 	}
+
+	// Stealth Mode
 	if agentCore != nil && agentCore.IsStealthEnabled() {
 		color.Magenta("  Stealth Mode: ENABLED (History suppression active)")
+	} else {
+		color.Yellow("  Stealth Mode: DISABLED")
+	}
+
+	// Typewrite-all
+	if cfg.UserPrefs.TypewriteAll {
+		color.Green("  Typewrite-All: ENABLED (All output animated)")
+	} else {
+		color.Yellow("  Typewrite-All: DISABLED (AI output only)")
+	}
+
+	// Debug Mode
+	if utils.IsDebugMode() {
+		color.Magenta("  Debug Mode: ENABLED")
+	} else {
+		color.Yellow("  Debug Mode: DISABLED")
+	}
+
+	// Sandbox
+	if sandbox != nil {
+		color.Cyan("  Sandbox: %s", sandbox.ModeString())
+		if sandbox.GetMode() == commands.SandboxStrict {
+			color.Cyan("    └─ Confinement: %s", confinement.BackendName())
+		}
 	}
 }
 
@@ -458,9 +530,6 @@ func handleRAGStatus() {
 	}
 }
 
-// handleRAGReindex performs a FULL foreground rebuild with live progress.
-// FIX (interrupt hardening): Ctrl+C cancels the rebuild and returns to the
-// prompt instead of killing Helix.
 func handleRAGReindex() {
 	if ragSystem == nil {
 		color.Red("RAG system not initialized")
@@ -498,9 +567,6 @@ func handleRAGReset() {
 	color.Green("RAG reset completed.")
 }
 
-// handleRAGRebuild performs a confirmed full rebuild with live progress.
-// FIX (interrupt hardening): Ctrl+C cancels the rebuild and returns to the
-// prompt instead of killing Helix.
 func handleRAGRebuild() {
 	if ragSystem == nil {
 		color.Red("RAG system not initialized")
@@ -587,7 +653,6 @@ func handleStealthCommand(input string) {
 // -------------------------------------------------------
 // RECON
 // -------------------------------------------------------
-
 func handleQuickScan(args []string) {
 	if len(args) < 2 {
 		color.Cyan("Usage: /scan authorize <target> --reason \"<written scope>\"")
@@ -628,19 +693,62 @@ func handleQuickScan(args []string) {
 			color.Red("Target %q is not authorized for reconnaissance.", target)
 			return
 		}
-		result, err := agentCore.RunReconTool("nmap", "-sV", target)
+
+		toolName := "nmap"
+
+		// Phase 15 Fix: Show reasoning progress bar during the scan
+		think := ux.NewThinker("HELIX :: SCANNING")
+		think.Start()
+		result, err := agentCore.RunReconTool(toolName, "-sV", target)
+		think.Stop()
+
 		if err != nil {
 			color.Red("Recon failed: %v", err)
 			return
 		}
+
+		// Auto-install missing recon tools
+		if result.Error != nil && strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
+			color.Yellow("Recon tool %q is not installed.", toolName)
+			if commands.AskForConfirmation(fmt.Sprintf("Install %s now using system package manager?", toolName)) {
+				if installErr := agentCore.InstallTool(toolName); installErr != nil {
+					color.Red("Installation failed: %v", installErr)
+					return
+				}
+				color.Green("%s installed successfully. Retrying scan...", toolName)
+
+				think2 := ux.NewThinker("HELIX :: SCANNING")
+				think2.Start()
+				result, err = agentCore.RunReconTool(toolName, "-sV", target)
+				think2.Stop()
+
+				if err != nil {
+					color.Red("Recon retry failed: %v", err)
+					return
+				}
+			} else {
+				color.Yellow("Scan skipped.")
+				return
+			}
+		}
+
+		if result.Error != nil {
+			color.Red("Recon tool issue: %v", result.Error)
+		}
 		color.Green("Recon completed in %v", result.Elapsed)
+		if result.Raw != "" {
+			fmt.Println(result.Raw)
+		} else if len(result.Parsed) > 0 {
+			summary, _ := json.MarshalIndent(result.Parsed, "", "  ")
+			color.Cyan("Parsed Results:")
+			fmt.Println(string(summary))
+		}
 	}
 }
 
 // -------------------------------------------------------
 // /explain — defensive debrief
 // -------------------------------------------------------
-
 func handleExplainCommand(input string) {
 	args := strings.TrimSpace(strings.TrimPrefix(input, "/explain"))
 	if args == "" {
@@ -663,7 +771,8 @@ Given the user's command or technique description, produce a structured defensiv
 MITRE Context: %s
 User Request: %s
 FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lines.`, mitreContext, args)
-	explainConfig := ai.ModelConfig{Temperature: 0.7, TopP: 0.9, TopK: 40, MaxTokens: 512}
+
+	explainConfig := ai.ModelConfig{Temperature: 0.7, TopP: 0.9, TopK: 40, MaxTokens: 2048}
 	think := ux.NewThinker("HELIX :: REASONING")
 	think.Start()
 	resp, err := ai.RunModelWithConfig(prompt, explainConfig)
@@ -673,6 +782,10 @@ FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lin
 		return
 	}
 	cleaned := cleanDebrief(strings.TrimSpace(resp))
+	if cleaned == "" {
+		color.Yellow("The AI model returned an empty explanation. Try rephrasing the request or checking /provider-status.")
+		return
+	}
 	if agentCore != nil {
 		agentCore.GetUX().PrintAIMessage(cleaned, agentCore.GetTypingEffect())
 	}
@@ -718,11 +831,6 @@ func cleanDebrief(text string) string {
 // KNOWLEDGE BASE
 // -------------------------------------------------------
 
-// handleKnowledgeUpdate runs a staged fetch with a live progress bar that
-// politely pauses whenever the pipeline needs to ask the user something
-// (e.g. the Ollama embedding bootstrap).
-// FIX (interrupt hardening): Ctrl+C cancels the update and returns to the
-// prompt instead of killing Helix.
 func handleKnowledgeUpdate() {
 	if ragSystem == nil || ragSystem.GetDB() == nil {
 		color.Red("Knowledge database not available.")
@@ -745,16 +853,14 @@ func handleKnowledgeUpdate() {
 			prog.Start()
 		}
 	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	unreg := utils.RegisterOperation(cancel)
 	err := ragSystem.UpdateKnowledgeCtx(ctx)
 	unreg()
 	cancel()
-
 	rag.OnUpdateStage = nil
 	rag.OnInteractivePrompt = nil
-	prog.Stop() // always heals the line + cursor, even after cancellation
+	prog.Stop()
 	if err != nil {
 		if ctx.Err() != nil {
 			color.Yellow("Knowledge update cancelled.")
@@ -812,11 +918,42 @@ func handleVulnCommand(input string) {
 		return
 	}
 	db := ragSystem.GetDB()
-	exact, err := rag.LookupVulnByID(db, query)
-	if err == nil && len(exact) > 0 {
-		displayVulnEntries(exact)
-		return
+
+	if strings.HasPrefix(strings.ToUpper(query), "CVE-") {
+		exact, err := rag.LookupVulnByID(db, query)
+		if err == nil && len(exact) > 0 {
+			displayVulnEntries(exact)
+			return
+		}
+
+		color.Yellow("⚠ Local CVE database does not contain %s (rolling 119-day window).", strings.ToUpper(query))
+		color.Yellow("  Attempting on-demand fetch from NVD API...")
+
+		// Phase 15 Fix: Show reasoning progress bar during the API fetch
+		think := ux.NewThinker("HELIX :: FETCHING NVD")
+		think.Start()
+		fetchErr := fetchAndInsertCVE(db, strings.ToUpper(query))
+		think.Stop()
+
+		if fetchErr == nil {
+			exact, err = rag.LookupVulnByID(db, query)
+			if err == nil && len(exact) > 0 {
+				displayVulnEntries(exact)
+				return
+			}
+		} else {
+			color.Yellow("  On-demand fetch failed: %v", fetchErr)
+		}
+
+		color.Yellow("  Run /knowledge-update to sync full NVD data if needed.")
+	} else {
+		exact, err := rag.LookupVulnByID(db, query)
+		if err == nil && len(exact) > 0 {
+			displayVulnEntries(exact)
+			return
+		}
 	}
+
 	entries, err := rag.SearchVulns(db, query, 5)
 	if err != nil {
 		color.Red("Vulnerability search failed: %v", err)
@@ -827,6 +964,91 @@ func handleVulnCommand(input string) {
 		return
 	}
 	displayVulnEntries(entries)
+}
+
+func fetchAndInsertCVE(db *sql.DB, cveID string) error {
+	if !utils.IsOnline(3 * time.Second) {
+		return fmt.Errorf("offline")
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	url := fmt.Sprintf("https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=%s", cveID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Helix/1.0 (defensive threat intelligence)")
+
+	if apiKey := os.Getenv("NVD_API_KEY"); apiKey != "" {
+		req.Header.Set("apiKey", apiKey)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("NVD API returned %d", resp.StatusCode)
+	}
+
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+
+	var nvdResp struct {
+		Vulnerabilities []struct {
+			CVE struct {
+				ID           string `json:"id"`
+				Published    string `json:"published"`
+				LastModified string `json:"lastModified"`
+				Descriptions []struct {
+					Lang  string `json:"lang"`
+					Value string `json:"value"`
+				} `json:"descriptions"`
+				Metrics struct {
+					CVSSMetricV31 []struct {
+						CVSSData struct {
+							BaseScore float64 `json:"baseScore"`
+						} `json:"cvssData"`
+					} `json:"cvssMetricV31"`
+				} `json:"metrics"`
+			} `json:"cve"`
+		} `json:"vulnerabilities"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &nvdResp); err != nil {
+		return err
+	}
+
+	if len(nvdResp.Vulnerabilities) == 0 {
+		return fmt.Errorf("CVE not found in NVD")
+	}
+
+	vuln := nvdResp.Vulnerabilities[0].CVE
+	desc := ""
+	if len(vuln.Descriptions) > 0 {
+		for _, d := range vuln.Descriptions {
+			if d.Lang == "en" {
+				desc = d.Value
+				break
+			}
+		}
+		if desc == "" {
+			desc = vuln.Descriptions[0].Value
+		}
+	}
+
+	cvss := 0.0
+	if len(vuln.Metrics.CVSSMetricV31) > 0 {
+		cvss = vuln.Metrics.CVSSMetricV31[0].CVSSData.BaseScore
+	}
+
+	raw, _ := json.Marshal(vuln)
+	_, err = db.Exec(`INSERT OR REPLACE INTO cve(id, description, cvss_score, published_date, last_modified_date, raw_json) VALUES(?,?,?,?,?,?)`,
+		vuln.ID, desc, cvss, vuln.Published, vuln.LastModified, string(raw))
+
+	return err
 }
 
 func displayVulnEntries(entries []rag.VulnIntel) {
@@ -860,7 +1082,6 @@ func displayVulnEntries(entries []rag.VulnIntel) {
 	color.Yellow("Defensive use only: prioritize patching and detection.")
 }
 
-// handleKnowledgeReindex rebuilds the FTS index with live progress.
 func handleKnowledgeReindex() {
 	if ragSystem == nil || ragSystem.GetDB() == nil {
 		color.Red("Knowledge database not available.")
@@ -892,13 +1113,6 @@ func handleKnowledgeReindex() {
 // DOCTOR / PROVIDERS / MODELS
 // -------------------------------------------------------
 
-// handleDoctor prints full system diagnostics, including the Phase 13
-// kernel confinement backend so operators can verify which engine enforces
-// /sandbox strict on this host (seatbelt / bwrap / landlock / advisory).
-//
-// Args: none.
-// Returns: none.
-// Complexity: O(1) plus one bounded network probe (3s).
 func handleDoctor() {
 	color.Cyan("=== Helix Doctor ===")
 	home, err := os.UserHomeDir()
@@ -933,9 +1147,18 @@ func handleDoctor() {
 	if sandbox != nil {
 		color.Cyan("Sandbox: %s", sandbox.ModeString())
 	}
-	// Phase 13: report the kernel-grade confinement engine enforcing
-	// /sandbox strict, or the advisory fallback when none is available.
 	color.Cyan("Confinement backend: %s", confinement.BackendName())
+
+	if summaries := diagnostics.ListReports(); len(summaries) > 0 {
+		color.Yellow("Pending crash reports (%d):", len(summaries))
+		for _, s := range summaries {
+			color.Yellow("  • %s — %s", s.Time, s.Reason)
+			color.Yellow("    %s", s.Path)
+		}
+		color.Yellow("Reports are local-only; run /purge to delete them.")
+	} else {
+		color.Green("Crash diagnostics: no pending reports (telemetry-free)")
+	}
 }
 
 func handleProviderStatus() {
@@ -1005,14 +1228,6 @@ func displayProviderStatus() {
 	}
 }
 
-// handleAudioCommand processes /audio and verifies the sound engine is
-// actually ready, so silence can never be invisible again.
-//
-// Args:
-//   - input: raw user input line.
-//
-// Returns: none.
-// Complexity: O(1), plus possible audio-device initialization time.
 func handleAudioCommand(input string) {
 	args := strings.Fields(input)
 	if len(args) < 2 {
@@ -1031,7 +1246,6 @@ func handleAudioCommand(input string) {
 	switch strings.ToLower(args[1]) {
 	case "on", "enable":
 		audio.SetEnabled(true)
-		// Explicit user action: force a retry of speaker initialization.
 		if err := audio.EnsureReady(true); err != nil {
 			color.Yellow("Audio enabled, but the sound engine is unavailable: %v", err)
 			color.Yellow("Check your system output device and volume.")
@@ -1045,4 +1259,120 @@ func handleAudioCommand(input string) {
 		audio.SetEnabled(false)
 		color.Yellow("Audio disabled")
 	}
+}
+
+// -------------------------------------------------------
+// CRASH DIAGNOSTICS (/crash)
+// -------------------------------------------------------
+
+func handleCrashCommand(parts []string) {
+	action := "list"
+	if len(parts) >= 2 {
+		action = strings.ToLower(parts[1])
+	}
+
+	switch action {
+	case "list", "ls", "status":
+		summaries := diagnostics.ListReports()
+		if len(summaries) == 0 {
+			color.Green("✔ No pending crash reports. System is clean.")
+			return
+		}
+		color.Yellow("⚠ Pending crash reports (%d):", len(summaries))
+		for i, s := range summaries {
+			color.Yellow("  [%d] %s — %s", i+1, s.Time, s.Reason)
+			color.Yellow("      %s", s.Path)
+		}
+		fmt.Println()
+		color.Cyan("Use '/crash view <number>' to inspect the redacted stack trace.")
+		color.Cyan("Use '/crash clear' to safely delete them without wiping your config.")
+
+	case "view", "show", "cat", "read":
+		if len(parts) < 3 {
+			color.Red("Usage: /crash view <number>")
+			return
+		}
+		summaries := diagnostics.ListReports()
+		if len(summaries) == 0 {
+			color.Yellow("No crash reports to view.")
+			return
+		}
+
+		idx, err := strconv.Atoi(parts[2])
+		if err != nil || idx < 1 || idx > len(summaries) {
+			color.Red("Invalid report number. Use '/crash list' to see valid numbers (1-%d).", len(summaries))
+			return
+		}
+
+		target := summaries[idx-1]
+		data, err := os.ReadFile(target.Path)
+		if err != nil {
+			color.Red("Failed to read crash report: %v", err)
+			return
+		}
+
+		fmt.Println()
+		color.Cyan("=== Crash Report: %s ===", filepath.Base(target.Path))
+		var prettyJSON bytes.Buffer
+		if json.Indent(&prettyJSON, data, "", "  ") == nil {
+			fmt.Println(prettyJSON.String())
+		} else {
+			fmt.Println(string(data))
+		}
+		fmt.Println()
+		color.Yellow("Note: All API keys, tokens, and secrets are automatically [REDACTED].")
+
+	case "clear", "clean", "rm", "delete":
+		n, err := diagnostics.PurgeReports()
+		if err != nil {
+			color.Red("Failed to clear crash reports: %v", err)
+			return
+		}
+		if n == 0 {
+			color.Yellow("No crash reports to clear.")
+		} else {
+			color.Green("✔ Cleared %d crash report(s). Your config, keys, and history remain intact.", n)
+		}
+
+	default:
+		color.Yellow("Usage: /crash <list|view <number>|clear>")
+	}
+}
+
+// -------------------------------------------------------
+// /typewrite-all — Global Typewriter Effect Toggle
+// -------------------------------------------------------
+func handleTypewriteAllCommand(input string) {
+	args := strings.Fields(input)
+	if len(args) < 2 {
+		current := "OFF"
+		if cfg.UserPrefs.TypewriteAll {
+			current = "ON"
+		}
+		color.Cyan("Typewrite-all mode is currently: %s", current)
+		color.Yellow("Usage: /typewrite-all <on|off>")
+		return
+	}
+
+	gui := agentCore.GetUX()
+
+	switch strings.ToLower(args[1]) {
+	case "on", "enable":
+		cfg.UserPrefs.TypewriteAll = true
+		if gui != nil {
+			gui.SetTypewriteAll(true)
+		}
+		color.Green("Typewrite-all ENABLED — all output will use typewriter effect")
+	case "off", "disable":
+		cfg.UserPrefs.TypewriteAll = false
+		if gui != nil {
+			gui.SetTypewriteAll(false)
+		}
+		color.Yellow("Typewrite-all DISABLED — only AI output will use typewriter effect")
+	default:
+		color.Red("Unknown setting: %s", args[1])
+		color.Yellow("Usage: /typewrite-all <on|off>")
+		return
+	}
+	_ = cfg.SavePreferences()
 }

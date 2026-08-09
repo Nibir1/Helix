@@ -1,6 +1,5 @@
 // internal/commands/prompt.go
 // Purpose: Central prompt abstraction for all command confirmation and text input.
-// Phase 0 requirement: no direct stdin prompts in TUI mode.
 package commands
 
 import (

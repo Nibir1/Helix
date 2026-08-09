@@ -65,3 +65,21 @@ Run with `make e2e` (Linux/macOS only).
 Prompt-injection hardening for RAG-augmented planning: provenance tiers,
 retrieved-text sanitization, data-only context fencing, canary honeypots, a
 fail-closed critic pass, and provenance-based risk escalation.
+
+### 8. Kernel-Grade Confinement (`internal/confinement/`)
+`/sandbox strict` is enforced by the OS kernel, not by string matching:
+- **macOS:** Seatbelt (`sandbox-exec`) profile — `(allow default)`, deny all
+  file writes, re-allow the jail root (best-effort; Apple-deprecated).
+- **Linux:** bubblewrap namespaces preferred (`--ro-bind / /`, writable jail,
+  fresh /proc/dev, PID/IPC isolation); fallback to the **Landlock LSM** via
+  raw syscalls (CGO-free) using a `helix --confined-child` re-exec that
+  confines itself before running the shell.
+- **Unsupported platforms:** graceful advisory fallback with a visible warning.
+`/doctor` and `/sandbox` report the active backend.
+
+### 9. Telemetry-Free Crash Diagnostics (`internal/diagnostics/`)
+Panics and fatal signals (SIGSEGV/SIGABRT/SIGBUS/…) write a local, 0600,
+secret-redacted JSON report to `~/.helix/crash-*.json` (last 5 retained).
+The package imports no networking primitives (CI grep-test enforced).
+Opt out with `HELIX_CRASH_REPORTS=off`; `/doctor` lists reports; `/purge`
+deletes them; `HELIX_SELFTEST_PANIC=1` verifies the pipeline (exit 42).

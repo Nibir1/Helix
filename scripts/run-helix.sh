@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/run-helix.sh
 # Purpose: Build and run Helix locally without CGO or submodule dependencies.
-# Phase 3: Replaced legacy llama.cpp submodule compilation with pure Go build.
+# Replaced legacy llama.cpp submodule compilation with pure Go build.
 set -e
 
 ROOT_DIR=$(pwd)

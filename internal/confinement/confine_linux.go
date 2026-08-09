@@ -20,6 +20,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// lookPath reports whether bin is available in PATH.
+func lookPath(bin string) bool {
+	_, err := exec.LookPath(bin)
+	return err == nil
+}
+
 // Landlock syscall numbers (generic ABI, amd64/arm64) and rule type.
 const (
 	landlockRulePathBeneath = 1
@@ -148,7 +154,7 @@ func applyLandlock(p Profile) error {
 	if errno != 0 {
 		return fmt.Errorf("create_ruleset: %w", errno)
 	}
-	defer unix.Close(int(fd))
+	defer func() { _ = unix.Close(int(fd)) }()
 
 	if err := addPathRule(int(fd), "/", accessFSRead); err != nil {
 		return err
@@ -176,7 +182,7 @@ func addPathRule(rulesetFd int, path string, access uint64) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	attr := make([]byte, 12)
 	binary.LittleEndian.PutUint64(attr[:8], access)
 	binary.LittleEndian.PutUint32(attr[8:12], uint32(fd))

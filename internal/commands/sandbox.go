@@ -97,18 +97,33 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 	if ds.mode == SandboxDisabled {
 		return true, ""
 	}
-
 	commandLower := strings.ToLower(command)
+
+	// Phase 15 Hardening: Explicitly check for absolute paths outside the sandbox
+	// for ANY command that contains a path-like argument, not just "dangerous" ones.
+	// This closes the gap where extractFileArguments might miss certain path patterns.
+	words := strings.Fields(commandLower)
+	for _, w := range words {
+		if strings.HasPrefix(w, "-") {
+			continue
+		}
+		if filepath.IsAbs(w) {
+			if _, err := ds.ValidateSafePath(w); err != nil {
+				// If it's a write operation, block it
+				if ds.isDangerousWriteOperation(commandLower) {
+					return false, fmt.Sprintf("sandbox violation: write/delete/edit operation outside sandbox: %s", w)
+				}
+			}
+		}
+	}
 
 	// 1. Detect dangerous write/delete/edit operations
 	if ds.isDangerousWriteOperation(commandLower) {
 		args := ds.extractFileArguments(commandLower)
-
 		for _, arg := range args {
 			if arg == "" {
 				continue
 			}
-
 			if _, err := ds.ValidateSafePath(arg); err != nil {
 				return false, fmt.Sprintf(
 					"sandbox violation: write/delete/edit operation outside sandbox: %s", arg)
@@ -120,7 +135,6 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 	if ds.containsDirectoryEscape(commandLower) {
 		return false, "command attempts directory escape"
 	}
-
 	return true, ""
 }
 
@@ -186,6 +200,7 @@ func (ds *DirectorySandbox) isDangerousWriteOperation(cmd string) bool {
 		"rm ", "rm -rf", "mv ", "cp ", "dd ", "truncate",
 		"chmod", "chown", "tee ", "echo " + ">",
 		"sed -i", "perl -pi", "> ", ">> ", "git clone",
+		"touch ", "mkdir ", "install ", "mkfifo ", "mknod ", "ln ",
 	}
 	for _, d := range dangerous {
 		if strings.Contains(cmd, d) {
@@ -325,6 +340,14 @@ func runArgv(argv []string, dir string, lenient bool) error {
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
+			if code == 127 {
+				return exitErr
+			}
+			// Phase 15 Fix: Surface permission denied errors (exit 1) for write commands
+			// even in lenient mode. This ensures kernel confinement denials are visible.
+			if code == 1 && isWriteCommand(strings.Join(argv, " ")) {
+				return fmt.Errorf("command execution failed (exit %d): permission denied or sandbox violation", code)
+			}
 			if lenient || isNonFatalExit(strings.Join(argv, " "), code) {
 				return nil
 			}
@@ -333,6 +356,18 @@ func runArgv(argv []string, dir string, lenient bool) error {
 		return fmt.Errorf("command execution failed: %w", err)
 	}
 	return nil
+}
+
+// isWriteCommand reports whether a command is a known write operation.
+func isWriteCommand(cmd string) bool {
+	lc := strings.ToLower(cmd)
+	writes := []string{"touch ", "mkdir ", "rm ", "mv ", "cp ", "chmod ", "chown ", "echo ", "cat ", "sed ", "tee "}
+	for _, w := range writes {
+		if strings.Contains(lc, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // confinedArgv applies kernel-grade confinement when strict mode is active.
@@ -363,6 +398,10 @@ func (ds *DirectorySandbox) RunShellCommand(cmd, dir, shellName string) error {
 func (ds *DirectorySandbox) WrapCommand(cmd string, cfg ExecuteConfig, env shell.Env) error {
 	// 1. Validate against the sandbox boundary
 	if ok, reason := ds.ValidateCommand(cmd); !ok {
+		// Phase 15 Fix: Prevent double "sandbox violation:" prefix
+		if strings.HasPrefix(reason, "sandbox violation: ") {
+			return fmt.Errorf("%s", reason)
+		}
 		return fmt.Errorf("sandbox violation: %s", reason)
 	}
 	if cfg.DryRun {

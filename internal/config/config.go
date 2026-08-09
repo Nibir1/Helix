@@ -31,6 +31,7 @@ type UserPrefs struct {
 	AutoConfirm  bool   `json:"auto_confirm"`
 	ColorMode    string `json:"color_mode"`
 	TypingEffect bool   `json:"typing_effect"`
+	TypewriteAll bool   `json:"typewrite_all"`
 	DefaultMode  string `json:"default_mode"`
 	SafeMode     bool   `json:"safe_mode"`
 	UserName     string `json:"user_name"`
@@ -63,9 +64,10 @@ func DefaultConfig() (*Config, error) {
 			AutoConfirm:  false,
 			ColorMode:    "auto",
 			TypingEffect: true,
+			TypewriteAll: false, // Phase 15: Default to off (AI only)
 			DefaultMode:  "ask",
 			SafeMode:     true,
-			UserName:     "", // Defaults to Nahasat Nibir in prompt.go if empty
+			UserName:     "",
 			DebugMode:    false,
 		},
 		ModelConfig:   ai.DefaultModelConfig(),

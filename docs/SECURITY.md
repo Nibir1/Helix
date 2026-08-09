@@ -31,22 +31,28 @@ Helix treats AI-generated output as untrusted. To prevent catastrophic accidents
 ### 4. Instruction Firewall (Prompt-Injection Hardening)
 Retrieved knowledge is untrusted data with zero authority. Planner context is
 built only from sanitized structured fields inside `authority="data-only"`
-fences; a per-request canary detects context echo; a fail-closed critic
-validates every shell plan against the user request alone; and provenance
-escalation forces confirmation when plan commands carry retrieved-sourced
-tokens. See `docs/threat_model.md`.
+fences; a per-request canary detects context echo; a fail-closed critic validates any plan that exhibits unsolicited network
+egress (external URLs absent from the user request); clean local operations
+execute without extra review, keeping Helix fast for legitimate red-team work. See `docs/threat_model.md`.
+
+### 5. Kernel-Grade Confinement
+In strict mode (`/sandbox strict`), write and delete operations outside the
+jail root are denied by the OS kernel (Seatbelt on macOS; bubblewrap or
+Landlock on Linux). This closes the gap left by advisory path validation:
+even a confused or injected child process cannot write outside the sandbox.
+Where no kernel backend exists, Helix warns and degrades to advisory
+confinement.
+
+### 6. Telemetry-Free Crash Diagnostics
+Crash reports are written ONLY to local disk (0600), contain redacted
+environment values (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`), are never
+transmitted, are capped at 5, and are removable via `/purge`. The diagnostics
+package is provably network-free via a CI-enforced import grep test.
 
 ## Secret Handling
 - API keys are stored in `~/.helix/secrets.json` with strict `0600` file permissions.
 - Helix preferentially reads secrets from environment variables to avoid disk persistence in ephemeral environments.
 - No secrets are ever logged, even when `HELIX_DEBUG=1` is enabled.
-
-## Reporting a Vulnerability
-If you discover a security vulnerability in Helix (e.g., a sandbox escape, a planner injection flaw, or a bypass of the safety pipeline), please report it responsibly.
-
-**Do not open a public GitHub issue for security vulnerabilities.**
-
-Instead, please email the maintainer or use the GitHub Security Advisories feature to report the issue privately. We will acknowledge receipt within 48 hours and work on a patch.
 
 ## Supply-Chain Security & Release Integrity
 
@@ -77,3 +83,10 @@ syft helix_Linux_x86_64.tar.gz
 
 ### Continuous Security Scanning
 Every commit and pull request is automatically scanned for known vulnerabilities in Go dependencies using `govulncheck` and for static application security testing (SAST) using GitHub CodeQL. See `.github/workflows/security.yml` for details. You can run these checks locally via `make sec-scan`.
+
+## Reporting a Vulnerability
+If you discover a security vulnerability in Helix (e.g., a sandbox escape, a planner injection flaw, or a bypass of the safety pipeline), please report it responsibly.
+
+**Do not open a public GitHub issue for security vulnerabilities.**
+
+Instead, please email the maintainer or use the GitHub Security Advisories feature to report the issue privately. We will acknowledge receipt within 48 hours and work on a patch.

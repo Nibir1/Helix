@@ -12,6 +12,7 @@
 ![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![Security](https://img.shields.io/badge/Security-Enterprise%20Hardened-FF0055?logo=shield)
 
 Helix is an **AI-powered command‑line assistant and adversarial cybersecurity platform** that turns natural language into **safe, executable actions**. It bridges the gap between human intent and machine execution, combining local LLM inference, retrieval-augmented generation (RAG), live threat intelligence, and strict safety pipelines.
 
@@ -20,9 +21,10 @@ It combines:
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
 - **A Multi-Layer Safety & Sandbox Engine** around shell, git, packages, and recon
+- **Enterprise-Grade Hardening** (Kernel confinement, instruction firewalls, and signed supply chains)
 - **Synthetic Tonal Audio** for immersive, synchronized terminal feedback
 
-It’s built as a **portfolio‑grade systems project** in Go, demonstrating real‑world skills in AI integration, sandboxed execution, strict JSON planner protocols, memory-only stealth execution, and live threat intelligence pipelines.
+It’s built as a **portfolio‑grade, enterprise-hardened systems project** in Go, demonstrating real‑world skills in AI integration, sandboxed execution, strict JSON planner protocols, memory-only stealth execution, live threat intelligence pipelines, and verifiable supply-chain security.
 
 ---
 ## Quick Start & Installation
@@ -49,7 +51,7 @@ go install github.com/Nibir1/Helix/cmd/helix@latest
 ```
 
 ### Option 4: Pre-compiled Binaries (No Build Required)
-Don't want to build from source? Download the latest pre-compiled binary, checksums, and archives for your OS directly from the **[Releases Page](https://github.com/Nibir1/Helix/releases)**.
+Don't want to build from source? Download the latest pre-compiled binary, checksums, and archives for your OS directly from the **[Releases Page](https://github.com/Nibir1/Helix/releases)**. All official releases are cryptographically signed and include a Software Bill of Materials (SBOM). *(See "Verifying Releases" below).*
 
 ---
 
@@ -143,6 +145,11 @@ Using an advanced **Input Classification Engine** (`internal/shell/classify.go`)
 - `/scan authorize 192.168.1.10 --reason "Internal pentest scope"`
 - `/scan 192.168.1.10` *(Runs nmap/masscan through the authorized recon engine)*
 
+### 5. Enterprise Security & Privacy
+- `/sandbox strict` *(Enforces kernel-grade write confinement via Landlock/Seatbelt)*
+- `/doctor` *(Surfaces local, telemetry-free crash diagnostics and system health)*
+- `/purge` *(Cryptographically wipes all local Helix data, keys, and crash reports)*
+
 ---
 
 ## Comprehensive Command Reference
@@ -156,7 +163,7 @@ Helix exposes a rich set of slash commands for system control, intelligence gath
 | `/about` | Display the Helix philosophy, ASCII banner, and creator info. |
 | `/setup` | Unified setup wizard (Identity, AI Provider configuration). |
 | `/status` | Check background RAG indexing, AI provider, and audio engine status. |
-| `/doctor` | Run full system diagnostics (DB ping, network, OS, sandbox). |
+| `/doctor` | Run full system diagnostics (DB ping, network, confinement backend, and local crash reports). |
 | `/online` | Check internet connectivity for remote AI and threat feeds. |
 | `/debug <on\|off>` | Toggle verbose byte-level debug logging. |
 | `/cd <dir>` | Change directory (sandbox-aware). |
@@ -165,17 +172,17 @@ Helix exposes a rich set of slash commands for system control, intelligence gath
 | Command | Description |
 | :--- | :--- |
 | `/provider <name>` | Switch AI provider (openai, anthropic, ollama, llamacpp, etc.). |
-| `/model <id>` | Switch the active AI model. |
 | `/provider-status` | Show detailed provider health and API key status. |
+| `/model <id>` | Switch the active AI model. |
 | `/test-basic-ai` | Smoke test the active AI model with a simple prompt. |
+| `/explain <cmd>` | AI-powered defensive analysis of a command or technique. |
 
 ### Threat Intelligence & RAG
 | Command | Description |
 | :--- | :--- |
-| `/vuln <query>` | Defensive vulnerability intel (CVE/EDB/MITRE lookup). |
-| `/explain <cmd>` | AI-powered defensive analysis of a command or technique. |
 | `/knowledge-update` | Fetch latest CVEs, CISA KEV, Exploits, and MITRE data. |
 | `/knowledge-status` | Show knowledge database row counts. |
+| `/knowledge-reindex` | Rebuild FTS5 search index. |
 | `/rag-status` | Show RAG indexing progress and vector stats. |
 | `/rag-reindex` | Trigger background RAG reindex. |
 | `/rag-rebuild` | Force full RAG knowledge base rebuild (with live progress). |
@@ -184,26 +191,29 @@ Helix exposes a rich set of slash commands for system control, intelligence gath
 ### Security, Recon & Stealth
 | Command | Description |
 | :--- | :--- |
+| `/vuln <query>` | Defensive vulnerability intel (CVE/EDB/MITRE lookup). |
 | `/scan authorize <ip>` | Authorize recon target with a written scope/reason. |
 | `/scan <ip>` | Run nmap/masscan on an authorized target. |
-| `/sandbox <mode>` | Directory confinement (`off`, `current`, `strict`). |
+| `/sandbox <mode>` | Directory confinement (`off`, `current`, `strict` [kernel-enforced]). |
 | `/stealth <on\|off>` | Private history mode (suppresses shell history, memory-only). |
+| `/crash <list\|view 1\|clear>` | Inspect and manage local crash diagnostics. |
 | `/dry-run` | Toggle command execution preview mode. |
-| `/audio <on\|off>` | Toggle synthetic tonal audio feedback. |
 
 ### Git & Utilities
 | Command | Description |
 | :--- | :--- |
 | `/git <request>` | Natural language git operations with safety confirmations. |
+| `/audio <on\|off>` | Toggle synthetic tonal audio feedback. |
+| `/typewrite-all <on\|off>` | Toggle typewriter effect for ALL output. |
 
 ### DANGER ZONE
 | Command | Description |
 | :--- | :--- |
-| `/purge` | Wipe ALL Helix data (keys, DBs, caches) for a fresh start. |
+| `/purge` | Wipe ALL Helix data (keys, DBs, caches, crash reports) for a fresh start. |
 
 ---
 
-## AI & Planner System (Phase 3.x)
+## AI & Planner System
 
 Helix uses a **full agent-style planner** that outputs strict JSON.
 
@@ -246,7 +256,7 @@ If the planner ever returns junk, Helix will **drop invalid steps** or fall back
 
 ## Shell Safety Subsystem (Multi‑Layer)
 
-Arbitrary shell execution is **heavily guarded** by a 4-stage pipeline in `internal/commands/safety/`.
+Arbitrary shell execution is **heavily guarded** by a 5-stage pipeline in `internal/commands/safety/` and `internal/confinement/`.
 
 ### 1. ValidateAndCleanCommand
 Every shell step flows through `ValidateAndCleanShellCommand`:
@@ -262,11 +272,38 @@ Every shell step flows through `ValidateAndCleanShellCommand`:
 - **Medium** – file‑modifying (e.g. `sed -i`, redirections `>`). Shows reasons and asks: `Execute anyway? [y/N]`
 - **High** – catastrophic patterns (e.g. `rm -rf`, pipe‑into‑shell). Hard-blocked.
 
-### 3. Directory Sandbox (Mode C)
+### 3. Directory Sandbox (Advisory)
 All shell commands execute via a `DirectorySandbox`:
 - Prevents traversal outside the allowed root.
 - Resolves symlinks and handles case-insensitivity (macOS/Windows).
 - Allows READ-ONLY absolute paths anywhere, but MODIFY/WRITE actions are blocked outside the sandbox.
+
+### 4. Kernel-Grade Confinement (`/sandbox strict`)
+When strict mode is enabled, write/delete operations outside the jail root are denied **by the OS kernel**, not by string matching:
+- **macOS:** Seatbelt (`sandbox-exec`) profile enforcement.
+- **Linux:** bubblewrap namespaces (preferred) or the **Landlock LSM** via pure-Go, CGO-free raw syscalls using a `--confined-child` re-exec architecture.
+- **Unsupported platforms:** Graceful advisory fallback with a visible warning.
+
+---
+
+## Threat Intelligence & RAG Pipeline
+
+Helix maintains a local SQLite + FTS5 + Vector database updated with live threat feeds (`internal/rag/`).
+
+- **NVD CVEs:** Rolling 120-day window with checkpointing, rate-limit handle, and browser-spoofing.
+- **CISA KEV:** Known Exploited Vulnerabilities catalog.
+- **Exploit-DB:** Sanitized exploit references for defensive validation.
+- **MITRE ATT&CK:** Technique mappings for detection engineering.
+- **MAN Pages:** Background indexing of 900+ system commands using 6 parallel workers.
+- **First-Run Bootstrap:** `KnowledgeBootstrap` runs silently in the background on first boot to populate the DB without blocking the CLI.
+
+### Instruction Firewall (Prompt-Injection Hardening)
+Retrieved knowledge is treated as untrusted **data** with zero authority. The RAG pipeline is defended by five layered controls:
+1. **Structured-fields-only context:** Raw text never reaches the planner; only sanitized structured fields wrapped in `authority="data-only"` fences.
+2. **Sanitization:** Invisible/bidi Unicode, markdown fences, and imperative injection patterns ("ignore previous instructions") are stripped.
+3. **Canary Honeypot:** A per-request random token is embedded in the context; if the model echoes it, execution aborts with an injection alert.
+4. **Critic Pass:** A fail-closed, low-temperature JSON call validates the proposed shell plan against the *user request alone*.
+5. **Provenance Escalation:** Plan commands carrying tokens sourced from retrieved context (but absent from user input) are forced to Medium risk (mandatory confirmation).
 
 ---
 
@@ -292,19 +329,6 @@ For advanced workflows, the planner may emit dangerous actions. These require **
 Instead of letting the LLM call `apt`/`brew` directly, Helix exposes a `package` tool.
 - `IsPackageActionSafe` blocks obviously dangerous operations (e.g., uninstalling `libc6`, `systemd`, or `bash` on Linux).
 - `HandlePackageCommand` routes to the appropriate system package manager (apt, brew, choco, winget, pacman) through the sandbox.
-
----
-
-## Threat Intelligence & RAG Pipeline
-
-Helix maintains a local SQLite + FTS5 + Vector database updated with live threat feeds (`internal/rag/`).
-
-- **NVD CVEs:** Rolling 120-day window with checkpointing, rate-limit handling, and browser-spoofing.
-- **CISA KEV:** Known Exploited Vulnerabilities catalog.
-- **Exploit-DB:** Sanitized exploit references for defensive validation.
-- **MITRE ATT&CK:** Technique mappings for detection engineering.
-- **MAN Pages:** Background indexing of 900+ system commands using 6 parallel workers.
-- **First-Run Bootstrap:** `KnowledgeBootstrap` runs silently in the background on first boot to populate the DB without blocking the CLI.
 
 ---
 
@@ -356,6 +380,34 @@ helix ./scripts/build.sh
 
 ---
 
+## Enterprise Hardening & Supply Chain Security
+
+Helix is built with a verified, mathematically defensible supply chain and rigorous testing harnesses:
+
+- **SBOM & Cryptographic Signing:** Every release artifact ships with an SPDX Software Bill of Materials (via `syft`) and is cryptographically signed using Sigstore keyless signing (`cosign`).
+- **Continuous Fuzzing:** The safety surface (shell validation, JSON planner parsing, sandbox path resolution) is continuously fuzzed with invariant assertions to prevent ReDoS and state-machine bypasses.
+- **E2E TTY Harness:** A pseudo-terminal (PTY) test suite boots the real Helix binary against a mock provider, proving the safety pipeline end-to-end with zero real AI and zero network.
+- **Telemetry-Free Crash Diagnostics:** Panics and fatal signals generate local, 0600, secret-redacted JSON crash reports (`~/.helix/crash-*.json`). The diagnostics package imports zero networking primitives (grep-verified in CI), ensuring field failures are debuggable without violating user privacy.
+
+### Verifying Official Releases
+
+You can verify the integrity and provenance of any downloaded Helix binary using `cosign` and `syft`:
+
+```bash
+# Verify the Sigstore signature
+cosign verify-blob \
+  --certificate helix_Linux_x86_64.tar.gz.pem \
+  --signature helix_Linux_x86_64.tar.gz.sig \
+  --certificate-identity-regexp "https://github.com/Nibir1/Helix/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  helix_Linux_x86_64.tar.gz
+
+# Inspect the SBOM
+syft helix_Linux_x86_64.tar.gz
+```
+
+---
+
 ## Architecture Overview
 
 ```text
@@ -363,15 +415,18 @@ Helix/
 ├── cmd/helix              # CLI entrypoint, handlers, and non-interactive bridge
 ├── internal/
 │   ├── ai/                # Planner, OpenAI/local model integration, strict JSON parsing
-│   ├── agent/             # Agent orchestrator (intent classification + step executor)
+│   ├── agent/             # Agent orchestrator, Instruction Firewall, and step executor
 │   ├── audio/             # Synthetic tonal audio engine (beep/oto)
 │   ├── commands/          # Shell safety, git manager, package manager, sandbox
+│   ├── confinement/       # Kernel-grade write confinement (Seatbelt, Landlock, bwrap)
+│   ├── diagnostics/       # Telemetry-free, redacted crash reporting
 │   ├── shell/             # SYNAPSE prompt, raw-mode reader, input classifier, TTY hardening
 │   ├── rag/               # MAN page indexing, vector store, SQLite FTS5, NVD/KEV/MITRE updaters
 │   ├── recon/             # Authorized multi-tool reconnaissance engine
 │   ├── stealth/           # Memory-only private history execution
 │   ├── ux/                # Terminal UX (typewriter, prompts, colors)
-│   └── utils/             # Quote/brace validation, syntax highlighting, history
+│   └── utils/             # Quote/brace validation, syntax highlighting, history, interrupts
+├── tests/e2e/             # PTY-based end-to-end TTY harness
 ├── dist/                  # Built binaries (make current)
 └── scripts/               # Developer, build, and install scripts
 ```
@@ -398,6 +453,7 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 * Defensive vulnerability intel (`/vuln`) with CVSS, KEV status, and patch guidance
 * Command explanation engine (`/explain`) with MITRE ATT&CK context mapping
 * Automatic fallback to standard chat when planning fails
+* **Instruction Firewall** with canary honeypots and fail-closed critic passes
 
 ### Planner, Agent System & Tool Protocol
 * Unified multi-tool agent system: response, shell, git, package, recon
@@ -406,9 +462,10 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 * Argument normalization (array flattening, trimming, synonym resolution)
 * Auto-intent classification: chat, shell, git, package, multi_step
 
-### Shell Execution System (Safety-First)
+### Shell Execution & Confinement (Safety-First)
 * Directory sandbox with safe-path enforcement and symlink resolution
 * Multi-layer safety pipeline (Unicode validation → risk scoring → sandbox → execution)
+* **Kernel-Grade Confinement** (Landlock/Seatbelt) for `/sandbox strict`
 * Automatic quote/brace/syntax repairs for minor command issues
 * Detection of destructive patterns (e.g., `rm -rf /`, `curl | sh`, `eval`)
 * Medium-risk command confirmation prompts (`sed -i`, redirections)
@@ -426,6 +483,13 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 * Parallel RAG indexing with persistent vector stores for instant reload
 * OS & shell auto-detection with TTY hardening (SIGTTIN/SIGTTOU handling)
 * Non-interactive shell bridge for pipes and scripts
+* **Telemetry-Free Crash Diagnostics** (local, redacted, opt-outable)
+
+### Enterprise Hardening & Testing
+* **Supply Chain Security:** SBOM generation (Syft) and Sigstore keyless signing (Cosign)
+* **Continuous Fuzzing:** Invariant-aware fuzzing of all safety and planner parsers
+* **E2E TTY Harness:** PTY-based integration tests with mock providers
+* **Vulnerability Scanning:** Automated `govulncheck` and CodeQL SAST in CI
 
 ### UX & Developer Productivity
 * SYNAPSE TrueColor animated prompt with glitch effects and transient history
@@ -440,16 +504,19 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 
 Helix is intentionally structured as a **systems‑level AI project**, not just a wrapper:
 
-- **Real Tool‑Use & Safety:** Implements actual sandboxing, risk-tiering, and typed confirmations for dangerous paths.
+- **Real Tool‑Use & Safety:** Implements actual sandboxing, risk-tiering, kernel confinement, and typed confirmations for dangerous paths.
 - **Architectural Thinking:** Clear separation between planning, safety, execution, and telemetry layers.
-- **Modern AI Practices:** Strict JSON tool calling, truncation-resistant prompt engineering, RAG augmentation, and local/remote model fallbacks.
-- **Cybersecurity Focus:** Integrates live NVD/KEV pipelines, MITRE ATT&CK mappings, and authorized recon engines.
-- **Written in Go:** Demonstrates mastery of concurrency (goroutines for background indexing/audio), raw TTY manipulation, CGO-free builds, and modular package design.
+- **Modern AI Practices:** Strict JSON tool calling, truncation-resistant prompt engineering, RAG augmentation, instruction firewalls, and local/remote model fallbacks.
+- **Cybersecurity Focus:** Integrates live NVD/KEV pipelines, MITRE ATT&CK mappings, authorized recon engines, and prompt-injection defenses.
+- **Enterprise Assurance:** Verifiable supply chain, continuous fuzzing, and telemetry-free diagnostics.
+- **Written in Go:** Demonstrates mastery of concurrency (goroutines for background indexing/audio), raw TTY manipulation, CGO-free builds, Landlock syscalls, and modular package design.
 
 **Where to start reading the code:**
 - `internal/ai/planner.go` (Strict JSON protocol)
 - `internal/shell/classify.go` (Unified input routing)
 - `internal/commands/safety/shell.go` (Multi-layer risk analysis)
+- `internal/confinement/confine_linux.go` (Kernel-grade Landlock enforcement)
+- `internal/agent/firewall.go` (Prompt-instruction firewall)
 - `internal/rag/updater.go` (Live threat intelligence pipeline)
 - `internal/audio/audio.go` (Synthetic tonal feedback)
 

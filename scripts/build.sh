@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/build.sh
-# Phase 1: CGO-free Helix build script.
+# CGO-free Helix build script.
 set -e
 
 ROOT_DIR=$(pwd)

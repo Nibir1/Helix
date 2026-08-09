@@ -14,6 +14,7 @@
 package shell
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"helix/internal/utils"
 
@@ -64,12 +66,10 @@ var lastHistory []string
 // ReadLine renders the animated prompt and reads one line of input.
 func ReadLine(ctx PromptContext, highlighter *utils.SyntaxHighlighter, history []string) (string, error) {
 	fd := int(os.Stdin.Fd())
-
 	promptStatic := Fg(HexRectifier, bold+GlyphPrompt) + " "
 	if !term.IsTerminal(fd) {
 		return readLineCooked(promptStatic)
 	}
-
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return readLineCooked(promptStatic)
@@ -91,7 +91,6 @@ func ReadLine(ctx PromptContext, highlighter *utils.SyntaxHighlighter, history [
 	defer close(stop)
 	go e.animationLoop(stop)
 
-	// Instant resize healing (Unix). The 1Hz poll remains as fallback.
 	winchCh, stopWinch := notifyResize()
 	defer stopWinch()
 	go func() {
@@ -103,15 +102,24 @@ func ReadLine(ctx PromptContext, highlighter *utils.SyntaxHighlighter, history [
 	lastHistory = history
 	histIdx := len(history)
 
+	// CRITICAL FIX: Use bufio.Reader to properly decode multi-byte UTF-8
+	// characters (e.g., smart quotes “ ”) instead of reading raw bytes
+	// and mangling them into Latin-1 artifacts (â).
+	reader := bufio.NewReader(os.Stdin)
+
 	for {
-		var b [1]byte
-		_, rerr := os.Stdin.Read(b[:])
+		r, size, rerr := reader.ReadRune()
 		if rerr != nil {
 			e.finish()
 			return "", rerr
 		}
 
-		switch b[0] {
+		// Handle invalid UTF-8 gracefully
+		if size == 1 && r == utf8.RuneError {
+			continue
+		}
+
+		switch r {
 		case 3: // Ctrl+C
 			e.finish()
 			_, _ = os.Stdout.WriteString("^C\r\n")
@@ -153,14 +161,14 @@ func ReadLine(ctx PromptContext, highlighter *utils.SyntaxHighlighter, history [
 				}
 			})
 		case 27: // Escape sequences (arrows)
-			var seq [2]byte
-			if _, err := os.Stdin.Read(seq[:1]); err != nil {
+			seq := make([]byte, 2)
+			if _, err := reader.Read(seq[:1]); err != nil {
 				continue
 			}
 			if seq[0] != '[' {
 				continue
 			}
-			if _, err := os.Stdin.Read(seq[1:2]); err != nil {
+			if _, err := reader.Read(seq[1:2]); err != nil {
 				continue
 			}
 			switch seq[1] {
@@ -209,9 +217,9 @@ func ReadLine(ctx PromptContext, highlighter *utils.SyntaxHighlighter, history [
 				})
 			}
 		default:
-			if b[0] >= 32 { // Printable rune
+			if r >= 32 || r == '\t' { // Printable rune or tab
 				e.mutate(func() {
-					e.buf = append(e.buf[:e.cursor], append([]rune{rune(b[0])}, e.buf[e.cursor:]...)...)
+					e.buf = append(e.buf[:e.cursor], append([]rune{r}, e.buf[e.cursor:]...)...)
 					e.cursor++
 					e.hlDirty = true
 					e.updateSuggestion()
@@ -336,9 +344,39 @@ func (e *editor) redraw(regen bool) {
 // redrawLocked assembles ONE frame and writes it with a single syscall.
 // Caller holds e.mu.
 func (e *editor) redrawLocked(regen bool) {
-	if regen {
-		e.left, e.right, e.leftLen, e.rightLen = RenderPromptParts(e.ctx, e.glitch)
+	w := e.width
+	if w <= 0 {
+		w = 80
 	}
+
+	wBuf := runewidth.StringWidth(string(e.buf))
+	wGhost := runewidth.StringWidth(e.suggestion)
+	wBefore := runewidth.StringWidth(string(e.buf[:e.cursor]))
+
+	// Calculate preliminary newLines to determine if glitch should be disabled.
+	// We use the current e.leftLen for this estimate.
+	tempContentLen := e.leftLen + wBuf + wGhost
+	tempNewLines := tempContentLen/w + 1
+
+	// CRITICAL FIX: Disable glitch effect when input wraps to multiple lines.
+	// Terminal soft-wraps do not mix well with ANSI cursor movements and
+	// character replacement, causing severe redraw artifacts and duplicated prompts.
+	glitchProb := e.glitch
+	if tempNewLines > 1 {
+		glitchProb = 0
+	}
+
+	if regen {
+		e.left, e.right, e.leftLen, e.rightLen = RenderPromptParts(e.ctx, glitchProb)
+	}
+
+	// Recalculate geometry with the final leftLen.
+	contentLen := e.leftLen + wBuf + wGhost
+	newLines := contentLen/w + 1
+
+	// Right panel only when the whole line fits (2-col safety margin),
+	// preventing any overlap with the input area.
+	showRight := e.rightLen > 0 && newLines == 1 && e.leftLen+wBuf+wGhost+e.rightLen+2 <= w
 
 	// Recompute highlighting ONLY when the buffer changed.
 	if e.hlDirty {
@@ -350,22 +388,6 @@ func (e *editor) redrawLocked(regen bool) {
 		}
 		e.hlDirty = false
 	}
-
-	w := e.width
-	if w <= 0 {
-		w = 80
-	}
-
-	wBuf := runewidth.StringWidth(string(e.buf))
-	wGhost := runewidth.StringWidth(e.suggestion)
-	wBefore := runewidth.StringWidth(string(e.buf[:e.cursor]))
-
-	contentLen := e.leftLen + wBuf + wGhost
-	newLines := contentLen/w + 1
-
-	// Right panel only when the whole line fits (2-col safety margin),
-	// preventing any overlap with the input area.
-	showRight := e.rightLen > 0 && newLines == 1 && e.leftLen+wBuf+wGhost+e.rightLen+2 <= w
 
 	var b strings.Builder
 
@@ -402,7 +424,9 @@ func (e *editor) redrawLocked(regen bool) {
 	// 4) Buffer + ghost text.
 	b.WriteString(e.hlCache)
 	if e.suggestion != "" {
-		b.WriteString(fgHex(HexSubtle) + e.suggestion + ansiReset)
+		b.WriteString(fgHex(HexSubtle))
+		b.WriteString(e.suggestion)
+		b.WriteString(ansiReset)
 	}
 
 	// 5) Reposition cursor (absolute column, relative rows).

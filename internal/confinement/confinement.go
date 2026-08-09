@@ -3,14 +3,11 @@
 // OS backend (macOS Seatbelt, Linux bwrap, Linux Landlock) and rewrites child
 // argv so writes outside the jail root are denied BY THE KERNEL, not by string
 // matching. Unavailable platforms fail closed to advisory mode with a warning.
-// Author: Helix Hardening (Phase 13)
-// Dependencies: stdlib only (CGO-free).
 package confinement
 
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -62,11 +59,6 @@ func ResolveRoot(root string) string {
 	return root
 }
 
-func lookPath(bin string) bool {
-	_, err := exec.LookPath(bin)
-	return err == nil
-}
-
 // BuildSeatbeltProfile renders the macOS sandbox-exec profile. Seatbelt is
 // last-match-wins: allow default, deny all writes, then re-allow the jail.
 //
@@ -76,6 +68,13 @@ func BuildSeatbeltProfile(p Profile) string {
 	sb.WriteString("(version 1)\n")
 	sb.WriteString("(allow default)\n")
 	sb.WriteString("(deny file-write* (subpath \"/\"))\n")
+
+	// CRITICAL FIX: Allow essential system devices and temp directories.
+	// Tools like `git` require write access to /dev/null and /tmp to function.
+	sb.WriteString("(allow file-write* (subpath \"/dev\"))\n")
+	sb.WriteString("(allow file-write* (subpath \"/tmp\"))\n")
+	sb.WriteString("(allow file-write* (subpath \"/private/tmp\"))\n")
+
 	sb.WriteString("(allow file-write* (subpath (param \"HELIX_ROOT\")))\n")
 	for i := range p.ExtraRW {
 		fmt.Fprintf(&sb, "(allow file-write* (subpath (param \"HELIX_EXTRA_%d\")))\n", i)

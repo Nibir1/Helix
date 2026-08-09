@@ -1,6 +1,5 @@
 // internal/rag/vuln.go
 // Purpose: Defensive vulnerability intelligence lookup and hydration.
-// Phase 0 safety requirement:
 //   - no exploit recommendation,
 //   - no attack execution guidance,
 //   - focus on CVE, CVSS, KEV, detection, and patch prioritization.
@@ -302,7 +301,6 @@ func hydrateKnowledgeEntry(db *sql.DB, e KnowledgeEntry) (VulnIntel, error) {
 
 	case "kev":
 		var title, action, due, notes string
-
 		err := db.QueryRow(`
 			SELECT title, required_action, due_date, notes
 			FROM kev
@@ -311,15 +309,21 @@ func hydrateKnowledgeEntry(db *sql.DB, e KnowledgeEntry) (VulnIntel, error) {
 		if err != nil {
 			return v, err
 		}
-
 		cvss := 0.0
 		_ = db.QueryRow(`
 			SELECT cvss_score FROM cve WHERE id=?
 		`, e.SourceID).Scan(&cvss)
-
 		v.ID = e.SourceID
-		v.Title = title
-		v.Description = notes
+		v.Title = fmt.Sprintf("%s (%s)", title, e.SourceID)
+
+		// CRITICAL FIX: KEV notes often contain raw URLs. Use a clean description
+		// instead of dumping the URL into the description field.
+		if notes != "" && !strings.HasPrefix(strings.TrimSpace(notes), "http") {
+			v.Description = notes
+		} else {
+			v.Description = "Listed in CISA Known Exploited Vulnerabilities catalog."
+		}
+
 		v.CVSS = cvss
 		v.KEV = true
 		v.KEVAction = action

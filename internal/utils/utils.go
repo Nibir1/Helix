@@ -1,5 +1,4 @@
 // internal/utils/utils.go
-
 package utils
 
 import (
@@ -9,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/fatih/color"
@@ -90,14 +90,14 @@ func IsOnline(timeout time.Duration) bool {
 // ──────────────────────────────────────────────────────────────
 //
 
-// SafeTrim removes dangerous characters/newlines from AI output before executing
+// SafeTrim removes dangerous characters/trailing newlines from AI output before executing.
+// CRITICAL FIX: Only collapse horizontal whitespace (spaces/tabs). Preserving
+// internal newlines is mandatory for heredocs, loops, and multi-line scripts.
 func SafeTrim(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimRight(s, ";\n")
-
-	space := regexp.MustCompile(`\s+`)
+	space := regexp.MustCompile(`[ \t]+`)
 	s = space.ReplaceAllString(s, " ")
-
 	return s
 }
 
@@ -288,11 +288,9 @@ func FixUnmatchedQuotes(cmd string) string {
 	return cmd
 }
 
-//
 // ──────────────────────────────────────────────────────────────
 // FILE UTILS
 // ──────────────────────────────────────────────────────────────
-//
 
 func ReadFileSafe(path string) (string, error) {
 	data, err := os.ReadFile(path)
@@ -364,11 +362,10 @@ func CleanAIResponse(response string) string {
 // ──────────────────────────────────────────────────────────────
 // DEBUG HELPERS
 // ──────────────────────────────────────────────────────────────
-// Before running Helix (only when needed):
-// export HELIX_DEBUG=1
-// Disable later:
-// unset HELIX_DEBUG
-// This ensures we don't spam users with byte-level debug logs by default.
+// Interactive sessions: use `/debug on` / `/debug off` (canonical control;
+// persists to config.json and is inherited by child processes).
+// Non-interactive / startup debugging: export HELIX_DEBUG=1 before launch
+// (crash-before-REPL, `helix -c`, pipes, CI harnesses).
 
 // DebugPrintStringBytes prints each byte/Unicode rune of a string
 // including index, char, and codepoint. Only prints when DEBUG mode is enabled.
@@ -384,9 +381,50 @@ func DebugPrintStringBytes(s string) {
 	}
 }
 
-// IsDebugMode checks if HELIX_DEBUG=1 is set
+// debugOverride stores the runtime /debug toggle:
+//
+//	 0 = not toggled this session (fall back to the HELIX_DEBUG env var),
+//	 1 = forced ON  by /debug on,
+//	-1 = forced OFF by /debug off (wins over a pre-set HELIX_DEBUG=1).
+//
+// Atomic so every goroutine (planner, RAG, safety) sees a consistent value.
+var debugOverride int32
+
+// SetDebugMode flips the runtime debug toggle used by the /debug command.
+// HELIX_DEBUG remains the bootstrap channel for non-interactive and startup
+// paths (e.g. `HELIX_DEBUG=1 helix -c "..."`) where the REPL never runs.
+//
+// Args:
+//   - on: true to force verbose logging, false to force it off.
+//
+// Returns: none.
+// Complexity: O(1).
+func SetDebugMode(on bool) {
+	if on {
+		atomic.StoreInt32(&debugOverride, 1)
+		return
+	}
+	atomic.StoreInt32(&debugOverride, -1)
+}
+
+// resetDebugMode clears the runtime toggle (unit tests only).
+func resetDebugMode() { atomic.StoreInt32(&debugOverride, 0) }
+
+// IsDebugMode reports whether verbose debug logging is active.
+// Priority: explicit runtime toggle (/debug) > HELIX_DEBUG env var.
+//
+// Args: none.
+// Returns: bool.
+// Complexity: O(1).
 func IsDebugMode() bool {
-	return strings.TrimSpace(os.Getenv("HELIX_DEBUG")) == "1"
+	switch atomic.LoadInt32(&debugOverride) {
+	case 1:
+		return true
+	case -1:
+		return false
+	default:
+		return strings.TrimSpace(os.Getenv("HELIX_DEBUG")) == "1"
+	}
 }
 
 // ExtractCommand cleans AI output to get just the command

@@ -145,8 +145,12 @@ e2e:
 	@echo "Running E2E TTY harness..."
 	go test ./tests/e2e/... -v -count=1 -timeout 300s
 
-# Run all tasks: lint, build, test, install
-work: lint sec-scan build test install
+git-tag-push:
+	@echo "Tagging and pushing to GitHub..."
+	@./$(SCRIPTS_DIR)/git-push.sh
+
+# Run all tasks: lint, sec-scan, fuzz-ci, e2e, build, test, install
+work: lint sec-scan fuzz-ci e2e build test install
 
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci e2e
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci e2e git-tag-push

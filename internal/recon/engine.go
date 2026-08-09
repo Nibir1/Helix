@@ -1,6 +1,5 @@
 // internal/recon/engine.go
 // Purpose: Authorized multi-tool reconnaissance orchestration.
-// Phase 0 safety quarantine:
 //   - recon requires explicit target authorization,
 //   - unauthorized targets are rejected,
 //   - dangerous flags remain blocked unless explicitly allowed.
@@ -8,7 +7,9 @@ package recon
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -225,9 +226,12 @@ func extractTarget(args []string) string {
 }
 
 // getToolPath resolves the tool binary.
+//
+// Args: tool: recon tool name (nmap, masscan, etc.).
+// Returns: resolved absolute path or error.
+// Complexity: O(1) filesystem stats.
 func (re *ReconEngine) getToolPath(tool string) (string, error) {
 	var path string
-
 	switch tool {
 	case "nmap":
 		path = re.config.NmapPath
@@ -241,11 +245,26 @@ func (re *ReconEngine) getToolPath(tool string) (string, error) {
 		return "", fmt.Errorf("unknown recon tool: %s", tool)
 	}
 
-	if _, err := exec.LookPath(path); err != nil {
-		return "", fmt.Errorf("recon tool %q not found in PATH (looked for %s)", tool, path)
+	// 1. Check system PATH
+	if p, err := exec.LookPath(path); err == nil {
+		return p, nil
 	}
 
-	return path, nil
+	// 2. Phase 15 Fix: Fallback to common Homebrew paths (macOS).
+	// This handles cases where brew installed the tool but it's not in the
+	// current process PATH, or hasn't been linked to /usr/local/bin yet.
+	brewPaths := []string{
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+	}
+	for _, dir := range brewPaths {
+		candidate := filepath.Join(dir, path)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("recon tool %q not found in PATH or standard locations (looked for %s)", tool, path)
 }
 
 // checkArgs blocks obviously dangerous argument patterns.

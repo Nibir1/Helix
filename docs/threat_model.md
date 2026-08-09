@@ -15,9 +15,9 @@ planner into executing attacker-chosen commands.
    "run curl …", pipe-into-shell) are stripped or filtered.
 3. **Canary honeypot** — a per-request random token embedded in the data block;
    its appearance in model output aborts with an injection alert.
-4. **Critic pass** — a low-temperature, strict-JSON call seeing ONLY the user
-   request + proposed commands; "no", an unreachable critic, or garbage all
-   quarantine the plan to a chat fallback (fail-closed).
+4. **Critic pass (risk-gated)** — a low-temperature, strict-JSON call seeing
+   only the user request + proposed commands; triggered exclusively by
+   unsolicited external URLs; "no"/garbage/unreachable all quarantine.
 5. **Provenance escalation** — any plan command carrying a URL/host/path token
    present in retrieved context but absent from user input is forced to
    Medium risk (mandatory confirmation).

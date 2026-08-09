@@ -1,7 +1,5 @@
 // internal/shell/classify_test.go
 // Purpose: Unit tests for the unified input classifier.
-// Author:  Nahasat Nibir
-// Dependencies: testing, internal/shell.
 package shell
 
 import "testing"

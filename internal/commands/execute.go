@@ -1,6 +1,6 @@
 // internal/commands/execute.go
 // Purpose: Low-level command execution with safety checks.
-// Phase 0 change: confirmation prompts are routed through the Prompter abstraction.
+// confirmation prompts are routed through the Prompter abstraction.
 package commands
 
 import (

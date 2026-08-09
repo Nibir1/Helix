@@ -20,6 +20,7 @@ import (
 	"helix/internal/commands"
 	"helix/internal/config"
 	"helix/internal/confinement"
+	"helix/internal/diagnostics"
 	"helix/internal/rag"
 	"helix/internal/recon"
 	"helix/internal/shell"
@@ -42,11 +43,19 @@ var (
 )
 
 func main() {
-	// Phase 13: Landlock re-exec child (Linux only). Confines itself with the
+	// Landlock re-exec child (Linux only). Confines itself with the
 	// kernel LSM, then runs the requested shell command.
 	if len(os.Args) > 1 && os.Args[1] == "--confined-child" {
 		os.Exit(confinement.RunConfinedChild(os.Args[2:]))
 	}
+
+	// telemetry-free crash diagnostics. Installed FIRST so every
+	// later panic or fatal signal leaves a local, redacted report.
+	diagnostics.Version = config.HelixVersion
+	diagnostics.Install()
+	defer diagnostics.RecoverMain() // first defer => runs last on panic unwind
+	diagnostics.SelftestPanicIfRequested()
+
 	if len(os.Args) > 1 && os.Args[1] == "update" {
 		runKnowledgeUpdate()
 		return
@@ -66,6 +75,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Config error: %v\n", err)
 		return
 	}
+	// (startup sync stays: config → env, so early boot logs honor the preference)
 	if cfg.UserPrefs.DebugMode {
 		_ = os.Setenv("HELIX_DEBUG", "1")
 	}
@@ -107,16 +117,24 @@ func main() {
 	ragSystem = rag.NewSystem(env, db)
 	ragSystem.SetSilent(true)
 	go func() {
+		defer diagnostics.Guard("rag-bootstrap")
 		_ = ragSystem.Initialize()
+		// FIX: Use the unified debug toggle instead of reading the env var directly.
 		if err := rag.KnowledgeBootstrap(context.Background(), db); err != nil &&
-			os.Getenv("HELIX_DEBUG") == "1" {
+			utils.IsDebugMode() {
 			fmt.Fprintf(os.Stderr, "[boot] knowledge bootstrap: %v\n", err)
 		}
 	}()
 	gui := ux.NewUX()
-	dbg := os.Getenv("HELIX_DEBUG") == "1"
+	// Sync the global typewriter preference with the UX layer
+	gui.SetTypewriteAll(cfg.UserPrefs.TypewriteAll)
+
+	dbg := utils.IsDebugMode()
 	audioDone := make(chan error, 1)
-	go func() { audioDone <- audio.Init() }()
+	go func() {
+		defer diagnostics.Guard("audio-init")
+		audioDone <- audio.Init()
+	}()
 	select {
 	case aerr := <-audioDone:
 		if aerr != nil {

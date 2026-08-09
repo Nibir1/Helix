@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"helix/internal/audio"
+	"helix/internal/utils"
 
 	"github.com/fatih/color"
 )
@@ -23,6 +24,7 @@ type UX struct {
 	typingSpeed    time.Duration
 	animationSpeed time.Duration
 	colors         *ColorScheme
+	typewriteAll   bool
 }
 
 // ColorScheme centralizes Helix terminal colors.
@@ -61,6 +63,14 @@ func NewUX() *UX {
 			Highlight: color.New(color.FgHiWhite, color.BgBlue, color.Bold).SprintFunc(),
 		},
 	}
+}
+
+// SetTypewriteAll toggles the global typewriter effect for all output.
+//
+// Args: on: true to typewrite everything, false for AI-only.
+// Returns: none. Complexity: O(1).
+func (ux *UX) SetTypewriteAll(on bool) {
+	ux.typewriteAll = on
 }
 
 // AskYesNo asks a yes/no question.
@@ -171,21 +181,18 @@ func (ux *UX) PrintSystemMessage(text string) {
 }
 
 // PrintAIMessage prints an AI response.
-//
-// Args:
-//   - text: AI response text.
-//   - useTypingEffect: whether to animate the response.
-//
-// Returns: none.
-// Complexity: O(len(text)) when typing is enabled, otherwise O(1).
 func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
 	prefix := ux.scifiPrefix("[NEURAL_NET]", ux.colors.Primary)
-	fmt.Print(prefix)
-
-	if useTypingEffect {
-		ux.Typewriter(text)
+	if ux.typewriteAll {
+		// Phase 15: Typewrite the prefix and text together
+		ux.Typewriter(prefix + text)
 	} else {
-		fmt.Println(text)
+		fmt.Print(prefix)
+		if useTypingEffect {
+			ux.Typewriter(text)
+		} else {
+			fmt.Println(text)
+		}
 	}
 }
 
@@ -255,7 +262,8 @@ func (ux *UX) PrintInfo(message string) {
 	ux.scifiPrint("INFO", message, ux.colors.Info)
 }
 
-// PrintDebug prints debug output only when HELIX_DEBUG=1.
+// PrintDebug prints debug output only when debug mode is active
+// (/debug on or HELIX_DEBUG=1).
 //
 // Args:
 //   - message: debug text.
@@ -263,10 +271,9 @@ func (ux *UX) PrintInfo(message string) {
 // Returns: none.
 // Complexity: O(1).
 func (ux *UX) PrintDebug(message string) {
-	if os.Getenv("HELIX_DEBUG") != "1" {
+	if !utils.IsDebugMode() {
 		return
 	}
-
 	ux.scifiPrint("DEBUG", message, ux.colors.Neutral)
 }
 
@@ -345,17 +352,14 @@ func BuildShellCommand(command string, shellName string) *exec.Cmd {
 }
 
 // scifiPrint prints a labeled message using the Helix UX style.
-//
-// Args:
-//   - label: log label.
-//   - text: message text.
-//   - colorFunc: colorizer.
-//
-// Returns: none.
-// Complexity: O(1).
 func (ux *UX) scifiPrint(label, text string, colorFunc func(...interface{}) string) {
 	msg := fmt.Sprintf("%s %s", ux.scifiLabel(label), colorFunc(text))
-	fmt.Println(msg)
+	if ux.typewriteAll {
+		// Route all system messages through the typewriter engine
+		ux.Typewriter(msg)
+	} else {
+		fmt.Println(msg)
+	}
 }
 
 // scifiPrefix creates a colored prefix for inline messages.

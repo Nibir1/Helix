@@ -6,23 +6,28 @@ Helix is knowledge sovereign. Hundreds of thousands of CVEs, tens of thousands o
 
 In an age when intelligence is treated as a subscription, Helix has made it a possession.
 
-### Highlights
+### Core Highlights
 
-- **Unified input classification** — `ls -la`, `why is my build failing?`,
-  and `/vuln CVE-2024-1234` coexist in one prompt.
-- **Multi-provider AI** — OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM,
-  Ollama, llama.cpp, and custom OpenAI-compatible endpoints, driven by a
-  strict-JSON planner with truncation-resistant parsing.
-- **Local RAG + live threat intel** — 900+ indexed MAN pages plus NVD, CISA
-  KEV, Exploit-DB, and MITRE ATT&CK in a SQLite/FTS5 knowledge base.
-- **Safety-first execution** — hard blocks for `rm -rf /`, `curl | sh`, and
-  `eval`; confirmations for medium risk; critical-package protection.
-- **Authorized recon** — `/scan` requires written scope; dangerous flags are
-  blocked by default.
-- **Helix UX** — TrueColor animated prompt, live syntax highlighting,
-  in-place resize healing, and synthetic tonal audio synced to the typewriter.
+- **Unified input classification** — `ls -la`, `why is my build failing?`, and `/vuln CVE-2024-1234` coexist in one prompt.
+- **Multi-provider AI** — OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM, Ollama, llama.cpp, and custom OpenAI-compatible endpoints, driven by a strict-JSON planner with truncation-resistant parsing.
+- **Local RAG + live threat intel** — 900+ indexed MAN pages plus NVD, CISA KEV, Exploit-DB, and MITRE ATT&CK in a SQLite/FTS5 knowledge base.
+- **Safety-first execution** — hard blocks for `rm -rf /`, `curl | sh`, and `eval`; confirmations for medium risk; critical-package protection.
+- **Authorized recon** — `/scan` requires written scope; dangerous flags are blocked by default.
+- **Helix UX** — TrueColor animated prompt, live syntax highlighting, in-place resize healing, and synthetic tonal audio synced to the typewriter.
+
+### 🛡️ Enterprise Hardening
+
+What separates "portfolio-grade" from "enterprise-grade" is verified assurance. Helix v1.0.0 closes the gap with six mathematically defensible hardening pillars:
+
+- **Supply-Chain Security:** Every release artifact ships with an SPDX SBOM (via `syft`) and is cryptographically signed using Sigstore keyless signing (`cosign`). Continuous `govulncheck` and CodeQL SAST run on every commit.
+- **Instruction Firewall:** RAG-retrieved knowledge is treated as untrusted data. A 5-layer defense (structured-fields-only context, sanitization, canary honeypots, a fail-closed critic pass, and provenance escalation) neutralizes indirect prompt injection.
+- **Kernel-Grade Confinement:** `/sandbox strict` is no longer advisory. Writes outside the jail root are denied *by the OS kernel* using Seatbelt (macOS), bubblewrap (Linux), or the Landlock LSM via pure-Go raw syscalls.
+- **Continuous Fuzzing:** The safety surface (shell validation, JSON planner parsing, sandbox path resolution) is continuously fuzzed with invariant assertions to prevent ReDoS and state-machine bypasses.
+- **E2E TTY Harness:** A pseudo-terminal (PTY) test suite boots the real Helix binary against a mock provider, proving the safety pipeline end-to-end with zero real AI and zero network.
+- **Telemetry-Free Crash Diagnostics:** Panics and fatal signals generate local, 0600, secret-redacted JSON crash reports. The diagnostics package imports zero networking primitives (grep-verified in CI), and reports are safely inspectable via the new `/crash` command.
 
 ---
+
 ## Quick Start & Installation
 
 ### Option 1: Automated Installer (macOS / Linux)
@@ -102,3 +107,26 @@ Launch Helix and execute the knowledge update command:
 The live TrueColor progress bar will now reflect the accelerated sync speed, bypassing the 6.5-second rate limit and fully indexing ~290,000 CVEs in a fraction of the time.
 
 ---
+
+### 🔐 Verifying Release Integrity
+
+Every official Helix binary and archive is cryptographically signed and accompanied by a Software Bill of Materials (SBOM) to guarantee a clean supply chain.
+
+**1. Install the verification tools:**
+- [Cosign](https://docs.sigstore.dev/cosign/installation)
+- [Syft](https://github.com/anchore/syft#installation)
+
+**2. Verify the Sigstore Signature:**
+```bash
+cosign verify-blob \
+  --certificate helix_Linux_x86_64.tar.gz.pem \
+  --signature helix_Linux_x86_64.tar.gz.sig \
+  --certificate-identity-regexp "https://github.com/Nibir1/Helix/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  helix_Linux_x86_64.tar.gz
+```
+
+**3. Inspect the SBOM:**
+```bash
+syft helix_Linux_x86_64.tar.gz
+```

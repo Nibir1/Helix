@@ -1,5 +1,9 @@
 // internal/ai/planner_adapter.go
+//
 // Purpose: Planner provider adapter with JSON validation and one retry.
+//
+// Hardening:
+//   - planner calls use PlannerTimeout instead of the general long timeout.
 package ai
 
 import (
@@ -9,10 +13,18 @@ import (
 )
 
 // RunPlannerWithRetry runs the planner prompt and retries once on invalid JSON.
+//
+// Args:
+//   - prompt: full planner prompt.
+//
+// Returns:
+//   - raw planner output or error.
+//
+// Complexity: O(1) provider round trip(s).
 func RunPlannerWithRetry(prompt string) (string, error) {
 	cfg := PlannerModelConfig()
 
-	raw, err := RunModelWithConfig(prompt, cfg)
+	raw, err := RunModelWithTimeout(prompt, cfg, PlannerTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -22,11 +34,11 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 	}
 
 	retryPrompt := fmt.Sprintf(
-		"%s\n\nYour previous output was invalid. Return ONLY a complete JSON object. No markdown. No commentary.\n",
+		"%s\nYour previous output was invalid. Return ONLY a complete JSON object. No markdown. No commentary.\n",
 		prompt,
 	)
 
-	raw2, err2 := RunModelWithConfig(retryPrompt, cfg)
+	raw2, err2 := RunModelWithTimeout(retryPrompt, cfg, PlannerTimeout)
 	if err2 == nil && isPlannerJSON(raw2) {
 		return raw2, nil
 	}
@@ -46,6 +58,15 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 	return "", fmt.Errorf("planner returned empty output")
 }
 
+// isPlannerJSON reports whether raw model output is a valid planner JSON object.
+//
+// Args:
+//   - raw: raw model output.
+//
+// Returns:
+//   - bool.
+//
+// Complexity: O(len(raw)).
 func isPlannerJSON(raw string) bool {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -54,7 +75,6 @@ func isPlannerJSON(raw string) bool {
 
 	s = plannerStripFences(s)
 	candidate := plannerExtractObject(s)
-
 	if candidate == "" {
 		return false
 	}
@@ -62,6 +82,15 @@ func isPlannerJSON(raw string) bool {
 	return json.Valid([]byte(candidate))
 }
 
+// plannerStripFences removes accidental markdown fences.
+//
+// Args:
+//   - raw: raw model output.
+//
+// Returns:
+//   - cleaned string.
+//
+// Complexity: O(len(raw)).
 func plannerStripFences(raw string) string {
 	raw = strings.TrimSpace(raw)
 
@@ -77,6 +106,15 @@ func plannerStripFences(raw string) string {
 	return strings.TrimSpace(raw)
 }
 
+// plannerExtractObject extracts the outermost JSON object candidate.
+//
+// Args:
+//   - s: candidate text.
+//
+// Returns:
+//   - extracted object or empty string.
+//
+// Complexity: O(len(s)).
 func plannerExtractObject(s string) string {
 	start := strings.Index(s, "{")
 	end := strings.LastIndex(s, "}")

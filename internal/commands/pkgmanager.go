@@ -1,9 +1,13 @@
 // internal/commands/pkgmanager.go
-
+// Purpose: Package manager abstraction layer and safety enforcement.
+// Enhanced BrewManager to use the full path to brew if it's not
+// in the system PATH, resolving auto-install failures on macOS when Homebrew
+// is installed at /opt/homebrew/bin or /usr/local/bin but not exported to PATH.
 package commands
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -31,7 +35,6 @@ type PackageManagerHandler interface {
 }
 
 // Concrete implementations for different package managers
-
 type AptManager struct{}
 type BrewManager struct{}
 type ChocoManager struct{}
@@ -43,6 +46,19 @@ func (b BrewManager) Name() string   { return "brew" }
 func (c ChocoManager) Name() string  { return "choco" }
 func (w WingetManager) Name() string { return "winget" }
 func (p PacmanManager) Name() string { return "pacman" }
+
+// findBrewPath returns the full path to brew if it exists, or "brew" if in PATH.
+func findBrewPath() string {
+	if _, err := exec.LookPath("brew"); err == nil {
+		return "brew"
+	}
+	for _, p := range []string{"/opt/homebrew/bin/brew", "/usr/local/bin/brew"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
 
 //
 // ──────────────────────────────────────────────────────────────
@@ -90,12 +106,18 @@ func (a AptManager) RemoveCommand(pkg string) string {
 func (b BrewManager) CheckPackage(pkg string) (PackageInfo, error) {
 	info := PackageInfo{Name: pkg}
 
-	cmd := exec.Command("brew", "list", pkg)
+	// Phase 15 Fix: Use findBrewPath instead of hardcoded "brew"
+	brewCmd := findBrewPath()
+	if brewCmd == "" {
+		return info, fmt.Errorf("brew not found")
+	}
+
+	cmd := exec.Command(brewCmd, "list", pkg)
 	err := cmd.Run()
 	info.Installed = (err == nil)
 
 	if info.Installed {
-		cmd := exec.Command("brew", "info", pkg)
+		cmd := exec.Command(brewCmd, "info", pkg)
 		output, err := cmd.Output()
 		if err == nil {
 			for _, line := range strings.Split(string(output), "\n") {
@@ -112,13 +134,27 @@ func (b BrewManager) CheckPackage(pkg string) (PackageInfo, error) {
 }
 
 func (b BrewManager) InstallCommand(pkg string) string {
-	return fmt.Sprintf("brew install %s", pkg)
+	brewCmd := findBrewPath()
+	if brewCmd == "" {
+		brewCmd = "brew"
+	}
+	return fmt.Sprintf("%s install %s", brewCmd, pkg)
 }
+
 func (b BrewManager) UpdateCommand(pkg string) string {
-	return fmt.Sprintf("brew upgrade %s", pkg)
+	brewCmd := findBrewPath()
+	if brewCmd == "" {
+		brewCmd = "brew"
+	}
+	return fmt.Sprintf("%s upgrade %s", brewCmd, pkg)
 }
+
 func (b BrewManager) RemoveCommand(pkg string) string {
-	return fmt.Sprintf("brew uninstall %s", pkg)
+	brewCmd := findBrewPath()
+	if brewCmd == "" {
+		brewCmd = "brew"
+	}
+	return fmt.Sprintf("%s uninstall %s", brewCmd, pkg)
 }
 
 //

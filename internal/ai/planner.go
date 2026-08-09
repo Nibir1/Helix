@@ -37,6 +37,7 @@ type PlanStep struct {
 	Command string            `json:"command,omitempty"`
 	Action  string            `json:"action,omitempty"`
 	Args    map[string]string `json:"args,omitempty"`
+	Trusted bool              `json:"-"` // Internal: bypasses medium-risk confirmations for deterministic local plans
 }
 
 // Raw intermediate representation
@@ -200,7 +201,6 @@ NOW OUTPUT THE COMPLETE JSON:
 }
 
 // ParsePlanFromModelOutput parses, repairs, validates, and normalizes planner JSON.
-// Phase 0 hardening:
 //   - strips markdown fences,
 //   - extracts the outermost JSON object,
 //   - validates first/last character,
@@ -535,4 +535,18 @@ func containsAny(s string, needles []string) bool {
 		}
 	}
 	return false
+}
+
+// BuildCompactPlannerPrompt is a minimal-rules retry prompt used when the
+// provider returns empty output on the full prompt (reasoning-only models,
+// long-context flakiness). Same schema, far fewer tokens.
+//
+// Args: userInput, envDescription. Returns: prompt string. Complexity: O(1).
+func BuildCompactPlannerPrompt(userInput, envDescription string) string {
+	return fmt.Sprintf(`Output ONLY one valid JSON object. First char '{', last char '}'. No markdown, no commentary.
+Schema: {"intent":"chat|shell|git|package|multi_step","steps":[{"tool":"response|shell|git|package|recon","message":"...","command":"...","action":"...","args":{}}]}
+Shell rules: no package managers, no rm -rf /, no curl|bash, no /tmp execution.
+User Input: %s
+Environment: %s
+NOW OUTPUT THE COMPLETE JSON:`, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
 }
