@@ -113,20 +113,19 @@ func runNonInteractiveShell(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
-
 	env := shell.DetectEnvironment()
 	sandbox := commands.NewDirectorySandbox()
-
 	// Safety validation first.
 	if err := validateNonInteractiveScript(raw); err != nil {
+		fmt.Fprintf(os.Stderr, "helix: %v\n", err)
 		return err
 	}
-
 	// Sandbox validation second.
 	if ok, reason := sandbox.ValidateCommand(raw); !ok {
-		return fmt.Errorf("sandbox violation: %s", reason)
+		err := fmt.Errorf("sandbox violation: %s", reason)
+		fmt.Fprintf(os.Stderr, "helix: %v\n", err)
+		return err
 	}
-
 	return executeNonInteractiveScript(raw, sandbox.GetCurrentDirectory(), env)
 }
 

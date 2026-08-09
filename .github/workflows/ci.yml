@@ -53,3 +53,26 @@ jobs:
         
       - name: Build Binary
         run: go build -o dist/helix ./cmd/helix
+  
+  # Run the end-to-end TTY harness (Linux/macOS; the build tag skips Windows)
+  e2e:
+    name: E2E TTY Harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Run E2E Harness
+        run: make e2e

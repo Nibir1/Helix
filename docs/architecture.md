@@ -46,3 +46,17 @@ User Input → Classifier → [Shell Command] → Safety Pipeline → Sandbox �
                           ↓
                     Tool Executor (Git/Pkg/Shell/Recon)
 ```
+
+### 6. E2E TTY Harness (`tests/e2e/`)
+A pseudo-terminal (PTY) based end-to-end suite that boots the real `helix`
+binary against a mock OpenAI-compatible provider (in-process `httptest`
+server) with an isolated `$HOME` and a pre-seeded knowledge meta key (to keep
+the run fully offline). It proves, with zero real AI and zero network:
+- High-confidence shell input bypasses the planner.
+- Natural language routes through the strict-JSON planner and executes.
+- Medium-risk commands require confirmation; declining skips execution.
+- High-risk commands are hard-blocked.
+- Non-interactive mode blocks high-risk commands with a non-zero exit.
+- `/help` renders and `/purge` respects a declined confirmation.
+
+Run with `make e2e` (Linux/macOS only).

@@ -140,9 +140,13 @@ fuzz-ci:
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=20s
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=20s
 
+# Run the end-to-end TTY harness (Linux/macOS; the build tag skips Windows)
+e2e:
+	@echo "Running E2E TTY harness..."
+	go test ./tests/e2e/... -v -count=1 -timeout 300s
 
 # Run all tasks: lint, build, test, install
 work: lint sec-scan build test install
 
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci e2e
