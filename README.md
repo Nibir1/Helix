@@ -390,22 +390,19 @@ Helix is built with a verified, mathematically defensible supply chain and rigor
 - **Telemetry-Free Crash Diagnostics:** Panics and fatal signals generate local, 0600, secret-redacted JSON crash reports (`~/.helix/crash-*.json`). The diagnostics package imports zero networking primitives (grep-verified in CI), ensuring field failures are debuggable without violating user privacy.
 
 ### Verifying Official Releases
-
 You can verify the integrity and provenance of any downloaded Helix binary using `cosign` and `syft`:
-
 ```bash
 # Verify the Sigstore signature
 cosign verify-blob \
-  --certificate helix_Linux_x86_64.tar.gz.pem \
-  --signature helix_Linux_x86_64.tar.gz.sig \
+  --certificate Helix_Linux_x86_64.tar.gz.pem \
+  --signature Helix_Linux_x86_64.tar.gz.sig \
   --certificate-identity-regexp "https://github.com/Nibir1/Helix/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  helix_Linux_x86_64.tar.gz
+  Helix_Linux_x86_64.tar.gz
 
 # Inspect the SBOM
-syft helix_Linux_x86_64.tar.gz
+syft Helix_Linux_x86_64.tar.gz
 ```
-
 ---
 
 ## Architecture Overview

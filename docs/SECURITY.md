@@ -69,11 +69,11 @@ You can verify the integrity and provenance of any downloaded Helix binary or ar
 **2. Verify the signature (Sigstore Keyless):**
 ```bash
 cosign verify-blob \
-  --certificate helix_Linux_x86_64.tar.gz.pem \
-  --signature helix_Linux_x86_64.tar.gz.sig \
+  --certificate Helix_Linux_x86_64.tar.gz.pem \
+  --signature Helix_Linux_x86_64.tar.gz.sig \
   --certificate-identity-regexp "https://github.com/Nibir1/Helix/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  helix_Linux_x86_64.tar.gz
+  Helix_Linux_x86_64.tar.gz
 ```
 
 **3. Inspect the SBOM:**

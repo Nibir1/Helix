@@ -1,6 +1,13 @@
 # .goreleaser.yml
 # Purpose: GoReleaser configuration for cross-platform Helix binaries with
 # curated, professional release notes.
+# Fix (release pipeline):
+#   - signs: GoReleaser v2 removed the `.Artifact`, `.Certificate`, and
+#     `.Signature` template fields. The certificate/signature templates now
+#     derive from `.ArtifactPath`, and the cosign args write to those exact
+#     same paths so GoReleaser can attach the produced .pem/.sig files.
+#   - archives: migrated deprecated `format` / `format_overrides.format`
+#     to the v2 `formats` list keys.
 version: 2
 
 before:
@@ -67,16 +74,18 @@ sboms:
 
 signs:
   - cmd: cosign
-    # Certificate file NAME (placed next to the artifact in dist/).
-    certificate: '{{ .ArtifactName }}.pem'
+    # v2 signing model: these templates define the OUTPUT file names that
+    # cosign produces; the args below write to the exact same absolute paths
+    # ({{ .ArtifactPath }} lives inside dist/), so GoReleaser can attach them.
+    certificate: '{{ .ArtifactPath }}.pem'
+    signature: '{{ .ArtifactPath }}.sig'
     args:
       - sign-blob
       - '--yes'
       - '--output-certificate'
-      - '{{ .Certificate }}'
+      - '{{ .ArtifactPath }}.pem'
       - '--output-signature'
-      - '{{ .Signature }}'
-      # v2 field: full path of the artifact being signed.
+      - '{{ .ArtifactPath }}.sig'
       - '{{ .ArtifactPath }}'
     artifacts: all
     output: true
