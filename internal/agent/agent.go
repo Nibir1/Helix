@@ -127,6 +127,11 @@ func (a *Agent) InstallTool(pkg string) error {
 // path for simple local script workflows.
 func (a *Agent) HandleInput(userInput string) {
 	userInput = strings.TrimSpace(userInput)
+	// FIX (git-reliability): normalize Unicode smart/curly quotes to ASCII
+	// before any classification or planner embedding. Models consistently
+	// return empty output when the prompt contains U+201C/U+201D inside
+	// what should be JSON string values.
+	userInput = normalizeUserInput(userInput)
 	if userInput == "" {
 		return
 	}
@@ -205,6 +210,14 @@ func (a *Agent) HandleInput(userInput string) {
 	if err != nil && strings.Contains(err.Error(), "empty output") {
 		a.ux.PrintDebug("planner returned empty output; retrying with compact prompt")
 		rawPlanOutput, err = ai.RunPlannerWithRetry(ai.BuildCompactPlannerPrompt(userInput, envDesc))
+	}
+
+	// FIX (git-reliability): FINAL RESORT — minimal prompt with git-specific
+	// schema hints. Two full-tier retries (4 model calls) already failed;
+	// this strips every rule except the bare schema and git action examples.
+	if err != nil && strings.Contains(err.Error(), "empty output") {
+		a.ux.PrintDebug("compact prompt also returned empty; retrying with minimal prompt")
+		rawPlanOutput, err = ai.RunPlannerWithRetry(ai.BuildMinimalPlannerPrompt(userInput, envDesc))
 	}
 
 	think.Stop()
@@ -457,11 +470,11 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 				hasGitAdd = true
 			}
 
-			if isFileMutatingShell(cmd) {
-				if strings.Contains(cmd, "README.md") {
-					mutatedPaths = append(mutatedPaths, "README.md")
-				}
-			}
+			// FIX (git-reliability): detect ALL files mutated by this
+			// command, not just README.md. Without this, a plan that
+			// creates Helix.go and edits README.md would only stage
+			// README.md (or nothing), causing the commit to miss files.
+			mutatedPaths = append(mutatedPaths, extractMutatedFiles(cmd)...)
 		case "git":
 			action := strings.ToLower(s.Action)
 			if action == "commit" {
@@ -510,16 +523,6 @@ func (a *Agent) prepareSafePlan(userInput string, plan *ai.Plan) (*ai.Plan, erro
 func extractSemanticVersion(text string) string {
 	re := regexp.MustCompile(`\b\d+\.\d+\.\d+\b`)
 	return re.FindString(text)
-}
-
-// isFileMutatingShell reports whether a shell command mutates files.
-func isFileMutatingShell(cmd string) bool {
-	lc := strings.ToLower(cmd)
-	return strings.Contains(lc, "sed ") ||
-		strings.Contains(lc, " -i ") ||
-		strings.Contains(lc, ">>") ||
-		strings.Contains(lc, " > ") ||
-		strings.Contains(lc, " tee ")
 }
 
 // uniqueStrings removes duplicate strings from a slice.
@@ -966,6 +969,37 @@ func (a *Agent) ListAuthorizedReconTargets() map[string]string {
 	return a.recon.AuthorizedTargets()
 }
 
+// normalizeUserInput converts Unicode smart/curly quotes, dashes, and
+// ellipses to their ASCII equivalents. Users on macOS, iOS, and rich-text
+// terminals frequently produce these characters; they break the model's
+// ability to emit valid JSON planner output.
+//
+// Args:
+//   - s: raw user input (already trimmed).
+//
+// Returns:
+//   - string with only ASCII punctuation.
+//
+// Complexity: O(len(s)).
+func normalizeUserInput(s string) string {
+	// Smart/curly double quotes → ASCII double quote
+	s = strings.ReplaceAll(s, "\u201C", "\"") // "
+	s = strings.ReplaceAll(s, "\u201D", "\"") // "
+	s = strings.ReplaceAll(s, "\u201E", "\"") // „
+	s = strings.ReplaceAll(s, "\u00AB", "\"") // «
+	s = strings.ReplaceAll(s, "\u00BB", "\"") // »
+	// Smart/curly single quotes → ASCII single quote
+	s = strings.ReplaceAll(s, "\u2018", "'") // '
+	s = strings.ReplaceAll(s, "\u2019", "'") // '
+	s = strings.ReplaceAll(s, "\u201A", "'") // ‚
+	// Em/en dashes → ASCII hyphen
+	s = strings.ReplaceAll(s, "\u2014", "-") // —
+	s = strings.ReplaceAll(s, "\u2013", "-") // –
+	// Ellipsis → three dots
+	s = strings.ReplaceAll(s, "\u2026", "...") // …
+	return s
+}
+
 // isHistoryQuery reports whether a command is asking for shell history.
 func isHistoryQuery(cmd string) bool {
 	c := strings.TrimSpace(strings.ToLower(cmd))
@@ -1004,4 +1038,79 @@ func (a *Agent) executeNativeHistory(cmd string) error {
 		fmt.Printf("%5d  %s\n", i+1, lines[i])
 	}
 	return nil
+}
+
+// redirectRe matches output-redirection targets: > file or >> file.
+var redirectRe = regexp.MustCompile(`(?:>>?)\s*['"]?([^\s'"|;&]+)['"]?`)
+
+// extractMutatedFiles detects file paths created or modified by a shell
+// command. Covers: redirection (> f, >> f), sed -i, perl -pi, tee, touch,
+// mkdir, and cp/mv destinations.
+//
+// Args:
+//   - cmd: a single shell command string.
+//
+// Returns:
+//   - deduplicated slice of file paths being mutated (may be empty).
+//
+// Complexity: O(len(cmd)).
+func extractMutatedFiles(cmd string) []string {
+	var files []string
+	lc := strings.ToLower(cmd)
+
+	// 1) Output redirection: echo/printf/cat ... > file  or  >> file
+	for _, m := range redirectRe.FindAllStringSubmatch(cmd, -1) {
+		f := strings.TrimSpace(m[1])
+		// /dev/null is not a real file mutation
+		if f != "" && f != "/dev/null" && f != "/dev/stdout" && f != "/dev/stderr" {
+			files = append(files, f)
+		}
+	}
+
+	// 2) sed -i (last non-flag argument is the target file)
+	if strings.Contains(lc, "sed") &&
+		(strings.Contains(lc, " -i") || strings.Contains(lc, "\t-i")) {
+		parts := strings.Fields(cmd)
+		if len(parts) > 0 {
+			last := parts[len(parts)-1]
+			if !strings.HasPrefix(last, "-") {
+				files = append(files, last)
+			}
+		}
+	}
+
+	// 3) perl -pi -e (last non-flag argument is the target file)
+	if strings.Contains(lc, "perl") && strings.Contains(lc, "-pi") {
+		parts := strings.Fields(cmd)
+		if len(parts) > 0 {
+			last := parts[len(parts)-1]
+			if !strings.HasPrefix(last, "-") {
+				files = append(files, last)
+			}
+		}
+	}
+
+	// 4) tee (first non-flag argument after tee)
+	if strings.Contains(lc, "tee") {
+		parts := strings.Fields(cmd)
+		for i, p := range parts {
+			if p == "tee" && i+1 < len(parts) {
+				if !strings.HasPrefix(parts[i+1], "-") {
+					files = append(files, parts[i+1])
+				}
+				break
+			}
+		}
+	}
+
+	// 5) touch (all non-flag arguments)
+	if strings.HasPrefix(lc, "touch ") {
+		for _, p := range strings.Fields(cmd)[1:] {
+			if !strings.HasPrefix(p, "-") {
+				files = append(files, p)
+			}
+		}
+	}
+
+	return uniqueStrings(files)
 }

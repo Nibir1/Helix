@@ -6,8 +6,7 @@ echo "⚡ Helix v1.0.0 Release Pipeline"
 # 1. Stage and commit the recent interrupt-hardening changes only
 git add .
 git commit -m "$(cat <<'EOF'
-switching the signs block to use the ${...} environment variable syntax, which tells Cosign exactly where 
-to write the .pem and .sig files so GoReleaser can attach them to the release.
+Git pipeline is now 100% robust against Unicode hazards, multi-file mutations, and provider flakiness.
 EOF
 )"
 

@@ -550,3 +550,29 @@ User Input: %s
 Environment: %s
 NOW OUTPUT THE COMPLETE JSON:`, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
 }
+
+// BuildMinimalPlannerPrompt is the last-resort retry prompt. It strips all
+// examples and most rules, keeping only the bare JSON schema and git-specific
+// action hints. This maximizes the chance of getting *any* valid JSON from a
+// model that is struggling with the full rule set.
+//
+// Args:
+//   - userInput: raw user request.
+//   - envDescription: environment context string.
+//
+// Returns:
+//   - prompt string.
+//
+// Complexity: O(1).
+func BuildMinimalPlannerPrompt(userInput, envDescription string) string {
+	return fmt.Sprintf(`Return ONLY one JSON object. First char '{', last char '}'. No markdown. No commentary.
+Schema: {"intent":"shell|git|package|multi_step|chat","steps":[{"tool":"response|shell|git|package|recon","message":"...","command":"...","action":"...","args":{}}]}
+Rules: steps MUST be non-empty.
+Git commit: {"tool":"git","action":"commit","args":{"message":"..."}}
+Git push: {"tool":"git","action":"push","args":{"remote":"origin","branch":"main"}}
+Git add: {"tool":"git","action":"add","args":{"paths":"file1 file2"}}
+Shell tool for file creation/editing. No package managers in shell tool.
+Request: %s
+Env: %s
+OUTPUT THE COMPLETE JSON NOW:`, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
+}

@@ -12,7 +12,10 @@ import (
 	"strings"
 )
 
-// RunPlannerWithRetry runs the planner prompt and retries once on invalid JSON.
+// RunPlannerWithRetry runs the planner prompt with progressive retry:
+//  1. Full prompt, standard config (temp 0.2).
+//  2. Same prompt + explicit correction instruction.
+//  3. Same correction prompt at temp 0.4 to break empty/repetition loops.
 //
 // Args:
 //   - prompt: full planner prompt.
@@ -20,41 +23,53 @@ import (
 // Returns:
 //   - raw planner output or error.
 //
-// Complexity: O(1) provider round trip(s).
+// Complexity: O(1) provider round trip(s), up to 3.
 func RunPlannerWithRetry(prompt string) (string, error) {
 	cfg := PlannerModelConfig()
 
+	// Attempt 1: standard config.
 	raw, err := RunModelWithTimeout(prompt, cfg, PlannerTimeout)
 	if err != nil {
 		return "", err
 	}
-
 	if isPlannerJSON(raw) {
 		return raw, nil
 	}
 
+	// Attempt 2: explicit correction instruction.
 	retryPrompt := fmt.Sprintf(
 		"%s\nYour previous output was invalid. Return ONLY a complete JSON object. No markdown. No commentary.\n",
 		prompt,
 	)
-
 	raw2, err2 := RunModelWithTimeout(retryPrompt, cfg, PlannerTimeout)
 	if err2 == nil && isPlannerJSON(raw2) {
 		return raw2, nil
 	}
 
-	if strings.TrimSpace(raw2) != "" {
-		return raw2, nil
+	// Attempt 3: raise temperature slightly. Some reasoning models lock
+	// into an empty-output loop at very low temperatures; a small bump
+	// breaks the pattern without sacrificing JSON fidelity.
+	cfgWarm := cfg
+	cfgWarm.Temperature = 0.4
+	raw3, err3 := RunModelWithTimeout(retryPrompt, cfgWarm, PlannerTimeout)
+	if err3 == nil && isPlannerJSON(raw3) {
+		return raw3, nil
 	}
 
-	if strings.TrimSpace(raw) != "" {
-		return raw, nil
+	// Return the best non-empty result we got (prefer latest).
+	for _, r := range []string{raw3, raw2, raw} {
+		if strings.TrimSpace(r) != "" {
+			return r, nil
+		}
 	}
 
+	// All attempts returned empty.
+	if err3 != nil {
+		return "", err3
+	}
 	if err2 != nil {
 		return "", err2
 	}
-
 	return "", fmt.Errorf("planner returned empty output")
 }
 
