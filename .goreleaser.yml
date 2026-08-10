@@ -4,8 +4,8 @@
 # Fix (release pipeline):
 #   - signs: GoReleaser v2 removed the `.Artifact`, `.Certificate`, and
 #     `.Signature` template fields. The certificate/signature templates now
-#     derive from `.ArtifactPath`, and the cosign args write to those exact
-#     same paths so GoReleaser can attach the produced .pem/.sig files.
+#     derive from `${artifact}`, and the cosign args write to those exact
+#     same paths using the `${certificate}` and `${signature}` env vars.
 #   - archives: migrated deprecated `format` / `format_overrides.format`
 #     to the v2 `formats` list keys.
 version: 2
@@ -75,17 +75,17 @@ sboms:
 signs:
   - cmd: cosign
     # v2 signing model: these templates define the OUTPUT file names that
-    # cosign produces; the args below write to the exact same absolute paths
-    # ({{ .ArtifactPath }} lives inside dist/), so GoReleaser can attach them.
-    certificate: '{{ .ArtifactPath }}.pem'
-    signature: '{{ .ArtifactPath }}.sig'
+    # cosign produces; the args below write to the exact same paths
+    # using the ${artifact}, ${certificate}, and ${signature} env vars.
+    certificate: '${artifact}.pem'
+    signature: '${artifact}.sig'
     args:
       - sign-blob
       - '--yes'
       - '--output-certificate'
-      - '{{ .ArtifactPath }}.pem'
+      - '${certificate}'
       - '--output-signature'
-      - '{{ .ArtifactPath }}.sig'
-      - '{{ .ArtifactPath }}'
+      - '${signature}'
+      - '${artifact}'
     artifacts: all
     output: true
