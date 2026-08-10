@@ -127,11 +127,15 @@ func (a *Agent) InstallTool(pkg string) error {
 // path for simple local script workflows.
 func (a *Agent) HandleInput(userInput string) {
 	userInput = strings.TrimSpace(userInput)
-	// FIX (git-reliability): normalize Unicode smart/curly quotes to ASCII
-	// before any classification or planner embedding. Models consistently
-	// return empty output when the prompt contains U+201C/U+201D inside
-	// what should be JSON string values.
+
+	// FIX (git-reliability): Normalize Unicode IMMEDIATELY.
+	// Smart quotes break the planner's JSON generation, causing 150s hangs.
+	originalInput := userInput
 	userInput = normalizeUserInput(userInput)
+	if userInput != originalInput {
+		a.ux.PrintDebug(fmt.Sprintf("Normalized Unicode smart quotes to ASCII: %q", userInput))
+	}
+
 	if userInput == "" {
 		return
 	}

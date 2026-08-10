@@ -10,60 +10,46 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
-// RunPlannerWithRetry runs the planner prompt with progressive retry:
-//  1. Full prompt, standard config (temp 0.2).
-//  2. Same prompt + explicit correction instruction.
-//  3. Same correction prompt at temp 0.4 to break empty/repetition loops.
-//
-// Args:
-//   - prompt: full planner prompt.
-//
-// Returns:
-//   - raw planner output or error.
-//
-// Complexity: O(1) provider round trip(s), up to 3.
+// RunPlannerWithRetry runs the planner prompt with progressive retry.
+// Attempt 1 gets the full 60s. Retries get 30s to prevent 150s hangs.
 func RunPlannerWithRetry(prompt string) (string, error) {
 	cfg := PlannerModelConfig()
+	retryTimeout := 30 * time.Second // Fail fast on retries
 
-	// Attempt 1: standard config.
+	// Attempt 1: standard config, full timeout.
 	raw, err := RunModelWithTimeout(prompt, cfg, PlannerTimeout)
-	if err != nil {
-		return "", err
-	}
-	if isPlannerJSON(raw) {
+	if err == nil && isPlannerJSON(raw) {
 		return raw, nil
 	}
 
-	// Attempt 2: explicit correction instruction.
+	// Attempt 2: explicit correction instruction, shorter timeout.
 	retryPrompt := fmt.Sprintf(
 		"%s\nYour previous output was invalid. Return ONLY a complete JSON object. No markdown. No commentary.\n",
 		prompt,
 	)
-	raw2, err2 := RunModelWithTimeout(retryPrompt, cfg, PlannerTimeout)
+	raw2, err2 := RunModelWithTimeout(retryPrompt, cfg, retryTimeout)
 	if err2 == nil && isPlannerJSON(raw2) {
 		return raw2, nil
 	}
 
-	// Attempt 3: raise temperature slightly. Some reasoning models lock
-	// into an empty-output loop at very low temperatures; a small bump
-	// breaks the pattern without sacrificing JSON fidelity.
+	// Attempt 3: raise temperature slightly, shorter timeout.
 	cfgWarm := cfg
 	cfgWarm.Temperature = 0.4
-	raw3, err3 := RunModelWithTimeout(retryPrompt, cfgWarm, PlannerTimeout)
+	raw3, err3 := RunModelWithTimeout(retryPrompt, cfgWarm, retryTimeout)
 	if err3 == nil && isPlannerJSON(raw3) {
 		return raw3, nil
 	}
 
-	// Return the best non-empty result we got (prefer latest).
+	// Return the best non-empty result we got.
 	for _, r := range []string{raw3, raw2, raw} {
 		if strings.TrimSpace(r) != "" {
 			return r, nil
 		}
 	}
 
-	// All attempts returned empty.
 	if err3 != nil {
 		return "", err3
 	}
