@@ -6,7 +6,7 @@ echo "⚡ Helix v1.0.0 Release Pipeline"
 # 1. Stage and commit the recent interrupt-hardening changes only
 git add .
 git commit -m "$(cat <<'EOF'
-guaranting the normalization runs, added a debug log so I can see it working, and capped the retry timeouts so I never wait 3 minutes for a failed plan again
+updated README.md with latest youtube video link
 EOF
 )"
 
