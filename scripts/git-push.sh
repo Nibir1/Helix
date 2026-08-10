@@ -6,7 +6,7 @@ echo "⚡ Helix v1.0.0 Release Pipeline"
 # 1. Stage and commit the recent interrupt-hardening changes only
 git add .
 git commit -m "$(cat <<'EOF'
-Git pipeline is now 100% robust against Unicode hazards, multi-file mutations, and provider flakiness.
+guaranting the normalization runs, added a debug log so I can see it working, and capped the retry timeouts so I never wait 3 minutes for a failed plan again
 EOF
 )"
 
