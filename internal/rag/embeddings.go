@@ -126,9 +126,9 @@ func bootstrapOllama(ctx context.Context) embeddingBackend {
 	if !askPaused(fmt.Sprintf("Pull %s for local embeddings (~274MB)?", ollama.DefaultEmbeddingModel)) {
 		return embNone
 	}
-	if err := client.PullModel(bctx, ollama.DefaultEmbeddingModel, func(status string) {
+	if err := client.PullModel(bctx, ollama.DefaultEmbeddingModel, func(status string, completed, total int64) {
 		// Route pull progress into the live bar, never raw stdout.
-		notifyStage("PULLING EMBED MODEL")
+		notifyProgress("PULLING EMBED MODEL", int(completed), int(total))
 	}); err != nil {
 		color.Yellow("Embedding model pull failed: %v", err)
 		return embNone

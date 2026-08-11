@@ -94,12 +94,20 @@ func (c *Client) ListModels(ctx context.Context) ([]providers.ModelInfo, error) 
 }
 
 // PullModel pulls a model and reports progress.
-func (c *Client) PullModel(ctx context.Context, model string, progress func(string)) error {
+//
+// Args:
+//   - ctx: cancellation/timeout context.
+//   - model: Ollama model tag.
+//   - progress: optional callback receiving (stage, completedBytes, totalBytes).
+//     When totalBytes is 0, the UI should render an indeterminate spinner.
+//
+// Returns: error when the pull fails.
+// Complexity: O(download size).
+func (c *Client) PullModel(ctx context.Context, model string, progress func(status string, completed, total int64)) error {
 	body := map[string]interface{}{
 		"name":   model,
 		"stream": true,
 	}
-
 	resp, err := c.post(ctx, "/api/pull", body)
 	if err != nil {
 		return err
@@ -117,10 +125,12 @@ func (c *Client) PullModel(ctx context.Context, model string, progress func(stri
 		}
 
 		var event struct {
-			Status string `json:"status"`
-			Error  string `json:"error"`
+			Status    string `json:"status"`
+			Error     string `json:"error"`
+			Digest    string `json:"digest,omitempty"`
+			Total     int64  `json:"total,omitempty"`
+			Completed int64  `json:"completed,omitempty"`
 		}
-
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			continue
 		}
@@ -130,7 +140,7 @@ func (c *Client) PullModel(ctx context.Context, model string, progress func(stri
 		}
 
 		if progress != nil && event.Status != "" {
-			progress(event.Status)
+			progress(event.Status, event.Completed, event.Total)
 		}
 
 		if strings.Contains(strings.ToLower(event.Status), "success") {
@@ -142,6 +152,9 @@ func (c *Client) PullModel(ctx context.Context, model string, progress func(stri
 		return fmt.Errorf("ollama pull stream error: %w", err)
 	}
 
+	// Some Ollama versions close the stream immediately after the final digest
+	// without emitting an explicit "success" status. Reaching EOF cleanly is
+	// treated as a successful pull.
 	return nil
 }
 

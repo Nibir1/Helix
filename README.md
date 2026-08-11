@@ -17,7 +17,7 @@
 Helix is an **AI-powered command‑line assistant and adversarial cybersecurity platform** that turns natural language into **safe, executable actions**. It bridges the gap between human intent and machine execution, combining local LLM inference, retrieval-augmented generation (RAG), live threat intelligence, and strict safety pipelines.
 
 It combines:
-- **Multi-Provider AI** (OpenAI, Anthropic, DeepSeek, Ollama, llama.cpp, and more)
+- **Multi-Provider AI** (OpenAI, Anthropic, DeepSeek, Ollama and more)
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
 - **A Multi-Layer Safety & Sandbox Engine** around shell, git, packages, and recon
@@ -171,7 +171,7 @@ Helix exposes a rich set of slash commands for system control, intelligence gath
 ### AI & Providers
 | Command | Description |
 | :--- | :--- |
-| `/provider <name>` | Switch AI provider (openai, anthropic, ollama, llamacpp, etc.). |
+| `/provider <name>` | Switch AI provider (openai, anthropic, ollama etc.). |
 | `/provider-status` | Show detailed provider health and API key status. |
 | `/model <id>` | Switch the active AI model. |
 | `/test-basic-ai` | Smoke test the active AI model with a simple prompt. |
@@ -315,7 +315,7 @@ Helix has a dedicated **GitManager** with two faces: `/git` mode (natural langua
 - `commit`, `tag`, `add`, `checkout`, `create-branch`.
 - Commit messages are written to a **temporary `.helix-commit-msg.txt` file** and passed via `git commit -F` to avoid shell-escaping issues.
 
-### Dangerous Git Actions (Option C)
+### Dangerous Git Actions
 For advanced workflows, the planner may emit dangerous actions. These require **typed confirmation**:
 - Force push: `Type "YES, FORCE PUSH" to confirm`
 - Hard reset: `Type "YES, RESET HARD" to confirm`
@@ -434,8 +434,8 @@ Helix/
 
 Helix supports a massive array of AI providers out of the box, managed via `/setup` or `/provider`:
 
-1. **Remote APIs:** OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM, Custom OpenAI-Compatible.
-2. **Local Runtimes:** Ollama (auto-installs and pulls models), llama.cpp (auto-clones and builds from source).
+1. **Remote APIs:** OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM.
+2. **Local Runtimes:** Ollama (auto-installs and pulls models).
 
 API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions, or passed via environment variables.
 
@@ -455,7 +455,7 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 ### Planner, Agent System & Tool Protocol
 * Unified multi-tool agent system: response, shell, git, package, recon
 * Ultra-strict JSON planner protocol with schema enforcement and truncation-resistance
-* Dual-provider inference: local llama.cpp/Ollama + remote APIs
+* Dual-provider inference: local Ollama + remote APIs
 * Argument normalization (array flattening, trimming, synonym resolution)
 * Auto-intent classification: chat, shell, git, package, multi_step
 
@@ -475,7 +475,6 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 * Multi-step Git flows: update → stage → commit → tag
 
 ### System Architecture & Infrastructure
-* Full llama.cpp integration (auto-builds from source if missing)
 * Ollama integration (auto-installs and pulls recommended models based on RAM)
 * Parallel RAG indexing with persistent vector stores for instant reload
 * OS & shell auto-detection with TTY hardening (SIGTTIN/SIGTTOU handling)

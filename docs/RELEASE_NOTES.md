@@ -9,7 +9,7 @@ In an age when intelligence is treated as a subscription, Helix has made it a po
 ### Core Highlights
 
 - **Unified input classification** — `ls -la`, `why is my build failing?`, and `/vuln CVE-2024-1234` coexist in one prompt.
-- **Multi-provider AI** — OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM, Ollama, llama.cpp, and custom OpenAI-compatible endpoints, driven by a strict-JSON planner with truncation-resistant parsing.
+- **Multi-provider AI** — OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM, Ollama driven by a strict-JSON planner with truncation-resistant parsing.
 - **Local RAG + live threat intel** — 900+ indexed MAN pages plus NVD, CISA KEV, Exploit-DB, and MITRE ATT&CK in a SQLite/FTS5 knowledge base.
 - **Safety-first execution** — hard blocks for `rm -rf /`, `curl | sh`, and `eval`; confirmations for medium risk; critical-package protection.
 - **Authorized recon** — `/scan` requires written scope; dangerous flags are blocked by default.

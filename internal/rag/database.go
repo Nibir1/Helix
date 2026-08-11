@@ -2,6 +2,7 @@
 package rag
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -147,25 +148,50 @@ type schemaMigration struct {
 var migrations = []schemaMigration{}
 
 // OpenDB opens or creates the SQLite database in the Helix config directory.
+//
+// Args:
+//   - homeDir: user home directory.
+//
+// Returns:
+//   - open database handle or error.
+//
+// Complexity: O(schema migration time).
 func OpenDB(homeDir string) (*sql.DB, error) {
 	dir := filepath.Join(homeDir, ".helix")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create config dir: %w", err)
 	}
+
 	dbPath := filepath.Join(dir, dbFileName)
 
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	db.SetMaxOpenConns(1) // SQLite works best with single writer
+
+	db.SetMaxOpenConns(1)
 	db.SetConnMaxLifetime(0)
 	db.SetConnMaxIdleTime(5 * time.Minute)
+
+	// Prevent SQLite-level lock waits from becoming indefinite.
+	pragmaCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := db.ExecContext(pragmaCtx, "PRAGMA busy_timeout = 3000"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set busy_timeout: %w", err)
+	}
+
+	if _, err := db.ExecContext(pragmaCtx, "PRAGMA synchronous = NORMAL"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set synchronous mode: %w", err)
+	}
 
 	if err := migrate(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
+
 	return db, nil
 }
 
@@ -242,17 +268,33 @@ func applySchemaMigrations(db *sql.DB) error {
 // Args:
 //   - db: open knowledge database handle (nil-safe).
 //
-// Returns: int schema version.
+// Returns:
+//   - int schema version.
+//
 // Complexity: O(1).
 func SchemaVersion(db *sql.DB) int {
 	if db == nil {
 		return 0
 	}
-	if v := getMeta(db, schemaVersionKey); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var value string
+	err := db.QueryRowContext(
+		ctx,
+		`SELECT value FROM meta WHERE key = ?`,
+		schemaVersionKey,
+	).Scan(&value)
+
+	if err != nil {
+		return 0
 	}
+
+	if n, err := strconv.Atoi(value); err == nil {
+		return n
+	}
+
 	return 0
 }
 

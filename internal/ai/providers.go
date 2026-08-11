@@ -15,7 +15,6 @@ import (
 	deepseekprovider "helix/internal/providers/deepseek"
 	glmprovider "helix/internal/providers/glm"
 	kimiprovider "helix/internal/providers/kimi"
-	llamacppprovider "helix/internal/providers/llamacpp"
 	ollamaprovider "helix/internal/providers/ollama"
 	openaiprovider "helix/internal/providers/openai"
 	openaicompatible "helix/internal/providers/openai_compatible"
@@ -60,7 +59,6 @@ func InitProviders(settings ProviderSettings) error {
 	registry.Register(qwenprovider.New(keys.Get("qwen"), client))
 	registry.Register(glmprovider.New(keys.Get("glm"), client))
 	registry.Register(ollamaprovider.New(ollamaClient))
-	registry.Register(llamacppprovider.New(client))
 	if settings.CustomBaseURL != "" {
 		if err := RegisterCustomProvider(settings.CustomBaseURL, keys.Get("custom")); err != nil {
 			return err

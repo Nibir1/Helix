@@ -48,6 +48,12 @@ var contextLimits = []contextLimitEntry{
 	// Qwen
 	{prefix: "qwen3.7-plus", limit: 1_000_000},
 
+	// Gemma
+	{prefix: "gemma4", limit: 128_000},
+	{prefix: "gemma-4", limit: 128_000},
+	{prefix: "gemma3", limit: 128_000},
+	{prefix: "gemma2", limit: 8_192},
+
 	// Local common models
 	{prefix: "phi4-mini", limit: 128_000},
 	{prefix: "phi4", limit: 128_000},
@@ -56,8 +62,6 @@ var contextLimits = []contextLimitEntry{
 	{prefix: "llama3.2", limit: 128_000},
 	{prefix: "llama3.1", limit: 128_000},
 	{prefix: "llama3", limit: 8_192},
-	{prefix: "gemma3", limit: 128_000},
-	{prefix: "gemma2", limit: 8_192},
 	{prefix: "mistral-nemo", limit: 128_000},
 	{prefix: "mistral-small", limit: 128_000},
 	{prefix: "mistral-large", limit: 128_000},

@@ -163,28 +163,6 @@ func RunModelWithTimeout(prompt string, config ModelConfig, timeout time.Duratio
 	return strings.TrimSpace(out), nil
 }
 
-// LoadModel is retained for compatibility and starts a llama.cpp server.
-//
-// Args:
-//   - modelPath: local GGUF model path.
-//
-// Returns:
-//   - error when the server cannot be started.
-//
-// Complexity: O(server startup time).
-func LoadModel(modelPath string) error {
-	return EnsureLlamaCppServer(context.Background(), modelPath)
-}
-
-// CloseModel stops local runtimes.
-//
-// Args: none.
-// Returns: none.
-// Complexity: O(1).
-func CloseModel() {
-	StopLocalRuntimes()
-}
-
 // ModelIsLoaded reports whether a provider is active.
 //
 // Args: none.

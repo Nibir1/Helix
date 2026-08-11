@@ -56,13 +56,20 @@ func RecommendLocalModels(h HardwareProfile) []LocalModelRecommendation {
 
 	all := []LocalModelRecommendation{
 		{
-			ID:          "tinyllama-1-1b",
-			DisplayName: "TinyLlama 1.1B Q4 (very low RAM)",
-			Runtime:     "llamacpp",
-			GGUFURL:     "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf",
-			SHA256:      "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556",
-			MinRAMGB:    4,
-			Reason:      "Fast fallback for low-memory systems.",
+			ID:          "gemma4-e2b",
+			DisplayName: "Gemma 4 E2B (Default)",
+			Runtime:     "ollama",
+			OllamaTag:   "gemma4:e2b",
+			MinRAMGB:    8,
+			Reason:      "Google's latest efficient edge model. Best balance of speed and intelligence.",
+		},
+		{
+			ID:          "gemma4-e4b",
+			DisplayName: "Gemma 4 E4B",
+			Runtime:     "ollama",
+			OllamaTag:   "gemma4:e4b",
+			MinRAMGB:    16,
+			Reason:      "Larger Gemma 4 edge variant for stronger reasoning and tool calling.",
 		},
 		{
 			ID:          "phi4-mini",
@@ -105,13 +112,22 @@ func RecommendLocalModels(h HardwareProfile) []LocalModelRecommendation {
 			Reason:      "Strong 8B model when RAM allows.",
 		},
 		{
-			ID:          "llama2-7b",
-			DisplayName: "Llama 2 7B Q4 (llama.cpp)",
+			ID:          "gemma-4-e2b-gguf",
+			DisplayName: "Gemma 4 E2B Q4_K_M (llama.cpp)",
 			Runtime:     "llamacpp",
-			GGUFURL:     "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_0.gguf",
-			SHA256:      "9958ee9b670594147b750bbc7d0540b928fa12dcc5dd4c58cc56ed2eb85e371b",
+			GGUFURL:     "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-e2b-it-Q4_K_M.gguf",
+			SHA256:      "",
+			MinRAMGB:    8,
+			Reason:      "Google's latest efficient edge model for llama.cpp.",
+		},
+		{
+			ID:          "gemma-4-e4b-gguf",
+			DisplayName: "Gemma 4 E4B Q4_K_M (llama.cpp)",
+			Runtime:     "llamacpp",
+			GGUFURL:     "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf",
+			SHA256:      "",
 			MinRAMGB:    16,
-			Reason:      "Stable GGUF model for llama.cpp server.",
+			Reason:      "Larger Gemma 4 edge variant for llama.cpp.",
 		},
 	}
 

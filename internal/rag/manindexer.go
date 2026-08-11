@@ -9,6 +9,7 @@ package rag
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -130,6 +131,11 @@ func (mi *MANIndexer) IndexAvailableManPages(ctx context.Context) error {
 	} else {
 		mi.logGreen("MAN page indexing completed! Indexed %d pages", processed)
 	}
+	// If indexing was cancelled, do not persist a partial index.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	return mi.saveIndex()
 }
 
@@ -426,10 +432,79 @@ func (mi *MANIndexer) getMANPath() string {
 
 func (mi *MANIndexer) ensureIndexDir() error { return os.MkdirAll(mi.indexDir, 0o755) }
 
+// indexPath returns the persistent MAN index file.
+//
+// Args: none.
+// Returns: absolute path to the persisted MAN index JSON file.
+// Complexity: O(1).
+func (mi *MANIndexer) indexPath() string {
+	return filepath.Join(mi.indexDir, "man_index.json")
+}
+
+// loadIndex restores persisted MAN pages from disk.
+//
+// Args: none.
+// Returns: error when the index cannot be read or is empty.
+// Complexity: O(number of persisted MAN pages).
+func (mi *MANIndexer) loadIndex() error {
+	mi.mu.Lock()
+	defer mi.mu.Unlock()
+
+	data, err := os.ReadFile(mi.indexPath())
+	if err != nil {
+		return err
+	}
+
+	var pages map[string]MANPage
+	if err := json.Unmarshal(data, &pages); err != nil {
+		return err
+	}
+
+	if len(pages) == 0 {
+		return fmt.Errorf("empty MAN index")
+	}
+
+	mi.indexed = pages
+
+	if !mi.silent {
+		color.Green("Loaded MAN index with %d pages", len(mi.indexed))
+	}
+
+	return nil
+}
+
+// saveIndex persists the in-memory MAN page index to disk.
+//
+// Args: none.
+// Returns: error when serialization or filesystem persistence fails.
+// Complexity: O(number of indexed MAN pages).
 func (mi *MANIndexer) saveIndex() error {
+	if err := mi.ensureIndexDir(); err != nil {
+		return err
+	}
+
 	mi.mu.RLock()
 	defer mi.mu.RUnlock()
-	mi.logGreen("MAN page index ready (%d pages)", len(mi.indexed))
+
+	if len(mi.indexed) == 0 {
+		return nil
+	}
+
+	data, err := json.MarshalIndent(mi.indexed, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmp := mi.indexPath() + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmp, mi.indexPath()); err != nil {
+		return err
+	}
+
+	mi.logGreen("MAN page index persisted (%d pages)", len(mi.indexed))
 	return nil
 }
 

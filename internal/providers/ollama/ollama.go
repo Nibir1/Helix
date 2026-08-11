@@ -26,7 +26,7 @@ func (p *Provider) SetAPIKey(key string) {}
 
 func (p *Provider) RequiresAPIKey() bool { return false }
 func (p *Provider) IsLocal() bool        { return true }
-func (p *Provider) DefaultModel() string { return "phi4-mini" }
+func (p *Provider) DefaultModel() string { return "gemma4:e2b" }
 
 func (p *Provider) Capabilities() providers.Capabilities {
 	return providers.CapabilitiesFor("ollama", p.DefaultModel())

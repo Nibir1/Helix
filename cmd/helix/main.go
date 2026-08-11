@@ -100,7 +100,6 @@ func main() {
 		Model:         cfg.ProviderModel,
 		CustomBaseURL: cfg.CustomProviderBaseURL,
 	})
-	defer ai.StopLocalRuntimes()
 	needsSetup := cfg.Provider == "" || !ai.ModelIsLoaded()
 	if !needsSetup {
 		_ = ai.UseProvider(cfg.Provider)

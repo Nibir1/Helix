@@ -50,7 +50,7 @@ func DefaultConfig() (*Config, error) {
 	}
 	configDir := filepath.Join(home, ".helix")
 	openAIKeyPath := filepath.Join(configDir, "openai_api_key")
-	modelFile := filepath.Join(modelDir, "tinyllama-1.1b-chat-v1.0.Q4_0.gguf")
+	modelFile := filepath.Join(modelDir, "gemma-4-e2b-it-Q4_K_M.gguf")
 	cfg := &Config{
 		ModelDir:              modelDir,
 		ModelFile:             modelFile,

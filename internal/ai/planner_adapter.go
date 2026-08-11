@@ -14,30 +14,47 @@ import (
 )
 
 // RunPlannerWithRetry runs the planner prompt with progressive retry.
-// Attempt 1 gets the full 60s. Retries get 30s to prevent 150s hangs.
+//
+// Local providers receive longer timeouts because Gemma 4 and other local
+// models can be much slower than hosted APIs, especially on CPU.
+//
+// Args:
+//   - prompt: planner prompt.
+//
+// Returns: raw planner output or error.
+// Complexity: O(provider round trips).
 func RunPlannerWithRetry(prompt string) (string, error) {
 	cfg := PlannerModelConfig()
-	retryTimeout := 30 * time.Second // Fail fast on retries
 
-	// Attempt 1: standard config, full timeout.
-	raw, err := RunModelWithTimeout(prompt, cfg, PlannerTimeout)
+	initialTimeout := PlannerTimeout
+	retryTimeout := 30 * time.Second
+
+	if activeProvider != nil && activeProvider.IsLocal() {
+		initialTimeout = 180 * time.Second
+		retryTimeout = 90 * time.Second
+	}
+
+	// Attempt 1: standard config.
+	raw, err := RunModelWithTimeout(prompt, cfg, initialTimeout)
 	if err == nil && isPlannerJSON(raw) {
 		return raw, nil
 	}
 
-	// Attempt 2: explicit correction instruction, shorter timeout.
+	// Attempt 2: explicit correction instruction.
 	retryPrompt := fmt.Sprintf(
 		"%s\nYour previous output was invalid. Return ONLY a complete JSON object. No markdown. No commentary.\n",
 		prompt,
 	)
+
 	raw2, err2 := RunModelWithTimeout(retryPrompt, cfg, retryTimeout)
 	if err2 == nil && isPlannerJSON(raw2) {
 		return raw2, nil
 	}
 
-	// Attempt 3: raise temperature slightly, shorter timeout.
+	// Attempt 3: raise temperature slightly.
 	cfgWarm := cfg
 	cfgWarm.Temperature = 0.4
+
 	raw3, err3 := RunModelWithTimeout(retryPrompt, cfgWarm, retryTimeout)
 	if err3 == nil && isPlannerJSON(raw3) {
 		return raw3, nil
@@ -53,9 +70,11 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 	if err3 != nil {
 		return "", err3
 	}
+
 	if err2 != nil {
 		return "", err2
 	}
+
 	return "", fmt.Errorf("planner returned empty output")
 }
 

@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,9 +11,10 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/commands"
-	"helix/internal/llamacpp"
 	"helix/internal/ollama"
 	"helix/internal/providers"
+	"helix/internal/rag"
+	"helix/internal/utils"
 
 	"github.com/fatih/color"
 )
@@ -30,53 +32,25 @@ var providerOptions = []providerOption{
 	{ID: "qwen", Label: "Qwen"},
 	{ID: "glm", Label: "GLM"},
 	{ID: "ollama", Label: "Ollama (local)"},
-	{ID: "llamacpp", Label: "llama.cpp server (local)"},
-	{ID: "custom", Label: "Custom OpenAI-compatible endpoint"},
 }
 
 func normalizeProviderName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
-
 	switch name {
-	case "local", "llama", "llama.cpp", "llamacpp":
-		return "llamacpp"
-	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "ollama", "custom":
+	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "ollama":
 		return name
 	default:
 		return name
 	}
 }
 
-func parseProviderNumber(line string) (int, error) {
-	var n int
-
-	if _, err := fmt.Sscanf(line, "%d", &n); err != nil {
-		return 0, err
-	}
-
-	if n < 1 || n > len(providerOptions) {
-		return 0, fmt.Errorf("provider number out of range")
-	}
-
-	return n - 1, nil
-}
-
 func setupProvider(provider string) error {
 	provider = normalizeProviderName(provider)
-
 	switch provider {
 	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm":
 		return ensureRemoteAPIKey(provider)
-
-	case "custom":
-		return setupCustomProvider()
-
 	case "ollama":
 		return setupOllamaProvider()
-
-	case "llamacpp":
-		return setupLlamaCppProvider()
-
 	default:
 		return fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -97,59 +71,55 @@ func ensureRemoteAPIKey(provider string) error {
 	return ai.SaveProviderKey(provider, key)
 }
 
-func setupCustomProvider() error {
-	baseURL := strings.TrimSpace(commands.AskLine("Custom OpenAI-compatible base URL (example: https://api.example.com/v1)"))
-	if baseURL == "" {
-		return fmt.Errorf("custom base URL cannot be empty")
-	}
-
-	key := strings.TrimSpace(commands.AskLine("Custom API key (optional)"))
-
-	if err := ai.RegisterCustomProvider(baseURL, key); err != nil {
-		return err
-	}
-
-	if key != "" {
-		if err := ai.SaveProviderKey("custom", key); err != nil {
-			return err
-		}
-	}
-
-	cfg.CustomProviderBaseURL = baseURL
-	return nil
-}
-
+// setupOllamaProvider ensures Ollama is usable.
+//
+// Args: none.
+// Returns: error when Ollama cannot be installed/started.
+// Complexity: O(install/startup time).
 func setupOllamaProvider() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	client := ollama.NewClient()
+	err := client.Health(ctx)
+	cancel()
+
+	if err == nil {
+		return nil
+	}
 
 	if !ollama.IsInstalled() {
 		if !commands.AskForConfirmation("Ollama not found. Install Ollama now?") {
 			return fmt.Errorf("ollama is not installed")
 		}
 
-		installCtx, installCancel := context.WithTimeout(context.Background(), 20*time.Minute)
-		defer installCancel()
+		installErr := runCancellableProgressWithTimeout(
+			"INSTALLING OLLAMA",
+			30*time.Minute,
+			func(ctx context.Context, progress func(string, int64, int64)) error {
+				progress("INSTALLING OLLAMA", 0, 0)
+				return ollama.Install(ctx)
+			},
+		)
 
-		if err := ollama.Install(installCtx); err != nil {
-			return err
+		if installErr != nil {
+			return installErr
 		}
 	}
 
-	return ollama.EnsureRunning(ctx)
+	return runCancellableProgressWithTimeout(
+		"STARTING OLLAMA",
+		2*time.Minute,
+		func(ctx context.Context, progress func(string, int64, int64)) error {
+			progress("STARTING OLLAMA", 0, 0)
+			return ollama.EnsureRunning(ctx)
+		},
+	)
 }
 
 func selectModelForProvider(provider string) error {
 	provider = normalizeProviderName(provider)
-
 	switch provider {
 	case "ollama":
 		return selectOllamaModel()
-
-	case "llamacpp":
-		// llama.cpp model selection happens during runtime setup.
-		return nil
-
 	default:
 		return selectRemoteModel(provider)
 	}
@@ -165,7 +135,6 @@ func selectRemoteModel(provider string) error {
 	if err != nil {
 		color.Yellow("Could not fetch live model list: %v", err)
 		color.Yellow("Using default model: %s", defaultModel)
-
 		ai.UseModel(defaultModel)
 		return nil
 	}
@@ -180,18 +149,15 @@ func selectRemoteModel(provider string) error {
 	}
 
 	color.Cyan("Available models:")
-
 	for i, model := range models {
 		if i >= 25 {
 			color.Cyan("  ... and %d more", len(models)-25)
 			break
 		}
-
 		color.Cyan("  %s", model.ID)
 	}
 
 	choice := strings.TrimSpace(commands.AskLine(fmt.Sprintf("Model ID (default: %s)", defaultModel)))
-
 	if choice == "" {
 		choice = defaultModel
 	}
@@ -200,6 +166,11 @@ func selectRemoteModel(provider string) error {
 	return nil
 }
 
+// selectOllamaModel lets the user choose any installed or pullable Ollama model.
+//
+// Args: none.
+// Returns: error when model selection/pull fails.
+// Complexity: O(model pull time) when a pull is required.
 func selectOllamaModel() error {
 	client := ollama.NewClient()
 
@@ -211,66 +182,76 @@ func selectOllamaModel() error {
 		return err
 	}
 
-	if len(models) == 0 {
-		recs := providers.RecommendLocalModels(providers.DetectHardware())
+	recs := providers.RecommendLocalModels(providers.DetectHardware())
+	defaultTag := ""
 
-		tag := ""
+	for _, rec := range recs {
+		if rec.Runtime == "ollama" && rec.OllamaTag != "" {
+			defaultTag = rec.OllamaTag
+			break
+		}
+	}
 
-		for _, rec := range recs {
-			if rec.Runtime == "ollama" && rec.OllamaTag != "" {
-				tag = rec.OllamaTag
-				break
-			}
+	if len(models) > 0 {
+		color.Cyan("Installed Ollama models:")
+		for _, model := range models {
+			color.Cyan("  %s", model.ID)
 		}
 
-		if tag == "" {
-			return fmt.Errorf("no Ollama model recommendation available")
+		if defaultTag == "" {
+			defaultTag = models[0].ID
 		}
+	} else {
+		color.Yellow("No Ollama models are installed.")
+		if defaultTag != "" {
+			color.Cyan("Recommended model: %s", defaultTag)
+		}
+	}
 
-		if !commands.AskForConfirmation(fmt.Sprintf("No Ollama models installed. Pull %s now?", tag)) {
+	color.Cyan("Enter any Ollama model tag (for example: gemma4:e2b, phi4-mini, llama3.1:8b, qwen3:4b).")
+
+	choice := strings.TrimSpace(
+		commands.AskLine(fmt.Sprintf("Ollama model (default: %s)", defaultTag)),
+	)
+
+	if choice == "" {
+		if defaultTag == "" {
 			return fmt.Errorf("no Ollama model selected")
 		}
+		choice = defaultTag
+	}
 
-		pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer pullCancel()
-
-		if err := client.PullModel(pullCtx, tag, func(status string) {
-			color.Blue("Ollama pull: %s", status)
-		}); err != nil {
-			return err
-		}
-
-		ai.UseModel(tag)
+	if containsModelID(models, choice) {
+		ai.UseModel(choice)
 		return nil
 	}
 
-	color.Cyan("Installed Ollama models:")
-
-	for _, model := range models {
-		color.Cyan("  %s", model.ID)
+	if !commands.AskForConfirmation(fmt.Sprintf("Model %q is not installed. Pull it now?", choice)) {
+		return fmt.Errorf("selected Ollama model is not installed")
 	}
 
-	choice := strings.TrimSpace(commands.AskLine(fmt.Sprintf("Ollama model (default: %s)", models[0].ID)))
-
-	if choice == "" {
-		choice = models[0].ID
+	err = runCancellableProgressWithTimeout(
+		"PULLING OLLAMA MODEL",
+		1*time.Hour,
+		func(ctx context.Context, progress func(string, int64, int64)) error {
+			return client.PullModel(ctx, choice, func(status string, completed, total int64) {
+				stage := "PULLING " + strings.ToUpper(choice)
+				lcStatus := strings.ToLower(status)
+				if strings.Contains(lcStatus, "verifying") {
+					stage = "VERIFYING " + strings.ToUpper(choice)
+				} else if strings.Contains(lcStatus, "writing") || strings.Contains(lcStatus, "manifest") {
+					stage = "FINALIZING " + strings.ToUpper(choice)
+				}
+				progress(stage, completed, total)
+			})
+		},
+	)
+	if err != nil {
+		return err
 	}
 
-	if !containsModelID(models, choice) {
-		if !commands.AskForConfirmation(fmt.Sprintf("Model %q is not installed. Pull it now?", choice)) {
-			return fmt.Errorf("selected Ollama model is not installed")
-		}
-
-		pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer pullCancel()
-
-		if err := client.PullModel(pullCtx, choice, func(status string) {
-			color.Blue("Ollama pull: %s", status)
-		}); err != nil {
-			return err
-		}
-	}
-
+	// CRITICAL FIX: Actually activate the pulled model so Helix doesn't
+	// leak the previous provider's model.
 	ai.UseModel(choice)
 	return nil
 }
@@ -281,85 +262,7 @@ func containsModelID(models []providers.ModelInfo, id string) bool {
 			return true
 		}
 	}
-
 	return false
-}
-
-func setupLlamaCppProvider() error {
-	return setupLlamaCppWithModel(context.Background(), "")
-}
-
-func setupLlamaCppWithModel(ctx context.Context, model string) error {
-	if strings.TrimSpace(model) == "" {
-		model = promptForLlamaModel()
-	}
-
-	var modelPath string
-
-	switch {
-	case strings.HasPrefix(model, "http://"), strings.HasPrefix(model, "https://"):
-		if !commands.AskForConfirmation("Download model from URL?") {
-			return fmt.Errorf("model download cancelled")
-		}
-
-		path, err := llamacpp.EnsureModelFromURL(ctx, model)
-		if err != nil {
-			return err
-		}
-
-		modelPath = path
-
-	case fileExists(model):
-		modelPath = model
-
-	default:
-		rec, ok := llamacpp.FindModel(model)
-		if !ok {
-			return fmt.Errorf("model not found: %s", model)
-		}
-
-		if !commands.AskForConfirmation(fmt.Sprintf("Download %s?", rec.DisplayName)) {
-			return fmt.Errorf("model download cancelled")
-		}
-
-		path, err := llamacpp.EnsureModel(ctx, rec)
-		if err != nil {
-			return err
-		}
-
-		modelPath = path
-	}
-
-	if err := ai.EnsureLlamaCppServer(ctx, modelPath); err != nil {
-		return err
-	}
-
-	ai.UseModel("helix-local")
-	return nil
-}
-
-func promptForLlamaModel() string {
-	recs := llamacpp.RecommendedModels()
-
-	color.Cyan("Recommended llama.cpp models:")
-
-	for i, rec := range recs {
-		color.Cyan("  %d) %s", i+1, rec.DisplayName)
-	}
-
-	color.Cyan("You may also enter a local GGUF path or HTTPS URL.")
-
-	line := strings.TrimSpace(commands.AskLine("Choose model number, ID, path, or URL"))
-
-	if line == "" {
-		return recs[0].ID
-	}
-
-	if idx, err := parseProviderNumber(line); err == nil && idx < len(recs) {
-		return recs[idx].ID
-	}
-
-	return line
 }
 
 func fileExists(path string) bool {
@@ -401,16 +304,19 @@ func useModelInteractive(provider, model string) error {
 	switch provider {
 	case "ollama":
 		return ensureOllamaModel(model)
-
-	case "llamacpp":
-		return setupLlamaCppWithModel(context.Background(), model)
-
 	default:
 		ai.UseModel(model)
 		return nil
 	}
 }
 
+// ensureOllamaModel ensures a specific Ollama model is installed and active.
+//
+// Args:
+//   - model: Ollama model tag.
+//
+// Returns: error when the model cannot be selected/pulled.
+// Complexity: O(model pull time) when a pull is required.
 func ensureOllamaModel(model string) error {
 	if err := setupOllamaProvider(); err != nil {
 		return err
@@ -435,15 +341,111 @@ func ensureOllamaModel(model string) error {
 		return fmt.Errorf("selected Ollama model is not installed")
 	}
 
-	pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer pullCancel()
-
-	if err := client.PullModel(pullCtx, model, func(status string) {
-		color.Blue("Ollama pull: %s", status)
-	}); err != nil {
+	err = runCancellableProgressWithTimeout(
+		"PULLING OLLAMA MODEL",
+		1*time.Hour,
+		func(ctx context.Context, progress func(string, int64, int64)) error {
+			return client.PullModel(ctx, model, func(status string, completed, total int64) {
+				stage := "PULLING " + strings.ToUpper(model)
+				lcStatus := strings.ToLower(status)
+				if strings.Contains(lcStatus, "verifying") {
+					stage = "VERIFYING " + strings.ToUpper(model)
+				} else if strings.Contains(lcStatus, "writing") || strings.Contains(lcStatus, "manifest") {
+					stage = "FINALIZING " + strings.ToUpper(model)
+				}
+				progress(stage, completed, total)
+			})
+		},
+	)
+	if err != nil {
 		return err
 	}
 
+	// CRITICAL FIX: Activate the pulled model.
 	ai.UseModel(model)
 	return nil
+}
+
+// runCancellableProgressWithTimeout runs fn with a timeout, progress bar, and Ctrl+C support.
+//
+// Args:
+//   - title: default progress stage title.
+//   - timeout: maximum operation duration.
+//   - fn: cancellable operation.
+//
+// Returns: error from fn.
+// Complexity: O(operation runtime).
+func runCancellableProgressWithTimeout(
+	title string,
+	timeout time.Duration,
+	fn func(ctx context.Context, progress func(string, int64, int64)) error,
+) error {
+	parent := context.Background()
+
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		parent, cancel = context.WithTimeout(parent, timeout)
+		defer cancel()
+	}
+
+	return runCancellableProgressWithBase(parent, title, fn)
+}
+
+// runCancellableProgressWithBase is the shared progress/interrupt implementation.
+func runCancellableProgressWithBase(
+	parent context.Context,
+	title string,
+	fn func(ctx context.Context, progress func(string, int64, int64)) error,
+) error {
+	ctx, cancel := context.WithCancel(parent)
+	unreg := utils.RegisterOperation(cancel)
+
+	prog := rag.NewProgress()
+	prog.SetStage(title)
+	prog.Start()
+
+	// Track the last stage to avoid redundant updates
+	lastStage := title
+	lastCurrent := int64(0)
+	lastTotal := int64(0)
+
+	cb := func(stage string, current, total int64) {
+		if stage == "" {
+			stage = title
+		}
+
+		// Only update if something changed to reduce flicker
+		if stage != lastStage || current != lastCurrent || total != lastTotal {
+			if total > 0 {
+				if current < 0 {
+					current = 0
+				}
+				if current > total {
+					current = total
+				}
+				prog.Set(stage, int(current), int(total))
+			} else {
+				prog.SetStage(stage)
+			}
+			lastStage = stage
+			lastCurrent = current
+			lastTotal = total
+		}
+	}
+
+	err := fn(ctx, cb)
+
+	prog.Stop()
+	unreg()
+	cancel()
+
+	if errors.Is(err, context.Canceled) {
+		color.Yellow("Operation cancelled.")
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		color.Yellow("Operation timed out.")
+	}
+
+	return err
 }

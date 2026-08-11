@@ -498,25 +498,34 @@ func handleGitCommand(input string) {
 
 func handleRAGStatus() {
 	color.Cyan("RAG System Status:")
+
 	if ragSystem == nil {
 		color.Red("RAG system not initialized")
 		return
 	}
-	stats := ragSystem.GetSystemStats()
+
+	// IMPORTANT: /rag-status should not query the knowledge DB.
+	// That avoids hangs while knowledge bootstrap/update is running.
+	stats := ragSystem.GetRAGStats()
 	statusText := ragSystem.GetInitializationStatus()
+
 	initialized, _ := stats["initialized"].(bool)
 	indexedPages := stats["indexed_pages"]
+
 	color.Cyan("Statistics:")
 	color.Cyan("  • Status: %v", statusText)
 	color.Cyan("  • Initialized: %v", initialized)
 	color.Cyan("  • Indexed MAN Pages: %v", indexedPages)
+
 	if initialized {
 		if totalDocs, ok := stats["total_documents"]; ok {
 			color.Cyan("    • Vector Documents: %v", totalDocs)
 		}
+
 		if unique, ok := stats["unique_commands"]; ok {
 			color.Cyan("    • Unique Commands: %v", unique)
 		}
+
 		color.Green("RAG system ACTIVE and ready for retrieval")
 	} else {
 		switch v := indexedPages.(type) {
@@ -526,6 +535,7 @@ func handleRAGStatus() {
 				return
 			}
 		}
+
 		color.Yellow("RAG not initialized yet (no MAN pages indexed).")
 	}
 }
@@ -1128,11 +1138,17 @@ func handleDoctor() {
 	}
 	if ragSystem != nil && ragSystem.GetDB() != nil {
 		db := ragSystem.GetDB()
-		if err := db.Ping(); err != nil {
+
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := db.PingContext(pingCtx)
+		pingCancel()
+
+		if err != nil {
 			color.Red("Database ping failed: %v", err)
 		} else {
 			color.Green("Database connection OK")
 		}
+
 		color.Cyan("Knowledge schema version: v%d", rag.SchemaVersion(db))
 	}
 	color.Cyan("Provider: %s", ai.GetProvider())

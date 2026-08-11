@@ -239,28 +239,55 @@ func (rs *RAGSystem) Retrieve(query string) ([]CommandInfo, error) {
 	return relevant, nil
 }
 
-func (rs *RAGSystem) GetSystemStats() map[string]interface{} {
+// GetRAGStats returns RAG/vector statistics without touching the knowledge DB.
+//
+// Args: none.
+// Returns: RAG statistics map.
+// Complexity: O(1) plus vector stats access.
+func (rs *RAGSystem) GetRAGStats() map[string]interface{} {
 	stats := map[string]interface{}{
 		"initialized":   rs.initialized,
 		"indexed_pages": rs.indexer.GetIndexedCount(),
 		"status":        rs.GetInitializationStatus(),
 	}
+
 	if rs.initialized {
 		for k, v := range rs.vectorStore.GetStats() {
 			stats[k] = v
 		}
 	}
+
+	return stats
+}
+
+// GetSystemStats returns RAG stats plus knowledge DB row counts.
+//
+// DB queries use a short timeout so a background knowledge sync cannot hang
+// the interactive shell.
+//
+// Args: none.
+// Returns: combined statistics map.
+// Complexity: O(1) SQL count queries bounded by timeout.
+func (rs *RAGSystem) GetSystemStats() map[string]interface{} {
+	stats := rs.GetRAGStats()
+
 	if rs.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
 		var cveCount, exploitCount, kevCount, mitreCount int
-		_ = rs.db.QueryRow("SELECT COUNT(*) FROM cve").Scan(&cveCount)
-		_ = rs.db.QueryRow("SELECT COUNT(*) FROM exploit").Scan(&exploitCount)
-		_ = rs.db.QueryRow("SELECT COUNT(*) FROM kev").Scan(&kevCount)
-		_ = rs.db.QueryRow("SELECT COUNT(*) FROM mitre_technique").Scan(&mitreCount)
+
+		_ = rs.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM cve`).Scan(&cveCount)
+		_ = rs.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM exploit`).Scan(&exploitCount)
+		_ = rs.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM kev`).Scan(&kevCount)
+		_ = rs.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mitre_technique`).Scan(&mitreCount)
+
 		stats["db_cves"] = cveCount
 		stats["db_exploits"] = exploitCount
 		stats["db_kev"] = kevCount
 		stats["db_mitre"] = mitreCount
 	}
+
 	return stats
 }
 
@@ -278,31 +305,69 @@ func (rs *RAGSystem) GetInitializationStatus() string {
 func (rs *RAGSystem) IsInitialized() bool   { return rs.initialized }
 func (rs *RAGSystem) ensureIndexDir() error { return os.MkdirAll(rs.indexDir, 0755) }
 
-func (rs *RAGSystem) tryLoadExistingIndex() bool {
+// loadPersistedIndexes restores both the vector store and the MAN page index.
+//
+// Args: none.
+// Returns: true only when both persisted indexes are usable.
+// Complexity: O(index load time).
+func (rs *RAGSystem) loadPersistedIndexes() bool {
 	if err := rs.vectorStore.loadVectorIndex(); err != nil {
+		rs.logYellow("Vector index load failed: %v", err)
 		return false
 	}
-	return rs.vectorStore.IsInitialized()
+
+	if err := rs.indexer.loadIndex(); err != nil {
+		rs.logYellow("MAN index load failed: %v", err)
+		return false
+	}
+
+	if !rs.vectorStore.IsInitialized() {
+		return false
+	}
+
+	if rs.indexer.GetIndexedCount() == 0 {
+		return false
+	}
+
+	return true
 }
 
+// tryLoadExistingIndex attempts to load persisted RAG indexes without state.
+//
+// Args: none.
+// Returns: true when persisted indexes were loaded successfully.
+// Complexity: O(index load time).
+func (rs *RAGSystem) tryLoadExistingIndex() bool {
+	return rs.loadPersistedIndexes()
+}
+
+// loadSystemState loads RAG state and restores persisted indexes.
+//
+// Args: none.
+// Returns: true when the persisted state and indexes are valid.
+// Complexity: O(index load time).
 func (rs *RAGSystem) loadSystemState() bool {
 	data, err := os.ReadFile(rs.stateFile)
 	if err != nil {
 		return false
 	}
+
 	var state SystemState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return false
 	}
+
 	if state.Version != indexVersion {
 		return false
 	}
+
 	if state.Initialized {
-		if err := rs.vectorStore.loadVectorIndex(); err == nil {
+		if rs.loadPersistedIndexes() {
 			rs.initialized = true
 			return true
 		}
 	}
+
 	return false
 }
 
