@@ -24,6 +24,7 @@ import (
 	"helix/internal/rag"
 	"helix/internal/recon"
 	"helix/internal/shell"
+	"helix/internal/speech"
 	"helix/internal/stealth"
 	"helix/internal/utils"
 	"helix/internal/ux"
@@ -131,6 +132,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "[boot] knowledge bootstrap: %v\n", err)
 		}
 	}()
+
+	// BlackBox Phase 1: speech engine (STT/TTS registry with failover). A
+	// startup failure is non-fatal — text Helix keeps working; /voice-setup
+	// or /voice-status diagnose.
+	if err := speech.Init(speechConfigFrom(cfg.Speech)); err != nil {
+		color.Yellow("Speech engine unavailable: %v", err)
+	}
 	gui := ux.NewUX()
 	// Sync the global typewriter preference with the UX layer
 	gui.SetTypewriteAll(cfg.UserPrefs.TypewriteAll)

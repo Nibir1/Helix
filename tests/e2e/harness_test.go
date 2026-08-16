@@ -65,6 +65,7 @@ type harness struct {
 	home      string
 	project   string
 	chatHits  *int32
+	ttsHits   *int32
 	outMu     sync.Mutex
 	outBuf    bytes.Buffer
 	closeOnce sync.Once
@@ -79,6 +80,7 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 	project := t.TempDir()
 
 	hits := new(int32)
+	ttsHits := new(int32)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/chat/completions":
@@ -102,6 +104,11 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		case "/models":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"test-model","owned_by":"e2e"}]}`)
+		case "/v1/audio/speech":
+			// Mock TTS (OpenAI-shaped binary WAV response) for BlackBox /say.
+			atomic.AddInt32(ttsHits, 1)
+			w.Header().Set("Content-Type", "audio/wav")
+			_, _ = w.Write(mockWAV)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -122,6 +129,14 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 			"typing_effect": false,
 			"user_name":     "E2E",
 		},
+	}
+	if os.Getenv("HELIX_E2E_SPEECH") != "" {
+		cfg["speech"] = map[string]interface{}{
+			"tts": map[string]interface{}{
+				"provider": "openai",
+				"base_url": srv.URL + "/v1",
+			},
+		}
 	}
 	cfgBytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -156,6 +171,7 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		"HOME=" + home,
 		"PATH=" + os.Getenv("PATH"),
 		"CUSTOM_API_KEY=test",
+		"OPENAI_API_KEY=test", // speech TTS chain ("tts.openai" env mapping)
 		"HELIX_MODEL_DIR=" + filepath.Join(home, "models"),
 		"TERM=xterm-256color",
 	}
@@ -173,6 +189,7 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		home:     home,
 		project:  project,
 		chatHits: hits,
+		ttsHits:  ttsHits,
 	}
 	go h.readLoop()
 
@@ -261,6 +278,38 @@ func (h *harness) ExpectFile(t *testing.T, path string, timeout time.Duration) {
 // ChatHits returns the number of planner/chat requests the mock has served.
 func (h *harness) ChatHits() int32 {
 	return atomic.LoadInt32(h.chatHits)
+}
+
+// TTSHits returns the number of mock TTS synthesis requests served.
+func (h *harness) TTSHits() int32 {
+	return atomic.LoadInt32(h.ttsHits)
+}
+
+// mockWAV is a minimal 16-bit mono 8kHz WAV (2 frames) for the mock TTS.
+var mockWAV = buildMockWAV()
+
+func buildMockWAV() []byte {
+	samples := []int16{1000, -1000}
+	data := make([]byte, len(samples)*2)
+	for i, s := range samples {
+		data[i*2] = byte(s)
+		data[i*2+1] = byte(s >> 8)
+	}
+	var buf []byte
+	buf = append(buf, "RIFF"...)
+	buf = append(buf, 0x24, 0x00, 0x00, 0x00)
+	buf = append(buf, "WAVE"...)
+	buf = append(buf, "fmt "...)
+	buf = append(buf, 16, 0x00, 0x00, 0x00)
+	buf = append(buf, 1, 0x00)                // PCM
+	buf = append(buf, 1, 0x00)                // mono
+	buf = append(buf, 0x40, 0x1F, 0x00, 0x00) // 8000 Hz
+	buf = append(buf, 0x80, 0x3E, 0x00, 0x00) // byte rate
+	buf = append(buf, 2, 0x00)                // block align
+	buf = append(buf, 16, 0x00)               // bits
+	buf = append(buf, "data"...)
+	buf = append(buf, byte(len(data)), 0x00, 0x00, 0x00)
+	return append(buf, data...)
 }
 
 // Close terminates the helix process and releases the PTY and mock server.

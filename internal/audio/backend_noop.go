@@ -9,6 +9,8 @@
 // with `go build -tags audio_cgo`.
 package audio
 
+import "github.com/gopxl/beep/v2"
+
 // backendInit reports success so the engine stays "ready" but silent.
 //
 // Args: none.
@@ -27,3 +29,6 @@ func backendPlayAlert() {}
 
 // backendPlayError is a silent no-op.
 func backendPlayError() {}
+
+// backendPlaySpeech explains why speech is silent on this build.
+func backendPlaySpeech(beep.Streamer) error { return ErrSpeechUnsupported }

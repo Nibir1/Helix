@@ -103,6 +103,16 @@ func handleSlashCommand(input string) bool {
 		handleAudioCommand(input)
 	case "/typewrite-all":
 		handleTypewriteAllCommand(input)
+	case "/voice-setup":
+		handleVoiceSetup()
+	case "/voice-status":
+		handleVoiceStatus()
+	case "/say":
+		handleSayCommand(input)
+	case "/tts":
+		handleTTSCommand(input)
+	case "/listen":
+		handleListenCommand(input)
 	case "/purge":
 		handlePurgeCommand()
 	case "/crash":
@@ -291,6 +301,12 @@ func handleHelp() {
 	helpLine(colWidth, "/git <request>", "Natural language git operations with safety")
 	helpLine(colWidth, "/audio <on|off>", "Toggle tonal audio feedback")
 	helpLine(colWidth, "/typewrite-all <on|off>", "Toggle typewriter effect for ALL output")
+	helpSection("VOICE (BLACKBOX)")
+	helpLine(colWidth, "/voice-setup", "Configure STT/TTS providers with live pricing")
+	helpLine(colWidth, "/voice-status", "Speech chain health, keys, and recorder state")
+	helpLine(colWidth, "/say <text>", "Speak text through the TTS chain")
+	helpLine(colWidth, "/listen [sec]", "Record and transcribe one clip (max 60s)")
+	helpLine(colWidth, "/tts <on|off>", "Toggle automatic spoken responses")
 	helpSection("DANGER ZONE")
 	helpLine(colWidth, "/purge", "Wipe ALL Helix data (keys, DBs, caches) for a fresh start")
 	helpSection("TIPS & ACCELERATION")

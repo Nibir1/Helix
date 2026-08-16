@@ -1,0 +1,80 @@
+// internal/speech/types.go
+// Purpose: Core contracts for the BlackBox speech layer — multi-provider
+// speech-to-text (STT) and text-to-speech (TTS) behind unified interfaces,
+// mirroring the proven internal/providers pattern (ADR-001/006; roadmap §6
+// Phase 1).
+package speech
+
+import "context"
+
+// AudioKind identifies the container/encoding of synthesized or captured audio.
+type AudioKind string
+
+const (
+	// KindWAV is a RIFF/WAVE container (preferred for playback: pure-Go decode).
+	KindWAV AudioKind = "wav"
+	// KindPCM is headerless 16-bit little-endian PCM at a known sample rate.
+	KindPCM AudioKind = "pcm"
+	// KindMP3 is accepted in AudioFormat but playback support is deferred
+	// (providers are configured to return WAV/PCM; see roadmap §13 open Qs).
+	KindMP3 AudioKind = "mp3"
+)
+
+// AudioFormat carries one audio payload plus the metadata needed to decode or
+// re-encode it for a provider.
+type AudioFormat struct {
+	Kind       AudioKind `json:"kind"`
+	SampleRate int       `json:"sample_rate"`
+	Channels   int       `json:"channels"`
+	Bytes      []byte    `json:"-"`
+}
+
+// Transcript is the result of transcribing one audio clip.
+type Transcript struct {
+	Text       string  `json:"text"`
+	Language   string  `json:"language,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"` // 0..1; 0 = unknown
+	Provider   string  `json:"provider"`
+}
+
+// SynthesisOptions tune one text-to-speech request.
+type SynthesisOptions struct {
+	Voice string  // provider-specific voice id/name; empty = provider default
+	Speed float64 // 1.0 = normal; 0 = provider default
+}
+
+// STTProvider is the unified speech-to-text contract. Adapters exist for each
+// vendor (cloud) and for local sidecar services (whisper.cpp over HTTP).
+type STTProvider interface {
+	Name() string
+	DisplayName() string
+	Transcribe(ctx context.Context, audio AudioFormat) (Transcript, error)
+	SetAPIKey(key string)
+	HealthCheck(ctx context.Context) error
+	RequiresAPIKey() bool
+	IsLocal() bool
+	DefaultModel() string
+}
+
+// TTSProvider is the unified text-to-speech contract. Adapters return WAV or
+// PCM (never MP3) so playback stays dependency-free.
+type TTSProvider interface {
+	Name() string
+	DisplayName() string
+	Synthesize(ctx context.Context, text string, opts SynthesisOptions) (AudioFormat, error)
+	SetAPIKey(key string)
+	HealthCheck(ctx context.Context) error
+	RequiresAPIKey() bool
+	IsLocal() bool
+	DefaultModel() string
+}
+
+// StreamingSTTProvider is implemented by adapters that support real-time
+// streaming transcription (Deepgram WebSocket, OpenAI Realtime). The batch
+// Transcribe path is sufficient for Phase 1-2; streaming lands with the
+// hands-free loop (Phase 3).
+type StreamingSTTProvider interface {
+	STTProvider
+	// Stream consumes chunked audio and emits partial/final transcripts.
+	Stream(ctx context.Context, chunks <-chan AudioFormat) (<-chan Transcript, error)
+}

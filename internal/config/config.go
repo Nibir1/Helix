@@ -22,6 +22,7 @@ type Config struct {
 	ProviderModel         string                 `json:"provider_model"`
 	CustomProviderBaseURL string                 `json:"custom_provider_base_url"`
 	UserPrefs             UserPrefs              `json:"user_preferences"`
+	Speech                SpeechConfig           `json:"speech"`
 	ModelConfig           ai.ModelConfig         `json:"model_config"`
 	ExecuteConfig         commands.ExecuteConfig `json:"execute_config"`
 }
@@ -36,6 +37,30 @@ type UserPrefs struct {
 	SafeMode     bool   `json:"safe_mode"`
 	UserName     string `json:"user_name"`
 	DebugMode    bool   `json:"debug_mode"`
+	VoiceMode    bool   `json:"voice_mode"` // BlackBox Phase 2: default input channel
+}
+
+// SpeechSTTConfig selects the speech-to-text provider chain (BlackBox §7).
+type SpeechSTTConfig struct {
+	Provider  string   `json:"provider"`
+	Model     string   `json:"model"`
+	BaseURL   string   `json:"base_url"`
+	Fallbacks []string `json:"fallbacks"`
+}
+
+// SpeechTTSConfig selects the text-to-speech provider chain.
+type SpeechTTSConfig struct {
+	Provider  string   `json:"provider"`
+	Model     string   `json:"model"`
+	Voice     string   `json:"voice"`
+	BaseURL   string   `json:"base_url"`
+	Fallbacks []string `json:"fallbacks"`
+}
+
+// SpeechConfig is the speech subsystem section of ~/.helix/config.json.
+type SpeechConfig struct {
+	STT SpeechSTTConfig `json:"stt"`
+	TTS SpeechTTSConfig `json:"tts"`
 }
 
 // DefaultConfig returns sane default paths for Helix.
@@ -109,6 +134,9 @@ func (cfg *Config) LoadPreferences() error {
 	}
 	if prefs.CustomProviderBaseURL != "" {
 		cfg.CustomProviderBaseURL = prefs.CustomProviderBaseURL
+	}
+	if prefs.Speech.STT.Provider != "" || prefs.Speech.TTS.Provider != "" {
+		cfg.Speech = prefs.Speech
 	}
 	return nil
 }

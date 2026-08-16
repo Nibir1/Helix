@@ -39,9 +39,9 @@ type Request struct {
 
 // Response is any daemon → client message.
 type Response struct {
-	Type    string         `json:"type"`
-	OK      bool           `json:"ok"`
-	Error   string         `json:"error,omitempty"`
-	State   map[string]any `json:"state,omitempty"`
-	Meta    map[string]any `json:"meta,omitempty"`
+	Type  string         `json:"type"`
+	OK    bool           `json:"ok"`
+	Error string         `json:"error,omitempty"`
+	State map[string]any `json:"state,omitempty"`
+	Meta  map[string]any `json:"meta,omitempty"`
 }

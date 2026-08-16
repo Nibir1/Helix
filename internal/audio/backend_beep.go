@@ -132,6 +132,20 @@ func backendPlayError() {
 	speaker.Play(errorSound)
 }
 
+// backendPlaySpeech plays a decoded speech streamer to completion.
+//
+// Args:
+//   - s: fully decoded (and resampled) speech streamer.
+//
+// Returns: error if playback cannot be scheduled.
+// Complexity: O(duration).
+func backendPlaySpeech(s beep.Streamer) error {
+	done := make(chan struct{})
+	speaker.Play(beep.Seq(s, beep.Callback(func() { close(done) })))
+	<-done
+	return nil
+}
+
 // SineWave generates a simple sine tone.
 type SineWave struct {
 	Freq  float64

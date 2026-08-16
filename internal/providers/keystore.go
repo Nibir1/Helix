@@ -128,7 +128,15 @@ func (k *KeyStore) envName(provider string) string {
 		return "GLM_API_KEY"
 	case "custom":
 		return "CUSTOM_API_KEY"
+	// Speech providers share the vendor account key of their chat sibling
+	// (BlackBox internal/speech namespacing, ADR-005-era conventions).
+	case "stt.openai", "tts.openai":
+		return "OPENAI_API_KEY"
+	case "stt.deepgram", "tts.deepgram":
+		return "DEEPGRAM_API_KEY"
+	case "stt.elevenlabs", "tts.elevenlabs":
+		return "ELEVENLABS_API_KEY"
 	default:
-		return strings.ToUpper(provider) + "_API_KEY"
+		return strings.ToUpper(strings.ReplaceAll(provider, ".", "_")) + "_API_KEY"
 	}
 }

@@ -33,6 +33,12 @@ func NewHTTPClient(timeout time.Duration) *HTTPClient {
 	}
 }
 
+// RawClient exposes the underlying *http.Client for plain GET probes (health
+// checks) that do not fit the JSON/raw-body helpers. Shares the JSON timeout.
+func (c *HTTPClient) RawClient() *http.Client {
+	return c.client
+}
+
 // DoJSON performs a JSON request and returns the response body.
 func (c *HTTPClient) DoJSON(
 	ctx context.Context,
@@ -91,6 +97,102 @@ func (c *HTTPClient) DoRequest(
 	body interface{},
 ) (*http.Response, error) {
 	return c.do(c.streamClient, ctx, method, url, headers, body)
+}
+
+// DoRaw performs a request with a pre-built raw body (multipart forms, binary
+// audio payloads) and returns the full response body bytes. It shares the
+// retry policy of DoJSON. The body is passed as bytes so retries can re-send
+// it; use the non-retrying DoRequest for unbufferable streams.
+func (c *HTTPClient) DoRaw(
+	ctx context.Context,
+	method string,
+	url string,
+	headers map[string]string,
+	contentType string,
+	body []byte,
+) ([]byte, error) {
+	resp, err := c.doRaw(ctx, method, url, headers, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(data))
+	}
+
+	return data, nil
+}
+
+// doRaw is the retrying transport under DoRaw, mirroring do() but with an
+// explicit content type and a pre-marshaled body.
+func (c *HTTPClient) doRaw(
+	ctx context.Context,
+	method string,
+	url string,
+	headers map[string]string,
+	contentType string,
+	body []byte,
+) (*http.Response, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= c.retries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed: %w", err)
+
+			if !sleepCtx(ctx, c.retryDelay*time.Duration(attempt+1)) {
+				return nil, ctx.Err()
+			}
+
+			continue
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			_ = resp.Body.Close()
+
+			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(errBody))
+
+			if !sleepCtx(ctx, c.retryDelay*time.Duration(attempt+1)) {
+				return nil, ctx.Err()
+			}
+
+			continue
+		}
+
+		if resp.StatusCode >= 400 {
+			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			_ = resp.Body.Close()
+
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(errBody))
+		}
+
+		return resp, nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("request failed after retries")
+	}
+
+	return nil, lastErr
 }
 
 func (c *HTTPClient) do(

@@ -24,8 +24,8 @@ const (
 type ResponseMode string
 
 const (
-	ResponseVocal ResponseMode = "vocal"
-	ResponseLog   ResponseMode = "log"
+	ResponseVocal  ResponseMode = "vocal"
+	ResponseLog    ResponseMode = "log"
 	ResponseIgnore ResponseMode = "ignore"
 )
 
