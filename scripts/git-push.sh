@@ -11,31 +11,7 @@ git add .
 # are mistakenly evaluated as command substitutions before the heredoc 
 # delimiter is recognized.
 git commit -F - <<'EOF'
-refactor(ai): standardize on Ollama, adopt Gemma 4, and harden local UX
-
-Architectural Shift:
-- Excised raw llama.cpp runtime (downloader, builder, server) and Custom
-  OpenAI endpoints from the setup wizard and provider registry.
-- Standardized on Ollama as the sole local inference engine to leverage
-  its native macOS Metal memory management and avoid upstream dylib bugs.
-
-Model Defaults:
-- Upgraded local model recommendations to Google Gemma 4 E2B (default)
-  and E4B for high-performance edge inference.
-
-Bug Fixes:
-- Fixed critical state-leak bug where Ollama model pulls failed to call
-  `ai.UseModel()`, causing Helix to retain the previous provider's model.
-- Fixed `/status` and `/rag-status` UI hangs caused by SQLite contention
-  during background knowledge syncs (added PRAGMA busy_timeout and
-  context-bounded queries).
-- Fixed overlapping/ghosting progress bars by widening the stage label
-  column to 32 runes, adding live elapsed-time counters, and enforcing
-  strict `\033[2K` line clearing for console fallbacks.
-
-Cleanup:
-- Purged dead code (internal/llamacpp, local_runtime.go, unused helpers)
-  to satisfy golangci-lint `unused` and `errcheck` rules.
+fixing CI jobs
 EOF
 
 # 2. Push to main

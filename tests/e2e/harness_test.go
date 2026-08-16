@@ -225,6 +225,39 @@ func (h *harness) WriteLine(line string) {
 	_, _ = h.ptmx.Write([]byte(line + "\r"))
 }
 
+// SendExpect sends a line, then waits for one MORE occurrence of substr than
+// was captured before the send. Expect alone cannot synchronize a second
+// command that prints the same marker as an earlier one (e.g. the GRID STATUS
+// line after every input): it matches the stale occurrence and returns while
+// the command is still running.
+func (h *harness) SendExpect(line, substr string, timeout time.Duration) error {
+	base := strings.Count(h.stripped(), substr)
+	h.WriteLine(line)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Count(h.stripped(), substr) > base {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for next %q\n----- captured output -----\n%s", substr, h.stripped())
+}
+
+// ExpectFile polls until path exists, dumping the captured TUI transcript on
+// failure: under a PTY the transcript is the only way to see why a command
+// produced no file.
+func (h *harness) ExpectFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("expected file %q to exist within %v\n----- captured output -----\n%s", path, timeout, h.stripped())
+}
+
 // ChatHits returns the number of planner/chat requests the mock has served.
 func (h *harness) ChatHits() int32 {
 	return atomic.LoadInt32(h.chatHits)
