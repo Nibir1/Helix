@@ -21,6 +21,7 @@ import (
 	"helix/internal/config"
 	"helix/internal/confinement"
 	"helix/internal/diagnostics"
+	"helix/internal/input"
 	"helix/internal/rag"
 	"helix/internal/recon"
 	"helix/internal/shell"
@@ -174,33 +175,67 @@ func main() {
 	agentCore.OnSlashCommand = func(input string) bool { return handleSlashCommand(input) }
 	histPath := homeDir + "/.helix_history"
 	history, _ := utils.LoadHistory(histPath)
+
+	// BlackBox Phase 2: voice channel wiring — prompter swap, persisted mode,
+	// and the spoken-response seam.
+	initVoiceMode()
+	agentCore.OnSpeak = func(text string) {
+		if !speech.TTSEnabled() {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		if err := speech.Speak(ctx, text); err != nil && utils.IsDebugMode() {
+			fmt.Fprintf(os.Stderr, "[voice] speak: %v\n", err)
+		}
+	}
+
 	fmt.Println("⚡ Helix Native Shell. Type '/help' for SOS or 'exit' to quit.")
 	for {
-		input, err := shell.ReadLine(shell.GetContext(), highlighter, history)
-		if err != nil {
-			if err.Error() == "EOF" {
-				break // Ctrl+D on empty line / closed stdin still exits.
+		var ev input.InputEvent
+		if voiceModeActive {
+			var verr error
+			ev, verr = voiceTurn()
+			if verr != nil {
+				// Graceful degradation: mic/STT trouble must never brick the
+				// shell — offer one typed turn while staying in voice mode.
+				color.Yellow("voice: %v — type /manual to leave voice mode", verr)
+				line, rerr := shell.ReadLine(shell.GetContext(), highlighter, history)
+				if rerr != nil {
+					if rerr.Error() == "EOF" {
+						break
+					}
+					continue
+				}
+				ev = input.InputEvent{Text: strings.TrimSpace(line), Channel: input.ChannelText}
 			}
-			// FIX (interrupt hardening): Ctrl+C at the prompt behaves like a
-			// real shell: clear the line and redraw a fresh prompt. It must
-			// NEVER exit Helix.
+		} else {
+			line, err := shell.ReadLine(shell.GetContext(), highlighter, history)
+			if err != nil {
+				if err.Error() == "EOF" {
+					break // Ctrl+D on empty line / closed stdin still exits.
+				}
+				// FIX (interrupt hardening): Ctrl+C at the prompt behaves like a
+				// real shell: clear the line and redraw a fresh prompt. It must
+				// NEVER exit Helix.
+				continue
+			}
+			ev = input.InputEvent{Text: strings.TrimSpace(line), Channel: input.ChannelText}
+		}
+		if ev.Text == "" {
 			continue
 		}
-		input = strings.TrimSpace(input)
-		if input == "" {
-			continue
-		}
-		if input == "exit" || input == "quit" {
+		if ev.Text == "exit" || ev.Text == "quit" {
 			break
 		}
 		if agentCore.PersistsHistory() {
-			_ = utils.AppendHistory(histPath, input)
+			_ = utils.AppendHistory(histPath, ev.Text)
 		}
 		// In-memory history always records the line (ghost-text suggestions
 		// keep working); stealth MemoryOnly only suppresses the on-disk file.
-		history = append(history, input)
-		shell.PrintTransient(input)
-		agentCore.HandleInput(input)
+		history = append(history, ev.Text)
+		shell.PrintTransient(ev.Text)
+		agentCore.HandleInputEvent(ev)
 		gui.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 		fmt.Print("\x1b]133;D;0\x07")
 	}

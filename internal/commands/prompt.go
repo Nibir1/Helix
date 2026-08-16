@@ -71,6 +71,12 @@ func SetPrompter(p Prompter) {
 	}
 }
 
+// ActivePrompter returns the currently installed prompter (used by mode
+// switching to save/restore the TTY prompter around voice mode).
+func ActivePrompter() Prompter {
+	return activePrompter
+}
+
 // AskForConfirmation routes yes/no prompts through the active prompter.
 func AskForConfirmation(prompt string) bool {
 	return activePrompter.AskYesNo(prompt)

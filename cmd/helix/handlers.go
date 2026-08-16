@@ -107,6 +107,10 @@ func handleSlashCommand(input string) bool {
 		handleVoiceSetup()
 	case "/voice-status":
 		handleVoiceStatus()
+	case "/voice":
+		handleVoiceCommand(input)
+	case "/manual":
+		handleManualCommand()
 	case "/say":
 		handleSayCommand(input)
 	case "/tts":
@@ -304,6 +308,8 @@ func handleHelp() {
 	helpSection("VOICE (BLACKBOX)")
 	helpLine(colWidth, "/voice-setup", "Configure STT/TTS providers with live pricing")
 	helpLine(colWidth, "/voice-status", "Speech chain health, keys, and recorder state")
+	helpLine(colWidth, "/voice [off]", "Enter voice mode (speak instead of type)")
+	helpLine(colWidth, "/manual", "Return to keyboard input (voice safety valve)")
 	helpLine(colWidth, "/say <text>", "Speak text through the TTS chain")
 	helpLine(colWidth, "/listen [sec]", "Record and transcribe one clip (max 60s)")
 	helpLine(colWidth, "/tts <on|off>", "Toggle automatic spoken responses")

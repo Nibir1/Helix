@@ -20,6 +20,7 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/commands"
+	"helix/internal/input"
 	"helix/internal/rag"
 	"helix/internal/recon"
 	"helix/internal/shell"
@@ -44,6 +45,12 @@ type Agent struct {
 	// It receives the full raw input line. Return true if the command was
 	// handled internally; false to pass it to the AI planner.
 	OnSlashCommand func(string) bool
+	// BlackBox voice channel state (ADR-005 Voice Risk Policy). Set per turn
+	// by HandleInputEvent; zero value (ChannelText) keeps legacy behavior.
+	channel  input.Channel
+	turnMeta map[string]any
+	// OnSpeak, when set, vocalizes text (TTS). Wired by main; nil = silent.
+	OnSpeak func(text string)
 }
 
 // NewAgent creates a new Agent instance.
@@ -392,7 +399,7 @@ func (a *Agent) promoteFallbackScript(resp string) bool {
 		}
 		a.ux.PrintInfo(fmt.Sprintf("  %d. %s", i+1, preview))
 	}
-	if !a.ux.AskYesNo("Run it through the safety pipeline?") {
+	if !commands.AskForConfirmation("Run it through the safety pipeline?") {
 		return false
 	}
 	for _, b := range blocks {
@@ -564,6 +571,10 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 		return
 	}
 	a.ux.PrintAIMessage(msg, a.typingEffect)
+	// BlackBox voice mode: responses are spoken as well as printed.
+	if a.voiceActive() {
+		a.speak(msg)
+	}
 }
 
 // handleShellStep executes a planner/user shell step through the safety pipeline.
@@ -594,6 +605,12 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 	a.ux.PrintCommand(cmd)
 	validCmd, err := commands.ValidateAndCleanCommand(cmd)
 	if err != nil {
+		// BlackBox: hard validation blocks must be spoken on the voice
+		// channel — a silent refusal strands a user who cannot see the
+		// terminal (ADR-005 spoken-explanation requirement).
+		if a.voiceActive() {
+			a.speak("That command is blocked for safety. The terminal shows the details.")
+		}
 		return fmt.Errorf("invalid shell command: %w", err)
 	}
 
@@ -602,6 +619,10 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 		risk = commands.ShellRiskMedium
 		reasons = append(reasons, "provenance escalation: command carries tokens sourced from retrieved knowledge")
 	}
+
+	// BlackBox Voice Risk Policy (ADR-005): high risk is unreachable from
+	// the voice channel regardless of phrasing.
+	risk, reasons, voiceBlocked := voiceCapRisk(risk, reasons, a.voiceActive())
 
 	switch risk {
 	case commands.ShellRiskLow:
@@ -614,7 +635,7 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 			for _, r := range reasons {
 				a.ux.PrintWarning(fmt.Sprintf("   • %s", r))
 			}
-			if !a.ux.AskYesNo("Execute anyway?") {
+			if !commands.AskForConfirmation("Execute anyway?") {
 				a.ux.PrintWarning("Command skipped")
 				return nil
 			}
@@ -623,6 +644,9 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 		a.ux.PrintError("HIGH RISK — blocked")
 		for _, r := range reasons {
 			a.ux.PrintError(fmt.Sprintf("   • %s", r))
+		}
+		if voiceBlocked {
+			a.speak("That command is too dangerous to run by voice. Please use the terminal.")
 		}
 		return fmt.Errorf("high-risk shell command blocked")
 	}
@@ -659,7 +683,7 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 127 {
 			missingCmd := strings.Fields(validCmd)[0]
 			a.ux.PrintWarning(fmt.Sprintf("Command %q not found.", missingCmd))
-			if a.ux.AskYesNo(fmt.Sprintf("Attempt to install %q using system package manager?", missingCmd)) {
+			if commands.AskForConfirmation(fmt.Sprintf("Attempt to install %q using system package manager?", missingCmd)) {
 				if installErr := a.installPackage(missingCmd); installErr == nil {
 					a.ux.PrintSuccess(fmt.Sprintf("%s installed. Retrying command...", missingCmd))
 					return a.sandbox.RunShellCommand(validCmd, wd, a.env.Shell)
@@ -821,7 +845,7 @@ func (a *Agent) handleReconStep(step ai.PlanStep) error {
 	}
 	if result.Error != nil && strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
 		a.ux.PrintInfo(fmt.Sprintf("Recon tool %q is not installed.", toolName))
-		if a.ux.AskYesNo(fmt.Sprintf("Install %s now?", toolName)) {
+		if commands.AskForConfirmation(fmt.Sprintf("Install %s now?", toolName)) {
 			if installErr := a.installPackage(toolName); installErr != nil {
 				a.ux.PrintError(fmt.Sprintf("Installation failed: %v", installErr))
 				return nil
