@@ -562,8 +562,10 @@ func updateExploitDB(ctx context.Context, db *sql.DB) error {
 		if edbID == "" {
 			continue
 		}
+		// raw_text stays empty: the Exploit-DB CSV is metadata-only and payload
+		// text is intentionally not stored (defensive, sanitized by design).
 		_, err := tx.Exec(`INSERT OR REPLACE INTO exploit(edb_id, cve_id, description, platform, type, date_published, author, raw_text) VALUES(?,?,?,?,?,?,?,?)`,
-			edbID, get("cve_id"), get("description"), get("platform"), get("type"), get("date_published"), get("author"), get("description"))
+			edbID, get("cve_id"), get("description"), get("platform"), get("type"), get("date_published"), get("author"), "")
 		if err != nil {
 			return err
 		}

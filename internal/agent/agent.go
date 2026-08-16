@@ -111,6 +111,17 @@ func (a *Agent) IsStealthEnabled() bool {
 	return a.stealthEnabled
 }
 
+// PersistsHistory reports whether inputs should be written to the on-disk
+// history file. Stealth mode with MemoryOnly keeps history in memory only.
+//
+// Args: none. Returns: bool. Complexity: O(1).
+func (a *Agent) PersistsHistory() bool {
+	if a.stealthEnabled && a.stealth != nil {
+		return a.stealth.PersistsHistory()
+	}
+	return true
+}
+
 // InstallTool exposes the internal package installer for manual tool installations
 // triggered by the UI layer (e.g. /scan missing nmap).
 func (a *Agent) InstallTool(pkg string) error {
@@ -624,18 +635,6 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 		return fmt.Errorf("sandbox violation: %s", reason)
 	}
 
-	if a.stealthEnabled && a.stealth != nil {
-		a.ux.PrintDebug("Stealth mode: running command from memory")
-		output, err := a.stealth.Execute(validCmd)
-		if err != nil {
-			return err
-		}
-		if output != "" {
-			a.ux.PrintAIMessage(output, false)
-		}
-		return nil
-	}
-
 	if a.execConfig.DryRun {
 		a.ux.PrintWarning(fmt.Sprintf("[Dry Run] Would execute: %s", validCmd))
 		return nil
@@ -644,6 +643,15 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 	wd, wdErr := os.Getwd()
 	if wdErr != nil || wd == "" {
 		wd = a.sandbox.GetCurrentDirectory()
+	}
+
+	// Stealth mode keeps the full safety pipeline but suppresses the child
+	// shell's history via environment overrides. Execution still goes through
+	// the sandbox so /sandbox strict kernel confinement and the user's real
+	// shell apply — private execution must not be an escape hatch.
+	if a.stealthEnabled && a.stealth != nil {
+		a.ux.PrintDebug("Stealth mode: running command with private history")
+		return a.sandbox.RunShellCommandEnv(validCmd, wd, a.env.Shell, a.stealth.Environment())
 	}
 
 	err = a.sandbox.RunShellCommand(validCmd, wd, a.env.Shell)

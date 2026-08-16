@@ -2,7 +2,7 @@
 package stealth
 
 import (
-	"strings"
+	"slices"
 	"testing"
 )
 
@@ -17,18 +17,34 @@ func TestNewStealthExecutor(t *testing.T) {
 	if !executor.config.PrivateHistory {
 		t.Error("expected PrivateHistory true by default")
 	}
+	if !executor.config.MemoryOnly {
+		t.Error("expected MemoryOnly true by default")
+	}
 }
 
-func TestExecuteWithSuppression(t *testing.T) {
-	cfg := StealthConfig{PrivateHistory: true}
-	executor := NewStealthExecutor(cfg)
+func TestEnvironmentSuppression(t *testing.T) {
+	executor := NewStealthExecutor(StealthConfig{PrivateHistory: true})
+	env := executor.Environment()
 
-	output, err := executor.Execute("echo HistFile=$HISTFILE")
-	if err != nil {
-		t.Fatalf("execution failed: %v", err)
+	want := []string{"HISTFILE=/dev/null", "HISTSIZE=0", "HISTFILESIZE=0"}
+	if !slices.Equal(env, want) {
+		t.Errorf("Environment() = %v, want %v", env, want)
 	}
 
-	if !strings.Contains(output, "/dev/null") {
-		t.Logf("HISTFILE not visible in output (got %q); environment inheritance may vary", output)
+	off := NewStealthExecutor(StealthConfig{PrivateHistory: false})
+	if got := off.Environment(); len(got) != 0 {
+		t.Errorf("Environment() with PrivateHistory off = %v, want empty", got)
+	}
+}
+
+func TestPersistsHistory(t *testing.T) {
+	memoryOnly := NewStealthExecutor(StealthConfig{MemoryOnly: true})
+	if memoryOnly.PersistsHistory() {
+		t.Error("MemoryOnly must suppress on-disk history persistence")
+	}
+
+	persisting := NewStealthExecutor(StealthConfig{MemoryOnly: false})
+	if !persisting.PersistsHistory() {
+		t.Error("MemoryOnly=false must keep on-disk history persistence")
 	}
 }

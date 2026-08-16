@@ -184,8 +184,18 @@ func (ds *DirectorySandbox) ValidateSafePath(targetPath string) (string, error) 
 	// 5. Case-Insensitive Comparison (fixes /Users vs /users on macOS)
 	rootCheck := strings.ToLower(realRoot)
 	targetCheck := strings.ToLower(realTarget)
-	// 6. The Security Check
-	if !strings.HasPrefix(targetCheck, rootCheck) {
+	// 6. The Security Check — the target must be the root itself or a child of
+	// it. A plain prefix match would also admit sibling directories whose name
+	// merely extends the root (root /tmp/jail, target /tmp/jail-x).
+	sep := string(os.PathSeparator)
+	inRoot := targetCheck == rootCheck ||
+		strings.HasPrefix(targetCheck, rootCheck+sep)
+	// A root that already ends in a separator (e.g. "/" on Unix) must not be
+	// doubled — "/"+sep would be "//" and reject every absolute path.
+	if strings.HasSuffix(rootCheck, sep) {
+		inRoot = strings.HasPrefix(targetCheck, rootCheck)
+	}
+	if !inRoot {
 		return "", fmt.Errorf("path %s is outside root %s", cleanTarget, ds.allowedDir)
 	}
 	return cleanTarget, nil
@@ -330,9 +340,18 @@ func buildArgv(cmd, shellName string) []string {
 // non-zero exit as success (interactive shell semantics); lenient=false
 // preserves WrapCommand's historical isNonFatalExit behavior for git/pkg flows.
 func runArgv(argv []string, dir string, lenient bool) error {
+	return runArgvEnv(argv, dir, lenient, nil)
+}
+
+// runArgvEnv is runArgv plus extra environment variables appended to the
+// process environment (used by stealth mode for history suppression).
+func runArgvEnv(argv []string, dir string, lenient bool, extraEnv []string) error {
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir = dir
 	c.Env = os.Environ()
+	if len(extraEnv) > 0 {
+		c.Env = append(c.Env, extraEnv...)
+	}
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	c.Stdin = os.Stdin
@@ -391,6 +410,14 @@ func (ds *DirectorySandbox) confinedArgv(argv []string, dir string) []string {
 // Complexity: O(command execution time).
 func (ds *DirectorySandbox) RunShellCommand(cmd, dir, shellName string) error {
 	return runArgv(ds.confinedArgv(buildArgv(cmd, shellName), dir), dir, true)
+}
+
+// RunShellCommandEnv is RunShellCommand with extra environment variables
+// (stealth history suppression). It honors strict kernel confinement the
+// same way, so private execution cannot escape the jail.
+func (ds *DirectorySandbox) RunShellCommandEnv(cmd, dir, shellName string, extraEnv []string) error {
+	argv := ds.confinedArgv(buildArgv(cmd, shellName), dir)
+	return runArgvEnv(argv, dir, true, extraEnv)
 }
 
 // WrapCommand executes the command strictly within the sandbox logic and, in

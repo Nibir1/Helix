@@ -67,8 +67,8 @@ if ($installOllama -match '^[Yy]$') {
     if (-Not (Get-Command ollama -ErrorAction SilentlyContinue)) {
         Write-Host "Installing Ollama via Winget..."
         winget install --id Ollama.Ollama -e
-        Write-Host "Pulling default model (phi4-mini)..."
-        & ollama pull phi4-mini
+        Write-Host "Pulling default model (gemma4:e2b)..."
+        & ollama pull gemma4:e2b
     } else {
         Write-Host "Ollama is already installed."
     }

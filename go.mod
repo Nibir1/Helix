@@ -3,7 +3,7 @@ module helix
 
 go 1.25.1
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/creack/pty v1.1.24

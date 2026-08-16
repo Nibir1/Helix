@@ -17,11 +17,10 @@ import (
 )
 
 type VectorDocument struct {
-	ID         string    `json:"id"`
-	Content    string    `json:"content"`
-	Embedding  []float32 `json:"embedding"`
-	Metadata   Metadata  `json:"metadata"`
-	Similarity float32   `json:"similarity,omitempty"`
+	ID         string   `json:"id"`
+	Content    string   `json:"content"`
+	Metadata   Metadata `json:"metadata"`
+	Similarity float32  `json:"similarity,omitempty"`
 }
 
 type Metadata struct {

@@ -56,6 +56,13 @@ func main() {
 	defer diagnostics.RecoverMain() // first defer => runs last on panic unwind
 	diagnostics.SelftestPanicIfRequested()
 
+	// FIX (command-not-found): When Helix is the login shell or launched
+	// from the GUI, the process inherits a minimal PATH and no profile files
+	// ever run — commands like `code`, `brew`, or nvm-managed binaries then
+	// fail with "command not found". Overlay the user's real login-shell
+	// environment before anything executes commands.
+	shell.ApplyLoginEnvironment()
+
 	if len(os.Args) > 1 && os.Args[1] == "update" {
 		runKnowledgeUpdate()
 		return
@@ -178,7 +185,11 @@ func main() {
 		if input == "exit" || input == "quit" {
 			break
 		}
-		_ = utils.AppendHistory(histPath, input)
+		if agentCore.PersistsHistory() {
+			_ = utils.AppendHistory(histPath, input)
+		}
+		// In-memory history always records the line (ghost-text suggestions
+		// keep working); stealth MemoryOnly only suppresses the on-disk file.
 		history = append(history, input)
 		shell.PrintTransient(input)
 		agentCore.HandleInput(input)

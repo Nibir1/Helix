@@ -70,8 +70,8 @@ if [[ "$install_ollama" =~ ^[Yy]$ ]]; then
         echo "Starting Ollama service..."
         ollama serve &> /dev/null &
         sleep 2
-        echo "Pulling default model (phi4-mini)..."
-        ollama pull phi4-mini || echo "⚠️  Model pull failed; you can pull later."
+        echo "Pulling default model (gemma4:e2b)..."
+        ollama pull gemma4:e2b || echo "⚠️  Model pull failed; you can pull later."
     else
         echo "Ollama is already installed."
     fi
