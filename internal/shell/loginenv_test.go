@@ -63,9 +63,16 @@ func TestIsValidEnvKey(t *testing.T) {
 	}
 }
 
+// pathList joins entries with the platform's PATH separator so fixtures are
+// portable across the Unix and Windows CI matrices (Windows splits on ';',
+// where a literal "/a:/b" stays a single entry).
+func pathList(entries ...string) string {
+	return strings.Join(entries, string(os.PathListSeparator))
+}
+
 func TestMergePathEntriesUnionsInOrder(t *testing.T) {
-	primary := "/nvm/bin:/usr/bin"
-	secondary := "/usr/bin:/secret/bin"
+	primary := pathList("/nvm/bin", "/usr/bin")
+	secondary := pathList("/usr/bin", "/secret/bin")
 	merged := mergePathEntries(primary, secondary)
 
 	entries := filepath.SplitList(merged)
@@ -115,7 +122,7 @@ func TestApplyLoginEnvToCurrentOverlaysAndProtects(t *testing.T) {
 	t.Setenv("SHLVL", "1")
 
 	login := map[string]string{
-		"PATH":        "/login/bin:/orig/bin",
+		"PATH":        pathList("/login/bin", "/orig/bin"),
 		"PWD":         "/login/should/not/apply",
 		"SHLVL":       "42",
 		"HOME":        "/login/home/should/not/apply",
