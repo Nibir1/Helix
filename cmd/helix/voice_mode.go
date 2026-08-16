@@ -9,7 +9,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 	"helix/internal/input"
 	"helix/internal/speech"
 	"helix/internal/utils"
+	"helix/internal/wakeword"
 
 	"github.com/fatih/color"
 )
@@ -134,6 +138,13 @@ func voiceTurn() (input.InputEvent, error) {
 	}
 	fmt.Printf("[heard] %q (via %s%s)\n", text, transcript.Provider, conf)
 
+	// Hands-free kill switches (ADR-005 wake controls): recognized before
+	// dispatch. The /manual slash form also works when spoken as "/manual".
+	if isVoiceKillPhrase(text) {
+		exitVoiceMode(true)
+		return input.InputEvent{}, errVoiceStopped
+	}
+
 	return input.InputEvent{
 		Text:    text,
 		Channel: input.ChannelVoice,
@@ -143,4 +154,113 @@ func voiceTurn() (input.InputEvent, error) {
 			"stt_language":   transcript.Language,
 		},
 	}, nil
+}
+
+// errVoiceStopped signals a kill phrase ended voice mode (the mode line
+// already announced it; the main loop treats this as a quiet continue).
+var errVoiceStopped = fmt.Errorf("voice stopped by kill phrase")
+
+// isVoiceKillPhrase matches the documented sleep/stop phrases plus the
+// natural "manual mode" utterance.
+func isVoiceKillPhrase(text string) bool {
+	t := strings.ToLower(strings.TrimRight(strings.TrimSpace(text), ".!?"))
+	switch t {
+	case "stop listening", "go to sleep", "sleep", "manual mode",
+		"switch to manual mode", "i want to type", "stop voice":
+		return true
+	}
+	return false
+}
+
+// wakeIdleWindow is the ADR-005 §5 lockout window: between turns NOTHING is
+// transcribed; only wake scoring runs, for at most this long before the
+// shell falls back to push-to-talk turns.
+const wakeIdleWindow = 60 * time.Second
+
+// wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns
+// true when a wake event fires (caller runs another voice turn), false on
+// window expiry, disabled config, or scanner failure (fall back to
+// push-to-talk turns).
+func wakeListenUntilArmed() bool {
+	if speech.Default() == nil || !cfg.Speech.WakeWord.Enabled {
+		return false
+	}
+	if _, err := speech.DetectRecorder(); err != nil {
+		return false
+	}
+
+	preset := wakeword.Preset(cfg.Speech.WakeWord.SensitivityPreset)
+	var detector wakeword.Detector
+	switch cfg.Speech.WakeWord.Engine {
+	case "sidecar":
+		detector = wakeword.NewSidecarDetector(cfg.Speech.WakeWord.SidecarURL,
+			cfg.Speech.WakeWord.Phrase, preset)
+	default: // "energy" — the everywhere-works default (ADR-002 honesty)
+		detector = wakeword.NewEnergyDetector(preset)
+	}
+
+	chunkMs := cfg.Speech.WakeWord.ChunkMs
+	if chunkMs <= 0 {
+		chunkMs = 1500
+	}
+	svc, err := wakeword.NewService(
+		wakeword.NewSoXScanner(time.Duration(chunkMs)*time.Millisecond, 16000),
+		detector,
+		wakeword.Config{
+			Phrase:   cfg.Speech.WakeWord.Phrase,
+			Cooldown: time.Duration(cfg.Speech.WakeWord.CooldownS) * time.Second,
+			OnError:  func(error) {},
+		})
+	if err != nil {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), wakeIdleWindow)
+	unreg := utils.RegisterOperation(cancel)
+	defer unreg()
+	defer cancel()
+
+	events, err := svc.Start(ctx)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = svc.Stop() }()
+
+	fmt.Println("[wake] listening for the wake phrase (nothing is transcribed until it fires)...")
+	select {
+	case ev := <-events:
+		logWakeEvent(ev)
+		audio.PlayAlert()
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// logWakeEvent appends one wake event to the local metrics journal
+// (~/.helix/metrics/wake.jsonl, local only, never transmitted).
+func logWakeEvent(ev wakeword.WakeEvent) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(home, ".helix", "metrics")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "wake.jsonl"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	line, err := json.Marshal(map[string]any{
+		"ts":     ev.DetectedAt.UTC().Format(time.RFC3339),
+		"score":  ev.Score,
+		"phrase": ev.Phrase,
+	})
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(line, '\n'))
 }

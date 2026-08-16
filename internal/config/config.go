@@ -57,10 +57,22 @@ type SpeechTTSConfig struct {
 	Fallbacks []string `json:"fallbacks"`
 }
 
+// SpeechWakeConfig controls wake-word listening (BlackBox §7).
+type SpeechWakeConfig struct {
+	Enabled           bool   `json:"enabled"`
+	Engine            string `json:"engine"`             // "energy" (default) | "sidecar"
+	SidecarURL        string `json:"sidecar_url"`        // sidecar engine endpoint
+	Phrase            string `json:"phrase"`             // default "hey helix"
+	SensitivityPreset string `json:"sensitivity_preset"` // strict | balanced | loose
+	CooldownS         int    `json:"cooldown_s"`
+	ChunkMs           int    `json:"chunk_ms"` // scanner chunk length
+}
+
 // SpeechConfig is the speech subsystem section of ~/.helix/config.json.
 type SpeechConfig struct {
-	STT SpeechSTTConfig `json:"stt"`
-	TTS SpeechTTSConfig `json:"tts"`
+	STT      SpeechSTTConfig  `json:"stt"`
+	TTS      SpeechTTSConfig  `json:"tts"`
+	WakeWord SpeechWakeConfig `json:"wake_word"`
 }
 
 // DefaultConfig returns sane default paths for Helix.

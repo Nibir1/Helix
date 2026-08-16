@@ -25,6 +25,10 @@ type CaptureOptions struct {
 	MaxDuration time.Duration
 	// SampleRate is the capture rate (default 16000, ideal for STT).
 	SampleRate int
+	// NoSilenceStop records the full MaxDuration without sox's silence
+	// gating — for chunk-scanning loops (wake word, ambient) where quiet
+	// chunks are expected and must yield a clip, not an error.
+	NoSilenceStop bool
 }
 
 // DetectRecorder returns "sox", "ffmpeg", or an error naming what to install.
@@ -73,12 +77,15 @@ func RecordClip(ctx context.Context, opts CaptureOptions) (AudioFormat, error) {
 	var cmd *exec.Cmd
 	switch recorder {
 	case "sox":
-		// Effects: stop after 2s below 3% amplitude, hard cap at MaxDuration.
-		cmd = exec.CommandContext(ctx, "rec", "-q",
+		args := []string{"rec", "-q",
 			"-r", fmt.Sprint(opts.SampleRate), "-c", "1", "-b", "16", "-e", "signed-integer",
-			path,
-			"silence", "1", "0.1", "3%", "1", "2.0", "3%",
-			"trim", "0", fmt.Sprintf("%.1f", opts.MaxDuration.Seconds()))
+			path}
+		if !opts.NoSilenceStop {
+			// Stop after 2s below 3% amplitude (crude VAD for utterances).
+			args = append(args, "silence", "1", "0.1", "3%", "1", "2.0", "3%")
+		}
+		args = append(args, "trim", "0", fmt.Sprintf("%.1f", opts.MaxDuration.Seconds()))
+		cmd = exec.CommandContext(ctx, args[0], args[1:]...)
 	case "ffmpeg":
 		cmd = exec.CommandContext(ctx, "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
 			"-f", ffmpegInputFormat(), "-i", ffmpegInputDevice(),

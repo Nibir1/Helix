@@ -197,6 +197,9 @@ func main() {
 			var verr error
 			ev, verr = voiceTurn()
 			if verr != nil {
+				if verr == errVoiceStopped {
+					continue // kill phrase: mode line already announced it
+				}
 				// Graceful degradation: mic/STT trouble must never brick the
 				// shell — offer one typed turn while staying in voice mode.
 				color.Yellow("voice: %v — type /manual to leave voice mode", verr)
@@ -238,6 +241,14 @@ func main() {
 		agentCore.HandleInputEvent(ev)
 		gui.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 		fmt.Print("\x1b]133;D;0\x07")
+
+		// BlackBox Phase 3 hands-free: after a completed turn, hold in
+		// wake-only listening (no transcription) until a wake event fires or
+		// the idle window expires; then the next loop iteration runs another
+		// voice turn. Disabled wake config = classic push-to-talk per turn.
+		if voiceModeActive && wakeListenUntilArmed() {
+			continue
+		}
 	}
 }
 
