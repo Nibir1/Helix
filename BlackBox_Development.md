@@ -323,15 +323,19 @@ voice-first assistant.
 **Goal:** Lock the architecture, write the security groundwork, verify the baseline. No feature code.
 
 **Tasks:**
-- [ ] P0.1 Verify baseline: `make test`, `make e2e`, `make current` all green on `blackBox` at `fd34503`+.
-- [ ] P0.2 Ratify ADR-001…009 (§3) — adjust only with written rationale appended.
-- [ ] P0.3 Write `docs/threat_model_voice.md` from §5 (adapted into repo doc style).
-- [ ] P0.4 Draft the config schema (§7) as a reviewable doc section in this file — no code yet.
-- [ ] P0.5 Create package skeletons that **compile**: empty `internal/speech`, `internal/input`,
-      `internal/wakeword`, `internal/session`, `internal/daemon`, `internal/vision`,
-      `internal/ambient` with doc-comment placeholders and one trivial test each (proves CI wiring).
-- [ ] P0.6 Extend `.github/workflows/ci.yml` if needed so new packages are covered by `go vet`/build
-      matrix on the 3 OSes.
+- [x] P0.1 Verify baseline: `make test`, `make e2e`, `make current` all green on `blackBox` at `fd34503`+.
+      *(2026-08-16: `go test ./... -count=1` exit 0 — all 25 packages incl. tests/e2e.)*
+- [x] P0.2 Ratify ADR-001…009 (§3) — adjust only with written rationale appended.
+      *(Ratified with the roadmap commit `b1f5302`.)*
+- [x] P0.3 Write `docs/threat_model_voice.md` from §5 (adapted into repo doc style). *(2026-08-16)*
+- [x] P0.4 Draft the config schema (§7) as a reviewable doc section in this file — no code yet. *(In §7 since roadmap commit.)*
+- [x] P0.5 Create package skeletons that **compile**: `internal/input`, `internal/wakeword`,
+      `internal/session`, `internal/daemon`, `internal/vision`, `internal/ambient` with
+      purpose doc-comments, forward-contract types, and one real test each.
+      (`internal/speech` is implemented directly in Phase 1.)
+- [x] P0.6 Extend `.github/workflows/ci.yml` if needed so new packages are covered by `go vet`/build
+      matrix on the 3 OSes. *(Verified: CI already runs `go test ./...` + `go build` — new
+      packages are covered automatically; no change required.)*
 
 **Deliverables:** threat model doc, compiling skeletons, updated tracker.
 **Acceptance:** CI green including new packages; ADRs finalized.
@@ -852,8 +856,8 @@ necessary.
 
 | Phase | Status | Started | Completed | Notes |
 |-------|--------|---------|-----------|-------|
-| 0 — Decisions & Threat Model | `NOT STARTED` | — | — | This doc ratified = P0.1–P0.4 effectively drafted; skeletons still to do |
-| 1 — Speech Provider Layer | `NOT STARTED` | — | — | |
+| 0 — Decisions & Threat Model | `DONE` | 2026-08-16 | 2026-08-16 | Baseline green; ADRs ratified; `docs/threat_model_voice.md` written; 6 skeleton packages compiling+tested; CI covers them automatically |
+| 1 — Speech Provider Layer | `IN PROGRESS` | 2026-08-16 | — | |
 | 2 — Voice Input & Policy | `NOT STARTED` | — | — | |
 | 3 — Wake Word | `NOT STARTED` | — | — | Engine spike decision pending |
 | 4 — Daemon & Living AI | `NOT STARTED` | — | — | Biggest lift; 4A refactor first |
