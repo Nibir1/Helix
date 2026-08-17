@@ -148,12 +148,12 @@ func (h *failoverHarness) noNotice(t *testing.T) {
 	}
 }
 
-// unreachable is the shape the shared HTTP client produces for a dead endpoint.
-var unreachable = fmt.Errorf("request failed: %w",
+// errUnreachable is the shape the shared HTTP client produces for a dead endpoint.
+var errUnreachable = fmt.Errorf("request failed: %w",
 	&net.OpError{Op: "dial", Err: errors.New("connect: connection refused")})
 
 func TestFailoverTripsAfterThresholdAndAnnounces(t *testing.T) {
-	h := newFailoverHarness(t, unreachable, true)
+	h := newFailoverHarness(t, errUnreachable, true)
 	h.cloud.failNext = 2
 
 	// Failure 1: below threshold — still on the cloud provider, no notice.
@@ -205,9 +205,9 @@ func TestFailoverIgnoresNonAvailabilityErrors(t *testing.T) {
 }
 
 func TestFailoverDoesNotEngageWhenLocalBrainIsDown(t *testing.T) {
-	// Degrading onto a dead Ollama would swap a true "cloud unreachable"
+	// Degrading onto a dead Ollama would swap a true "cloud errUnreachable"
 	// diagnosis for a misleading one.
-	h := newFailoverHarness(t, unreachable, false)
+	h := newFailoverHarness(t, errUnreachable, false)
 	h.cloud.failNext = 6
 
 	for i := 0; i < 4; i++ {
@@ -223,7 +223,7 @@ func TestFailoverDoesNotEngageWhenLocalBrainIsDown(t *testing.T) {
 }
 
 func TestFailoverHalfOpenProbeRestoresCloud(t *testing.T) {
-	h := newFailoverHarness(t, unreachable, true)
+	h := newFailoverHarness(t, errUnreachable, true)
 
 	SetOfflineMode(true)
 	if !LocalFallbackActive() {
@@ -260,7 +260,7 @@ func TestFailoverHalfOpenProbeRestoresCloud(t *testing.T) {
 }
 
 func TestFailoverFailedProbeStaysLocalSilently(t *testing.T) {
-	h := newFailoverHarness(t, unreachable, true)
+	h := newFailoverHarness(t, errUnreachable, true)
 
 	SetOfflineMode(true)
 	h.awaitNotice(t)
@@ -284,7 +284,7 @@ func TestFailoverFailedProbeStaysLocalSilently(t *testing.T) {
 }
 
 func TestSetOfflineModeFalseRestores(t *testing.T) {
-	h := newFailoverHarness(t, unreachable, true)
+	h := newFailoverHarness(t, errUnreachable, true)
 
 	SetOfflineMode(true)
 	h.awaitNotice(t)
@@ -304,7 +304,7 @@ func TestSetOfflineModeFalseRestores(t *testing.T) {
 }
 
 func TestUserProviderChoiceOutranksBreaker(t *testing.T) {
-	h := newFailoverHarness(t, unreachable, true)
+	h := newFailoverHarness(t, errUnreachable, true)
 
 	SetOfflineMode(true)
 	h.awaitNotice(t)
@@ -323,7 +323,7 @@ func TestUserProviderChoiceOutranksBreaker(t *testing.T) {
 }
 
 func TestFailoverDisabledKeepsOldBehavior(t *testing.T) {
-	h := newFailoverHarness(t, unreachable, true)
+	h := newFailoverHarness(t, errUnreachable, true)
 	failoverMu.Lock()
 	fallbackCfg.Enabled = false
 	failoverMu.Unlock()
@@ -352,7 +352,7 @@ func TestIsAvailabilityError(t *testing.T) {
 		{"nil", nil, false},
 		{"user ctrl+c", context.Canceled, false},
 		{"timeout", context.DeadlineExceeded, true},
-		{"dial refused", unreachable, true},
+		{"dial refused", errUnreachable, true},
 		{"http 503", errors.New("HTTP 503: upstream unavailable"), true},
 		{"http 429", errors.New("HTTP 429: rate limited"), true},
 		{"http 400", errors.New("HTTP 400: bad request"), false},

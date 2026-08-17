@@ -38,7 +38,7 @@ func anthropicServer(t *testing.T, sse string) (*Provider, *map[string]any) {
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &body)
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, sse)
+		_, _ = fmt.Fprint(w, sse)
 	}))
 	t.Cleanup(srv.Close)
 

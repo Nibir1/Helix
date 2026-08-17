@@ -82,7 +82,7 @@ func TestClipLevelTracksRealSignal(t *testing.T) {
 	quiet := ClipLevel(syntheticWAV(t, 0.005))
 	loud := ClipLevel(syntheticWAV(t, 0.3))
 
-	if !(loud > quiet) {
+	if loud <= quiet {
 		t.Fatalf("a louder clip must read higher: quiet=%.3f loud=%.3f", quiet, loud)
 	}
 	if loud < 0.7 {

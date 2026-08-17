@@ -83,11 +83,6 @@ func (d *daemonRenderer) takeResult() (reply, errText string) {
 	return
 }
 
-func (d *daemonRenderer) takeLast() string {
-	reply, _ := d.takeResult()
-	return reply
-}
-
 // Daemon is the persistent service.
 type Daemon struct {
 	agent    *agent.Agent

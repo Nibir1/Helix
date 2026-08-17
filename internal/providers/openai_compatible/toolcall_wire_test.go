@@ -51,7 +51,7 @@ func serverCapturing(t *testing.T, respond func(w http.ResponseWriter)) (*Provid
 
 func TestToolsAbsentFromOrdinaryChatRequest(t *testing.T) {
 	p, body := serverCapturing(t, func(w http.ResponseWriter) {
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n")
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -75,7 +75,7 @@ func TestToolsAbsentFromOrdinaryChatRequest(t *testing.T) {
 
 func TestToolsWireShape(t *testing.T) {
 	p, body := serverCapturing(t, func(w http.ResponseWriter) {
-		fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -111,9 +111,9 @@ func TestToolsWireShape(t *testing.T) {
 // receives one complete, parseable arguments string.
 func TestStreamedToolCallReachesCaller(t *testing.T) {
 	p, _ := serverCapturing(t, func(w http.ResponseWriter) {
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"emit_plan\",\"arguments\":\"{\\\"intent\\\":\"}}]}}]}\n\n")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"shell\\\"}\"}}]}}]}\n\n")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"emit_plan\",\"arguments\":\"{\\\"intent\\\":\"}}]}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"shell\\\"}\"}}]}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -147,7 +147,7 @@ func TestStreamedToolCallReachesCaller(t *testing.T) {
 // terminal would hang the stream until the client timed out.
 func TestToolCallsFinishReasonTerminatesStream(t *testing.T) {
 	p, _ := serverCapturing(t, func(w http.ResponseWriter) {
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"function\":{\"name\":\"emit_plan\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"function\":{\"name\":\"emit_plan\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n")
 		// Deliberately no [DONE]: some providers omit it after a tool call.
 	})
 
@@ -169,8 +169,8 @@ func TestToolCallsFinishReasonTerminatesStream(t *testing.T) {
 // Text-only responses must keep working through the new result path.
 func TestCollectChatStillReturnsText(t *testing.T) {
 	p, _ := serverCapturing(t, func(w http.ResponseWriter) {
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}\n\n")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"world\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"world\"},\"finish_reason\":\"stop\"}]}\n\n")
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

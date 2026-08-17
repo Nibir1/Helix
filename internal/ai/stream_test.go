@@ -139,9 +139,9 @@ func TestStreamModelWithoutProvider(t *testing.T) {
 // Streaming must not bypass the P11.2 breaker: an availability failure here
 // has to count toward failover exactly as a buffered call would.
 func TestStreamModelFeedsTheFailoverBreaker(t *testing.T) {
-	h := newFailoverHarness(t, unreachable, true)
+	h := newFailoverHarness(t, errUnreachable, true)
 	// Replace the harness's cloud provider with a failing streamer.
-	failing := &streamFake{name: "cloud", openErr: unreachable}
+	failing := &streamFake{name: "cloud", openErr: errUnreachable}
 	failoverMu.Lock()
 	activeProvider = failing
 	failoverMu.Unlock()

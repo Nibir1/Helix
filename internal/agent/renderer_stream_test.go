@@ -112,7 +112,7 @@ func TestStreamStartedGatesBufferedFallback(t *testing.T) {
 		t.Fatal("an empty chunk must not mark the stream started")
 	}
 	// This is the condition chatFallback uses to decide whether to also print.
-	if !(s == nil || !s.Started()) {
+	if s != nil && s.Started() {
 		t.Fatal("an unstarted stream must trigger the buffered print")
 	}
 }

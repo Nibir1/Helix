@@ -255,17 +255,3 @@ func parseDeepgramFrame(data []byte) (t Transcript, segmentFinal bool, kind dgFr
 		IsFinal:    msg.SpeechFinal,
 	}, msg.IsFinal, dgFrameResults
 }
-
-// parseDeepgramTranscript is the legacy single-frame view kept for tests:
-// Results frames map to a Transcript whose IsFinal reflects segment finality.
-func parseDeepgramTranscript(data []byte) (Transcript, bool) {
-	t, segFinal, kind := parseDeepgramFrame(data)
-	if kind != dgFrameResults {
-		return Transcript{}, false
-	}
-	if !segFinal && !t.IsFinal && strings.TrimSpace(t.Text) == "" {
-		return Transcript{}, false
-	}
-	t.IsFinal = t.IsFinal || segFinal
-	return t, true
-}

@@ -24,7 +24,7 @@ func toolStub(t *testing.T, ndjson string) (*Client, *map[string]any) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &body)
-		fmt.Fprint(w, ndjson)
+		_, _ = fmt.Fprint(w, ndjson)
 	}))
 	t.Cleanup(srv.Close)
 

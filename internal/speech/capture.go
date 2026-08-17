@@ -233,7 +233,7 @@ func (r *StreamRecorder) ReadChunk(ctx context.Context, d time.Duration) (AudioF
 	case <-ctx.Done():
 		// Unblock the pending read by killing the recorder; the stream is
 		// unusable after this, matching Scanner retry-then-rebuild semantics.
-		r.Close()
+		_ = r.Close()
 		<-done
 		return AudioFormat{}, ctx.Err()
 	}

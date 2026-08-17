@@ -79,8 +79,8 @@ func TestChatRoundTripAgainstLlamaServer(t *testing.T) {
 		_ = json.Unmarshal(body, &gotBody)
 
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"pong\"}}]}\n\n")
-		fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"pong\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer srv.Close()
 
@@ -136,7 +136,7 @@ func TestListModelsReportsLoadedGGUF(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"data":[{"id":"qwen2.5-3b-instruct-q4_k_m.gguf","owned_by":"llamacpp"}]}`)
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"qwen2.5-3b-instruct-q4_k_m.gguf","owned_by":"llamacpp"}]}`)
 	}))
 	defer srv.Close()
 

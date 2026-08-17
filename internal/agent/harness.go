@@ -119,8 +119,8 @@ func observationBlock(obs []StepObservation) string {
 		if target == "" {
 			target = o.Action
 		}
-		b.WriteString(fmt.Sprintf("- step %d [%s] %s: %s%s\n",
-			o.Index+1, o.Tool, sanitizeReport(target), status, detail))
+		_, _ = fmt.Fprintf(&b, "- step %d [%s] %s: %s%s\n",
+			o.Index+1, o.Tool, sanitizeReport(target), status, detail)
 
 		// P8.6: what the command actually printed. The failing step gets the
 		// larger budget — its output is the diagnosis the next plan must act
@@ -135,7 +135,7 @@ func observationBlock(obs []StepObservation) string {
 			if o.OutputTruncated {
 				note = " (earlier output omitted)"
 			}
-			b.WriteString(fmt.Sprintf("  output tail%s:\n", note))
+			_, _ = fmt.Fprintf(&b, "  output tail%s:\n", note)
 			for _, line := range strings.Split(out, "\n") {
 				b.WriteString("  | " + line + "\n")
 			}

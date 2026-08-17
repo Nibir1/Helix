@@ -41,7 +41,11 @@ build-all: all
 # Lint the codebase using golangci-lint
 lint:
 	@echo "Running golangci-lint..."
-	@golangci-lint run ./... --timeout=5m || (echo "Install golangci-lint: https://golangci-lint.run/usage/install/" && exit 1)
+	@golangci-lint run ./... --timeout=5m || (echo "" && \
+	 echo "If this failed to RUN (rather than reporting issues), your golangci-lint" && \
+	 echo "is probably v1 — it cannot read the v2 .golangci.yml. Install the version" && \
+	 echo "CI uses, so local and CI enforce the same rules:" && \
+	 echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0" && exit 1)
 
 # Clean build artifacts AND generated data (but keep models)
 clean:

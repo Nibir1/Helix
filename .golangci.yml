@@ -1,0 +1,47 @@
+# .golangci.yml
+#
+# Purpose: pin the lint contract so every developer, and CI, see the SAME
+# findings. Added after a real incident: a contributor running golangci-lint
+# v1.64 reported "2 issues" while CI and the owner (v2.x) saw 10 — v2 folds
+# gosimple/stylecheck into `staticcheck` (enabling the QF*/ST* categories) and
+# drops v1's legacy errcheck exclusions. Without a checked-in config, "lint is
+# clean" meant different things to different people.
+#
+# The canonical version is golangci-lint v2.5.0 — the same one
+# .github/workflows/ci.yml installs. A v1 binary cannot read this file and will
+# say so loudly, which is the intended behavior: fail visibly rather than lint
+# a different rule set in silence.
+#
+#   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+version: "2"
+
+run:
+  timeout: 5m
+  # Tests carry real logic here (fuzz targets, PTY e2e, wire-format stubs) and
+  # have produced genuine findings, so they are linted like any other code.
+  tests: true
+
+linters:
+  # "standard" is v2's default set: errcheck, govet, ineffassign, staticcheck,
+  # unused. Stated explicitly so a future golangci-lint release cannot silently
+  # widen or narrow what `make lint` enforces.
+  default: standard
+
+  # staticcheck settings are deliberately NOT overridden. v2's default check set
+  # is what CI and the owner already run, and the tree is clean under it;
+  # spelling out `checks:` here would risk enabling categories the default
+  # disables (ST1000/ST1003/ST1020-1023 are noisy doc/naming rules this codebase
+  # does not follow) and turn a green build red for no safety gain.
+
+issues:
+  # THE important setting, and the reason this file exists.
+  #
+  # By default golangci-lint prints at most 3 occurrences of the same issue and
+  # 50 per linter. That silently understated a real problem: 13 unchecked
+  # fmt.Fprint calls were reported as 3, so "fix the reported lines" left the
+  # build red. Lint output must be complete or it cannot be trusted.
+  max-same-issues: 0
+  max-issues-per-linter: 0
+
+  # One report per line keeps the output readable once the caps are lifted.
+  uniq-by-line: true
