@@ -126,6 +126,8 @@ func (k *KeyStore) envName(provider string) string {
 		return "QWEN_API_KEY"
 	case "glm":
 		return "GLM_API_KEY"
+	case "xai":
+		return "XAI_API_KEY"
 	case "custom":
 		return "CUSTOM_API_KEY"
 	// Speech providers share the vendor account key of their chat sibling
@@ -140,5 +142,74 @@ func (k *KeyStore) envName(provider string) string {
 		return "ELEVENLABS_API_KEY"
 	default:
 		return strings.ToUpper(strings.ReplaceAll(provider, ".", "_")) + "_API_KEY"
+	}
+}
+
+// --- Misdirected-key detection ---------------------------------------------
+
+// keyPrefixOwners maps an UNAMBIGUOUS key prefix to the provider that issues
+// it. Order matters: longer, more specific prefixes come first.
+//
+// Deliberately absent: a bare "sk-". OpenAI, DeepSeek, Kimi and Qwen all use
+// it, so it identifies nothing and would produce false alarms.
+var keyPrefixOwners = []struct{ Prefix, Owner string }{
+	{"sk-ant-", "anthropic"},
+	{"xai-", "xai"},
+	{"gsk_", "groq"},
+}
+
+// MisdirectedKey reports that a key was plainly issued by a DIFFERENT provider
+// than the one it is being stored under.
+//
+// The check is deliberately negative-only: it never asserts what a valid key
+// for a provider looks like — vendors change formats, and a positive rule would
+// start rejecting good keys. It only fires when a prefix unambiguously belongs
+// to somebody else, so unknown formats always pass.
+//
+// This exists because of a real incident: an `xai-` key (xAI, which serves
+// Grok) was pasted into Helix's `groq` slot — GroqCloud, a different company
+// one letter away — and the mistake only surfaced later as an auth failure on
+// every transcription.
+//
+// Args:
+//   - provider: registry name, optionally "stt."/"tts." namespaced.
+//   - key: the pasted secret.
+//
+// Returns: the issuing provider and true when the key belongs elsewhere.
+// Complexity: O(len(prefixes)).
+func MisdirectedKey(provider, key string) (owner string, misdirected bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", false
+	}
+
+	// Speech keys are namespaced but share the vendor account (see envName).
+	base := strings.ToLower(strings.TrimSpace(provider))
+	base = strings.TrimPrefix(strings.TrimPrefix(base, "stt."), "tts.")
+
+	for _, e := range keyPrefixOwners {
+		if !strings.HasPrefix(key, e.Prefix) {
+			continue
+		}
+		if e.Owner == base {
+			return e.Owner, false
+		}
+		return e.Owner, true
+	}
+	return "", false
+}
+
+// KeyOwnerHint returns a one-line explanation for a misdirected key, including
+// the name collision that causes the most common mistake.
+func KeyOwnerHint(provider, owner string) string {
+	switch {
+	case owner == "xai" && strings.Contains(provider, "groq"):
+		return "xAI (which serves Grok) and Groq are different companies — " +
+			"Groq keys come from console.groq.com, xAI keys from console.x.ai."
+	case owner == "groq" && strings.Contains(provider, "xai"):
+		return "Groq (GroqCloud) and xAI (Grok) are different companies — " +
+			"xAI keys come from console.x.ai, Groq keys from console.groq.com."
+	default:
+		return "That key looks like it was issued by " + owner + "."
 	}
 }

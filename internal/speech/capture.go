@@ -39,16 +39,27 @@ type CaptureOptions struct {
 // "rec" and "sox" matters: minimal sox packages ship without the `rec`
 // symlink, and invoking the wrong binary fails every capture.
 func DetectRecorder() (string, error) {
-	if _, err := exec.LookPath("rec"); err == nil {
-		return "rec", nil
-	}
-	if _, err := exec.LookPath("sox"); err == nil {
-		return "sox", nil
-	}
-	if _, err := exec.LookPath("ffmpeg"); err == nil {
-		return "ffmpeg", nil
+	for _, name := range recorderNames {
+		if _, err := exec.LookPath(name); err == nil {
+			return name, nil
+		}
 	}
 	return "", ErrNoRecorder
+}
+
+// recorderNames is the detection order and the single source of truth for
+// which binaries RecordClip can drive. Tests assert against this rather than
+// re-listing the names, so a new backend cannot be detected but not runnable.
+var recorderNames = []string{"rec", "sox", "ffmpeg"}
+
+// knownRecorder reports whether a name is one RecordClip can invoke.
+func knownRecorder(name string) bool {
+	for _, n := range recorderNames {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 // RecordClip records the default microphone to an in-memory WAV clip.

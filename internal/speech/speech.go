@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"helix/internal/audio"
 	"helix/internal/providers"
 )
 
@@ -24,10 +23,20 @@ var (
 	registry   *Registry
 	ttsEnabled = true
 
-	// lastSynthMs records the most recent TTS synthesis round-trip latency — a
-	// conservative upper bound on first-byte time, surfaced in /voice-status
-	// against the configured budget (P7.2b).
+	// lastSynthMs records the most recent TTS latency surfaced in
+	// /voice-status against the configured budget.
+	//
+	// Its meaning depends on the path, and lastSpeechStreamed says which:
+	//   streamed  — true TIME-TO-FIRST-AUDIO (request → first sample), P7.2c
+	//   buffered  — full synthesis round trip, which for that path IS the
+	//               first-audio time, since nothing plays until it completes
+	// Both are therefore comparable against first_byte_ms.
 	lastSynthMs atomic.Int64
+
+	// lastSpeechStreamed reports whether the last spoken chunk used the
+	// streaming path, so the status line can label the number honestly rather
+	// than leaving the user to guess which it measured.
+	lastSpeechStreamed atomic.Bool
 )
 
 // Init builds the global registry: all builtin adapters registered, keys
@@ -155,29 +164,27 @@ func Synthesize(ctx context.Context, text string) (AudioFormat, error) {
 	start := time.Now()
 	audio, err := reg.Synthesize(ctx, text, opts)
 	lastSynthMs.Store(time.Since(start).Milliseconds())
+	lastSpeechStreamed.Store(false)
 	return audio, err
 }
 
-// LastSynthesizeLatencyMs returns the most recent TTS synthesis latency in
-// milliseconds (0 before the first synthesis).
+// LastSynthesizeLatencyMs returns the most recent TTS latency in milliseconds
+// (0 before the first synthesis). On the streaming path this is true
+// time-to-first-audio; on the buffered path it is the synthesis round trip,
+// which for that path amounts to the same thing.
 func LastSynthesizeLatencyMs() int64 { return lastSynthMs.Load() }
+
+// LastSpeechStreamed reports whether the last spoken chunk was streamed.
+func LastSpeechStreamed() bool { return lastSpeechStreamed.Load() }
 
 // Speak synthesizes text and plays it through the Helix speaker stack
 // (audio.PlaySpeech, ADR-007). Explicit invocations (/say) bypass the TTS
 // runtime toggle; automatic spoken responses in Phase 2 gate on TTSEnabled.
 func Speak(ctx context.Context, text string) error {
-	fmt_, err := Synthesize(ctx, text)
-	if err != nil {
-		return err
-	}
-	// Context-aware playback (P12.5): /say and daemon `remote say` are
-	// interruptible too, not just streamed replies.
-	return audio.PlaySpeechContext(ctx, audio.SpeechFormat{
-		Kind:       string(fmt_.Kind),
-		SampleRate: fmt_.SampleRate,
-		Channels:   fmt_.Channels,
-		Data:       fmt_.Bytes,
-	}, 1.0)
+	// speakOnce streams when the provider supports it and falls back to the
+	// buffered path otherwise (P7.2c), and is context-aware throughout (P12.5),
+	// so /say and daemon `remote say` get both low latency and interruptibility.
+	return speakOnce(ctx, text)
 }
 
 // SetTTSEnabled toggles automatic spoken responses (runtime only, like /audio).
@@ -225,6 +232,9 @@ type StatusReport struct {
 	RecorderErr          string
 	TTSLastLatencyMs     int64 // 0 = never synthesized this process
 	TTSFirstByteBudgetMs int
+	// TTSLastStreamed reports whether TTSLastLatencyMs came from the streaming
+	// path (true first-audio) or the buffered one (full synthesis).
+	TTSLastStreamed bool
 }
 
 // Status collects chains, per-provider health (chain providers only, bounded
@@ -246,6 +256,7 @@ func Status(ctx context.Context) StatusReport {
 	report.STTChain = reg.STTChain()
 	report.TTSChain = reg.TTSChain()
 	report.TTSLastLatencyMs = lastSynthMs.Load()
+	report.TTSLastStreamed = lastSpeechStreamed.Load()
 	report.TTSFirstByteBudgetMs = reg.ActiveConfig().TTS.FirstByteMs
 	if report.TTSFirstByteBudgetMs <= 0 {
 		report.TTSFirstByteBudgetMs = 800

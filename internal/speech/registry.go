@@ -347,3 +347,55 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+// SynthesizeStream starts streamed synthesis on the first chain provider that
+// supports it, so playback can begin before generation finishes (P7.2c).
+//
+// It walks the SAME failover chain as Synthesize, skipping providers that do
+// not implement StreamingTTSProvider. A provider that fails before returning a
+// body is recorded and the walk continues; if no provider yields a stream the
+// caller falls back to the buffered path, so streaming can only ever be faster,
+// never a new way to be silent.
+//
+// Args: ctx, text, opts as Synthesize.
+// Returns: the open stream and the provider name, or an error.
+// Complexity: O(len(chain)) request attempts.
+func (r *Registry) SynthesizeStream(
+	ctx context.Context, text string, opts SynthesisOptions,
+) (StreamedAudio, string, error) {
+	chain := r.TTSChain()
+	if len(chain) == 0 {
+		return StreamedAudio{}, "", errors.New("no TTS provider configured — run /voice-setup")
+	}
+
+	var errs []error
+	for _, name := range chain {
+		if err := ctx.Err(); err != nil {
+			return StreamedAudio{}, "", err
+		}
+
+		p, ok := r.TTSProvider(name)
+		if !ok {
+			continue
+		}
+		sp, ok := p.(StreamingTTSProvider)
+		if !ok {
+			continue // buffered-only provider; not an error
+		}
+
+		stream, err := sp.SynthesizeStream(ctx, text, opts)
+		if err == nil {
+			return stream, name, nil
+		}
+		errs = append(errs, fmt.Errorf("%s: %w", name, err))
+	}
+
+	if len(errs) == 0 {
+		return StreamedAudio{}, "", errNoStreamingTTS
+	}
+	return StreamedAudio{}, "", fmt.Errorf("streaming TTS unavailable: %w", errors.Join(errs...))
+}
+
+// errNoStreamingTTS marks "no provider in the chain streams" — an expected,
+// non-error condition that simply selects the buffered path.
+var errNoStreamingTTS = errors.New("no streaming TTS provider in chain")

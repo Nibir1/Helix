@@ -21,6 +21,7 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/commands"
+	"helix/internal/diagnostics"
 	"helix/internal/input"
 	"helix/internal/rag"
 	"helix/internal/recon"
@@ -743,12 +744,33 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 	if msg == "" {
 		return
 	}
-	a.render.PrintAIMessage(msg, a.typingEffect)
 	a.lastResponse = msg // session memory (Phase 4B)
-	// BlackBox voice mode: responses are spoken as well as printed.
-	if a.voiceActive() {
-		a.speak(msg)
+
+	// Speak and print CONCURRENTLY. Sequentially, the reader finished the whole
+	// message before the first word was heard, so the voice always trailed the
+	// screen by a full render — and with the typewriter effect on, by seconds.
+	// Both are presentations of the same text, so they should start together.
+	//
+	// Speech is started first and printing runs on this goroutine: synthesis
+	// has real network latency to absorb, whereas printing begins immediately.
+	if !a.voiceActive() {
+		a.render.PrintAIMessage(msg, a.typingEffect)
+		return
 	}
+
+	done := make(chan struct{})
+	go func() {
+		defer diagnostics.Guard("agent-speak")()
+		defer close(done)
+		a.speak(msg)
+	}()
+
+	a.render.PrintAIMessage(msg, a.typingEffect)
+
+	// Wait for speech before returning: the turn is not over while Helix is
+	// still talking, and returning early would let the next prompt (and the
+	// next capture) start over the tail of the reply.
+	<-done
 }
 
 // handleShellStep executes a planner/user shell step through the safety pipeline.

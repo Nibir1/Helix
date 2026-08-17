@@ -48,6 +48,15 @@ var contextLimits = []contextLimitEntry{
 	// Qwen
 	{prefix: "qwen3.7-plus", limit: 1_000_000},
 
+	// xAI (Grok) — context windows from docs.x.ai/docs/models. Without these
+	// the default 8k applies and GetSafeContentLimit clamps RAG context to a
+	// fraction of what Grok can actually take.
+	{prefix: "grok-4.6", limit: 500_000},
+	{prefix: "grok-4.5", limit: 500_000},
+	{prefix: "grok-4.3", limit: 1_000_000},
+	{prefix: "grok-4.20", limit: 1_000_000},
+	{prefix: "grok-build", limit: 256_000},
+
 	// Gemma
 	{prefix: "gemma4", limit: 128_000},
 	{prefix: "gemma-4", limit: 128_000},
@@ -120,6 +129,7 @@ var toolUseProviders = map[string]bool{
 	"kimi":      true,
 	"qwen":      true,
 	"glm":       true,
+	"xai":       true, // docs.x.ai lists function calling
 	"anthropic": true, // P8.7b: tool_use blocks + input_schema
 	"ollama":    true, // P8.7b: /api/chat tools — but MODEL-gated, see below
 }

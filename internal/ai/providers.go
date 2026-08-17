@@ -20,6 +20,7 @@ import (
 	openaiprovider "helix/internal/providers/openai"
 	openaicompatible "helix/internal/providers/openai_compatible"
 	qwenprovider "helix/internal/providers/qwen"
+	xaiprovider "helix/internal/providers/xai"
 	"helix/internal/utils"
 )
 
@@ -63,6 +64,7 @@ func InitProviders(settings ProviderSettings) error {
 	registry.Register(kimiprovider.New(keys.Get("kimi"), client))
 	registry.Register(qwenprovider.New(keys.Get("qwen"), client))
 	registry.Register(glmprovider.New(keys.Get("glm"), client))
+	registry.Register(xaiprovider.New(keys.Get("xai"), client))
 	registry.Register(ollamaprovider.New(ollamaClient))
 	// llama.cpp is always registered (P11.4): it needs no key and costs nothing
 	// until used, and pre-registering it makes it selectable as the Phase 11

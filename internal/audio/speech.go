@@ -71,16 +71,22 @@ func PlaySpeechContext(ctx context.Context, f SpeechFormat, volume float64) erro
 	if !IsEnabled() {
 		return errors.New("audio output is disabled (use /audio on)")
 	}
+
+	// Decode BEFORE touching the device. An undecodable clip (an MP3 from a
+	// misconfigured provider, a truncated body) is a caller error, and opening
+	// the speaker to discover that is both wasteful and — under the race
+	// detector on macOS — enough to trip a data race inside oto's CoreAudio
+	// driver that has nothing to do with the clip.
+	streamer, sr, err := decodeSpeech(f)
+	if err != nil {
+		return err
+	}
+
 	if err := Init(); err != nil {
 		return fmt.Errorf("audio device: %w", err)
 	}
 	if !IsReady() {
 		return errors.New("audio engine not ready")
-	}
-
-	streamer, sr, err := decodeSpeech(f)
-	if err != nil {
-		return err
 	}
 
 	if volume <= 0 || volume > 1 {

@@ -42,6 +42,79 @@ func speechConfigFrom(sc config.SpeechConfig) speech.Config {
 	}
 }
 
+// knownVoices lists valid voice identifiers per TTS provider.
+//
+// This exists because the wizard used to ask for a bare "Voice id/name" right
+// after printing a table whose most prominent column is the MODEL — so the
+// obvious answer was to retype the model, which the provider then rejects with
+// an HTTP 400 at /say time, long after the wizard said "Voice link configured."
+// Showing the real options at the moment of asking turns a paid round trip into
+// a correct answer.
+var knownVoices = map[string][]string{
+	"openai": {"alloy", "ash", "ballad", "cedar", "coral", "echo", "fable",
+		"marin", "nova", "onyx", "sage", "shimmer", "verse"},
+	"deepgram":     {"aura-2-thalia-en", "aura-2-andromeda-en", "aura-2-apollo-en"},
+	"elevenlabs":   {"<voice id from your ElevenLabs voice library>"},
+	"kokoro-local": {"af_bella", "af_sarah", "am_adam", "bf_emma"},
+	"piper-local":  {"<voice model name installed in your Piper sidecar>"},
+}
+
+// askVoiceID prompts for the voice, showing the provider's valid values.
+func askVoiceID(provider string) string {
+	if voices, ok := knownVoices[provider]; ok {
+		color.Cyan("  Voices for %s: %s", provider, strings.Join(voices, ", "))
+	}
+	voice := strings.TrimSpace(commands.AskLine(
+		"Voice id/name (blank for provider default — NOT the model name)"))
+	if voice == "" {
+		return ""
+	}
+
+	// Catch the exact mistake the old prompt invited, while it is still free
+	// to correct, rather than at the first paid synthesis.
+	if valid, ok := knownVoices[provider]; ok && !validName(valid, voice) &&
+		!strings.HasPrefix(valid[0], "<") {
+		color.Yellow("%q is not a known %s voice (valid: %s).",
+			voice, provider, strings.Join(valid, ", "))
+		if !commands.AskForConfirmation("Use it anyway?") {
+			color.Cyan("Using the provider default voice.")
+			return ""
+		}
+	}
+	return voice
+}
+
+// askFallback prompts for a fallback PROVIDER, listing the valid names up
+// front. The old prompt named them only in the rejection message, after the
+// answer was already wrong.
+func askFallback(kind string, names []string, primary string) []string {
+	options := make([]string, 0, len(names))
+	for _, n := range names {
+		if n != primary {
+			options = append(options, n)
+		}
+	}
+	if len(options) == 0 {
+		return nil
+	}
+
+	color.Cyan("  Fallback %s providers: %s", kind, strings.Join(options, ", "))
+	fallback := strings.TrimSpace(commands.AskLine(
+		fmt.Sprintf("Fallback %s provider (blank for none — a provider name, not a model)", kind)))
+	if fallback == "" {
+		return nil
+	}
+	if !validName(names, fallback) {
+		color.Yellow("Unknown fallback %q ignored (valid: %s)", fallback, strings.Join(options, ", "))
+		return nil
+	}
+	if fallback == primary {
+		color.Yellow("Fallback %q is the same as the primary — ignored.", fallback)
+		return nil
+	}
+	return []string{fallback}
+}
+
 // handleVoiceSetup runs the STT/TTS selection wizard with live pricing.
 func handleVoiceSetup() {
 	color.Cyan("⚡ HELIX VOICE LINK CONFIGURATION")
@@ -70,19 +143,18 @@ func handleVoiceSetup() {
 		sttCfg.Model = entry.APIModel()
 		if entry.RequiresKey {
 			key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", entry.Provider)))
-			if key == "" {
+			switch {
+			case key == "":
 				color.Yellow("No key entered — %s will fail until a key is set.", entry.Provider)
-			} else if err := speech.SaveSTTKey(entry.Provider, key); err != nil {
-				color.Red("Key storage failed: %v", err)
+			case !confirmKeyForProvider("stt."+entry.Provider, key):
+				color.Yellow("Key not stored — %s will fail until a key is set.", entry.Provider)
+			default:
+				if err := speech.SaveSTTKey(entry.Provider, key); err != nil {
+					color.Red("Key storage failed: %v", err)
+				}
 			}
 		}
-		if fallback := strings.TrimSpace(commands.AskLine("Fallback STT provider (blank for none)")); fallback != "" {
-			if validName(sttNames, fallback) {
-				sttCfg.Fallbacks = []string{fallback}
-			} else {
-				color.Yellow("Unknown fallback %q ignored (registered: %s)", fallback, strings.Join(sttNames, ", "))
-			}
-		}
+		sttCfg.Fallbacks = askFallback("STT", sttNames, entry.Provider)
 		color.Green("STT: %s", sttCfg.Provider)
 	}
 
@@ -99,22 +171,19 @@ func handleVoiceSetup() {
 		ttsCfg.Model = entry.APIModel()
 		if entry.RequiresKey {
 			key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", entry.Provider)))
-			if key == "" {
+			switch {
+			case key == "":
 				color.Yellow("No key entered — %s will fail until a key is set.", entry.Provider)
-			} else if err := speech.SaveTTSKey(entry.Provider, key); err != nil {
-				color.Red("Key storage failed: %v", err)
+			case !confirmKeyForProvider("tts."+entry.Provider, key):
+				color.Yellow("Key not stored — %s will fail until a key is set.", entry.Provider)
+			default:
+				if err := speech.SaveTTSKey(entry.Provider, key); err != nil {
+					color.Red("Key storage failed: %v", err)
+				}
 			}
 		}
-		if voice := strings.TrimSpace(commands.AskLine("Voice id/name (blank for provider default)")); voice != "" {
-			ttsCfg.Voice = voice
-		}
-		if fallback := strings.TrimSpace(commands.AskLine("Fallback TTS provider (blank for none)")); fallback != "" {
-			if validName(ttsNames, fallback) {
-				ttsCfg.Fallbacks = []string{fallback}
-			} else {
-				color.Yellow("Unknown fallback %q ignored (registered: %s)", fallback, strings.Join(ttsNames, ", "))
-			}
-		}
+		ttsCfg.Voice = askVoiceID(entry.Provider)
+		ttsCfg.Fallbacks = askFallback("TTS", ttsNames, entry.Provider)
 		color.Green("TTS: %s", ttsCfg.Provider)
 	}
 
@@ -330,8 +399,12 @@ func handleVoiceStatus() {
 		color.Yellow("Recorder: %s", report.RecorderErr)
 	}
 	if report.TTSLastLatencyMs > 0 {
-		fmt.Printf("Last TTS latency: %dms (budget %dms)\n",
-			report.TTSLastLatencyMs, report.TTSFirstByteBudgetMs)
+		path := "buffered — full synthesis before playback"
+		if report.TTSLastStreamed {
+			path = "streamed"
+		}
+		fmt.Printf("Last TTS time-to-first-audio: %dms (budget %dms) [%s]\n",
+			report.TTSLastLatencyMs, report.TTSFirstByteBudgetMs, path)
 	}
 
 	printStatusRows("STT PROVIDERS", report.STTStatus)

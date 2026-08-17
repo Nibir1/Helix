@@ -5,7 +5,10 @@
 // Phase 1).
 package speech
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // AudioKind identifies the container/encoding of synthesized or captured audio.
 type AudioKind string
@@ -71,6 +74,29 @@ type TTSProvider interface {
 	RequiresAPIKey() bool
 	IsLocal() bool
 	DefaultModel() string
+}
+
+// StreamedAudio is an in-flight synthesis: raw PCM arriving over the wire.
+//
+// Raw PCM, not WAV, by design — the streaming path requests a headerless
+// format so there is no container to parse incrementally, and the sample rate
+// is known from the provider contract rather than from bytes that may not have
+// arrived yet.
+type StreamedAudio struct {
+	SampleRate int
+	Channels   int
+	Body       io.ReadCloser
+}
+
+// StreamingTTSProvider is implemented by adapters that can deliver audio while
+// it is still being generated (BlackBox P7.2c). Optional, exactly like
+// StreamingSTTProvider: the registry type-asserts for it and falls back to the
+// buffered Synthesize when it is absent or fails before the first byte.
+type StreamingTTSProvider interface {
+	TTSProvider
+	// SynthesizeStream begins synthesis and returns the audio body. The caller
+	// owns Body and must close it.
+	SynthesizeStream(ctx context.Context, text string, opts SynthesisOptions) (StreamedAudio, error)
 }
 
 // StreamingSTTProvider is implemented by adapters that support real-time

@@ -9,8 +9,10 @@ package speech
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"helix/internal/audio"
 	"helix/internal/utils"
@@ -46,6 +48,22 @@ func SpeakStream(ctx context.Context, text string) error {
 	if len(sentences) <= 1 {
 		return speakOnce(ctx, text)
 	}
+
+	// P7.2c: the FIRST sentence is streamed, the rest are pipelined.
+	//
+	// Time-to-first-audio is set entirely by sentence 1 — nothing is playing to
+	// hide its synthesis behind. Streaming it drops that from a full synthesis
+	// (~2.3s measured) to the ~150ms preroll. Sentences 2..N stay buffered
+	// because their latency is ALREADY hidden: they are fetched while an
+	// earlier sentence plays, so streaming them would add complexity for no
+	// perceptible gain.
+	if err := speakOnce(ctx, sentences[0]); err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	sentences = sentences[1:]
 
 	// Producer: synthesize sentences in order into a bounded channel so at
 	// most one sentence is buffered ahead of playback (memory-bounded, and
@@ -149,7 +167,21 @@ func StopSpeaking() {
 // speakOnce synthesizes and plays a single chunk under ctx. It is the
 // cancellable twin of Speak, used inside SpeakStream so the single-sentence
 // path is interruptible too.
+//
+// P7.2c: it tries STREAMED playback first. The buffered path waits for the
+// entire synthesis before the first sample reaches the speaker — measured at
+// 2,280 ms against an 800 ms budget on a real OpenAI round trip — whereas
+// streaming starts after a ~150 ms preroll. Any failure BEFORE audio plays
+// falls back to the buffered path, so this can only be faster, never a new way
+// to be silent.
 func speakOnce(ctx context.Context, text string) error {
+	if err := speakOnceStreamed(ctx, text); err == nil {
+		return nil
+	} else if ctx.Err() != nil {
+		// A barge-in is not a streaming failure; do not re-synthesize.
+		return err
+	}
+
 	f, err := Synthesize(ctx, text)
 	if err != nil {
 		return err
@@ -160,6 +192,35 @@ func speakOnce(ctx context.Context, text string) error {
 		Channels:   f.Channels,
 		Data:       f.Bytes,
 	}, 1.0)
+}
+
+// speakOnceStreamed plays one chunk via the streaming path, recording true
+// TIME-TO-FIRST-AUDIO — the number the first_byte_ms budget is about.
+//
+// Timing the whole call would measure the entire utterance instead, so a longer
+// reply would report a worse latency even though the user heard the first word
+// just as quickly. The audio layer signals the first-audio instant explicitly.
+func speakOnceStreamed(ctx context.Context, text string) error {
+	reg := Default()
+	if reg == nil {
+		return errors.New("speech not initialized")
+	}
+
+	start := time.Now()
+	stream, _, err := reg.SynthesizeStream(ctx, text, SynthesisOptions{Voice: reg.ActiveConfig().TTS.Voice})
+	if err != nil {
+		return err
+	}
+
+	return audio.PlaySpeechStream(ctx, audio.StreamFormat{
+		SampleRate: stream.SampleRate,
+		Channels:   stream.Channels,
+	}, stream.Body, audio.StreamPlayback{
+		OnFirstAudio: func() {
+			lastSynthMs.Store(time.Since(start).Milliseconds())
+			lastSpeechStreamed.Store(true)
+		},
+	})
 }
 
 // SplitSentences breaks text into speakable chunks on sentence terminators,

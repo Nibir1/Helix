@@ -293,10 +293,33 @@ func TestPiperSidecarContract(t *testing.T) {
 }
 
 func TestDetectRecorderSmoke(t *testing.T) {
-	// Machine-dependent: must never panic, and must return a known name or the
-	// install-hint error.
+	// Machine-dependent: must never panic, and must return a name RecordClip
+	// knows how to invoke, or the install-hint error.
+	//
+	// "rec" belongs in this set. DetectRecorder deliberately distinguishes it
+	// from "sox" because minimal sox packages ship without the `rec` symlink,
+	// and invoking the wrong binary fails every capture. This test predated
+	// that split and still only accepted sox/ffmpeg, so it passed on machines
+	// with NO recorder installed (the error branch) and failed on every machine
+	// that actually had sox — the exact environments the feature targets.
 	rec, err := DetectRecorder()
-	if err == nil && rec != "sox" && rec != "ffmpeg" {
-		t.Fatalf("unexpected recorder %q", rec)
+	if err != nil {
+		return // no recorder on this machine; the install hint is the contract
+	}
+	if !knownRecorder(rec) {
+		t.Fatalf("DetectRecorder returned %q, which RecordClip cannot invoke", rec)
+	}
+}
+
+// TestKnownRecordersMatchRecordClip pins the detector and the runner to the
+// same vocabulary, so a new backend cannot be detected but not executable.
+func TestKnownRecordersMatchRecordClip(t *testing.T) {
+	for _, name := range recorderNames {
+		if !knownRecorder(name) {
+			t.Errorf("recorder %q is advertised but not recognized", name)
+		}
+	}
+	if knownRecorder("definitely-not-a-recorder") {
+		t.Error("unknown binaries must not be accepted as recorders")
 	}
 }

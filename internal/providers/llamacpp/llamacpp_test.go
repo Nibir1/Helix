@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,5 +152,38 @@ func TestListModelsReportsLoadedGGUF(t *testing.T) {
 	}
 	if len(models) != 1 || models[0].ID != "qwen2.5-3b-instruct-q4_k_m.gguf" {
 		t.Fatalf("expected the loaded GGUF reported, got %+v", models)
+	}
+}
+
+// Port 8080 is llama-server's default AND one of the most commonly occupied
+// ports on a dev machine. Reporting "not reachable" when some unrelated
+// service is answering sends the user to start llama-server on a port that is
+// already taken.
+func TestDiagnoseDistinguishesForeignServerFromSilence(t *testing.T) {
+	const url = "http://127.0.0.1:8080/v1"
+
+	// A real case from QA: an unrelated local API answered 404 on /v1/models.
+	foreign := fmt.Errorf(`HTTP 404: {"title":"Not found","status":404}`)
+	kind, hint := Diagnose(foreign, url)
+	if kind != DiagnosisForeignServer {
+		t.Fatalf("an HTTP status means a server replied, got kind=%v", kind)
+	}
+	for _, want := range []string{"Something IS listening", "another service", "8081", "HELIX_LLAMACPP_URL"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("foreign-server hint should mention %q:\n%s", want, hint)
+		}
+	}
+
+	// Nothing listening: the guidance is simply "start it".
+	refused := fmt.Errorf("request failed: dial tcp 127.0.0.1:8080: connect: connection refused")
+	kind, hint = Diagnose(refused, url)
+	if kind != DiagnosisUnreachable {
+		t.Fatalf("a dial failure means nobody is listening, got kind=%v", kind)
+	}
+	if !strings.Contains(hint, "Nothing is listening") || !strings.Contains(hint, "llama-server -m") {
+		t.Errorf("unreachable hint should say to start the server:\n%s", hint)
+	}
+	if strings.Contains(hint, "another service") {
+		t.Error("a dial failure must not blame a port conflict")
 	}
 }

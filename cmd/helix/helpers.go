@@ -13,6 +13,7 @@ import (
 	"helix/internal/commands"
 	"helix/internal/ollama"
 	"helix/internal/providers"
+	"helix/internal/providers/llamacpp"
 	"helix/internal/rag"
 	"helix/internal/utils"
 
@@ -31,13 +32,15 @@ var providerOptions = []providerOption{
 	{ID: "kimi", Label: "Kimi"},
 	{ID: "qwen", Label: "Qwen"},
 	{ID: "glm", Label: "GLM"},
+	{ID: "xai", Label: "xAI (Grok)"},
 	{ID: "ollama", Label: "Ollama (local)"},
+	{ID: "llamacpp", Label: "llama.cpp (local, user-managed llama-server)"},
 }
 
 func normalizeProviderName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch name {
-	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "ollama":
+	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "xai", "ollama":
 		return name
 	default:
 		return name
@@ -47,13 +50,65 @@ func normalizeProviderName(name string) string {
 func setupProvider(provider string) error {
 	provider = normalizeProviderName(provider)
 	switch provider {
-	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm":
+	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "xai":
 		return ensureRemoteAPIKey(provider)
 	case "ollama":
 		return setupOllamaProvider()
+	case "llamacpp":
+		return setupLlamaCppProvider()
 	default:
-		return fmt.Errorf("unknown provider: %s", provider)
+		// The registry is the authority on what exists: a provider registered
+		// by ai.InitProviders but missing from this switch used to be listed by
+		// /provider status and then rejected by /provider use — which is
+		// exactly how llamacpp shipped broken. Anything keyless and registered
+		// is usable as-is.
+		if ai.HasProvider(provider) {
+			return nil
+		}
+		return fmt.Errorf("unknown provider: %s (registered: %s)",
+			provider, strings.Join(ai.ListProviders(), ", "))
 	}
+}
+
+// setupLlamaCppProvider prepares the user-managed llama-server sidecar. There
+// is no key and nothing to install (ADR-002) — the only useful setup step is
+// telling the user whether the server is actually reachable, since an
+// unreachable one fails later as an opaque connection error.
+func setupLlamaCppProvider() error {
+	url := llamacpp.BaseURL(cfg.LLM.LlamaCppURL)
+	color.Cyan("llama.cpp endpoint: %s", url)
+
+	p, err := ai.GetProviderByName(llamacpp.Name)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if herr := p.HealthCheck(ctx); herr != nil {
+		kind, hint := llamacpp.Diagnose(herr, url)
+		if kind == llamacpp.DiagnosisForeignServer {
+			color.Yellow("A DIFFERENT service is answering on %s.", url)
+		} else {
+			color.Yellow("llama-server is not reachable at %s.", url)
+		}
+		for _, line := range strings.Split(hint, "\n") {
+			color.Yellow("  %s", line)
+		}
+		color.Yellow("  Override the endpoint with HELIX_LLAMACPP_URL or llm.llamacpp_url.")
+		// Selecting it anyway leaves the shell unable to answer ANYTHING, so
+		// say that plainly rather than letting the next prompt fail with a raw
+		// 404 from whatever else is on that port.
+		color.Yellow("  Until it responds, every planner and chat request will fail.")
+		if !commands.AskForConfirmation("Select llama.cpp anyway?") {
+			return fmt.Errorf("llama.cpp not usable at %s", url)
+		}
+		return nil
+	}
+
+	color.Green("llama-server reachable.")
+	return nil
 }
 
 func ensureRemoteAPIKey(provider string) error {
@@ -66,6 +121,9 @@ func ensureRemoteAPIKey(provider string) error {
 	key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("Paste API key for %s", provider)))
 	if key == "" {
 		return fmt.Errorf("API key cannot be empty")
+	}
+	if !confirmKeyForProvider(provider, key) {
+		return fmt.Errorf("API key entry cancelled")
 	}
 
 	return ai.SaveProviderKey(provider, key)
@@ -448,4 +506,20 @@ func runCancellableProgressWithBase(
 	}
 
 	return err
+}
+
+// confirmKeyForProvider warns when a pasted key was plainly issued by another
+// vendor, and asks before storing it. Warn-and-confirm, never a hard block:
+// key formats change, and refusing a valid new format would be worse than the
+// mistake being guarded against.
+//
+// Returns false when the user declines, so the caller can abort cleanly.
+func confirmKeyForProvider(provider, key string) bool {
+	owner, wrong := providers.MisdirectedKey(provider, key)
+	if !wrong {
+		return true
+	}
+	color.Yellow("That key looks like a %s key, but you are configuring %q.", owner, provider)
+	color.Yellow("  %s", providers.KeyOwnerHint(provider, owner))
+	return commands.AskForConfirmation("Store it anyway?")
 }

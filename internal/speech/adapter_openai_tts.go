@@ -146,3 +146,66 @@ func (p *openaiTTS) HealthCheck(ctx context.Context) error {
 	_ = data
 	return nil
 }
+
+// openaiPCMSampleRate is the sample rate OpenAI's `pcm` response format emits:
+// 24 kHz, 16-bit signed little-endian, mono. Fixed by the API contract, which
+// is what makes headerless streaming safe — there is nothing to parse.
+const openaiPCMSampleRate = 24000
+
+// SynthesizeStream begins synthesis and hands back the audio body unread, so
+// playback can start while generation is still running (P7.2c).
+//
+// It requests `pcm` rather than the buffered path's `wav`: a WAV container
+// would require parsing a header out of a stream whose first bytes may not have
+// arrived, whereas raw PCM at a contract-fixed rate can be played from byte one.
+//
+// Args:
+//   - ctx: cancels the request and, through the body, playback.
+//   - text: the utterance.
+//   - opts: voice/speed overrides.
+//
+// Returns: the open audio body, or an error before any audio was produced —
+// which is the caller's cue to fall back to the buffered path.
+// Complexity: O(1) request; the body streams.
+func (p *openaiTTS) SynthesizeStream(
+	ctx context.Context, text string, opts SynthesisOptions,
+) (StreamedAudio, error) {
+	if p.RequiresAPIKey() && p.key == "" {
+		return StreamedAudio{}, fmt.Errorf("%s: missing API key", p.name)
+	}
+	if text == "" {
+		return StreamedAudio{}, fmt.Errorf("%s: empty text", p.name)
+	}
+
+	voice := p.voice
+	if opts.Voice != "" {
+		voice = opts.Voice
+	}
+	speed := opts.Speed
+	if speed <= 0 {
+		speed = 1.0
+	}
+
+	headers := map[string]string{}
+	if p.key != "" {
+		headers["Authorization"] = "Bearer " + p.key
+	}
+
+	resp, err := sharedClient.DoRequest(ctx, http.MethodPost, p.baseURL+"/audio/speech", headers,
+		map[string]any{
+			"model":           p.model,
+			"input":           text,
+			"voice":           voice,
+			"speed":           speed,
+			"response_format": "pcm",
+		})
+	if err != nil {
+		return StreamedAudio{}, fmt.Errorf("%s: %w", p.name, err)
+	}
+
+	return StreamedAudio{
+		SampleRate: openaiPCMSampleRate,
+		Channels:   1,
+		Body:       resp.Body,
+	}, nil
+}
