@@ -13,7 +13,17 @@ The entry point for all user input. It uses a weighted evidence system to classi
 
 ### 2. AI Planner & Agent Orchestrator (`internal/ai/planner.go`, `internal/agent/agent.go`)
 - **Strict JSON Protocol**: The planner is forced to output a rigid JSON schema defining `intent` and `steps`.
-- **Tool Use**: Supports `response`, `shell`, `git`, `package`, and `recon` tools.
+- **Tool Use**: Supports `response`, `shell`, `git`, `package`, `recon`, and `web` tools.
+- **Web Tool** (`internal/agent/web.go`): read-only network retrieval —
+  `action: "search"` (DuckDuckGo Lite, top 5 results) and `action: "fetch"` (one URL,
+  HTML stripped to text). Classified at the same risk tier as a read-only shell
+  command: it cannot write, install, or execute anything. A model-chosen `fetch`
+  URL passes an SSRF guard (no loopback, link-local, private, or CGNAT
+  destinations, http/https only, redirects re-checked), and an unmentioned URL
+  goes through the Instruction Firewall's critic and provenance escalation
+  exactly as a URL inside a shell command does. Retrieved text returns to the
+  planner inside the harness's `authority="data-only"` fence, which earns one
+  follow-up iteration so the model answers from the results.
 - **Safety Layer**: Intercepts the plan to inject missing `git add` steps, normalize versions, and validate arguments before execution.
 
 ### 3. Shell Safety & Sandbox (`internal/commands/safety/`, `internal/commands/sandbox.go`)

@@ -54,6 +54,36 @@ func TestHasSpeech(t *testing.T) {
 	}
 }
 
+// TestUsableSpeech pins the QA regression directly: the recorder used to hand
+// back a ~0.1s clip of Helix's own 880Hz ready chime, which cleared the
+// amplitude gate and came back from STT as the word "you". Loud is not enough —
+// it also has to be long enough to be a command.
+func TestUsableSpeech(t *testing.T) {
+	cases := []struct {
+		name string
+		clip AudioFormat
+		want bool
+	}{
+		// 0.1s at 16 kHz = 1600 samples, at chime amplitude: the exact shape of
+		// the clip that produced the phantom turn.
+		{"loud 0.1s chime tail", sineClip(0.8, 1600), false},
+		// 0.5s of ordinary speech level: the shortest genuine utterance.
+		{"0.5s speech", sineClip(0.1, 8000), true},
+		// Long but silent: still nothing to transcribe.
+		{"1s silence", silenceClip(16000), false},
+		// Right at the boundary (0.3s = 4800 samples) — accepted.
+		{"0.3s speech", sineClip(0.1, 4800), true},
+		{"undecodable", AudioFormat{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := UsableSpeech(tc.clip); got != tc.want {
+				t.Fatalf("UsableSpeech = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestClipDuration(t *testing.T) {
 	// 1 second at 16 kHz.
 	if d := ClipDuration(sineClip(0.5, 16000)); math.Abs(d-1.0) > 0.01 {

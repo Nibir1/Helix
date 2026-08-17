@@ -290,15 +290,27 @@ func (a *Agent) HandleInput(userInput string) {
 
 	obs, planned := a.planFirewallExecute(userInput, envDesc, ragContext, canary)
 
-	// Agentic harness (opt-in): when a plan executed and a step failed, feed
-	// the failure back to the planner and let it self-correct, bounded by a
-	// step budget. Every follow-up plan re-enters the SAME safety pipeline —
-	// the loop never bypasses classify → firewall → risk tiers → sandbox
-	// (guardrail #3). Disabled by default; /agentic on enables it.
-	if planned && a.Agentic {
-		a.agenticFollowUp(userInput, envDesc, ragContext, obs)
+	// Agentic harness: when a plan executed and a step failed, feed the failure
+	// back to the planner and let it self-correct, bounded by a step budget.
+	// Every follow-up plan re-enters the SAME safety pipeline — the loop never
+	// bypasses classify → firewall → risk tiers → sandbox (guardrail #3).
+	//
+	// Self-correction is opt-in (/agentic on). A web retrieval is NOT: a search
+	// that nobody reads is not a feature, so a successful retrieval always earns
+	// its follow-up iteration, in which the model answers from the results. The
+	// user asked for a lookup and one extra planner call is what a lookup costs.
+	switch {
+	case planned && a.Agentic:
+		a.agenticFollowUp(userInput, envDesc, ragContext, obs, 0)
+	case planned && needsAnswer(obs):
+		a.agenticFollowUp(userInput, envDesc, ragContext, obs, retrievalFollowUpBudget)
 	}
 }
+
+// retrievalFollowUpBudget is the follow-up allowance for a turn that only
+// retrieved something. One iteration: enough to answer from the results, and not
+// enough to become the self-correction loop the user did not enable.
+const retrievalFollowUpBudget = 1
 
 // planFirewallExecute runs one plan→firewall→execute cycle. It returns the
 // per-step observation trace and whether a plan actually executed (false when
@@ -418,6 +430,15 @@ type StepObservation struct {
 	// test run actually failed — this can. Zero means success or "unknown"
 	// (non-shell tools, capture disabled).
 	ExitCode int
+
+	// NeedsAnswer marks a step that SUCCEEDED but whose output is an input the
+	// model still has to use — a web retrieval, not an action.
+	//
+	// Without it the harness would stop here: its rule is "a fully successful
+	// plan is complete", which is right for a command that did something and
+	// exactly wrong for a search, whose results nobody has read yet. This is
+	// what turns a retrieval into an answer.
+	NeedsAnswer bool
 }
 
 // executePlanSteps runs a validated plan's steps through the safety pipeline
@@ -485,6 +506,26 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 				return obs
 			}
 
+		case "web":
+			// Provenance escalation keys web steps on their URL (firewall.go):
+			// a fetch target lifted out of retrieved context needs the same
+			// mandatory confirmation a shell command carrying that URL would.
+			out, err := a.handleWebStep(step, escalated[step.Args["url"]])
+			if err != nil {
+				a.render.PrintError(fmt.Sprintf("Web step failed: %v", err))
+				o.OK, o.Err = false, err.Error()
+				obs = append(obs, o)
+				return obs
+			}
+			// A web step's whole purpose is to hand the planner facts it did not
+			// have, so the retrieved text is captured unconditionally — unlike
+			// shell output, which is only captured on agentic turns because
+			// capturing costs the child its TTY. Retrieval has no such cost, and
+			// without the text the model would answer the very question it just
+			// searched from memory.
+			o.Output = out
+			o.NeedsAnswer = true
+
 		default:
 			a.render.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
 			o.OK, o.Err = false, "unknown tool"
@@ -504,6 +545,22 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 // provider's real latency instead of the whole generation. Non-streaming
 // renderers (daemon, headless) keep the buffered path byte-for-byte.
 //
+// chatCapabilityPreamble tells the fallback model what Helix can actually do.
+//
+// This path used to send the bare user line, so the model answered as a generic
+// assistant reasoning from its training cutoff — which is how "I can't perform a
+// web search" reached the user of a shell that now can. It cannot emit a plan
+// from here (this path exists precisely because planning failed), so the honest
+// move is to stop denying the capability and name the phrasing that reaches it.
+const chatCapabilityPreamble = `You are Helix, a local AI shell. Helix can run shell commands, git and package
+operations, recon tools, and — through its "web" tool — search the web and fetch pages.
+Never tell the user you are unable to search the web or look something up: Helix can.
+If answering needs current information you do not have, say that in one line and
+suggest re-asking as "search the web for <topic>", which routes to the web tool.
+Answer the user's message below.
+
+`
+
 // Args: userInput: the user's original text; think: the caller's spinner.
 // Complexity: O(response length), streamed.
 func (a *Agent) chatFallback(userInput string, think thinkerShim) {
@@ -523,7 +580,8 @@ func (a *Agent) chatFallback(userInput string, think thinkerShim) {
 	}
 
 	think.Start()
-	resp, chatErr := ai.StreamModel(userInput, ai.DefaultModelConfig(), ai.DefaultChatTimeout, onChunk)
+	resp, chatErr := ai.StreamModel(chatCapabilityPreamble+userInput,
+		ai.DefaultModelConfig(), ai.DefaultChatTimeout, onChunk)
 	if out != nil {
 		out.Close()
 	} else {

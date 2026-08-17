@@ -103,7 +103,7 @@ To ensure valid JSON and executable shell commands:
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package" | "recon",
+      "tool": "response" | "shell" | "git" | "package" | "recon" | "web",
       "message": "...",
       "command": "...",
       "action": "...",
@@ -146,6 +146,21 @@ To ensure valid JSON and executable shell commands:
 - args.target = IP, CIDR, or URL
 - NEVER put recon commands under "shell".
 
+### WEB TOOL RULES
+
+- tool = "web"
+- action = "search" | "fetch"
+- search -> args.query = the search terms (plain text, no operators required)
+- fetch  -> args.url = a single absolute http(s) URL
+- Use it for anything you cannot know from training data: current events, today's
+  prices/scores/weather, "latest"/"current"/"who is now", release versions, or any
+  claim the user asks you to verify.
+- NEVER answer "I cannot search the web" — you can. Emit a web step instead.
+- NEVER put curl/wget under "shell" to read a page; use this tool.
+- One retrieval step is usually enough. Do NOT emit a "response" step in the same
+  plan that pretends to already know the results — the search results come back
+  to you first, and you answer from them on the next turn.
+
 ### GIT TOOL RULES (SAFE + DANGEROUS OPTION C)
 
 SAFE:
@@ -179,6 +194,12 @@ Example for version update (file editing + git):
 {"intent":"multi_step","steps":[{"tool":"shell","command":"sed -i '' 's/1.0.0/2.0.0/g' package.json"},{"tool":"shell","command":"sed -i '' 's/1.0.0/2.0.0/g' README.md"},{"tool":"git","action":"add","args":{"paths":"package.json README.md"}},{"tool":"git","action":"commit","args":{"message":"release v2.0.0"}},{"tool":"git","action":"tag","args":{"name":"v2.0.0"}}]}
 
 This example is VALID. The single quotes in the sed commands are CORRECT shell syntax.
+
+Example for a question that needs current information:
+{"intent":"chat","steps":[{"tool":"web","action":"search","args":{"query":"current US president"}}]}
+
+Example for reading one specific page the user named:
+{"intent":"chat","steps":[{"tool":"web","action":"fetch","args":{"url":"https://go.dev/doc/devel/release"}}]}
 
 ### FINAL HARD REQUIREMENT
 
@@ -425,12 +446,17 @@ func validatePlan(p *Plan) error {
 		return fmt.Errorf("planner produced no steps")
 	}
 
+	// The tool vocabulary is CLOSED, and that is the security property: an
+	// unknown tool is dropped, never dispatched. Adding "web" widens what Helix
+	// can do by exactly one read-only network capability; it does not loosen the
+	// gate.
 	var validTools = map[string]bool{
 		"response": true,
 		"shell":    true,
 		"git":      true,
 		"package":  true,
 		"recon":    true,
+		"web":      true,
 	}
 
 	var filtered []PlanStep
@@ -489,6 +515,32 @@ func validatePlan(p *Plan) error {
 				continue
 			}
 
+		case "web":
+			// Both actions need exactly one argument, and a step missing it is
+			// unexecutable — drop it here rather than letting the executor
+			// discover it and fail the turn.
+			switch step.Action {
+			case "search":
+				query := strings.TrimSpace(step.Args["query"])
+				if query == "" {
+					color.Yellow("Dropping web search step with no query")
+					continue
+				}
+				step.Args = map[string]string{"query": query}
+			case "fetch":
+				target := strings.TrimSpace(step.Args["url"])
+				if target == "" {
+					color.Yellow("Dropping web fetch step with no url")
+					continue
+				}
+				step.Args = map[string]string{"url": target}
+			default:
+				color.Yellow("Dropping unsupported web action: %s", step.Action)
+				continue
+			}
+			step.Command = "" // never a raw command
+			step.Message = ""
+
 		case "recon":
 			if step.Action == "" {
 				continue
@@ -544,8 +596,9 @@ func containsAny(s string, needles []string) bool {
 // Args: userInput, envDescription. Returns: prompt string. Complexity: O(1).
 func BuildCompactPlannerPrompt(userInput, envDescription string) string {
 	return fmt.Sprintf(`Output ONLY one valid JSON object. First char '{', last char '}'. No markdown, no commentary.
-Schema: {"intent":"chat|shell|git|package|multi_step","steps":[{"tool":"response|shell|git|package|recon","message":"...","command":"...","action":"...","args":{}}]}
+Schema: {"intent":"chat|shell|git|package|multi_step","steps":[{"tool":"response|shell|git|package|recon|web","message":"...","command":"...","action":"...","args":{}}]}
 Shell rules: no package managers, no rm -rf /, no curl|bash, no /tmp execution.
+Current info (news, prices, "latest", "who is now"): {"tool":"web","action":"search","args":{"query":"..."}} — never claim you cannot search.
 User Input: %s
 Environment: %s
 NOW OUTPUT THE COMPLETE JSON:`, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))
@@ -566,12 +619,13 @@ NOW OUTPUT THE COMPLETE JSON:`, strings.TrimSpace(userInput), strings.TrimSpace(
 // Complexity: O(1).
 func BuildMinimalPlannerPrompt(userInput, envDescription string) string {
 	return fmt.Sprintf(`Return ONLY one JSON object. First char '{', last char '}'. No markdown. No commentary.
-Schema: {"intent":"shell|git|package|multi_step|chat","steps":[{"tool":"response|shell|git|package|recon","message":"...","command":"...","action":"...","args":{}}]}
+Schema: {"intent":"shell|git|package|multi_step|chat","steps":[{"tool":"response|shell|git|package|recon|web","message":"...","command":"...","action":"...","args":{}}]}
 Rules: steps MUST be non-empty.
 Git commit: {"tool":"git","action":"commit","args":{"message":"..."}}
 Git push: {"tool":"git","action":"push","args":{"remote":"origin","branch":"main"}}
 Git add: {"tool":"git","action":"add","args":{"paths":"file1 file2"}}
 Shell tool for file creation/editing. No package managers in shell tool.
+Web search: {"tool":"web","action":"search","args":{"query":"..."}}
 Request: %s
 Env: %s
 OUTPUT THE COMPLETE JSON NOW:`, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))

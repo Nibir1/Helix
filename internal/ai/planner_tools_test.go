@@ -52,10 +52,11 @@ func TestPlannerToolSchemaMatchesPromptContract(t *testing.T) {
 	// a tool the executor has never heard of, at the API level.
 	wantTools := map[string]bool{
 		"response": true, "shell": true, "git": true, "package": true, "recon": true,
+		"web": true,
 	}
 	got := schema.Properties.Steps.Items.Properties.Tool.Enum
 	if len(got) != len(wantTools) {
-		t.Fatalf("tool enum = %v, want exactly the 5 executor tools", got)
+		t.Fatalf("tool enum = %v, want exactly the %d executor tools", got, len(wantTools))
 	}
 	for _, tool := range got {
 		if !wantTools[tool] {

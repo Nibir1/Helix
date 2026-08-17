@@ -27,6 +27,12 @@ func backendPlayTick() {}
 // backendPlayAlert is a silent no-op.
 func backendPlayAlert() {}
 
+// backendPlayAlertSync is a silent no-op. There is no playback to wait for on
+// this backend, so "blocking until the tone finishes" returns immediately —
+// which is also the honest answer for the mic-overlap problem it exists to
+// solve: a silent build cannot echo its own chime into the microphone.
+func backendPlayAlertSync() {}
+
 // backendPlayError is a silent no-op.
 func backendPlayError() {}
 

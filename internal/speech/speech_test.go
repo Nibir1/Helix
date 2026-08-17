@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"helix/internal/providers"
 )
@@ -41,6 +42,9 @@ type fakeTTS struct {
 	name  string
 	err   error
 	local bool
+	// delay simulates synthesis time, so latency-metric tests can tell a
+	// pipelined sentence's round trip apart from sentence 1's first-audio time.
+	delay time.Duration
 }
 
 func (f *fakeTTS) Name() string                      { return f.name }
@@ -51,6 +55,9 @@ func (f *fakeTTS) RequiresAPIKey() bool              { return false }
 func (f *fakeTTS) IsLocal() bool                     { return f.local }
 func (f *fakeTTS) DefaultModel() string              { return "fake" }
 func (f *fakeTTS) Synthesize(_ context.Context, _ string, _ SynthesisOptions) (AudioFormat, error) {
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
 	if f.err != nil {
 		return AudioFormat{}, f.err
 	}

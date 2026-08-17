@@ -745,9 +745,12 @@ func (d *Daemon) runVoiceTurn(ctx context.Context) bool {
 		return false
 	}
 
-	// Amplitude gate BEFORE the STT round-trip (mirrors the interactive loop):
-	// a dead mic or silent room must not burn a cloud transcription.
-	if !speech.HasSpeech(clip, 0) {
+	// Amplitude AND duration gate BEFORE the STT round-trip (mirrors the
+	// interactive loop): a dead mic, a silent room, or a sub-0.3s transient must
+	// not burn a cloud transcription. The daemon speaks its own prompts, so the
+	// duration half matters here too — the tail of a spoken notice is exactly
+	// the kind of clip STT hallucinates a word out of.
+	if !speech.UsableSpeech(clip) {
 		d.journal.Record("voice", "", "", "no speech detected — re-arming")
 		return false
 	}

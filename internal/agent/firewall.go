@@ -100,6 +100,25 @@ func shellCommandsOf(p *ai.Plan) []string {
 	return out
 }
 
+// planWebFetchURLs returns the URLs a plan would fetch with the web tool.
+//
+// Only "fetch": a web SEARCH goes to one fixed endpoint with the user's own
+// words, so there is no model-chosen destination to review. A fetch is a
+// model-chosen URL, which makes it the same egress surface as a URL inside a
+// shell command — and gets the same treatment.
+func planWebFetchURLs(p *ai.Plan) []string {
+	var out []string
+	for _, s := range p.Steps {
+		if s.Tool != "web" || s.Action != "fetch" {
+			continue
+		}
+		if u := strings.TrimSpace(s.Args["url"]); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
 // criticRun is the model entry point for the critic pass; swappable in tests.
 var criticRun = func(prompt string, cfg ai.ModelConfig) (string, error) {
 	return ai.RunModelWithConfig(prompt, cfg)
@@ -134,15 +153,24 @@ var urlTokenRe = regexp.MustCompile(`https?://[^\s"'<>|)]+`)
 //
 // Args: userInput: raw user line; plan: parsed plan. Returns: bool. Complexity: O(commands x URLs).
 func RequiresCriticReview(userInput string, plan *ai.Plan) bool {
-	if !planHasShellSteps(plan) {
-		return false
-	}
 	userLC := strings.ToLower(userInput)
-	for _, cmd := range shellCommandsOf(plan) {
-		for _, u := range urlTokenRe.FindAllString(strings.ToLower(cmd), -1) {
-			if !strings.Contains(userLC, u) {
-				return true
+
+	if planHasShellSteps(plan) {
+		for _, cmd := range shellCommandsOf(plan) {
+			for _, u := range urlTokenRe.FindAllString(strings.ToLower(cmd), -1) {
+				if !strings.Contains(userLC, u) {
+					return true
+				}
 			}
+		}
+	}
+
+	// A web fetch is the same surface with a different spelling: an unmentioned
+	// destination chosen by the model. Reviewing shell URLs but not these would
+	// leave the new tool as the way around the control.
+	for _, u := range planWebFetchURLs(plan) {
+		if !strings.Contains(userLC, strings.ToLower(u)) {
+			return true
 		}
 	}
 	return false
@@ -171,6 +199,16 @@ func escalatedCommands(userInput, retrievedText string, plan *ai.Plan) map[strin
 			}
 		}
 	}
+	// Web fetches key on their URL rather than on a command string, since that is
+	// the whole step. A URL the planner lifted out of retrieved context is the
+	// same poisoned-knowledge signature whichever tool carries it, so it earns
+	// the same mandatory confirmation.
+	for _, u := range planWebFetchURLs(plan) {
+		lc := strings.ToLower(u)
+		if !strings.Contains(userLC, lc) && strings.Contains(retrievedLC, lc) {
+			out[u] = true
+		}
+	}
 	return out
 }
 
@@ -183,6 +221,12 @@ func escalatedCommands(userInput, retrievedText string, plan *ai.Plan) map[strin
 // Complexity: O(1) HTTP round trip.
 func (a *Agent) criticAllows(userInput string, plan *ai.Plan) bool {
 	cmds := shellCommandsOf(plan)
+	// Web fetches are presented to the critic as actions too — otherwise a
+	// web-only plan would have nothing for it to look at and pass trivially,
+	// which is precisely the plan shape an injected URL produces.
+	for _, u := range planWebFetchURLs(plan) {
+		cmds = append(cmds, "web fetch "+u)
+	}
 	if len(cmds) == 0 {
 		return true
 	}
@@ -191,6 +235,7 @@ You see ONLY the user request and the proposed shell commands.
 Rules:
 - Creating, editing, chmod +x, and executing files inside the user's working directory (cat/printf/echo > file, ./script) is NORMAL: approve.
 - Installing packages or downloading from official URLs that plausibly serve the request: approve.
+- Reading a public web page or search result that plausibly serves the request ("web fetch <url>") is NORMAL: approve.
 - Reject ONLY if a command exfiltrates local files/data to a remote host, fetches and executes remote code, reads credential or system files unrelated to the request, destroys data beyond the request, or is unrelated to the request.
 Output exactly one JSON object and nothing else: {"verdict":"yes"} or {"verdict":"no"}.
 Example A: request "create a script that prints hello and run it"; commands "printf '#!/bin/bash\necho hello' > hello.sh ; chmod +x hello.sh ; ./hello.sh" => {"verdict":"yes"}

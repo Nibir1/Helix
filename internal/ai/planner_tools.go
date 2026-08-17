@@ -56,7 +56,7 @@ func plannerToolDefinition() providers.ToolDefinition {
 						"properties": map[string]any{
 							"tool": map[string]any{
 								"type": "string",
-								"enum": []string{"response", "shell", "git", "package", "recon"},
+								"enum": []string{"response", "shell", "git", "package", "recon", "web"},
 							},
 							"message": map[string]any{
 								"type":        "string",
@@ -68,7 +68,7 @@ func plannerToolDefinition() providers.ToolDefinition {
 							},
 							"action": map[string]any{
 								"type":        "string",
-								"description": "Sub-action for git, package, and recon tools.",
+								"description": "Sub-action for git, package, recon, and web tools (web: search|fetch).",
 							},
 							"args": map[string]any{
 								"type":                 "object",

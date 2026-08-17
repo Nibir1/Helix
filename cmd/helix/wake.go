@@ -60,9 +60,55 @@ func enableWakeWord() {
 		color.Red("No audio recorder found — install sox (`brew install sox`) before hands-free will work.")
 		return
 	}
-	color.Cyan("Hands-free is live in THIS shell: after each turn I listen for \"%s\" before the next one.", ww.Phrase)
-	color.Cyan("For always-on conversation (no terminal open), run:  helix daemon")
-	color.Cyan("Say \"go to sleep\" or \"stop listening\" anytime to pause; /wake off to disable.")
+	for _, line := range wakeBannerLines(ww.Engine, ww.Phrase) {
+		color.Cyan("%s", line)
+	}
+}
+
+// wakeBannerLines is the /wake on explanation, worded for the engine that will
+// actually do the detecting.
+//
+// The banner used to promise `after each turn I listen for "hey helix"`
+// unconditionally. With the default `energy` engine that is false: it scores
+// normalized RMS over a chunk (internal/wakeword/energy.go), so ANY speech or
+// loud sound wakes it — it cannot recognize a phrase, and never claimed to
+// internally. printWakeStatus already differentiated the two detectors; this
+// makes the enable banner agree with it.
+//
+// Args:
+//   - engine: the configured engine ("energy" — the default — or "sidecar").
+//   - phrase: the configured wake phrase.
+//
+// Returns: the lines to print, in order.
+// Complexity: O(1).
+func wakeBannerLines(engine, phrase string) []string {
+	if phrase == "" {
+		phrase = "hey helix"
+	}
+
+	var lines []string
+	if engine == "sidecar" {
+		lines = append(lines,
+			fmt.Sprintf("Hands-free is live in THIS shell: after each turn I listen for %q before the next one.", phrase))
+	} else {
+		lines = append(lines,
+			"Hands-free is live in THIS shell: after each turn I listen before the next one.",
+			fmt.Sprintf("Engine %q wakes on ANY speech or loud sound — say anything to continue; it cannot", engineOrDefault(engine)),
+			fmt.Sprintf("match the phrase %q. For true phrase spotting, run an openWakeWord-class", phrase),
+			"sidecar and set speech.wake_word.engine=sidecar (see docs/edge_deployment.md §5.1).")
+	}
+	return append(lines,
+		"The wake word gates turns AFTER this one — a voice turn already in progress needs no wake.",
+		"For always-on conversation (no terminal open), run:  helix daemon",
+		"Say \"go to sleep\" or \"stop listening\" anytime to pause; /wake off to disable.")
+}
+
+// engineOrDefault names the engine that will run when config leaves it blank.
+func engineOrDefault(engine string) string {
+	if engine == "" {
+		return "energy"
+	}
+	return engine
 }
 
 // printWakeStatus summarizes the hands-free configuration and readiness.
@@ -90,9 +136,10 @@ func printWakeStatus() {
 		}
 		color.Green("Recorder: ok — hands-free is ready.")
 		if ww.Engine == "sidecar" {
-			color.Cyan("Detector: sidecar (%s)", ww.SidecarURL)
+			color.Cyan("Detector: sidecar (%s) — matches the phrase", ww.SidecarURL)
 		} else {
-			color.Cyan("Detector: energy onset (everywhere-works default)")
+			color.Cyan("Detector: energy onset (everywhere-works default) — wakes on ANY speech,")
+			color.Cyan("          not on the phrase; the phrase is only used by the sidecar engine.")
 		}
 	} else {
 		color.Cyan("Run /wake on to enable hands-free conversation.")

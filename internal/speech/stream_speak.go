@@ -79,7 +79,11 @@ func SpeakStream(ctx context.Context, text string) error {
 			if ctx.Err() != nil {
 				return
 			}
-			a, err := Synthesize(ctx, s)
+			// synthesizeChain, not Synthesize: these sentences play BEHIND
+			// sentence 1, so their latency is already hidden and must not
+			// overwrite the reply's time-to-first-audio metric (which sentence 1
+			// owns, streamed or buffered).
+			a, err := synthesizeChain(ctx, s)
 			select {
 			case out <- synth{a, err}:
 			case <-ctx.Done():

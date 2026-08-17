@@ -335,7 +335,15 @@ func main() {
 			lastWakeAt = time.Time{}
 		}
 		agentCore.HandleInputEvent(ev)
-		gui.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
+		// Derived from state the subsystems already recorded, never from a probe:
+		// this is the hot loop. An unconditional CLEAR here used to claim the
+		// grid was fine while the STT chain was falling back to a sidecar that
+		// was not running.
+		if status := evaluateGridStatus(currentGridSignals()); status.Degraded {
+			gui.PrintWarning(status.Line)
+		} else {
+			gui.PrintSuccess(status.Line)
+		}
 		fmt.Print("\x1b]133;D;0\x07")
 
 		// BlackBox Phase 3 hands-free: after a completed turn, hold in
@@ -343,10 +351,14 @@ func main() {
 		// the idle window expires; then the next loop iteration runs another
 		// voice turn. Disabled wake config = classic push-to-talk per turn.
 		if voiceModeActive {
-			if wakeEv, ok := wakeListenUntilArmed(); ok {
+			wakeEv, outcome := wakeListenUntilArmed()
+			if outcome == wakeFired {
 				lastWakeAt = wakeEv.DetectedAt
 				continue
 			}
+			// Wake gating lapsing back to open capture is a change the user
+			// announced /wake on for — say so once instead of silently listening.
+			noteWakeLapse(outcome)
 		}
 	}
 }

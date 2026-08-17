@@ -58,6 +58,79 @@ type Registry struct {
 	client  *providers.HTTPClient
 	cfg     Config
 	offline bool // Phase 4 graceful degradation: local-first chain ordering
+
+	// lastSTT/lastTTS record the most recent failover-chain outcome so callers
+	// can report degradation WITHOUT probing anything. The interactive shell's
+	// per-turn status line needs this: it runs in the hot loop, where a health
+	// check would add a round trip to every turn just to print one word.
+	lastSTT ChainHealth
+	lastTTS ChainHealth
+}
+
+// ChainHealth is the outcome of the most recent run of a failover chain.
+type ChainHealth struct {
+	// Attempted reports whether the chain has run at least once. The zero value
+	// is therefore "unused", not "broken" — the state every session starts in.
+	Attempted bool
+
+	// OK reports whether some provider in the chain answered.
+	OK bool
+
+	// Used is the provider that answered ("" when none did).
+	Used string
+
+	// Failed lists, in chain order, the providers that errored before one
+	// answered. Empty on a clean primary-only call.
+	Failed []string
+}
+
+// Degraded reports whether the last call needed more than its primary provider,
+// or failed outright.
+func (h ChainHealth) Degraded() bool {
+	return h.Attempted && (!h.OK || len(h.Failed) > 0)
+}
+
+// Reason returns a short explanation of the degradation, or "" when the chain is
+// clean or has not run. Kept to one clause: it goes inside a one-line status.
+func (h ChainHealth) Reason() string {
+	if !h.Degraded() {
+		return ""
+	}
+	if !h.OK {
+		if len(h.Failed) == 0 {
+			return "no provider configured"
+		}
+		return "chain failed: " + strings.Join(h.Failed, ", ")
+	}
+	return "fallback: " + strings.Join(h.Failed, ", ") + " down, using " + h.Used
+}
+
+// LastSTTHealth returns the most recent STT chain outcome.
+func (r *Registry) LastSTTHealth() ChainHealth {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lastSTT
+}
+
+// LastTTSHealth returns the most recent TTS chain outcome.
+func (r *Registry) LastTTSHealth() ChainHealth {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lastTTS
+}
+
+// recordSTTHealth stores one STT chain outcome.
+func (r *Registry) recordSTTHealth(h ChainHealth) {
+	r.mu.Lock()
+	r.lastSTT = h
+	r.mu.Unlock()
+}
+
+// recordTTSHealth stores one TTS chain outcome.
+func (r *Registry) recordTTSHealth(h ChainHealth) {
+	r.mu.Lock()
+	r.lastTTS = h
+	r.mu.Unlock()
 }
 
 // NewRegistry creates a speech registry over the shared keystore and HTTP
@@ -288,12 +361,16 @@ func (r *Registry) StreamingSTT() (StreamingSTTProvider, bool) {
 func (r *Registry) Transcribe(ctx context.Context, audio AudioFormat) (Transcript, error) {
 	chain := r.STTChain()
 	if len(chain) == 0 {
+		r.recordSTTHealth(ChainHealth{Attempted: true})
 		return Transcript{}, errors.New("no STT provider configured — run /voice-setup")
 	}
 
 	var errs []error
+	var failed []string
 	for _, name := range chain {
 		if err := ctx.Err(); err != nil {
+			// A cancelled turn says nothing about provider health, so the last
+			// outcome is left as it was rather than recorded as a failure.
 			return Transcript{}, err
 		}
 
@@ -305,13 +382,17 @@ func (r *Registry) Transcribe(ctx context.Context, audio AudioFormat) (Transcrip
 			// loop can re-arm the mic instead of dispatching "" to the agent.
 			if strings.TrimSpace(t.Text) == "" {
 				errs = append(errs, fmt.Errorf("%s: %w", name, ErrEmptyTranscript))
+				failed = append(failed, name)
 				continue
 			}
+			r.recordSTTHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return t, nil
 		}
 		errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		failed = append(failed, name)
 	}
 
+	r.recordSTTHealth(ChainHealth{Attempted: true, Failed: failed})
 	return Transcript{}, fmt.Errorf("all STT providers failed: %w", errors.Join(errs...))
 }
 
@@ -319,23 +400,29 @@ func (r *Registry) Transcribe(ctx context.Context, audio AudioFormat) (Transcrip
 func (r *Registry) Synthesize(ctx context.Context, text string, opts SynthesisOptions) (AudioFormat, error) {
 	chain := r.TTSChain()
 	if len(chain) == 0 {
+		r.recordTTSHealth(ChainHealth{Attempted: true})
 		return AudioFormat{}, errors.New("no TTS provider configured — run /voice-setup")
 	}
 
 	var errs []error
+	var failed []string
 	for _, name := range chain {
 		if err := ctx.Err(); err != nil {
+			// Barge-in and Ctrl+C cancel here; that is not a provider failure.
 			return AudioFormat{}, err
 		}
 
 		p, _ := r.TTSProvider(name)
 		audio, err := p.Synthesize(ctx, text, opts)
 		if err == nil {
+			r.recordTTSHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return audio, nil
 		}
 		errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		failed = append(failed, name)
 	}
 
+	r.recordTTSHealth(ChainHealth{Attempted: true, Failed: failed})
 	return AudioFormat{}, fmt.Errorf("all TTS providers failed: %w", errors.Join(errs...))
 }
 
@@ -369,6 +456,7 @@ func (r *Registry) SynthesizeStream(
 	}
 
 	var errs []error
+	var failed []string
 	for _, name := range chain {
 		if err := ctx.Err(); err != nil {
 			return StreamedAudio{}, "", err
@@ -380,15 +468,21 @@ func (r *Registry) SynthesizeStream(
 		}
 		sp, ok := p.(StreamingTTSProvider)
 		if !ok {
-			continue // buffered-only provider; not an error
+			continue // buffered-only provider; not an error, so not "failed"
 		}
 
 		stream, err := sp.SynthesizeStream(ctx, text, opts)
 		if err == nil {
+			r.recordTTSHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return stream, name, nil
 		}
 		errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		failed = append(failed, name)
 	}
+
+	// Deliberately no failure recorded here: every failing exit from this
+	// function is followed by the buffered Synthesize path, whose outcome is the
+	// authoritative one for "could Helix speak?".
 
 	if len(errs) == 0 {
 		return StreamedAudio{}, "", errNoStreamingTTS

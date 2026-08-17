@@ -48,6 +48,26 @@ func HasSpeech(audio AudioFormat, minRMS float64) bool {
 	return ClipRMS(audio) >= minRMS
 }
 
+// minSpeechSeconds is the shortest clip that can plausibly hold a spoken
+// command.
+//
+// The amplitude gate alone is not enough: Helix's own 880Hz ready chime clears
+// the RMS floor easily, so a recorder armed inside the chime's tail produced a
+// ~0.1s clip of pure tone that the STT provider turned into the word "you" —
+// and Helix answered a turn the user never took. Real one-word commands
+// ("yes", "stop", "no") occupy ~0.3-0.5s including attack and release, so this
+// floor rejects transients (chime tails, key clicks, door thumps) without
+// rejecting the shortest genuine utterance.
+const minSpeechSeconds = 0.3
+
+// UsableSpeech reports whether a clip is worth sending to an STT provider:
+// audible above the RMS floor AND long enough to contain a command. Callers
+// treat false as ErrNoSpeech and re-arm the microphone rather than burning a
+// paid transcription on a transient.
+func UsableSpeech(audio AudioFormat) bool {
+	return HasSpeech(audio, 0) && ClipDuration(audio) >= minSpeechSeconds
+}
+
 // ClipDuration returns the decoded duration of a WAV clip in seconds
 // (0 for undecodable/empty buffers). Used to tell the user how much the mic
 // actually captured — instant feedback that the recorder is alive.

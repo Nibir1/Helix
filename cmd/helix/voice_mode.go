@@ -63,6 +63,40 @@ func enterVoiceMode(persist bool) {
 	}
 	audio.PlayAlert()
 	color.Cyan("VOICE MODE — speak after the chime; say %q or type /manual to switch back.", "manual mode")
+	for _, line := range voiceModeWakeNotes(cfg.Speech.WakeWord.Enabled, cfg.Speech.WakeWord.Engine) {
+		color.Cyan("%s", line)
+	}
+}
+
+// voiceModeWakeNotes explains how wake word and voice mode interact, which is
+// the part the two banners together used to get wrong.
+//
+// /wake on promised listening "for the wake word" and /voice on said nothing
+// about it, so the reasonable reading — every turn needs the phrase — was doubly
+// false: the FIRST turn after /voice on is open capture, and continuous turns
+// only pass through wake gating between them (see wakeListenUntilArmed and the
+// main loop). Saying so here costs one line and removes the surprise.
+//
+// Args:
+//   - wakeEnabled: cfg.Speech.WakeWord.Enabled.
+//   - engine: the configured wake engine.
+//
+// Returns: the extra banner lines (nil when wake is off).
+// Complexity: O(1).
+func voiceModeWakeNotes(wakeEnabled bool, engine string) []string {
+	if !wakeEnabled {
+		return nil
+	}
+	lines := []string{
+		"Wake word is on, but it gates the gaps BETWEEN turns — this first turn starts now,",
+		"with no wake needed.",
+	}
+	if engine != "sidecar" {
+		lines = append(lines,
+			fmt.Sprintf("Engine %q wakes on any speech, not on a phrase (/wake status).",
+				engineOrDefault(engine)))
+	}
+	return lines
 }
 
 func exitVoiceMode(persist bool) {
@@ -117,7 +151,13 @@ func handleManualCommand() {
 // partials live and finalizes on the utterance-final result; a failed stream
 // dial degrades to the proven batch path.
 func voiceTurn() (input.InputEvent, error) {
-	audio.PlayAlert() // ready cue
+	// Ready cue, then get out of the microphone's way. PlayAlertSync (not
+	// PlayAlert) waits for the tone to finish and micSettleDelay covers the
+	// ring-down after it: arming the recorder inside the chime made sox's
+	// silence gate open on Helix's own audio, and a 0.1s clip of the 880Hz ping
+	// came back from STT as the word "you" — a full reply to a turn nobody took.
+	audio.PlayAlertSync()
+	time.Sleep(micSettleDelay)
 
 	if s, ok := speech.StreamingSTT(); ok {
 		ev, err := streamingVoiceTurn(s)
@@ -137,6 +177,13 @@ func voiceTurn() (input.InputEvent, error) {
 // maxVoiceRetries is how many times the mic re-arms after a silent/empty turn
 // before falling back to typed input. Never zero — the shell must not brick.
 const maxVoiceRetries = 3
+
+// micSettleDelay is the pause between the ready chime finishing and the
+// recorder arming. Even after the last sample is played the speaker cone, the
+// desk, and the mic's AGC keep ringing for a few tens of milliseconds, and that
+// tail is loud enough to trip sox's `silence 1 0.1 1%` gate. 150ms is
+// imperceptible as a gap and clears the measured decay of the 880Hz ping.
+const micSettleDelay = 150 * time.Millisecond
 
 // voiceTurnWithRetry runs one voice turn, re-arming the mic on silence or an
 // empty transcript with a gentle prompt instead of silently switching to
@@ -181,10 +228,12 @@ func batchVoiceTurn() (input.InputEvent, error) {
 		return input.InputEvent{}, fmt.Errorf("capture: %w", err)
 	}
 
-	// Amplitude gate BEFORE the STT round-trip: a dead mic or a silent room
-	// must not burn a cloud transcription (and return a confusing empty
-	// result) — re-arm the mic instead.
-	if !speech.HasSpeech(clip, 0) {
+	// Amplitude AND duration gate BEFORE the STT round-trip: a dead mic, a
+	// silent room, or a sub-0.3s transient (the ready chime's tail, a key
+	// click) must not burn a cloud transcription — that is exactly how a clip
+	// of Helix's own chime came back as the word "you" and ran as a real turn.
+	// Re-arm the mic instead.
+	if !speech.UsableSpeech(clip) {
 		viz.Stop()
 		return input.InputEvent{}, speech.ErrNoSpeech
 	}
@@ -214,6 +263,10 @@ var errStreamDial = errors.New("stream dial failed")
 // streamingVoiceTurn streams 300ms chunks to the provider, echoes interim
 // partials, and returns on the utterance-final transcript. A 3s silence gap
 // finalizes the turn so a silent mic doesn't hang the shell.
+//
+// The chunk scanner arms as soon as this is entered, so the ready chime must
+// already be finished and settled: voiceTurn owns that ordering
+// (PlayAlertSync + micSettleDelay) for this path and the batch one alike.
 func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	unreg := utils.RegisterOperation(cancel)
@@ -395,17 +448,42 @@ func isVoiceKillPhrase(text string) bool {
 // shell falls back to push-to-talk turns.
 const wakeIdleWindow = 60 * time.Second
 
-// wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns the
-// wake event when it fires (caller runs another voice turn), ok=false on
-// window expiry, disabled config, or scanner failure (fall back to
-// push-to-talk turns). The DetectedAt timestamp feeds the §10 wake→execution
-// latency metric.
-func wakeListenUntilArmed() (wakeword.WakeEvent, bool) {
+// wakeOutcome says how a stretch of wake listening ended.
+//
+// The distinction exists because wake gating used to lapse SILENTLY: the 60s
+// window expiring and wake never being configured both returned a bare false,
+// and the main loop reacted identically — back to open capture. From the user's
+// seat that is the shell quietly abandoning a privacy control it announced, so
+// the two cases now have to be told apart at the call site.
+type wakeOutcome int
+
+const (
+	// wakeNotEngaged: wake listening never started (disabled, no recorder, no
+	// speech engine). Nothing changed, so nothing is announced.
+	wakeNotEngaged wakeOutcome = iota
+
+	// wakeFired: a wake event arrived; the caller runs another voice turn.
+	wakeFired
+
+	// wakeWindowExpired: the ADR-005 §5 idle window elapsed with no wake.
+	wakeWindowExpired
+
+	// wakeScannerFailed: wake listening was configured and engaged but the
+	// capture stream died (device yanked, recorder killed, service refused to
+	// start). Gating is gone for the same reason expiry loses it, so it is
+	// announced too — with its own cause.
+	wakeScannerFailed
+)
+
+// wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns the wake
+// event and how the listen ended; only wakeFired carries a usable event. The
+// DetectedAt timestamp feeds the §10 wake→execution latency metric.
+func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 	if speech.Default() == nil || !cfg.Speech.WakeWord.Enabled {
-		return wakeword.WakeEvent{}, false
+		return wakeword.WakeEvent{}, wakeNotEngaged
 	}
 	if _, err := speech.DetectRecorder(); err != nil {
-		return wakeword.WakeEvent{}, false
+		return wakeword.WakeEvent{}, wakeNotEngaged
 	}
 
 	preset := wakeword.Preset(cfg.Speech.WakeWord.SensitivityPreset)
@@ -437,7 +515,7 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, bool) {
 			OnError:  func(error) {},
 		})
 	if err != nil {
-		return wakeword.WakeEvent{}, false
+		return wakeword.WakeEvent{}, wakeScannerFailed
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), wakeIdleWindow)
@@ -447,7 +525,7 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, bool) {
 
 	events, err := svc.Start(ctx)
 	if err != nil {
-		return wakeword.WakeEvent{}, false
+		return wakeword.WakeEvent{}, wakeScannerFailed
 	}
 	defer func() { _ = svc.Stop() }()
 
@@ -460,15 +538,49 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, bool) {
 			// Scanner failure closed the channel — a zero-value event here is
 			// NOT a wake. Fall back to push-to-talk instead of phantom-arming
 			// the mic (the exact moment the mic is most likely broken).
-			return wakeword.WakeEvent{}, false
+			return wakeword.WakeEvent{}, wakeScannerFailed
 		}
 		logWakeEvent(ev)
 		viz.Stop()
-		audio.PlayAlert()
-		return ev, true
+		// No chime here: the caller runs a voice turn next and voiceTurn plays
+		// the ready cue itself. Two pings back to back read as a stutter, and
+		// the second one is the only one whose timing is actually coupled to the
+		// recorder arming (PlayAlertSync + micSettleDelay).
+		return ev, wakeFired
 	case <-ctx.Done():
-		return wakeword.WakeEvent{}, false
+		return wakeword.WakeEvent{}, wakeWindowExpired
 	}
+}
+
+// wakeLapseNotice returns the one-line explanation for an outcome that silently
+// dropped wake gating, or "" when there is nothing to announce.
+func wakeLapseNotice(o wakeOutcome) string {
+	switch o {
+	case wakeWindowExpired:
+		return "wake window expired — listening without the wake word; /wake status for info"
+	case wakeScannerFailed:
+		return "wake listening stopped (recorder unavailable) — listening without the wake word; " +
+			"/wake status for info"
+	default:
+		return ""
+	}
+}
+
+// wakeLapseAnnounced tracks which lapse notices this session has already shown.
+//
+// Once each, per cause: the message explains a STATE CHANGE, and the idle window
+// expires every 60s of quiet, so repeating it would bury the shell in a notice
+// about not listening.
+var wakeLapseAnnounced = map[wakeOutcome]bool{}
+
+// noteWakeLapse prints the notice for an outcome at most once per session.
+func noteWakeLapse(o wakeOutcome) {
+	notice := wakeLapseNotice(o)
+	if notice == "" || wakeLapseAnnounced[o] {
+		return
+	}
+	wakeLapseAnnounced[o] = true
+	color.Yellow("%s", notice)
 }
 
 // interactiveAmbientMonitor builds the monitor for the interactive wake loop.

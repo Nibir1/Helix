@@ -225,7 +225,7 @@ The planner always returns a JSON `Plan`:
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package" | "recon",
+      "tool": "response" | "shell" | "git" | "package" | "recon" | "web",
       "message": "...",
       "command": "...",
       "action": "...",
@@ -453,7 +453,7 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 * **Instruction Firewall** with canary honeypots and fail-closed critic passes
 
 ### Planner, Agent System & Tool Protocol
-* Unified multi-tool agent system: response, shell, git, package, recon
+* Unified multi-tool agent system: response, shell, git, package, recon, web
 * Ultra-strict JSON planner protocol with schema enforcement and truncation-resistance
 * Dual-provider inference: local Ollama + remote APIs
 * Argument normalization (array flattening, trimming, synonym resolution)

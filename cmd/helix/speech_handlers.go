@@ -10,12 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"helix/internal/commands"
 	"helix/internal/config"
 	"helix/internal/speech"
-
-	"helix/internal/audio"
 
 	"github.com/fatih/color"
 )
@@ -260,11 +259,21 @@ func printSpeechTable(title string, rows []speech.PricingEntry) {
 	}
 }
 
+// truncStr shortens s to at most n display columns, ending in an ellipsis.
+//
+// Rune-based, not byte-based: byte-slicing a UTF-8 string can cut a rune in
+// half, and this is used on model names, provider errors, and the /say echo —
+// all of which can carry non-ASCII. A truncated model name that renders as a
+// replacement character reads like a corrupted config.
 func truncStr(s string, n int) string {
-	if len(s) <= n {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }
 
 func validName(names []string, s string) bool {
@@ -300,23 +309,27 @@ func handleSayCommand(input string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	fmt_, err := speech.Synthesize(ctx, text)
-	if err != nil {
-		color.Red("Speech synthesis failed: %v", err)
+	// speech.Speak takes the streamed-first path (P7.2c): playback begins after
+	// the provider's preroll instead of after the whole synthesis, and it falls
+	// back to the buffered path by itself. The old Synthesize+PlaySpeech pair
+	// bypassed streaming entirely, which made /say the one command guaranteed to
+	// blow the first-byte budget — and to leave /voice-status reporting
+	// "buffered" even on a build where streaming works.
+	fmt.Printf("[voice] %s\n", truncStr(text, 60))
+	if err := speech.Speak(ctx, text); err != nil {
+		color.Red("Speech failed: %v", err)
 		return
 	}
 
-	fmt.Printf("[voice] %s (%s, %d bytes)\n", truncStr(text, 60), fmt_.Kind, len(fmt_.Bytes))
-	if err := audio.PlaySpeech(audio.SpeechFormat{
-		Kind:       string(fmt_.Kind),
-		SampleRate: fmt_.SampleRate,
-		Channels:   fmt_.Channels,
-		Data:       fmt_.Bytes,
-	}, 1.0); err != nil {
-		color.Yellow("Audio output: %v (synthesis succeeded)", err)
-		return
+	// Byte count and container kind are not knowable up front on the streamed
+	// path — the body is still arriving while it plays — so report what the
+	// budget line actually cares about: which path served it, and how long the
+	// first audio took.
+	path := "buffered"
+	if speech.LastSpeechStreamed() {
+		path = "streamed"
 	}
-	fmt.Println("spoken.")
+	fmt.Printf("spoken (%s, first audio %dms)\n", path, speech.LastSynthesizeLatencyMs())
 }
 
 // handleTTSCommand toggles automatic spoken responses (Phase 2 gate).
@@ -421,20 +434,178 @@ func chainOrNone(chain []string) string {
 func printStatusRows(title string, rows []speech.ProviderStatusRow) {
 	fmt.Println()
 	color.Cyan("%s", title)
-	for _, r := range rows {
-		state := "standby"
-		switch {
-		case r.Healthy:
-			state = "healthy"
-		case r.HealthDetail != "" && r.HealthDetail != "standby":
-			state = truncStr(r.HealthDetail, 48)
-		}
-		key := "-"
-		if r.HasKey {
-			key = "key"
-		}
-		fmt.Printf("  %-14s %-24s %-8s %-6s %s\n", r.Name, r.Display, state, key, locality(r.Local))
+	for _, line := range statusRowLines(rows) {
+		fmt.Println(line)
 	}
+}
+
+// Column widths for the /voice-status provider table.
+//
+// The health DETAIL is deliberately not a column. A provider failure is a
+// sentence — a dialed URL, a TLS message, an HTTP body — and forcing one into an
+// 8-character cell is exactly what produced the QA line:
+//
+//	whisper-local  Whisper (local sidecar)  whisper-local unreachable: Get "http://127.0.0.… key    local
+//
+// where the URL is cut mid-address AND every column after it is shoved out of
+// alignment. The state column now holds one word and the detail goes on its own
+// wrapped, indented lines below the row.
+const (
+	statusNameWidth    = 14
+	statusDisplayWidth = 24
+	statusStateWidth   = 8
+	statusKeyWidth     = 7
+)
+
+// statusDetailWidth is the wrap width for the indented detail lines — narrow
+// enough to survive an 80-column terminal with the indent.
+const statusDetailWidth = 72
+
+// statusDetailIndent hangs the detail lines under their row.
+const statusDetailIndent = "      "
+
+// statusRowLines renders one provider table as plain lines.
+//
+// It returns strings rather than printing so the layout — the part that broke —
+// is testable without a terminal.
+//
+// Args:
+//   - rows: provider status rows from speech.Status.
+//
+// Returns: the lines to print, in order.
+// Complexity: O(rows × detail length).
+func statusRowLines(rows []speech.ProviderStatusRow) []string {
+	if len(rows) == 0 {
+		return []string{"  (no registered providers)"}
+	}
+
+	out := []string{fmt.Sprintf("  %-*s %-*s %-*s %-*s %s",
+		statusNameWidth, "PROVIDER", statusDisplayWidth, "NAME",
+		statusStateWidth, "STATE", statusKeyWidth, "KEY", "WHERE")}
+
+	for _, r := range rows {
+		out = append(out, fmt.Sprintf("  %-*s %-*s %-*s %-*s %s",
+			statusNameWidth, truncStr(r.Name, statusNameWidth),
+			statusDisplayWidth, truncStr(r.Display, statusDisplayWidth),
+			statusStateWidth, providerState(r),
+			statusKeyWidth, providerKeyState(r),
+			locality(r.Local)))
+		for _, detail := range providerDetailLines(r) {
+			out = append(out, statusDetailIndent+detail)
+		}
+	}
+	return out
+}
+
+// providerState reduces a row to one state word.
+//
+// "standby" and "down" are genuinely different and were previously conflated:
+// an out-of-chain provider is never probed, so its Healthy=false means "not
+// being used", not "broken".
+func providerState(r speech.ProviderStatusRow) string {
+	switch {
+	case r.Healthy:
+		return "healthy"
+	case !r.InChain:
+		return "standby"
+	default:
+		return "down"
+	}
+}
+
+// providerKeyState describes the credential situation in one word.
+//
+// "key" now means what it says — a key is stored. Keyless local sidecars report
+// "free"; the QA line showed an unreachable whisper.cpp server as "key", which
+// invited exactly the wrong diagnosis (a bad credential rather than a process
+// that is not running).
+func providerKeyState(r speech.ProviderStatusRow) string {
+	switch {
+	case !r.RequiresKey:
+		return "free"
+	case r.HasKey:
+		return "key"
+	default:
+		return "no key"
+	}
+}
+
+// providerDetailLines returns the wrapped explanation printed under a row:
+// the full health detail, plus a start-it hint when a local sidecar that the
+// active chain depends on is down.
+func providerDetailLines(r speech.ProviderStatusRow) []string {
+	if r.Healthy {
+		return nil
+	}
+
+	var lines []string
+	if detail := strings.TrimSpace(r.HealthDetail); detail != "" && detail != "standby" {
+		lines = append(lines, wrapText(detail, statusDetailWidth)...)
+	}
+	// Only for a sidecar the chain actually needs: a hint about a standby
+	// provider nobody selected is noise.
+	if r.InChain && r.Local {
+		lines = append(lines, localSidecarHints[r.Name]...)
+	}
+	return lines
+}
+
+// localSidecarHints maps a local provider to the command that starts it.
+//
+// Sidecars are user-managed by design (ADR-002) — Helix never launches one — so
+// an accurate status plus the exact command IS the fix here. Wording tracks the
+// sidecar section of scripts/edge-setup.sh and docs/edge_deployment.md §5.1;
+// keep the three in sync.
+//
+// Each command sits alone on its line and is printed verbatim (never wrapped),
+// because these are meant to be copy-pasted.
+var localSidecarHints = map[string][]string{
+	"whisper-local": {
+		"start it (whisper.cpp — docs/edge_deployment.md §5.1):",
+		"  ./build/bin/whisper-server -m models/ggml-base.en.bin --port 8080",
+	},
+	"piper-local": {
+		"start it (Piper — docs/edge_deployment.md §5.1):",
+		"  releases: https://github.com/rhasspy/piper/releases",
+	},
+	"kokoro-local": {
+		"start it (Kokoro-FastAPI — docs/edge_deployment.md §5.1):",
+		"  docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu",
+	},
+}
+
+// wrapText breaks s into lines of at most width columns on word boundaries.
+//
+// A word longer than width is left whole rather than split: a URL cut in half is
+// the failure this exists to prevent, so overflowing one line is the lesser
+// evil.
+//
+// Args:
+//   - s: the text to wrap.
+//   - width: the maximum line width in runes.
+//
+// Returns: the wrapped lines (nil for blank input).
+// Complexity: O(len(s)).
+func wrapText(s string, width int) []string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return nil
+	}
+	if width <= 0 {
+		return []string{strings.Join(words, " ")}
+	}
+
+	var lines []string
+	cur := words[0]
+	for _, w := range words[1:] {
+		if utf8.RuneCountInString(cur)+1+utf8.RuneCountInString(w) > width {
+			lines = append(lines, cur)
+			cur = w
+			continue
+		}
+		cur += " " + w
+	}
+	return append(lines, cur)
 }
 
 func locality(local bool) string {

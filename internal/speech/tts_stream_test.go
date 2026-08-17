@@ -6,6 +6,7 @@ package speech
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -88,8 +89,10 @@ func TestBufferedPathStillRequestsWAV(t *testing.T) {
 // the buffered path — not an error the user should ever see.
 func TestRegistryStreamReportsNoStreamingProvider(t *testing.T) {
 	reg := newTestRegistry(t)
-	reg.RegisterTTS(NewPiperTTS("http://127.0.0.1:1")) // buffered-only adapter
-	reg.SetConfig(Config{TTS: TTSConfig{Provider: "piper-local"}})
+	// fakeTTS implements TTSProvider only — the buffered-only shape. (Not piper:
+	// that adapter streams now, by consuming its sidecar's WAV header.)
+	reg.RegisterTTS(&fakeTTS{name: "buffered-only"})
+	reg.SetConfig(Config{TTS: TTSConfig{Provider: "buffered-only"}})
 
 	_, _, err := reg.SynthesizeStream(context.Background(), "hi", SynthesisOptions{})
 	if err == nil {
@@ -98,6 +101,95 @@ func TestRegistryStreamReportsNoStreamingProvider(t *testing.T) {
 	if err != errNoStreamingTTS {
 		t.Fatalf("want errNoStreamingTTS so the caller falls back quietly, got %v", err)
 	}
+}
+
+// The piper sidecar has no headerless response format, so streaming it means
+// consuming the RIFF header off the front and handing back the reader
+// positioned at the PCM — with the rate and channel count taken from the header
+// rather than assumed.
+func TestPiperSynthesizeStreamConsumesWAVHeader(t *testing.T) {
+	samples := []int16{1, -2, 3, -4, 5, -6}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("text"); got != "hello" {
+			t.Errorf("text = %q, want %q", got, "hello")
+		}
+		_, _ = w.Write(makeWAV(samples, 22050, 1))
+	}))
+	defer srv.Close()
+
+	p, ok := NewPiperTTS(srv.URL).(StreamingTTSProvider)
+	if !ok {
+		t.Fatal("piper must implement StreamingTTSProvider")
+	}
+	got, err := p.SynthesizeStream(context.Background(), "hello", SynthesisOptions{})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	defer func() { _ = got.Body.Close() }()
+
+	if got.SampleRate != 22050 || got.Channels != 1 {
+		t.Errorf("format = %d Hz / %d ch, want 22050/1 (read from the header)",
+			got.SampleRate, got.Channels)
+	}
+	// The body must start at the first PCM sample, not at "RIFF": the consumer
+	// decodes fixed 16-bit frames and would play the header itself as noise.
+	pcm, err := io.ReadAll(got.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if len(pcm) != len(samples)*2 {
+		t.Fatalf("PCM length = %d bytes, want %d (header not fully consumed?)",
+			len(pcm), len(samples)*2)
+	}
+	if int16(uint16(pcm[0])|uint16(pcm[1])<<8) != samples[0] {
+		t.Errorf("first frame = % x, want the first sample %d", pcm[:2], samples[0])
+	}
+}
+
+// A body Helix cannot decode as 16-bit PCM must be reported BEFORE any audio
+// plays, so the caller falls back to the buffered path instead of streaming
+// noise to the speaker.
+func TestPiperSynthesizeStreamRejectsUndecodableBodies(t *testing.T) {
+	cases := map[string][]byte{
+		"not a RIFF container": []byte("<html>404 not found</html>...........,,,,,"),
+		"truncated header":     []byte("RIFF"),
+		"32-bit float PCM":     floatWAVHeader(22050, 1),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(body)
+			}))
+			defer srv.Close()
+
+			p := NewPiperTTS(srv.URL).(StreamingTTSProvider)
+			got, err := p.SynthesizeStream(context.Background(), "hi", SynthesisOptions{})
+			if err == nil {
+				_ = got.Body.Close()
+				t.Fatal("an undecodable body must fail before playback, not stream noise")
+			}
+		})
+	}
+}
+
+// floatWAVHeader builds a RIFF/WAVE header declaring IEEE-float samples: valid
+// WAV that the fixed 16-bit PCM consumer cannot play.
+func floatWAVHeader(rate, channels int) []byte {
+	out := make([]byte, 0, 44)
+	out = append(out, "RIFF"...)
+	out = binary.LittleEndian.AppendUint32(out, 36)
+	out = append(out, "WAVE"...)
+	out = append(out, "fmt "...)
+	out = binary.LittleEndian.AppendUint32(out, 16)
+	out = binary.LittleEndian.AppendUint16(out, 3) // IEEE float
+	out = binary.LittleEndian.AppendUint16(out, uint16(channels))
+	out = binary.LittleEndian.AppendUint32(out, uint32(rate))
+	out = binary.LittleEndian.AppendUint32(out, uint32(rate*channels*4))
+	out = binary.LittleEndian.AppendUint16(out, uint16(channels*4))
+	out = binary.LittleEndian.AppendUint16(out, 32) // bits per sample
+	out = append(out, "data"...)
+	out = binary.LittleEndian.AppendUint32(out, 0)
+	return out
 }
 
 func TestRegistryStreamRequiresConfiguredChain(t *testing.T) {

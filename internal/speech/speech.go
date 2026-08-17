@@ -154,18 +154,40 @@ func Transcribe(ctx context.Context, clip AudioFormat) (Transcript, error) {
 
 // Synthesize runs the global TTS failover chain with the configured voice,
 // recording the round-trip latency for the /voice-status budget line.
+//
+// This is the REPLY-LEVEL entry point: every call here claims the metric. Code
+// that synthesizes a fragment of an already-started reply must use
+// synthesizeChain instead — see the note there.
 func Synthesize(ctx context.Context, text string) (AudioFormat, error) {
+	start := time.Now()
+	audio, err := synthesizeChain(ctx, text)
+	lastSynthMs.Store(time.Since(start).Milliseconds())
+	lastSpeechStreamed.Store(false)
+	return audio, err
+}
+
+// synthesizeChain runs the TTS failover chain WITHOUT touching the
+// /voice-status latency metric.
+//
+// The metric answers one question — "how long until the user heard the FIRST
+// word of this reply?" — which is a property of the reply, not of every request
+// made while it plays. SpeakStream streams sentence 1 (recording true
+// time-to-first-audio) and then pipelines sentences 2..N behind the audio that
+// is already playing. While those pipelined calls also wrote the metric, a
+// reply that streamed perfectly reported the LAST sentence's full synthesis
+// time labeled "buffered": the QA line
+//
+//	Last TTS time-to-first-audio: 1185ms (budget 800ms) [buffered — ...]
+//
+// on a reply whose first word had in fact arrived in ~150ms. Pipelined
+// sentences go through this path so only the reply-level call records.
+func synthesizeChain(ctx context.Context, text string) (AudioFormat, error) {
 	reg := Default()
 	if reg == nil {
 		return AudioFormat{}, fmt.Errorf("speech not initialized")
 	}
 	cfg := reg.ActiveConfig()
-	opts := SynthesisOptions{Voice: cfg.TTS.Voice}
-	start := time.Now()
-	audio, err := reg.Synthesize(ctx, text, opts)
-	lastSynthMs.Store(time.Since(start).Milliseconds())
-	lastSpeechStreamed.Store(false)
-	return audio, err
+	return reg.Synthesize(ctx, text, SynthesisOptions{Voice: cfg.TTS.Voice})
 }
 
 // LastSynthesizeLatencyMs returns the most recent TTS latency in milliseconds
@@ -212,11 +234,24 @@ func SetOfflineMode(on bool) {
 
 // ProviderStatusRow is one line of the /voice-status report.
 type ProviderStatusRow struct {
-	Name         string
-	Display      string
-	Local        bool
-	RequiresKey  bool
-	HasKey       bool
+	Name    string
+	Display string
+	Local   bool
+	// RequiresKey reports whether the provider needs an API key at all.
+	RequiresKey bool
+	// HasKey reports whether a key is actually STORED for this provider.
+	//
+	// Strictly that, and nothing else: it used to be
+	// `!RequiresAPIKey() || keys.Has(...)`, which made every keyless local
+	// sidecar report "key" in /voice-status — a whisper.cpp server that needs no
+	// credential at all looked like it had one. Whether a key is needed is
+	// RequiresKey's job; renderers combine the two.
+	HasKey bool
+	// InChain reports whether the provider is in the ACTIVE failover chain.
+	// Out-of-chain providers are not probed, so their Healthy=false means
+	// "standby", not "down" — a distinction the status line has to make, and the
+	// gate on whether a down local sidecar is worth a start-it hint.
+	InChain      bool
 	Healthy      bool
 	HealthDetail string
 }
@@ -283,8 +318,8 @@ func Status(ctx context.Context) StatusReport {
 		}
 		report.STTStatus = append(report.STTStatus, ProviderStatusRow{
 			Name: name, Display: p.DisplayName(), Local: p.IsLocal(),
-			RequiresKey: p.RequiresAPIKey(), HasKey: !p.RequiresAPIKey() || reg.Keys().Has(STTKeyPrefix+name),
-			Healthy: healthy, HealthDetail: detail,
+			RequiresKey: p.RequiresAPIKey(), HasKey: reg.Keys().Has(STTKeyPrefix + name),
+			InChain: inChain, Healthy: healthy, HealthDetail: detail,
 		})
 	}
 
@@ -297,8 +332,8 @@ func Status(ctx context.Context) StatusReport {
 		}
 		report.TTSStatus = append(report.TTSStatus, ProviderStatusRow{
 			Name: name, Display: p.DisplayName(), Local: p.IsLocal(),
-			RequiresKey: p.RequiresAPIKey(), HasKey: !p.RequiresAPIKey() || reg.Keys().Has(TTSKeyPrefix+name),
-			Healthy: healthy, HealthDetail: detail,
+			RequiresKey: p.RequiresAPIKey(), HasKey: reg.Keys().Has(TTSKeyPrefix + name),
+			InChain: inChain, Healthy: healthy, HealthDetail: detail,
 		})
 	}
 
