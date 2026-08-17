@@ -104,6 +104,8 @@ type Daemon struct {
 
 	breakReminderMin int // focus-break reminder cadence; 0 = off
 
+	llmFallback config.LLMFallbackConfig // P11.2/P11.3 offline-brain settings
+
 	healthMu sync.Mutex
 	sidecars map[string]string // component → health state ("ok" | error detail)
 }
@@ -123,9 +125,10 @@ func New() (*Daemon, error) {
 	// with "no AI provider configured" and IPC submits silently return an
 	// empty reply. Initialize the LLM registry from persisted config here.
 	if ierr := ai.InitProviders(ai.ProviderSettings{
-		Provider:      cfg.Provider,
-		Model:         cfg.ProviderModel,
-		CustomBaseURL: cfg.CustomProviderBaseURL,
+		Provider:        cfg.Provider,
+		Model:           cfg.ProviderModel,
+		CustomBaseURL:   cfg.CustomProviderBaseURL,
+		LlamaCppBaseURL: cfg.LLM.LlamaCppURL,
 	}); ierr != nil {
 		return nil, fmt.Errorf("ai providers: %w", ierr)
 	}
@@ -139,6 +142,14 @@ func New() (*Daemon, error) {
 	journal, err := NewJournal()
 	if err != nil {
 		return nil, err
+	}
+
+	// P11.2: arm the cloud→local brain failover. A misconfigured fallback is
+	// journaled and tolerated — an unprotected daemon still serves requests,
+	// and refusing to start over it would be a worse failure than the one it
+	// guards against.
+	if ferr := ai.ConfigureLocalFallback(cfg.AIFallback()); ferr != nil {
+		journal.Record("lifecycle", "", "", "llm fallback disabled: "+ferr.Error())
 	}
 	sess, err := session.NewRingStore(cfg.Daemon.SessionTurns)
 	if err != nil {
@@ -192,13 +203,23 @@ func New() (*Daemon, error) {
 		return nil, err
 	}
 
-	return &Daemon{
+	d := &Daemon{
 		agent: ag, sess: sess, undo: undo, journal: journal,
 		renderer: renderer, server: server,
 		startedAt: time.Now(), stopping: make(chan struct{}),
 		breakReminderMin: cfg.Daemon.BreakReminderMin,
 		sidecars:         make(map[string]string),
-	}, nil
+		llmFallback:      cfg.LLM.Fallback,
+	}
+
+	// Brain switches are spoken AND journaled: the user hears why answers
+	// suddenly got shorter, and the journal keeps the evidence for later.
+	ai.SetFailoverNotice(func(msg string) {
+		d.journal.Record("llm_failover", "", "", msg)
+		d.speakNotice(msg)
+	})
+
+	return d, nil
 }
 
 // Addr exposes the IPC address.
@@ -239,6 +260,13 @@ func (d *Daemon) statusResponse() Response {
 		"uptime_s":    int(time.Since(d.startedAt).Seconds()),
 		"addr":        d.server.Addr(),
 		"tts_enabled": speech.TTSEnabled(),
+		// P11.2: surface which brain is answering. "provider" is the one in
+		// force right now, so a degraded daemon reports the local model rather
+		// than the configured cloud one it can no longer reach.
+		"provider":       ai.ActiveProviderName(),
+		"model":          ai.ActiveModel(),
+		"llm_fallback":   ai.FailoverStatus(),
+		"llm_local_mode": ai.LocalFallbackActive(),
 	}
 	if reg := speech.Default(); reg != nil {
 		state["stt_chain"] = strings.Join(reg.STTChain(), " → ")
@@ -346,6 +374,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.sidecarHealthLoop(runCtx)
 	}()
 
+	go func() {
+		defer diagnostics.Guard("daemon-llm-ready")()
+		d.ensureLocalBrainReady(runCtx)
+	}()
+
 	if cfg, err := config.DefaultConfig(); err == nil && cfg.Speech.WakeWord.Enabled {
 		go func() {
 			defer diagnostics.Guard("daemon-voice-loop")()
@@ -379,13 +412,21 @@ func (d *Daemon) watchConnectivity(ctx context.Context) {
 				continue
 			}
 			wasOnline = online
+			// Ears, voice, and brain move together (P11.2): before this, the
+			// speech chain went local-first while the planner kept dialing a
+			// dead cloud endpoint, so Helix could still hear and speak but
+			// could no longer think. ai.SetOfflineMode fires its own spoken
+			// notice only when a local brain is actually reachable, so a
+			// machine with no local model stays silent about it.
 			if online {
 				speech.SetOfflineMode(false)
-				d.journal.Record("connectivity", "", "", "online — restored configured speech chain")
+				ai.SetOfflineMode(false)
+				d.journal.Record("connectivity", "", "", "online — restored configured speech + LLM chains")
 				d.speakNotice("Internet connection restored.")
 			} else {
 				speech.SetOfflineMode(true)
-				d.journal.Record("connectivity", "", "", "offline — switched speech chain to local fallback")
+				ai.SetOfflineMode(true)
+				d.journal.Record("connectivity", "", "", "offline — switched speech + LLM chains to local fallback")
 				d.speakNotice("I lost internet connection. Switching to local processing; some features may be limited.")
 			}
 		}
@@ -413,6 +454,87 @@ func (d *Daemon) speakNotice(text string) {
 	if d.agent.OnSpeak != nil {
 		d.agent.OnSpeak(text)
 	}
+}
+
+// ensureLocalBrainReady verifies at startup that the configured offline brain
+// can actually answer when the cloud disappears (P11.3).
+//
+// A fallback that is configured but not pulled is worse than no fallback: it
+// looks armed in /doctor and then fails at the one moment it was supposed to
+// save the session. This runs the check once, at startup, while there is still
+// a network to fix it with.
+//
+// Consent (guardrail §12 #1): the model PULL is a multi-gigabyte download and
+// happens only when `llm.fallback.ensure_ready` is explicitly true. Otherwise
+// the daemon verifies and journals — the diagnosis without the surprise.
+//
+// Runs in the background: a cold Ollama start plus a model pull can take
+// minutes, and the IPC listener must be serving long before that finishes.
+func (d *Daemon) ensureLocalBrainReady(ctx context.Context) {
+	if !d.llmFallback.FallbackEnabled() {
+		return
+	}
+	provider := d.llmFallback.Provider
+	if provider == "" {
+		provider = config.LLMDefaults().Fallback.Provider
+	}
+	// llama.cpp is a user-managed sidecar with no install/pull API (ADR-002,
+	// P7.7): llama-server loads its GGUF at launch. Reachability is all Helix
+	// can check, and sidecarHealthLoop already reports it.
+	if provider != "ollama" {
+		return
+	}
+
+	model := d.llmFallback.Model
+	if model == "" {
+		// The active model is the honest default: if the user already runs
+		// Ollama as their main provider, that is the model to keep ready.
+		model = ai.ActiveModel()
+	}
+
+	readyCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	if err := ollama.EnsureRunning(readyCtx); err != nil {
+		d.journal.Record("llm_ready", "", "",
+			"local fallback unavailable — Ollama is not running: "+err.Error())
+		return
+	}
+	if model == "" {
+		d.journal.Record("llm_ready", "", "",
+			"Ollama reachable; no fallback model configured (llm.fallback.model)")
+		return
+	}
+
+	client := ollama.NewClient()
+	installed, err := client.ListModels(readyCtx)
+	if err != nil {
+		d.journal.Record("llm_ready", "", "", "could not list Ollama models: "+err.Error())
+		return
+	}
+	for _, m := range installed {
+		// Ollama reports tags as "name:tag"; a bare "llama3.2" must match
+		// "llama3.2:latest" or the daemon would re-pull an installed model.
+		if m.ID == model || strings.HasPrefix(m.ID, model+":") {
+			d.journal.Record("llm_ready", "", "", "local fallback ready: "+model)
+			return
+		}
+	}
+
+	if !d.llmFallback.EnsureReady {
+		d.journal.Record("llm_ready", "", "", fmt.Sprintf(
+			"local fallback model %q is NOT pulled — offline mode will have no brain. "+
+				"Run `ollama pull %s`, or set llm.fallback.ensure_ready=true to let the daemon pull it.",
+			model, model))
+		return
+	}
+
+	d.journal.Record("llm_ready", "", "", "pulling local fallback model "+model)
+	if err := client.PullModel(readyCtx, model, nil); err != nil {
+		d.journal.Record("llm_ready", "", "", "pull failed for "+model+": "+err.Error())
+		return
+	}
+	d.journal.Record("llm_ready", "", "", "local fallback ready: "+model)
 }
 
 // sidecarHealthLoop polls local sidecars (Ollama, whisper, piper, wake word)

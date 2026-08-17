@@ -50,7 +50,6 @@ var vizBars = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 type VoiceViz struct {
 	mu      sync.Mutex
 	state   VizState
-	label   string
 	running bool
 	stop    chan struct{}
 	frame   int

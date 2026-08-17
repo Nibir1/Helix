@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"helix/internal/daemon"
+	"helix/internal/edge"
 
 	"github.com/fatih/color"
 )
@@ -266,30 +267,28 @@ func installDaemonService() {
 		fmt.Println("The daemon auto-starts at login (RunAtLoad) and restarts on crash (KeepAlive).")
 
 	case "linux":
-		unitDir := filepath.Join(homeDirOrEmpty(), ".config", "systemd", "user")
-		unit := filepath.Join(unitDir, "helix-daemon.service")
-		if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		unit := edge.SystemdUnitPath(homeDirOrEmpty())
+		if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
 			color.Red("mkdir systemd user dir: %v", err)
 			return
 		}
-		content := fmt.Sprintf(`[Unit]
-Description=Helix BlackBox daemon
-After=network-online.target
-
-[Service]
-ExecStart=%s daemon
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-`, exe)
-		if err := os.WriteFile(unit, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(unit, []byte(edge.SystemdUnit(exe)), 0o644); err != nil {
 			color.Red("write unit: %v", err)
 			return
 		}
 		color.Green("Installed %s", unit)
-		fmt.Println("Enable now:  systemctl --user daemon-reload && systemctl --user enable --now helix-daemon")
+
+		// P10.4: headless-board guidance. The linger note in particular is the
+		// difference between "installed" and "actually runs" on an appliance
+		// nobody logs into.
+		lingerOn, lingerKnown := edge.LingerEnabled("")
+		for _, line := range edge.SystemdEdgeNotes("", lingerOn, lingerKnown) {
+			if strings.HasPrefix(line, "Boot start:  lingering is OFF") {
+				color.Yellow(line)
+				continue
+			}
+			fmt.Println(line)
+		}
 
 	default: // windows
 		fmt.Println("Windows service installation (run in an elevated prompt):")

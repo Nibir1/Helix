@@ -28,8 +28,37 @@ type Renderer interface {
 	Interactive() bool
 }
 
+// AIStream renders an AI response incrementally (BlackBox P8.8).
+type AIStream interface {
+	// Chunk renders one streamed fragment.
+	Chunk(text string)
+
+	// Started reports whether any content was rendered.
+	Started() bool
+
+	// Close terminates the streamed output.
+	Close()
+}
+
+// StreamingRenderer is the OPTIONAL half of the Renderer contract: renderers
+// that can display a response as it arrives implement it, and the Agent type-
+// asserts for it.
+//
+// It is deliberately not part of Renderer. Live rendering is meaningful only
+// for a human watching a terminal, and the daemon's renderer captures the
+// reply text by overriding PrintAIMessage — an override that embedding would
+// NOT dispatch to from inside a HeadlessRenderer method. Keeping streaming
+// opt-in means the daemon keeps the buffered path unchanged and cannot
+// silently lose its IPC reply.
+type StreamingRenderer interface {
+	StreamAIMessage() AIStream
+}
+
 // TTYRenderer adapts the interactive terminal UX.
 type TTYRenderer struct{ UX *ux.UX }
+
+// StreamAIMessage implements StreamingRenderer for the interactive terminal.
+func (r TTYRenderer) StreamAIMessage() AIStream { return r.UX.StreamAIMessage() }
 
 func (r TTYRenderer) PrintSystemMessage(t string)          { r.UX.PrintSystemMessage(t) }
 func (r TTYRenderer) PrintAIMessage(t string, typing bool) { r.UX.PrintAIMessage(t, typing) }

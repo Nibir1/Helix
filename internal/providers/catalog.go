@@ -101,6 +101,71 @@ func GetSafeContentLimit(modelID string) int {
 	return availableTokens * 4
 }
 
+// toolUseProviders are the providers whose Helix adapter actually implements
+// native function calling AND whose current chat models support it.
+//
+// This deliberately describes the ADAPTER's ability, not just the vendor's:
+// the flag is consumed as "can Helix use tool calling here", so listing a
+// provider Helix cannot yet drive (Anthropic, Ollama — both have their own
+// non-OpenAI wire formats) would cost a wasted round trip on every planner
+// call before the fallback kicked in.
+//
+// "custom" is excluded on purpose: an arbitrary OpenAI-compatible endpoint may
+// or may not implement /tools, and guessing wrong is worse than not trying.
+// llama.cpp is excluded for the same reason — llama-server's tool support
+// depends on the loaded GGUF and a --jinja launch flag Helix cannot detect.
+var toolUseProviders = map[string]bool{
+	"openai":    true,
+	"deepseek":  true,
+	"kimi":      true,
+	"qwen":      true,
+	"glm":       true,
+	"anthropic": true, // P8.7b: tool_use blocks + input_schema
+	"ollama":    true, // P8.7b: /api/chat tools — but MODEL-gated, see below
+}
+
+// ollamaToolModels are the local model families whose Ollama builds ship a
+// tool-calling template.
+//
+// This gate is not pedantry. Helix's own default local model is `gemma4:e2b`,
+// and Gemma has NO tool template — advertising tool support for every Ollama
+// model would make the planner attempt a tool call, get prose back, and fall
+// through to the prompt ladder on EVERY plan, burning a wasted round trip on
+// exactly the low-powered hardware that can least afford one.
+var ollamaToolModels = []string{
+	"llama3.1", "llama3.2", "llama3.3",
+	"qwen2.5", "qwen3",
+	"mistral-nemo", "mistral-small", "mistral-large",
+	"command-r", "firefunction", "hermes3",
+}
+
+// SupportsToolUse reports whether native function calling can be used for a
+// provider/model pair (BlackBox P8.7/P8.7b).
+func SupportsToolUse(provider, model string) bool {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if !toolUseProviders[p] {
+		return false
+	}
+	m := strings.ToLower(strings.TrimSpace(model))
+
+	// Embedding endpoints share the provider name but have no tool support.
+	if strings.Contains(m, "embedding") {
+		return false
+	}
+
+	// Cloud providers ship tool support across their current chat models;
+	// Ollama's depends entirely on the individual model's template.
+	if p != "ollama" {
+		return true
+	}
+	for _, family := range ollamaToolModels {
+		if strings.HasPrefix(m, family) {
+			return true
+		}
+	}
+	return false
+}
+
 // CapabilitiesFor returns capability flags for a provider/model pair.
 func CapabilitiesFor(provider, model string) Capabilities {
 	model = strings.ToLower(model)
@@ -115,6 +180,6 @@ func CapabilitiesFor(provider, model string) Capabilities {
 		Local:      local,
 		Remote:     !local,
 		Streaming:  true,
-		ToolUse:    false,
+		ToolUse:    SupportsToolUse(provider, model),
 	}
 }

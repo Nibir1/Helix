@@ -346,18 +346,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 			return nil, false
 		}
 
-		think.Start()
-		resp, chatErr := ai.RunModel(userInput)
-		think.Stop()
-
-		if chatErr != nil {
-			a.render.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
-			return nil, false
-		}
-
-		if !a.promoteFallbackScript(resp) {
-			a.render.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
-		}
+		a.chatFallback(userInput, think)
 		return nil, false
 	}
 
@@ -374,18 +363,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	if err != nil {
 		a.render.PrintWarning(fmt.Sprintf("Planner parse error: %v", err))
 
-		think.Start()
-		resp, chatErr := ai.RunModel(userInput)
-		think.Stop()
-
-		if chatErr != nil {
-			a.render.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
-			return nil, false
-		}
-
-		if !a.promoteFallbackScript(resp) {
-			a.render.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
-		}
+		a.chatFallback(userInput, think)
 		return nil, false
 	}
 
@@ -393,18 +371,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	if RequiresCriticReview(userInput, plan) && !a.criticAllows(userInput, plan) {
 		a.render.PrintWarning("Instruction Firewall: plan quarantined by critic; falling back to chat.")
 
-		think.Start()
-		resp, chatErr := ai.RunModel(userInput)
-		think.Stop()
-
-		if chatErr != nil {
-			a.render.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
-			return nil, false
-		}
-
-		if !a.promoteFallbackScript(resp) {
-			a.render.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
-		}
+		a.chatFallback(userInput, think)
 		return nil, false
 	}
 
@@ -433,6 +400,23 @@ type StepObservation struct {
 	Command string
 	OK      bool
 	Err     string
+
+	// Output is a bounded tail of what the command printed (P8.6), captured
+	// only on agentic turns. Exit status alone cannot distinguish "compile
+	// error on line 42" from "network unreachable"; this is what lets the
+	// planner correct the actual cause instead of guessing at it.
+	Output string
+
+	// OutputTruncated marks a tail that dropped earlier bytes, so the report
+	// can say so instead of presenting a fragment as the whole output.
+	OutputTruncated bool
+
+	// ExitCode is the command's true exit status, captured on agentic turns.
+	// Execution is intentionally lenient (a non-zero exit does not raise an
+	// error at the user), so OK alone cannot tell the planner that a build or
+	// test run actually failed — this can. Zero means success or "unknown"
+	// (non-shell tools, capture disabled).
+	ExitCode int
 }
 
 // executePlanSteps runs a validated plan's steps through the safety pipeline
@@ -457,7 +441,19 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 			a.handleResponseStep(step)
 
 		case "shell":
-			if err := a.handleShellStepWithEscalation(step, escalated[step.Command]); err != nil {
+			// P8.6: capture output only while the harness is running. On a
+			// normal turn nothing consumes the tail, and capturing would cost
+			// the child its TTY (see runArgvEnvCapture) for no benefit.
+			var capture *commands.OutputCapture
+			if a.Agentic {
+				capture = commands.NewOutputCapture()
+			}
+			err := a.handleShellStepWithEscalation(step, escalated[step.Command], capture)
+			if capture != nil {
+				o.Output, o.OutputTruncated = capture.Combined(), capture.Truncated()
+				o.ExitCode = capture.ExitCode
+			}
+			if err != nil {
 				a.render.PrintError(fmt.Sprintf("Shell step failed: %v", err))
 				o.OK, o.Err = false, err.Error()
 				obs = append(obs, o)
@@ -495,6 +491,63 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 		obs = append(obs, o)
 	}
 	return obs
+}
+
+// chatFallback answers with plain chat whenever planning did not produce an
+// executable plan — a planner error, an unparseable plan, or a critic
+// quarantine. It was three identical copies before P8.8; streaming made the
+// duplication actively harmful, so it is one path now.
+//
+// Rendering is live when the renderer supports it (P8.8): the spinner stops at
+// the FIRST token rather than at the end, so time-to-first-word becomes the
+// provider's real latency instead of the whole generation. Non-streaming
+// renderers (daemon, headless) keep the buffered path byte-for-byte.
+//
+// Args: userInput: the user's original text; think: the caller's spinner.
+// Complexity: O(response length), streamed.
+func (a *Agent) chatFallback(userInput string, think thinkerShim) {
+	streamer, canStream := a.render.(StreamingRenderer)
+
+	var out AIStream
+	var onChunk func(string)
+	if canStream {
+		onChunk = func(chunk string) {
+			if out == nil {
+				// First token: drop the spinner and open the response line.
+				think.Stop()
+				out = streamer.StreamAIMessage()
+			}
+			out.Chunk(chunk)
+		}
+	}
+
+	think.Start()
+	resp, chatErr := ai.StreamModel(userInput, ai.DefaultModelConfig(), ai.DefaultChatTimeout, onChunk)
+	if out != nil {
+		out.Close()
+	} else {
+		// Nothing streamed (no support, an error before the first token, or an
+		// empty response) — the spinner is still running.
+		think.Stop()
+	}
+
+	if chatErr != nil {
+		a.render.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
+		return
+	}
+
+	// Fenced scripts still route through the consent + safety pipeline. Note
+	// that with streaming the model's prose has already been shown before the
+	// prompt appears — an improvement for an execution decision, since the
+	// user now sees the reasoning behind the script they are approving.
+	if a.promoteFallbackScript(resp) {
+		return
+	}
+
+	// Already rendered live; only the buffered path needs to print.
+	if out == nil || !out.Started() {
+		a.render.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
+	}
 }
 
 // promoteFallbackScript offers to execute fenced shell blocks found in a chat
@@ -703,11 +756,15 @@ func (a *Agent) handleResponseStep(step ai.PlanStep) {
 // Args: step: planner step.
 // Returns: error if execution fails. Complexity: O(execution time).
 func (a *Agent) handleShellStep(step ai.PlanStep) error {
-	return a.handleShellStepWithEscalation(step, false)
+	return a.handleShellStepWithEscalation(step, false, nil)
 }
 
-// handleShellStepWithEscalation is handleShellStep plus provenance escalation.
-func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) error {
+// handleShellStepWithEscalation is handleShellStep plus provenance escalation
+// and optional output capture (P8.6; nil capture = the original inherited-fd
+// behavior, unchanged).
+func (a *Agent) handleShellStepWithEscalation(
+	step ai.PlanStep, escalated bool, capture *commands.OutputCapture,
+) error {
 	cmd := strings.TrimSpace(step.Command)
 	if cmd == "" {
 		return fmt.Errorf("empty shell command")
@@ -796,10 +853,11 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 	// shell apply — private execution must not be an escape hatch.
 	if a.stealthEnabled && a.stealth != nil {
 		a.render.PrintDebug("Stealth mode: running command with private history")
-		return a.sandbox.RunShellCommandEnv(validCmd, wd, a.env.Shell, a.stealth.Environment())
+		return a.sandbox.RunShellCommandCaptured(
+			validCmd, wd, a.env.Shell, a.stealth.Environment(), capture)
 	}
 
-	err = a.sandbox.RunShellCommand(validCmd, wd, a.env.Shell)
+	err = a.sandbox.RunShellCommandCaptured(validCmd, wd, a.env.Shell, nil, capture)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 127 {
 			missingCmd := strings.Fields(validCmd)[0]
@@ -807,7 +865,7 @@ func (a *Agent) handleShellStepWithEscalation(step ai.PlanStep, escalated bool) 
 			if commands.AskForConfirmation(fmt.Sprintf("Attempt to install %q using system package manager?", missingCmd)) {
 				if installErr := a.installPackage(missingCmd); installErr == nil {
 					a.render.PrintSuccess(fmt.Sprintf("%s installed. Retrying command...", missingCmd))
-					return a.sandbox.RunShellCommand(validCmd, wd, a.env.Shell)
+					return a.sandbox.RunShellCommandCaptured(validCmd, wd, a.env.Shell, nil, capture)
 				} else {
 					a.render.PrintError(fmt.Sprintf("Installation failed: %v", installErr))
 				}

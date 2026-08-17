@@ -224,3 +224,9 @@ func (s *SawWave) Stream(samples [][2]float64) (int, bool) {
 // Returns: nil.
 // Complexity: O(1).
 func (s *SawWave) Err() error { return nil }
+
+// backendName identifies this build's audio backend for /doctor (P10.3).
+func backendName() string { return "beep/oto (speaker output available)" }
+
+// backendSpeechSupported reports whether TTS audio can actually be heard.
+func backendSpeechSupported() bool { return true }

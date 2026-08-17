@@ -1,0 +1,2 @@
+go test fuzz v1
+string("000000000\x8b0000000AAA\x00uthoritY=0000000000")

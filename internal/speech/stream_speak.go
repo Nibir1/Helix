@@ -10,8 +10,10 @@ package speech
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"helix/internal/audio"
+	"helix/internal/utils"
 )
 
 // maxSpokenSentence caps a single synthesis request so one runaway sentence
@@ -27,9 +29,22 @@ func SpeakStream(ctx context.Context, text string) error {
 	if text == "" {
 		return nil
 	}
+
+	// Barge-in v2 (P12.5): derive a cancellable context and publish it, so a
+	// wake event, a keypress, or Ctrl+C can stop the reply MID-SENTENCE rather
+	// than at the next sentence boundary. Registering with the interrupt
+	// manager here — rather than at each call site — means every caller
+	// (interactive shell, daemon, ambient responses) gets it.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	unreg := utils.RegisterOperation(cancel)
+	defer unreg()
+	release := beginSpeaking(cancel)
+	defer release()
+
 	sentences := SplitSentences(text)
 	if len(sentences) <= 1 {
-		return Speak(ctx, text)
+		return speakOnce(ctx, text)
 	}
 
 	// Producer: synthesize sentences in order into a bounded channel so at
@@ -66,7 +81,10 @@ func SpeakStream(ctx context.Context, text string) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := audio.PlaySpeech(audio.SpeechFormat{
+		// PlaySpeechContext stops within one audio buffer (~50ms) when the
+		// context is cancelled, so a barge-in cuts the current sentence
+		// instead of waiting for it to finish (P12.5).
+		if err := audio.PlaySpeechContext(ctx, audio.SpeechFormat{
 			Kind:       string(item.audio.Kind),
 			SampleRate: item.audio.SampleRate,
 			Channels:   item.audio.Channels,
@@ -75,7 +93,73 @@ func SpeakStream(ctx context.Context, text string) error {
 			return err
 		}
 	}
-	return nil
+	// Report interruption rather than nil: the producer exits silently on a
+	// cancelled context (closing the channel with nothing sent), so without
+	// this a barge-in — or a reply cancelled before its first word — would be
+	// indistinguishable from a reply that was spoken in full.
+	return ctx.Err()
+}
+
+// speakingState tracks the in-flight spoken reply so an external trigger can
+// interrupt it. Only one reply is ever spoken at a time (the speaker is a
+// single owned device, ADR-007), so a single cancel handle is sufficient.
+var (
+	speakingMu     sync.Mutex
+	speakingCancel context.CancelFunc
+)
+
+// beginSpeaking publishes the cancel handle and returns its release func.
+func beginSpeaking(cancel context.CancelFunc) func() {
+	speakingMu.Lock()
+	speakingCancel = cancel
+	speakingMu.Unlock()
+	return func() {
+		speakingMu.Lock()
+		// Clear only if still ours: a later reply may have taken over.
+		if speakingCancel != nil {
+			speakingCancel = nil
+		}
+		speakingMu.Unlock()
+	}
+}
+
+// Speaking reports whether a spoken reply is currently in flight.
+func Speaking() bool {
+	speakingMu.Lock()
+	defer speakingMu.Unlock()
+	return speakingCancel != nil
+}
+
+// StopSpeaking interrupts the in-flight spoken reply (barge-in v2, P12.5).
+//
+// It is safe to call when nothing is speaking. Playback stops within about one
+// audio buffer; the speaking call returns context.Canceled.
+//
+// Callers: the interrupt manager (Ctrl+C), and — once the half-duplex
+// constraint is lifted — a wake event detected during playback.
+func StopSpeaking() {
+	speakingMu.Lock()
+	cancel := speakingCancel
+	speakingMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// speakOnce synthesizes and plays a single chunk under ctx. It is the
+// cancellable twin of Speak, used inside SpeakStream so the single-sentence
+// path is interruptible too.
+func speakOnce(ctx context.Context, text string) error {
+	f, err := Synthesize(ctx, text)
+	if err != nil {
+		return err
+	}
+	return audio.PlaySpeechContext(ctx, audio.SpeechFormat{
+		Kind:       string(f.Kind),
+		SampleRate: f.SampleRate,
+		Channels:   f.Channels,
+		Data:       f.Bytes,
+	}, 1.0)
 }
 
 // SplitSentences breaks text into speakable chunks on sentence terminators,

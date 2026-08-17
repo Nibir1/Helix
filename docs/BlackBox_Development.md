@@ -286,6 +286,20 @@ Policy, sandbox, and confinement all run each iteration. The harness decides onl
 plan again; it never executes anything itself and never relaxes a control (guardrail #3 intact).
 The observation block carries `authority="data-only"` and is sanitized (no backticks/braces/tags)
 so command output can never become an instruction.
+**Amendment (2026-08-17, P8.6):** the observation now carries a bounded tail of what each step
+*printed*, plus its true `ExitCode`. Two consequences worth recording:
+1. **Output is a genuine injection surface** — unlike an exit code, command output is fully
+   attacker-controllable (a crafted filename, a poisoned log line). `sanitizeOutput` is its
+   boundary. Sanitizer *ordering* is part of the contract: character-level cleanup runs before
+   token-level neutralization, because stripping control characters can otherwise reassemble a
+   token a regex already walked past (`Auth\x00ority=` → `Authority=`). A fuzz target
+   (`FuzzSanitizeOutput`) pins this, and found exactly that bug.
+2. **Exit codes are recorded because execution is lenient.** `RunShellCommand` deliberately treats
+   a non-zero exit as success so the user is not nagged about `grep` finding nothing — which made
+   the harness blind: a failing `go build` reported OK, `allStepsOK` returned true, and the loop
+   stopped without replanning. `OK` keeps its meaning (the handler returned no error) and the
+   captured `ExitCode` carries the truth; `allStepsOK` now judges on both. User-facing execution
+   semantics are unchanged.
 
 ### ADR-014 — Sentence-pipelined TTS for time-to-first-audio.
 **Decision (2026-08-17):** Spoken replies play sentence-by-sentence with one-ahead synthesis
@@ -304,6 +318,36 @@ wave, wake-standby breathing pulse — built on the proven `Thinker` machinery (
 cursor hide/heal, TTY-gated no-op). No GUI/framebuffer dependency; daemon/headless renders nothing.
 **Rationale:** Delivers the "living AI" presence the vision calls for while honoring the CGO-free,
 terminal-native, single-binary philosophy (guardrail #8).
+
+### ADR-016 — Two local LLM runtimes (Ollama + llama.cpp), and a circuit-breaker brain failover.
+**Decision (2026-08-17):** P11.4 is resolved in favor of **implementing** the `llamacpp` provider
+rather than deleting the vestiges. `internal/providers/llamacpp` speaks `llama-server`'s
+OpenAI-compatible API as a **user-managed sidecar** (ADR-002: no install, no weight download, no
+CGO). Ollama remains the default and recommended local runtime; llama.cpp is the escape hatch.
+Automatic cloud→local failover (`internal/ai/failover.go`) is a **circuit breaker**, not a
+monitor-only flip:
+
+| State | Behavior |
+|-------|----------|
+| CLOSED | calls go to the configured provider |
+| OPEN | after N consecutive *availability* failures — or `SetOfflineMode(true)` from the daemon monitor — calls go to the local provider; one spoken + printed notice |
+| HALF-OPEN | after `retry_after_s`, the next call probes the cloud; success restores it with a notice, failure resets the timer silently |
+
+**Rationale:** (a) The edge matrix (`docs/edge_deployment.md` §5) already documents a board — the
+first-gen Jetson Nano, frozen at JetPack 4.6 / CUDA 10.2 / Maxwell 5.3 — where **Ollama is
+unsupported and a hand-built llama.cpp is the only local-LLM path**. Deleting the provider would
+have left that board with no offline brain at all, contradicting Phase 10. (b) A breaker rather
+than a pure connectivity hook is what makes failover work in the **interactive shell**, which has
+no connectivity monitor; the daemon's monitor becomes one of two triggers, not the only one.
+**Guardrails:** failover changes only *which model writes the plan* — every plan still re-enters
+classify → planner → Instruction Firewall → risk tiers → Voice Risk Policy → sandbox → confinement
+(§12 #3 intact). Only availability errors count (a 400/401 or Ctrl+C must stay visible, never be
+hidden behind a quieter model). The breaker **health-checks the local provider before every
+switch**, so on a machine with no local runtime it never engages and behavior is unchanged.
+An explicit `/provider use` or `/model` outranks the breaker permanently.
+**Consequences:** a second local runtime to document; `llm.fallback.enabled` is the project's
+first default-**true** setting, which forces a `*bool` in config so an explicit `false` is
+distinguishable from an absent section.
 
 ---
 
@@ -796,14 +840,93 @@ recovers from failures and chains follow-ups (ADR-013).
 - [x] P8.4 `/agentic on|off|status` toggle + persisted `user_preferences.agentic_mode`; wired in
       `main.go` and `/help`.
 - [x] P8.5 Tests: completion detection, data-only fencing + injection sanitization, budget cap.
-- [ ] P8.6 **Output capture (next):** tee command stdout/stderr into a bounded per-step buffer and
-      include a truncated tail in the observation block, so the planner can react to *what a
-      command printed*, not just its exit status. (Needs a capture-capable sandbox runner —
-      scoped, not yet built.)
-- [ ] P8.7 **Provider-native tool calling (next):** replace prompt-enforced JSON with function
-      calling where the provider supports it (`Capabilities.ToolUse`), reducing planner retries.
-- [ ] P8.8 **Streaming token render (next):** render planner/chat tokens live instead of buffering
-      the whole response in `CollectChat`.
+- [x] P8.6 **Output capture:** `commands.TailBuffer`/`OutputCapture` (bounded, last-N-bytes,
+      concurrency-safe) + `DirectorySandbox.RunShellCommandCaptured` tee stdout/stderr to the
+      terminal *and* into a per-step tail; `StepObservation` gains `Output`, `OutputTruncated`,
+      `ExitCode`; `observationBlock` renders a sanitized tail per step (larger budget for the
+      failing step, where the diagnosis is). **Capture is gated on agentic mode** — assigning a
+      non-`*os.File` to `cmd.Stdout` makes os/exec insert a pipe, so the child loses its TTY and
+      stops emitting colors/progress; the default path keeps inherited descriptors byte for byte.
+      **Exit-code capture was required for the feature to work at all** — see the ADR-013
+      amendment: lenient execution meant a failing build reported OK and the harness never looped.
+      Tests: 10 capture (incl. tee-does-not-swallow, stderr, race), 9 sanitizer/observation,
+      5 integration (agentic-on vs off, failure path), `FuzzSanitizeOutput` (945k execs; found a
+      real sanitizer-ordering bypass, fixed, seed committed).
+- [x] P8.7 **Provider-native tool calling:** `providers.ToolDefinition`/`ToolCall`,
+      `ChatRequest.Tools`/`ToolChoice`, `StreamChunk.ToolCalls`, `CollectChatResult`, and a
+      `toolCallAccumulator` that reassembles fragmented SSE tool-call deltas (id+name arrive once,
+      argument slices accumulate, ordered by provider index — consumers never see partial JSON).
+      Implemented in the `openai_compatible` adapter, which **covers 7 providers at once** (openai,
+      deepseek, kimi, qwen, glm, custom, llamacpp all embed it). `ai/planner_tools.go` offers the
+      plan as an `emit_plan` tool with the schema mirrored from `BuildPlannerPrompt` and
+      `tool_choice=required`, so the model cannot answer in prose — the failure the 3-attempt
+      JSON-repair ladder exists to absorb. `Capabilities.ToolUse` is now real, via
+      `providers.SupportsToolUse`.
+      **Design constraints honored:**
+      • *Fast path, never a new failure mode* — unsupported provider, transport error, no call,
+        wrong tool, or empty arguments all fall through to the untouched prompt ladder.
+      • *Honest capability reporting* — the flag describes the ADAPTER's ability, not the vendor's:
+        Anthropic and Ollama have their own wire formats and report false rather than cost a wasted
+        round trip per plan. `custom` and `llamacpp` are excluded because their tool support is
+        undetectable (arbitrary endpoint; llama-server needs `--jinja` + a capable GGUF).
+      • *Same safety path* (§12 #3) — tool arguments go through the identical
+        `ParsePlanFromModelOutput` → `validatePlan` → firewall → risk tiers → sandbox chain. The
+        schema's closed enums are defense in depth, not a replacement for validation.
+      • *Composes with P11.2* — `ToolCallingAvailable` asks the provider the BREAKER would pick, so
+        a session degraded to a local model correctly stops using tool calling.
+      Surfaced in `/provider status` ("Planner protocol"). Tests: 6 accumulator/capability,
+      6 adapter wire (incl. ordinary requests staying byte-identical), 8 planner (schema contract,
+      shared validation, all four fallback modes).
+- [x] P8.7b **Anthropic + Ollama native tool calling.** Shared plumbing extracted to
+      `internal/providers/tools.go` (exported `ToolCallAccumulator`, `ToolsToOpenAIWire`,
+      `ToolsToAnthropicWire`, `AnthropicToolChoice`) so three wires share one reassembly
+      implementation instead of re-deriving — and re-bugging — it per adapter.
+      **Anthropic:** flat `tools` with `input_schema` (not OpenAI's nested `function.parameters`),
+      `tool_choice` as an object where "must call one" is `{"type":"any"}`; streamed as
+      `content_block_start{type:"tool_use"}` + `input_json_delta` fragments keyed by block index —
+      different event names, same index-keyed accumulation, so the shared accumulator applies. The
+      provider gained an `endpoint` field so the wire is testable against a stub.
+      **Ollama:** OpenAI-shaped definitions on `/api/chat`, **no `tool_choice`** — a call cannot be
+      forced, only offered, so the field is honestly omitted rather than faked (the planner already
+      falls back when no call returns). Its arguments arrive as a JSON **object**, not the string
+      every other provider sends; `json.RawMessage` normalizes them without a re-encode round trip.
+      **Ollama support is per-MODEL, not per-provider** — `ollamaToolModels` gates on families that
+      ship a tool template (llama3.x, qwen2.5/3, mistral-nemo/small/large, command-r, firefunction,
+      hermes3). This is load-bearing honesty: Helix's own default local model is `gemma4:e2b`, and
+      Gemma has no tool template, so a blanket claim would make the planner attempt a call, get
+      prose, and fall through on EVERY plan — burning a wasted round trip on exactly the
+      low-powered hardware that can least afford one.
+      Tests: 5 Anthropic (wire shape incl. "no OpenAI envelope", streamed reassembly, mixed
+      text+tool, truncated stream), 5 Ollama (wire shape incl. "no fabricated tool_choice",
+      object→string normalization with a round-trip check, delivered-once, nameless dropped), plus
+      updated capability expectations.
+- [x] P8.8 **Streaming token render:** `ai.StreamModel` consumes the provider channel directly and
+      delivers fragments to a callback while still returning the complete text (script promotion
+      and session memory need the whole response — streaming changes when bytes are *displayed*,
+      not what the caller holds). `ux.AIStreamWriter` renders live; `agent.AIStream` +
+      `agent.StreamingRenderer` are the seam.
+      **Design decisions:**
+      • *Streaming replaces the typewriter rather than composing with it.* `Typewriter` simulates
+        live generation with fixed per-character sleeps; once real tokens arrive that simulation is
+        strictly worse — it would add artificial delay on top of genuine latency. The audible tick
+        (one per chunk ≈ per token, `PlayType` is already 10 ms-throttled) and the `[NEURAL_NET]`
+        prefix keep the established character.
+      • *The spinner now stops at the FIRST token*, not at the end — time-to-first-word becomes the
+        provider's real latency instead of the whole generation. That is the actual win.
+      • *`StreamingRenderer` is an OPTIONAL interface, not part of `Renderer`.* The daemon captures
+        its IPC reply by embedding `HeadlessRenderer` and overriding `PrintAIMessage` — an override
+        Go does **not** dispatch from inside a `HeadlessRenderer` method. Making streaming opt-in
+        means headless paths keep the buffered render byte-for-byte and cannot silently start
+        returning empty replies. Two tests pin this (`TestHeadlessRendererDoesNotStream`,
+        `TestDaemonRendererDoesNotStream`).
+      • *The prefix is deferred to first content*, so a response that produces nothing leaves no
+        orphaned `[NEURAL_NET] →` on screen; an unstarted stream falls back to `PrintAIMessage`.
+      **Behavior change (deliberate):** the three duplicated chat-fallback blocks became one
+      `Agent.chatFallback`, and a fallback response containing fenced scripts now shows its prose
+      *before* the run-it prompt. Previously the model's explanation was discarded in that case —
+      seeing the reasoning behind a script you are approving is better for an execution decision.
+      Tests: 4 stream writer, 7 `StreamModel` (incl. partial-text-on-error and breaker feeding),
+      5 renderer-seam/daemon guards.
 
 **Acceptance:** a voice-initiated multi-step task that hits a recoverable error self-corrects
 within the step budget (manual QA with a real model); single-shot behavior unchanged with
@@ -850,15 +973,54 @@ for on-device speaker output, and **bubblewrap** to preserve kernel confinement 
 - [x] P10.1 `docs/edge_deployment.md` — the deployment matrix: build flags per arch, the two Linux
       gotchas (audio_cgo, confinement fallback), cloud/hybrid/local path guidance, and per-device
       notes for Pi 5, Pi 4, **Jetson Nano (1st-gen)**, amd64 mini-PC, generic arm64 SBC, and RISC-V.
-- [ ] P10.2 `scripts/edge-setup.sh` (consent-gated, checksum-pinned like the Ollama installer):
-      detects arch/board, installs sox + bubblewrap, and — where supported — Ollama + a size-matched
-      model, whisper.cpp server, Kokoro-FastAPI/Piper, openWakeWord. Refuses/warns on unsupported
-      combos (e.g. Ollama on Jetson Nano 1st-gen) and points at the cloud path instead.
-- [ ] P10.3 `/doctor` gains an "edge appliance" section: arch + build flavor (audio_cgo?),
-      confinement backend actually in force (bwrap/landlock/none), recorder present, each configured
-      sidecar reachable, model pulled, thermals/throttling note.
-- [ ] P10.4 `systemd --user` unit template for `helix daemon` on headless boards (`helix daemon
-      install` already emits launchd/systemd/sc.exe — extend the Linux template with edge notes).
+- [x] P10.2 `scripts/edge-setup.sh` — detects arch/board/kernel/package manager, installs
+      sox + bubblewrap through the system package manager, and offers Ollama behind a
+      **SHA-256-verified** install that **fails closed** on mismatch or an unverifiable digest.
+      **Refuses Ollama on the Jetson Nano 1st-gen** and points at the cloud voice path (Groq +
+      gpt-4o-mini-tts) plus the llama.cpp escape hatch from P11.4. Modes: `--check` (detection
+      only, inert), `--dry-run` (prints the plan), `--yes`, `--assume-board=` (exercises a board
+      path without that board). Prompts are TTY-gated and EOF-tolerant, so a piped/CI run declines
+      instead of hanging or aborting under `set -e`.
+      **Deviation from the sketch, deliberate:** whisper.cpp / Piper / Kokoro / openWakeWord are
+      **not** auto-installed. They have no stable, per-arch, checksummable release artifact
+      (whisper.cpp builds from source, Kokoro ships as Docker), so a pinned installer would be
+      security theater that rots — the same conclusion P7.7 reached. They stay user-managed
+      sidecars (ADR-002) and the script prints exact, copy-pasteable setup for each.
+      Tests: 9, incl. a **pin-drift guard** asserting the script's Ollama checksum still matches
+      `internal/ollama/installer.go` (a drift means one install path trusts what the other
+      rejects), a no-`curl|sh` assertion, consent-gating assertions, and `--dry-run` runs of both
+      the Jetson refusal and the Pi 5 non-refusal. `shellcheck` runs in CI when present.
+- [x] P10.3 `/doctor` "edge appliance" section, backed by the new `internal/edge` package:
+      platform + arch + detected board, **build flavor** (`audio.BackendName`/`SpeechSupported` —
+      new, exposing the `audio_cgo` build tag at runtime), **confinement actually in force** with
+      the bubblewrap remediation attached when it degraded, recorder presence, each configured
+      **local** sidecar's reachability, the offline-LLM fallback's reachability **and whether its
+      model is pulled** (P11.3's check, surfaced interactively), and thermals with a throttling
+      verdict.
+      **Rationale:** both Linux edge gotchas fail *silently* — a CGO-free binary is structurally
+      mute however TTS is configured, and confinement degrades to none on an old kernel without
+      stopping anything. On a headless board that stays invisible until something important does
+      not happen. Tests: 10, using synthetic sysfs fixtures so board/thermal/throttle parsing is
+      covered on a dev machine, not only on the boards it targets.
+- [x] P10.4 `systemd --user` unit template for headless boards — `internal/edge/systemd.go`
+      (`SystemdUnit`, `LingerEnabled`, `SystemdEdgeNotes`), consumed by `helix daemon install`.
+      **Two load-bearing corrections, not cosmetics:**
+      • `Wants=network-online.target` added alongside `After=`. `After` only *orders* against a
+        target; it does not pull it in, and nothing else requests network-online on a minimal
+        headless image — so the previous unit's ordering was **silently inert** and the daemon
+        raced the network while its first acts are a connectivity probe and a cloud STT/TTS call.
+      • **Lingering guidance.** A `--user` service stops at logout and never starts at boot unless
+        `loginctl enable-linger` is set. On an appliance nobody logs into that is the difference
+        between "installed" and "actually runs". `helix daemon install` now *detects* the linger
+        state (reading systemd's marker directly, so no `loginctl` dependency) and warns in yellow
+        with the exact fix when it is off — while honestly reporting "unknown" when it cannot tell.
+      Also added: `StartLimitIntervalSec`/`StartLimitBurst` to bound restart storms on a small
+      board (placed in `[Unit]`, where systemd ≥ 230 expects them — under `[Service]` modern
+      systemd logs "Unknown lvalue" and ignores them), `TimeoutStopSec`, `WorkingDirectory=%h`,
+      `After=sound.target`, and commented `Environment=` examples for the three edge knobs. Post-
+      install notes cover the `audio` group, the silent-build gotcha, `journalctl --user`, and
+      `/doctor`. Tests: 10, incl. percent-escaping (`%h` must survive, a literal `%` must double
+      or the unit fails to load), a section-placement check, and a well-formed-lines check.
 - [ ] P10.5 Manual QA on real hardware:
       - Pi 5 fully-local: wake→first-audio ≤ ~2.5 s, sustained CPU/thermal check.
       - **Jetson Nano (1st-gen), cloud path:** wake→first-audio over Groq + gpt-4o-mini-tts;
@@ -871,7 +1033,7 @@ end-to-end.
 
 ---
 
-### Phase 11 — Offline LLM Resilience *(partial — daemon init fixed 2026-08-17)*
+### Phase 11 — Offline LLM Resilience *(core DONE 2026-08-17)*
 
 **Goal:** Helix keeps thinking when the cloud is gone (not just keeps hearing/speaking).
 
@@ -879,18 +1041,40 @@ end-to-end.
 - [x] P11.1 **Daemon provider init (was a silent-failure bug):** `daemon.New` now calls
       `ai.InitProviders` from persisted config — previously every daemon planner/chat call failed
       "no provider configured" and IPC submits returned an empty reply.
-- [ ] P11.2 **Automatic LLM failover (next):** on repeated cloud-provider failure (or the
-      connectivity monitor firing), transparently switch the planner/chat provider to a local
-      Ollama model, mirroring the existing speech `SetOfflineMode` local-first flip; switch back on
-      restore, with a spoken notice.
-- [ ] P11.3 **Ensure-local-ready:** when a local fallback is configured, `helix daemon` verifies
-      the Ollama model is pulled at startup (reuse `ollama.EnsureRunning` + pull).
-- [ ] P11.4 llama.cpp: either implement the `llamacpp` provider (GGUF over the OpenAI-compatible
-      llama-server) or remove the dead `llamacpp` vestiges and document Ollama as the one local
-      runtime. **Decision required at phase start.**
+- [x] P11.2 **Automatic LLM failover:** `internal/ai/failover.go` — a circuit breaker (CLOSED /
+      OPEN / HALF-OPEN, ADR-016) resolves the provider for every model call. Two triggers:
+      repeated availability failures at the call site (works in the interactive shell, which has
+      no monitor), and `ai.SetOfflineMode` from the daemon's 5 s connectivity monitor, called
+      alongside the existing `speech.SetOfflineMode` so ears, voice, and brain move together.
+      Switches are spoken *and* printed; the daemon also journals them (`llm_failover`).
+      Restore happens on connectivity return or via the half-open cloud probe.
+      **Design notes:** only availability errors count (`isAvailabilityError` — a 400/401/Ctrl+C
+      stays visible); the local provider is health-checked *before* every switch, so a machine
+      with no local runtime never degrades onto a dead brain; `UseProvider`/`UseModel` clear
+      breaker state so an explicit user choice is never silently undone; planner retry timeouts
+      are now computed per attempt (`plannerTimeout`) because the breaker can flip cloud→local
+      *between* the three planner attempts, and a CPU-bound local model handed a 30 s cloud budget
+      would time out on the very attempt meant to rescue the turn.
+- [x] P11.3 **Ensure-local-ready:** `daemon.ensureLocalBrainReady` (background, guarded) runs
+      `ollama.EnsureRunning`, lists installed models, and matches bare names against `name:tag`.
+      **Deviation from the sketch (consent, §12 #1):** the model *pull* is a multi-gigabyte
+      download, so it happens only when `llm.fallback.ensure_ready` is explicitly true. By default
+      the daemon still **verifies and journals** a loud warning — the useful half of the check
+      without a surprise download. No-op for `llamacpp` (a user-managed sidecar has no pull API).
+- [x] P11.4 llama.cpp — **decision: implement** (ADR-016). `internal/providers/llamacpp` over
+      `llama-server`'s OpenAI-compatible API, registered unconditionally (keyless, costs nothing
+      until used), `HELIX_LLAMACPP_URL` / `llm.llamacpp_url` override, bare-host URLs normalized
+      to `/v1`. Rationale: the Jetson Nano 1st-gen row of the edge matrix has no Ollama, so
+      deleting the provider would have left that board with no offline brain.
+- [ ] P11.5 **Manual QA (hardware/keys):** cut the network mid-conversation against a real cloud
+      key + a real Ollama, confirm the ~5 s spoken switch and the half-open restore; run
+      `llama-server` and confirm a full degraded planner turn on the llamacpp provider.
 
 **Acceptance:** cloud cut mid-conversation → within ~5 s Helix answers from the local model with a
 spoken "switching to local intelligence" notice; restore switches back.
+*(Unit-proven end to end — 9 breaker tests incl. threshold, non-availability errors, dead-local
+refusal, half-open restore, user-override precedence. The ~5 s wall-clock and the spoken audio
+itself remain manual QA, P11.5.)*
 
 ---
 
@@ -909,10 +1093,30 @@ spoken "switching to local intelligence" notice; restore switches back.
       check), silent-capture → `ErrNoSpeech` (no 80 s dead-air hang), wake-scanner retry (survives
       quiet rooms), `sox`-vs-`rec` binary fix, VoicePrompter now prints questions (visible when TTS
       is down), Deepgram `speech_final` endpointing (no mid-utterance truncation).
-- [ ] P12.4 **Live amplitude feed (next):** tap the capture stream to drive `VoiceViz.SetLevel`
-      for a truly mic-reactive waveform (infra noted in the audit: `ambient.Tee` + `DecodeWAVMono`).
-- [ ] P12.5 **Barge-in v2 (next):** cancel in-flight `SpeakStream` on a wake/keypress mid-sentence
-      (v1 cancels at sentence boundaries).
+- [x] P12.4 **Live amplitude feed:** `speech.ClipLevel` meters each captured chunk and drives
+      `VoiceViz.SetLevel` in the streaming voice turn, so the waveform tracks the real microphone.
+      **The mapping is logarithmic (dBFS), not linear** — that is the whole point. Speech RMS sits
+      around 0.01–0.1, so a linear meter fed by RMS barely leaves the floor and produces exactly
+      the dead-looking waveform this replaces; the meter spans −50 dBFS (quiet room) to −10 dBFS
+      (close talking) instead. The HUD **hands the terminal line over** to the interim-transcript
+      display as soon as real words arrive — they share one row, and text is more informative than
+      a waveform once there is text.
+      **Honest scope note:** only the *chunked* paths can be metered. `batchVoiceTurn` calls
+      `RecordClip`, which shells out to sox writing a whole file with no incremental readback, so
+      it keeps the synthetic animation. Metering it would mean restructuring it onto `ChunkScanner`
+      — a real change to the proven fallback path, not worth it for an animation.
+- [x] P12.5 **Barge-in v2:** `audio.PlaySpeechContext` + a `ctxStreamer` wrapper end the beep
+      stream when the context is cancelled, so playback stops at the next buffer (~50 ms) —
+      **mid-sentence**, where v1 could only stop between sentences. `SpeakStream` derives a
+      cancellable context, publishes it via `speech.StopSpeaking()`/`Speaking()`, and registers it
+      with the interrupt manager **inside `SpeakStream`** rather than at each call site, so every
+      caller (interactive shell, daemon, ambient responses) gains it at once — closing a real gap
+      where **Ctrl+C did not stop a spoken reply at all**. `Speak` (`/say`, `remote say`) is
+      context-aware too.
+      **Residual, documented honestly:** a *wake-word* barge-in during playback still needs echo
+      cancellation — the mic would hear Helix's own voice and re-trigger (the half-duplex
+      constraint from Phase 2). `StopSpeaking()` is the seam that path will call; today's working
+      triggers are Ctrl+C and any programmatic caller.
 - [ ] P12.6 Manual QA: HUD readability across terminals; first-audio latency with a real TTS key.
 
 **Acceptance:** voice mode shows live sci-fi feedback; spoken replies begin within one sentence's
@@ -944,6 +1148,15 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
                 "sensitivity_preset": "balanced", "cooldown_s": 2 },
     "capture": { "backend": "auto", "device": "default", "sample_rate": 16000,
                 "silence_timeout_ms": 1500, "max_utterance_s": 30 }
+  },
+  "llm": {                                   // Phase 11 (ADR-016)
+    "llamacpp_url": "",                      // "" → HELIX_LLAMACPP_URL → http://127.0.0.1:8080/v1
+    "fallback": { "enabled": true,           // default TRUE (omit the key to keep it)
+                  "provider": "ollama",      // "ollama" | "llamacpp"
+                  "model": "",               // "" → provider default / active model
+                  "threshold": 2,            // consecutive availability failures that trip it
+                  "retry_after_s": 120,      // half-open cloud probe interval
+                  "ensure_ready": false }    // true = daemon may PULL the model at startup
   },
   "voice_policy": { "max_risk": "medium", "confirm_timeout_s": 8,
                 "dangerous_needs_typed": true, "min_transcript_confidence": 0.6 },
@@ -1085,11 +1298,11 @@ necessary.
 | 5 — Vision | `DONE` | 2026-08-16 | 2026-08-16 | `MessagePart` multimodal format + OpenAI/Ollama/Anthropic wire adapters, `ai.RunVisionModel` (capability-gated), ffmpeg memory-only capture (fs-snapshot + stdout-only tests), `/eyes` + "turn off your eyes" kill switch + metadata-only journal, deictic voice routing, P5.5 dedicated `vision.provider` fallback; manual QA (real camera + vision model) pending |
 | 6 — Ambient Audio (optional) | `DONE` | 2026-08-16 | 2026-08-16 | Rule-based analyzer (RMS + hand-rolled FFT concentration → silence/loud/alarm/music) + cooldown-gated service + response mapping + config + golden fixtures + fuzz, live wake-stream `TeeScanner`/`ChunkMonitor` wiring; CPU budget benchmark (26µs/chunk) green |
 | 7 — Polish & Release | `IN PROGRESS` | 2026-08-16 | — | `input.HybridSource`, 3 new fuzz targets, ADR-010 (tray helper), `docs/blackbox.md`, benchmark suite, streaming STT partials (Deepgram WS), TTS latency budget metric, 3-OS e2e matrix (Windows daemon IPC), Ollama installer checksum pinning, §10 latency-metrics instrumentation (wake→exec + frame-to-insight) done; speech queue tuning + measured latency, §10 metrics run (needs hardware), `blackbox-v0.1.0` tag (owner-gated) remain |
-| 8 — Agentic Harness | `CORE DONE` | 2026-08-17 | — | `executePlanSteps`+`planFirewallExecute` refactor, `harness.go` bounded plan→act→observe→replan (data-only fenced observations, ADR-013), `/agentic` toggle + persisted pref, 4 harness tests. Output capture / native tool-calling / streaming render = next (P8.6–8.8) |
+| 8 — Agentic Harness | `DONE` | 2026-08-17 | 2026-08-17 | `executePlanSteps`+`planFirewallExecute` refactor, `harness.go` bounded plan→act→observe→replan (data-only fenced observations, ADR-013), `/agentic` toggle + persisted pref. **P8.6 output capture done**: bounded tee-ing `TailBuffer`/`OutputCapture` + `RunShellCommandCaptured`, sanitized per-step output tail + true `ExitCode` in the observation block (ADR-013 amendment), agentic-gated so the default path keeps its TTY; `FuzzSanitizeOutput` found and fixed a sanitizer-ordering bypass. **P8.7 native tool calling done**: normalized `ToolDefinition`/`ToolCall` types + streamed tool-call accumulator + `openai_compatible` implementation (7 providers), planner `emit_plan` tool with `tool_choice=required` and silent fallback to the prompt ladder, honest `Capabilities.ToolUse` via `SupportsToolUse`. **P8.8 streaming render done**: `ai.StreamModel` + `ux.AIStreamWriter` + optional `agent.StreamingRenderer` seam (headless/daemon keep the buffered path by design), spinner stops at the first token, three duplicated chat-fallback blocks unified into `Agent.chatFallback`. **P8.7b**: Anthropic (`tool_use` blocks + `input_schema`) and Ollama (`/api/chat` tools, object-valued arguments normalized, **per-model** gating because Gemma ships no tool template) now drive tools natively; shared plumbing in `providers/tools.go`. 70 new tests across P8.6–8.7b. **Phase 8 fully complete — all five tool-capable cloud providers plus Anthropic and tool-capable Ollama models use native function calling** |
 | 9 — Cheap Speech Defaults | `CORE DONE` | 2026-08-17 | — | Groq STT + Aura-2 TTS + Kokoro-local adapters, pricing.json refresh (Groq turbo & gpt-4o-mini-tts recommended, ADR-011), `GROQ_API_KEY` mapping, wizard persists model, contract tests. Chain presets + real-key QA = next |
-| 10 — Linux Edge-Device Deployment | `MATRIX DONE` | 2026-08-17 | — | `docs/edge_deployment.md` — per-board matrix (Pi 5/4, Jetson Nano 1st-gen, amd64 mini-PC, arm64 SBC, RISC-V): build flags per arch, `audio_cgo` + confinement-fallback gotchas, cloud/hybrid/local path guidance. `scripts/edge-setup.sh`, `/doctor` edge section, systemd template, hardware QA remain (hardware-gated) |
-| 11 — Offline LLM Resilience | `PARTIAL` | 2026-08-17 | — | Daemon `ai.InitProviders` bug fixed (was silent no-provider failure); automatic cloud→local LLM failover + ensure-local-ready + llamacpp decision remain |
-| 12 — Sci-Fi Presence & UX | `CORE DONE` | 2026-08-17 | — | `voiceviz.go` HUD (ADR-015), `SpeakStream` sentence-pipelined TTS (ADR-014), persistent gapless `StreamRecorder`, phantom-wake/silent-hang/wake-retry/sox-rec/prompter-print/Deepgram-endpointing fixes. Live amplitude feed + barge-in v2 + QA remain |
+| 10 — Linux Edge-Device Deployment | `TOOLING DONE` | 2026-08-17 | — | `docs/edge_deployment.md` per-board matrix (Pi 5/4, Jetson Nano 1st-gen, amd64 mini-PC, arm64 SBC, RISC-V). **P10.2** `scripts/edge-setup.sh` — consent-gated, SHA-256-verified Ollama install (fail-closed), Jetson-Nano refusal → cloud path, `--check`/`--dry-run`/`--yes`/`--assume-board`, shellcheck-clean; ML sidecars stay user-managed with printed instructions (no pinnable artifact — same call as P7.7). **P10.3** `internal/edge` + `/doctor` "edge appliance" section: board, build flavor via new `audio.SpeechSupported`, confinement in force + remediation, recorder, local sidecar reachability, offline-LLM model-pulled check, thermals/throttling. **P10.4** `internal/edge/systemd.go` — edge-aware `systemd --user` unit (`Wants=network-online` fixing a silently-inert `After=`, restart-storm bounds in `[Unit]`, edge env knobs) + linger detection and post-install notes wired into `helix daemon install`. 29 new tests incl. a checksum pin-drift guard and unit percent-escaping. Only P10.5 hardware QA remains (inherently hardware-gated) |
+| 11 — Offline LLM Resilience | `CORE DONE` | 2026-08-17 | — | Daemon `ai.InitProviders` bug fixed (P11.1); `internal/ai/failover.go` circuit-breaker cloud→local brain failover (P11.2) wired into both the interactive shell and the daemon connectivity monitor; `ensureLocalBrainReady` startup verification, consent-gated pull (P11.3); `internal/providers/llamacpp` implemented over llama-server — P11.4 decided in favor of implement (ADR-016). 18 new tests. Real-network/real-key QA (P11.5) remains |
+| 12 — Sci-Fi Presence & UX | `CODE DONE` | 2026-08-17 | — | `voiceviz.go` HUD (ADR-015), `SpeakStream` sentence-pipelined TTS (ADR-014), persistent gapless `StreamRecorder`, phantom-wake/silent-hang/wake-retry/sox-rec/prompter-print/Deepgram-endpointing fixes. **P12.4** `speech.ClipLevel` log-scale meter driving `VoiceViz.SetLevel` from the real mic (chunked paths; batch keeps synthetic — sox has no incremental readback). **P12.5** `audio.PlaySpeechContext` + `ctxStreamer` = true mid-sentence cancellation (~50 ms), `speech.StopSpeaking()`/`Speaking()` barge-in handle, interrupt-manager registration inside `SpeakStream` (Ctrl+C previously could NOT stop a spoken reply). 16 new tests. Only P12.6 manual QA remains; mic-triggered barge-in needs echo cancellation (documented residual) |
 
 ### Task-level checkboxes
 
@@ -1116,6 +1329,22 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 | 2026-08-17 | True hands-free conversation: `/wake on|off|status` command (enable UI with safe defaults: phrase "hey helix", engine energy, preset balanced) + `/help` entry; config fix — `LoadPreferences` now merges the wake_word section field-wise even when STT/TTS providers are unset (previously a wake-only config never loaded) and fills empty fields from `config.WakeWordDefaults()` (the old file's empty section clobbered defaults → broken ""-phrase detector); daemon voice loop smoothed — amplitude gate before STT + spoken "I didn't catch that, please repeat" retry (up to 3 tries) then return to wake-only listening, mirroring the interactive path; `helix remote status` now reports `wake_enabled`/`wake_phrase`/`voice_loop`. Tests: config defaults-merge + custom-phrase-survives. Build+vet+lint(0 issues)+full suite green | Full BlackBox diff (Phases 4–7) uncommitted | Real-mic QA of the daemon wake→turn loop + energy-detector false-positive rate still manual |
 | 2026-08-17 | **Edge-device deployment matrix (Phase 10).** Generalized Phase 10 from Pi-5-only to a full Linux edge-device matrix after confirming the core cross-compiles CGO-free to `arm64`/`armv7` (verified builds). New `docs/edge_deployment.md`: build flags per arch; the two Linux gotchas (`audio_cgo`+libasound for on-device TTS output, bubblewrap fallback where Landlock/kernel≥5.13 is absent); cloud/hybrid/local path guidance; per-board notes for Pi 5, Pi 4, **NVIDIA Jetson Nano (1st-gen)**, amd64 mini-PC, generic arm64 SBC, RISC-V. Key finding: Jetson Nano 1st-gen runs the core fine (static binary sidesteps its frozen Ubuntu 18.04/glibc 2.27) but Ollama is unsupported (Maxwell/CUDA 10.2/kernel 4.9) → cloud voice path recommended; kernel 4.9 → no Landlock → install bwrap. Phase 10 tasks + tracker updated | Docs only; no code change | `scripts/edge-setup.sh`, `/doctor` edge section, systemd template, hardware QA (P10.2–10.5) |
 | 2026-08-17 | **Living-AI pass (Phases 8/9/11/12 core).** Two parallel audits (voice pipeline + agent/daemon) surfaced ~20 real bugs; fixed the load-bearing ones and built the new capabilities. **Bugs:** daemon never called `ai.InitProviders` (every daemon AI request silently no-op'd → fixed, P11.1); `defer diagnostics.Guard(...)` missing `()` in 2 goroutines (panics went unguarded); double-stop panic (`sync.Once`); phantom wake on closed channel; silent capture hung 80 s (→ `ErrNoSpeech` retry); wake scanner died in a quiet room (retry budget + `NoSilenceStop`); `DetectRecorder` returned "sox" but `RecordClip` ran `rec` (split rec/sox binaries); `/voice-setup` wiped wake+tuning config (field-wise merge) and never persisted the chosen model; VoicePrompter never printed questions (invisible confirmations when TTS down); Deepgram finalized on `is_final` not `speech_final` (mid-utterance truncation → segment accumulation); streaming producer leaked goroutine+HTTP body after ctx cancel (ctx-aware send); undo journal never popped (double-undo rewound an unjournalled commit → `Pop()`); commit journalled for undo even when HEAD didn't move (baseline test failure → `HeadCommit()` guard); ElevenLabs ignored speed; HybridSource leaked on partial start. **New capabilities:** agentic harness (`harness.go`, `executePlanSteps`/`planFirewallExecute` refactor, `/agentic` toggle, ADR-013); Groq STT + Deepgram Aura-2 TTS + Kokoro-local TTS adapters + pricing refresh (ADR-011/012); `SpeakStream` sentence-pipelined TTS (ADR-014); `voiceviz.go` sci-fi voice HUD (ADR-015); persistent gapless `StreamRecorder` replacing per-chunk spawns. New ADRs 011–015; new Phases 8–12 (§6B). ~15 new tests. `go build`+`go vet`+full suite incl. e2e (26 pkgs) green | Full BlackBox diff (Phases 4–12) uncommitted | Hardware/owner-gated: real-key QA (Groq/Kokoro/TTS mic), Pi appliance build (Phase 10), automatic cloud→local LLM failover (P11.2), agentic output-capture (P8.6), barge-in v2 (P12.5) |
+
+| 2026-08-17 | **Phase 11 core complete — Helix keeps thinking offline.** Closed the asymmetry where the speech chain degraded local-first (P4.10) while the planner kept dialing a dead cloud endpoint: Helix could still hear and speak but could no longer think. **P11.4 decided: implement** the `llamacpp` provider (ADR-016) — `internal/providers/llamacpp` over `llama-server`'s OpenAI-compatible API, keyless/local/registered unconditionally, `HELIX_LLAMACPP_URL` + `llm.llamacpp_url` overrides, bare-host URLs normalized to `/v1`; the deciding factor was the Jetson Nano 1st-gen edge-matrix row, where Ollama is unsupported and llama.cpp is the only local-LLM path (deleting the vestiges would have left that board with no offline brain). **P11.2:** `internal/ai/failover.go` — a CLOSED/OPEN/HALF-OPEN circuit breaker resolving the provider for every model call, so failover works in the interactive shell too (no monitor there); `ai.SetOfflineMode` now fires beside `speech.SetOfflineMode` in `watchConnectivity`. Only availability errors count; the local brain is health-checked before every switch (never degrade onto a dead Ollama); switches are spoken + printed + journaled; `UseProvider`/`UseModel` clear breaker state so a user's explicit choice is never silently undone. Follow-on fix found while wiring: `RunPlannerWithRetry` computed its timeouts **once**, so a breaker flip between planner attempts left a CPU-bound local model with a 30 s cloud-sized budget — now per-attempt via `plannerTimeout`. **P11.3:** `daemon.ensureLocalBrainReady` verifies the fallback model at startup (bare-name vs `name:tag` matching); the multi-GB **pull is consent-gated** behind `llm.fallback.ensure_ready` (default false) — verify-and-warn by default, per §12 #1. New `llm` config section, field-wise merged; `enabled` is a `*bool` because it is the project's first default-true setting and a plain bool cannot distinguish "absent" from "explicitly false". Surfaces: `/provider status` offline-fallback line, `helix remote status` `provider`/`model`/`llm_fallback`/`llm_local_mode`. 18 new tests (9 breaker, 5 llamacpp, 4 config, 3 daemon-readiness). `go build` + `go vet` + full suite incl. e2e (27 pkgs) green; golangci-lint reports only 3 findings that predate this change (`takeLast`, `voiceviz.label`, `parseDeepgramTranscript` — all unused, untouched) | Full BlackBox diff (Phases 4–12) uncommitted | P11.5 manual QA (real network cut + real key; a live `llama-server` turn). Then P8.6 agentic output capture, or P10.2/P10.3 edge tooling |
+
+| 2026-08-17 | **P8.6 agentic output capture — the harness can now see what commands printed.** New `internal/commands/capture.go`: `TailBuffer` (fixed-allocation last-N bytes, mutex-guarded because exec copies stdout/stderr on separate goroutines, always reports a full write so truncation never reads as an I/O error and kills the command) and `OutputCapture`; `DirectorySandbox.RunShellCommandCaptured` + `runArgvEnvCapture` tee via `io.MultiWriter` — **the terminal still receives everything**, capture never swallows. `StepObservation` gains `Output`/`OutputTruncated`/`ExitCode`; `observationBlock` renders a sanitized tail per step with an asymmetric budget (25 lines/1500 B for the failing step where the diagnosis is, 6/400 for successful ones — the block is re-sent every iteration, so this is recurring token cost). **Capture is gated on `Agentic`**: assigning a non-`*os.File` to `cmd.Stdout` makes os/exec insert a pipe and the child's isatty check fails (no colors, no progress bars), so the default path keeps inherited descriptors byte for byte and only an opt-in agentic turn pays. **Two findings the tests forced out.** (1) `FuzzSanitizeOutput` (945k execs) found a genuine **sanitizer-ordering bypass**: `authority=` was neutralized *before* control characters were stripped, so `Auth\x00ority=` passed the regex and the later control-char strip *reassembled* `Authority=` inside the prompt — fixed by running character-level cleanup first and token-level neutralization last; failing seed committed to `testdata/fuzz/`. (2) The integration test exposed that **lenient execution made the harness blind**: `RunShellCommand` treats any non-zero exit as success (right for the user — no nagging about `grep` finding nothing), so a failing `go build` produced `OK: true`, `allStepsOK` returned true, and the loop stopped without ever replanning — output capture alone would have delivered nothing. Fixed by recording the true `ExitCode` in the capture and having `allStepsOK`/`observationBlock` judge on it; **user-facing execution semantics unchanged**, only the planner-facing observation regained the truth. Cost: a benign non-zero exit (grep no-match) spends one extra planner iteration, bounded by the step budget — the model now decides whether the goal is met instead of a hardcoded leniency rule. ADR-013 amended with both. 24 new tests (10 capture incl. tee-does-not-swallow + race, 9 sanitizer/observation incl. fence-breakout + multibyte truncation, 5 integration). `go build` + `go vet` + full suite incl. e2e (27 pkgs) green; golangci-lint unchanged at the same 3 pre-existing findings | Full BlackBox diff (Phases 4–12) uncommitted | P8.7 provider-native tool calling, P8.8 streaming token render; or P10.2/P10.3 edge tooling. Manual QA: a real multi-step agentic turn against a live model, confirming self-correction from a captured compiler error |
+
+| 2026-08-17 | **P8.7 provider-native tool calling — the planner stops begging for valid JSON.** The planner protocol was prompt-enforced: a wall of "ABSOLUTE OUTPUT RULES" asking for a bare JSON object, backed by a 3-attempt repair ladder for markdown fences, prose preambles, and truncated braces. Providers with function calling enforce the schema at the API level instead. **Normalized types** in `providers`: `ToolDefinition`, `ToolCall`, `ChatRequest.Tools`/`ToolChoice` (no JSON tags, like `ChatMessage.Parts`, so adapters render their own wire format and non-tool providers are untouched), `StreamChunk.ToolCalls`, `ChatResult` + `CollectChatResult` (`CollectChat` now delegates, text behavior unchanged). **The fiddly part** was `toolCallAccumulator`: providers stream tool calls fragmented — id and function name arrive once on the first frame, argument slices accumulate across later frames keyed by `index`, and parallel calls interleave — so fragments are merged by index (sorted, not arrival order), nameless entries are dropped as truncated streams, and complete calls are emitted only on the terminating frame, so consumers never see partial JSON. `finish_reason:"tool_calls"` is now terminal alongside `"stop"` (some providers omit `[DONE]` after a tool call — treating only `"stop"` as terminal would hang until client timeout). **Implemented in `openai_compatible`, which covers 7 providers at once** (openai/deepseek/kimi/qwen/glm/custom/llamacpp all embed it). **Planner** (`ai/planner_tools.go`): `emit_plan` tool whose JSON Schema mirrors `BuildPlannerPrompt`, with closed enums on tool and intent so a model cannot invent a sixth executor tool; `tool_choice=required` because a chatty model answering in prose is precisely the failure being removed; arguments feed the SAME `ParsePlanFromModelOutput` → `validatePlan` → firewall → risk tiers → sandbox path, so tool output is not trusted one bit more than prompt output (§12 #3 intact — the schema is defense in depth, not a replacement). **Risk posture: fast path, never a new failure mode** — unsupported provider, transport error, no call, wrong tool, or empty arguments each fall through to the untouched ladder, costing at most one round trip. **Capability honesty:** `SupportsToolUse` describes what the ADAPTER can drive, not what the vendor sells — Anthropic and Ollama report false (their own wire formats, P8.7b) rather than burn a wasted round trip on every plan, and `custom`/`llamacpp` are excluded because their support is genuinely undetectable (arbitrary endpoint; llama-server needs `--jinja` plus a capable GGUF). **Composes with P11.2:** `ToolCallingAvailable` queries the provider the breaker would pick, so a session degraded to a local brain correctly stops offering tools. `/provider status` gained a "Planner protocol" line. Follow-up noted, not done: the prompt's JSON-formatting section is now redundant on the native path (harmless, and all semantic tool rules must stay) — trimming it is a separate change. 20 new tests (6 accumulator/capability, 6 adapter wire incl. ordinary requests staying byte-identical, 8 planner). `go build` + `go vet` + full suite incl. e2e (27 pkgs) green; golangci-lint unchanged at the same 3 pre-existing findings | Full BlackBox diff (Phases 4–12) uncommitted | P8.7b Anthropic/Ollama tool wire, P8.8 streaming token render, or P10.2/P10.3 edge tooling. Manual QA: a real OpenAI-key planner turn confirming zero JSON-repair retries |
+
+| 2026-08-17 | **P8.8 streaming token render — Phase 8 complete.** Chat replies now appear as they generate instead of after the whole response buffers. `ai.StreamModel` consumes the provider channel directly, feeding a callback per fragment while still returning the complete text — script promotion and session memory need the whole response, so streaming changes *when bytes are displayed*, not what the caller holds. It keeps the same breaker/interrupt semantics as every other entry point (a test proves streamed failures still feed the P11.2 breaker; without it, streaming would have silently disabled failover on the chat path). `ux.AIStreamWriter` renders live. **Three design calls worth recording.** (1) **Streaming replaces the typewriter rather than composing with it** — `Typewriter` simulates live generation with fixed per-character sleeps, and once real tokens arrive that simulation is strictly worse, adding artificial delay on top of genuine latency; the audible tick (one per chunk, `PlayType` already 10 ms-throttled) and the `[NEURAL_NET]` prefix carry the established character instead. (2) **The spinner stops at the FIRST token**, not at the end — time-to-first-word becomes the provider's real latency rather than the full generation, which is the actual UX win. (3) **`StreamingRenderer` is an optional interface, deliberately NOT part of `Renderer`** — the daemon captures its IPC reply by embedding `HeadlessRenderer` and overriding `PrintAIMessage`, an override Go does **not** dispatch from inside a `HeadlessRenderer` method, so had streaming been added to the base interface the daemon's `submit` would have started returning empty replies silently. Opt-in means headless paths keep the buffered render byte-for-byte; `TestHeadlessRendererDoesNotStream` and `TestDaemonRendererDoesNotStream` pin it. The prefix is deferred to first content so an empty response leaves no orphaned `[NEURAL_NET] →`, and an unstarted stream falls back to `PrintAIMessage`. **Refactor + deliberate behavior change:** the three byte-identical chat-fallback blocks in `planFirewallExecute` became one `Agent.chatFallback` (duplication that streaming would have tripled), and a fallback response containing fenced shell blocks now shows its prose *before* the run-it prompt — previously the model's explanation was discarded in that case, which is worse for an execution decision the user is being asked to approve. 16 new tests (4 stream writer, 7 StreamModel, 5 renderer-seam/daemon guards). PTY e2e suite green unchanged — the proof that interactive behavior did not regress. `go build` + `go vet` + full suite (27 pkgs) green; golangci-lint unchanged at the same 3 pre-existing findings. **Phase 8 is now DONE** (P8.1–8.8); P8.7b (Anthropic/Ollama native tool wire) logged as an optional follow-on | Full BlackBox diff (Phases 4–12) uncommitted | P10.2/P10.3 edge tooling, P12.4/P12.5 (live amplitude feed, barge-in v2), or P8.7b. Manual QA: watch a real streamed reply for first-token latency and tick rhythm |
+
+| 2026-08-17 | **P10.2/P10.3 edge tooling — the appliance can now be provisioned and inspected.** **P10.3** first, because the setup script points at it: new `internal/edge` package collecting the appliance picture, rendered as a `/doctor` "edge appliance" section. It reports platform/arch/board (device-tree + DMI, NUL-trimmed), **build flavor** via new `audio.BackendName`/`audio.SpeechSupported` (which finally expose the `audio_cgo` build tag at runtime), **confinement actually in force** with the bubblewrap fix attached when degraded, recorder presence, each configured **local** sidecar's reachability, the offline-LLM fallback's reachability **and whether its model is pulled** (P11.3's startup check, now visible interactively), and thermals with a throttle verdict. The motivation is that both Linux edge gotchas fail *silently* — a CGO-free binary is structurally mute however TTS is configured, and confinement degrades to none on an old kernel without stopping anything — which on a headless board stays invisible until something important does not happen. Board/thermal/throttle parsing is split into platform-independent halves (`detectBoardFrom`, `readThermalFrom`, `readThrottledFrom`) so synthetic sysfs fixtures cover it on a dev machine; thermal reads take the HOTTEST zone (boards expose CPU/GPU/PMIC and the first is not reliably the throttling one) and discard implausible values. **P10.2** `scripts/edge-setup.sh`: detects arch/board/kernel/package-manager, installs sox + bubblewrap via the system package manager (distro signatures do the integrity work), and offers Ollama behind a **SHA-256-verified** install that **fails closed** on mismatch *or* on having no digest tool at all. It **refuses Ollama on the Jetson Nano 1st-gen** — the one board in the matrix that cannot run it — and points at the cloud voice path plus the llama.cpp escape hatch P11.4 added, with the same Orin carve-out as `IsJetsonNanoFirstGen`. Modes: `--check` (inert), `--dry-run`, `--yes`, `--assume-board=` (exercises a board path without owning that board). Prompts are TTY-gated and EOF-tolerant so a piped/CI run declines rather than hanging or aborting under `set -e` (the v1.0.0 install.sh lesson). **Deliberate deviation from the roadmap sketch:** whisper.cpp / Piper / Kokoro / openWakeWord are NOT auto-installed — no stable per-arch checksummable artifact exists (whisper.cpp builds from source, Kokoro is Docker), so a pinned installer would be security theater that rots; they stay user-managed sidecars (ADR-002) with printed copy-pasteable setup, the same conclusion P7.7 reached. **The test that matters most** is the **pin-drift guard**: the script and `internal/ollama/installer.go` verify the same upstream artifact, and if their pinned checksums diverge one install path trusts a script the other rejects — nothing else would catch that. Also asserted: no `curl|sh` anywhere executable, consent gating, fail-closed verification elements, and `--dry-run` runs of both the Jetson refusal and the Pi 5 non-refusal. `shellcheck` runs as a skippable test and found 3 real issues (two `A && B \|\| C` pseudo-if-then-elses and a malformed `disable` directive), all fixed — the script is shellcheck-clean. 19 new tests; suite now 28 packages. `go build` + `go vet` + full suite green; golangci-lint unchanged at the same 3 pre-existing findings | Full BlackBox diff (Phases 4–12) uncommitted | P10.4 systemd edge template, P10.5 hardware QA (Pi 5 / Jetson Nano / amd64), P12.4/P12.5, or P8.7b |
+
+| 2026-08-17 | **P10.4 systemd edge template — Phase 10 tooling complete.** The Linux unit `helix daemon install` emitted was a five-directive stub; it is now `internal/edge/systemd.go` (testable, not inline `fmt.Sprintf`) with two corrections that are bugs rather than polish. **(1)** `After=network-online.target` was present *without* `Wants=` — a classic systemd footgun, because `After` only ORDERS a unit against a target and does not pull it in. Nothing else requests network-online on a minimal headless image, so the ordering was **silently inert**: the daemon could start before the network existed, while its first two actions are a connectivity probe and (on the cloud voice path) a remote STT/TTS call. **(2)** A `--user` service stops at logout and never starts at boot unless lingering is enabled for the account — on an appliance nobody logs into, that is the difference between "installed" and "actually runs", and nothing previously said so. `helix daemon install` now detects the linger state by reading systemd's marker directory (no `loginctl` dependency, works in containers), warns in yellow with the exact `enable-linger` command when it is off, confirms when on, and reports **unknown** rather than guessing when the marker directory is absent. Also added: `StartLimitIntervalSec`/`StartLimitBurst` so a crash-looping daemon cannot hammer a small board — deliberately in `[Unit]`, where systemd ≥ 230 expects them (under `[Service]` modern systemd logs "Unknown lvalue" and silently ignores them; the oldest board in the matrix, Jetson Nano on Ubuntu 18.04, ships systemd 237); `TimeoutStopSec`, `WorkingDirectory=%h`, `After=sound.target`, and commented `Environment=` examples for the three documented edge knobs. Post-install notes now cover the `audio` group, the silent-CGO-free-build gotcha, `journalctl --user`, and `/doctor`. **Percent escaping is a real hazard here** — systemd treats `%` as a specifier introducer, so a literal percent in a value must be doubled or the unit fails to load; the template threads `%h` and `2%%` through `fmt.Sprintf` correctly and a test pins both. One test initially failed on its own parsing (a naive `strings.Index` matched the literal `[Service]` inside the template's explanatory comment) — fixed by resolving sections from line-start headers while skipping comments, which is what the assertion should have done anyway. 10 new tests; the edge package now carries 29. `go build` + `go vet` + full suite (28 pkgs) green; golangci-lint unchanged at the same 3 pre-existing findings. **Phase 10 code is complete** — only P10.5 hardware QA remains, which needs the boards | Full BlackBox diff (Phases 4–12) uncommitted | P10.5 hardware QA (Pi 5 / Jetson Nano / amd64), P12.4/P12.5 (live amplitude feed, barge-in v2), or P8.7b |
+
+| 2026-08-17 | **P12.4/P12.5 — the HUD tracks the real mic, and speech is genuinely interruptible.** **P12.5** first, because it needed a mechanism that did not exist: `SpeakStream` could only cancel *between* sentences, since `audio.PlaySpeech` blocks until a clip finishes. New `audio.PlaySpeechContext` wraps the decoded source in a `ctxStreamer` that reports "finished" once the context is cancelled — beep *pulls* samples, so ending the stream is the idiomatic stop, and it takes effect at the next buffer (~50 ms) **mid-sentence**, without racing the backend or touching the platform-specific files. `SpeakStream` now derives a cancellable context, publishes it through `speech.StopSpeaking()`/`Speaking()`, and — importantly — registers it with the interrupt manager **inside `SpeakStream`** rather than at each call site, so the interactive shell, the daemon, and ambient responses all gain it at once. That closed a real gap found while wiring it: **Ctrl+C did not stop a spoken reply at all**, because the `OnSpeak` closures never registered their cancel func. `Speak` (`/say`, `remote say`) became context-aware too. A test caught a second real bug: `SpeakStream` returned **nil** on a cancelled context — the producer exits silently and closes the channel, so a barge-in was indistinguishable from a fully-spoken reply; it now returns `ctx.Err()`. **P12.4** `speech.ClipLevel` meters each captured chunk and drives `VoiceViz.SetLevel` in the streaming voice turn. The mapping is **logarithmic (dBFS), not linear** — speech RMS sits around 0.01–0.1, so a linear meter fed by RMS barely leaves the floor, which is precisely the dead-looking waveform this replaces; the meter spans −50 dBFS (quiet room) to −10 dBFS (close talking), and a test asserts normal speech lands mid-meter rather than near zero. The HUD and the interim-transcript display share one terminal row, so the waveform **hands the line over** as soon as real words arrive — before that the meter answers "is the mic live?", after it the text is strictly more informative. **Honest scope limits, both documented rather than papered over:** only the chunked capture paths can be metered (`batchVoiceTurn` calls `RecordClip`, which shells out to sox writing a whole file with no incremental readback, so it keeps the synthetic animation — restructuring the proven fallback path onto `ChunkScanner` is not worth it for an animation); and **mic-triggered** barge-in during playback still needs echo cancellation, or the mic re-triggers on Helix's own voice (the Phase 2 half-duplex constraint) — `StopSpeaking()` is the seam that path will call, while today's working triggers are Ctrl+C and any programmatic caller. Also removed the dead `VoiceViz.label` field while working in that file, dropping golangci-lint from 3 pre-existing findings to 2. 16 new tests (6 barge-in incl. race-safety, 5 level meter, 5 audio cancellation). `go build` + `go vet` + full suite (28 pkgs) green | Full BlackBox diff (Phases 4–12) uncommitted | P12.6 manual QA (HUD readability, first-audio latency, barge-in feel with a real key), P10.5 hardware QA, or P8.7b |
+
+| 2026-08-17 | **P8.7b Anthropic + Ollama native tool calling — Phase 8 fully closed.** P8.7 deliberately reported `false` for both adapters because Helix could not yet drive their wires; this closes that gap rather than leaving the honest-but-limited state. Shared plumbing moved to `internal/providers/tools.go` (exported `ToolCallAccumulator` plus per-wire definition helpers), so three different transports share one reassembly implementation instead of re-deriving — and re-bugging — it per adapter; the openai_compatible and client.go duplicates were folded into it. **Anthropic** needed a genuinely different shape: `tools` is flat with `input_schema` rather than OpenAI's nested `function.parameters` (getting that wrong is a silent 400, so a test asserts the OpenAI envelope is NOT sent), and `tool_choice` is an object whose "you must call a tool" form is `{"type":"any"}`, not the string `"required"`. Its streaming is unrecognizable next to OpenAI's — `content_block_start{type:"tool_use"}` then `input_json_delta` fragments — but both are keyed by an index, which is exactly why the shared accumulator transfers. The provider gained an `endpoint` field purely so the wire could be tested against a stub; it was previously a hardcoded const and therefore untestable. **Ollama** has two quirks worth recording: it exposes **no `tool_choice`**, so a call cannot be forced, only offered — the field is honestly omitted rather than fabricated, and the planner's existing fallback covers the case where the model answers in prose anyway; and its arguments arrive as a JSON **object** where every other provider sends a string, normalized via `json.RawMessage` so the exact bytes pass through without a re-encode round trip. **The most consequential decision was per-MODEL gating for Ollama.** Tool support there is a property of the model's template, not the server: Helix's own default local model is `gemma4:e2b`, and Gemma ships no tool template. A blanket provider-level claim would have made the planner attempt a tool call, receive prose, and fall through to the prompt ladder on *every single plan* — a wasted round trip on precisely the low-powered edge hardware that can least afford one. `ollamaToolModels` allowlists the families that actually have templates. The P8.7 capability test asserted `false` for anthropic/ollama; those expectations were updated because the underlying capability genuinely changed (adapters gained the ability), not to make new code pass — and new cases pin the Gemma/tinyllama exclusions. 10 new tests (5 Anthropic, 5 Ollama) plus updated expectations; suite now 29 packages. `go build` + `go vet` + full suite green; golangci-lint unchanged at 2 pre-existing findings. **Phase 8 is fully complete (P8.1–8.8 + P8.7b)** | Full BlackBox diff (Phases 4–12) uncommitted | Only hardware/owner-gated work remains: P10.5 hardware QA, P12.6 voice QA, P7.2c/P7.8 metrics runs, P7.9 `blackbox-v0.1.0` tag |
 
 ### Phase 2 carry-overs (do with Phase 4)
 
@@ -1147,6 +1376,9 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 - [x] Phase 6: ambient monitor wired into the live wake-loop capture stream (`ambient.TeeScanner`
       tees wake-loop chunks into `ChunkMonitor`); CPU-budget benchmark run — analyzer 26µs/chunk
       (≪5% idle overhead target).
+- [x] Phase 11: P11.4 llama.cpp decision — resolved: **implement** the provider over
+      `llama-server` (ADR-016). Ollama stays the default local runtime; llama.cpp is the escape
+      hatch for boards Ollama does not support (Jetson Nano 1st-gen).
 - [ ] Phase 7: speech queue tuning + measured first-byte/latency validation (P7.2c, hardware),
       §10 metrics run (P7.8 — instrumentation now in place, see dev log), and the
       `blackbox-v0.1.0` tag (P7.9, owner approval).

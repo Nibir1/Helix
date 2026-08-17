@@ -24,18 +24,23 @@ import (
 // Returns: raw planner output or error.
 // Complexity: O(provider round trips).
 func RunPlannerWithRetry(prompt string) (string, error) {
-	cfg := PlannerModelConfig()
-
-	initialTimeout := PlannerTimeout
-	retryTimeout := 30 * time.Second
-
-	if activeProvider != nil && activeProvider.IsLocal() {
-		initialTimeout = 180 * time.Second
-		retryTimeout = 90 * time.Second
+	// P8.7: when the provider enforces the schema natively, the JSON-repair
+	// ladder below is unnecessary — the model cannot return prose or a fenced
+	// block. Any failure falls through to the prompt path unchanged, so this
+	// is a fast path, never a new failure mode.
+	if raw, ok := runPlannerNative(prompt); ok && isPlannerJSON(raw) {
+		return raw, nil
 	}
 
+	cfg := PlannerModelConfig()
+
+	// Timeouts are recomputed per attempt rather than once up front: the P11.2
+	// breaker can flip the brain from cloud to local BETWEEN these attempts
+	// (two failed calls is the default threshold), and a CPU-bound local model
+	// handed a 30s cloud-sized budget would time out on the very attempt that
+	// was supposed to rescue the turn.
 	// Attempt 1: standard config.
-	raw, err := RunModelWithTimeout(prompt, cfg, initialTimeout)
+	raw, err := RunModelWithTimeout(prompt, cfg, plannerTimeout(true))
 	if err == nil && isPlannerJSON(raw) {
 		return raw, nil
 	}
@@ -46,7 +51,7 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 		prompt,
 	)
 
-	raw2, err2 := RunModelWithTimeout(retryPrompt, cfg, retryTimeout)
+	raw2, err2 := RunModelWithTimeout(retryPrompt, cfg, plannerTimeout(false))
 	if err2 == nil && isPlannerJSON(raw2) {
 		return raw2, nil
 	}
@@ -55,7 +60,7 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 	cfgWarm := cfg
 	cfgWarm.Temperature = 0.4
 
-	raw3, err3 := RunModelWithTimeout(retryPrompt, cfgWarm, retryTimeout)
+	raw3, err3 := RunModelWithTimeout(retryPrompt, cfgWarm, plannerTimeout(false))
 	if err3 == nil && isPlannerJSON(raw3) {
 		return raw3, nil
 	}
@@ -76,6 +81,31 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 	}
 
 	return "", fmt.Errorf("planner returned empty output")
+}
+
+// plannerTimeout returns the budget for one planner attempt, sized to the
+// provider that will actually serve it.
+//
+// Local providers get far longer budgets because Gemma 4 and other local models
+// can be much slower than hosted APIs, especially on CPU.
+//
+// Args:
+//   - first: true for the initial attempt, false for a correction retry.
+//
+// Returns: the timeout for this attempt.
+// Complexity: O(1).
+func plannerTimeout(first bool) time.Duration {
+	p, _, _ := resolveProvider()
+	if p != nil && p.IsLocal() {
+		if first {
+			return 180 * time.Second
+		}
+		return 90 * time.Second
+	}
+	if first {
+		return PlannerTimeout
+	}
+	return 30 * time.Second
 }
 
 // isPlannerJSON reports whether raw model output is a valid planner JSON object.

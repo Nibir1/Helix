@@ -100,6 +100,15 @@ func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan 
 		body["stop"] = req.Stop
 	}
 
+	// Native tool calling (P8.7). Only sent when the caller supplied tools, so
+	// the wire format for ordinary chat is byte-identical to before.
+	if len(req.Tools) > 0 {
+		body["tools"] = providers.ToolsToOpenAIWire(req.Tools)
+		if req.ToolChoice != "" {
+			body["tool_choice"] = req.ToolChoice
+		}
+	}
+
 	headers := map[string]string{}
 	if p.apiKey != "" {
 		headers["Authorization"] = "Bearer " + p.apiKey

@@ -15,6 +15,7 @@ import (
 	deepseekprovider "helix/internal/providers/deepseek"
 	glmprovider "helix/internal/providers/glm"
 	kimiprovider "helix/internal/providers/kimi"
+	llamacppprovider "helix/internal/providers/llamacpp"
 	ollamaprovider "helix/internal/providers/ollama"
 	openaiprovider "helix/internal/providers/openai"
 	openaicompatible "helix/internal/providers/openai_compatible"
@@ -35,6 +36,10 @@ type ProviderSettings struct {
 	Provider      string
 	Model         string
 	CustomBaseURL string
+
+	// LlamaCppBaseURL points at a user-managed llama-server (P11.4). Empty
+	// falls back to HELIX_LLAMACPP_URL, then llama-server's default port.
+	LlamaCppBaseURL string
 }
 
 var (
@@ -59,6 +64,10 @@ func InitProviders(settings ProviderSettings) error {
 	registry.Register(qwenprovider.New(keys.Get("qwen"), client))
 	registry.Register(glmprovider.New(keys.Get("glm"), client))
 	registry.Register(ollamaprovider.New(ollamaClient))
+	// llama.cpp is always registered (P11.4): it needs no key and costs nothing
+	// until used, and pre-registering it makes it selectable as the Phase 11
+	// local fallback on boards where Ollama is unsupported.
+	registry.Register(llamacppprovider.New(settings.LlamaCppBaseURL, client))
 	if settings.CustomBaseURL != "" {
 		if err := RegisterCustomProvider(settings.CustomBaseURL, keys.Get("custom")); err != nil {
 			return err
@@ -117,12 +126,16 @@ func UseProvider(name string) error {
 	if activeModel == "" {
 		activeModel = p.DefaultModel()
 	}
+	// A deliberate choice outranks the P11.2 breaker: without this, a later
+	// automatic restore would silently revert what the user just selected.
+	clearDegradedForUserOverride()
 	return nil
 }
 
 // UseModel sets the active model.
 func UseModel(model string) {
 	activeModel = model
+	clearDegradedForUserOverride()
 }
 
 // ActiveModel returns the active model.

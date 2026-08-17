@@ -3,6 +3,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -346,19 +347,46 @@ func runArgv(argv []string, dir string, lenient bool) error {
 // runArgvEnv is runArgv plus extra environment variables appended to the
 // process environment (used by stealth mode for history suppression).
 func runArgvEnv(argv []string, dir string, lenient bool, extraEnv []string) error {
+	return runArgvEnvCapture(argv, dir, lenient, extraEnv, nil)
+}
+
+// runArgvEnvCapture is runArgvEnv with optional output tee-ing (P8.6).
+//
+// Why capture is opt-in rather than always on: assigning an *os.File to
+// cmd.Stdout hands the child the terminal's file descriptor directly, so it
+// sees a TTY and behaves interactively — colors, progress bars, pagers. Any
+// other writer makes os/exec insert an os.Pipe and a copying goroutine, and
+// the child's isatty check now fails. That is a real behavior change, so the
+// default path (capture == nil) keeps the inherited descriptors byte for byte,
+// and only an explicitly agentic turn pays the cost.
+func runArgvEnvCapture(
+	argv []string, dir string, lenient bool, extraEnv []string, capture *OutputCapture,
+) error {
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir = dir
 	c.Env = os.Environ()
 	if len(extraEnv) > 0 {
 		c.Env = append(c.Env, extraEnv...)
 	}
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	if capture != nil {
+		// Tee, never swallow: the user still sees the full live output.
+		c.Stdout = io.MultiWriter(os.Stdout, capture.Stdout)
+		c.Stderr = io.MultiWriter(os.Stderr, capture.Stderr)
+	} else {
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+	}
 	c.Stdin = os.Stdin
 	err := c.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
+			// Record the true exit status before leniency discards it, so the
+			// agentic observation trace can see a failure the user was
+			// deliberately not bothered with.
+			if capture != nil {
+				capture.ExitCode = code
+			}
 			if code == 127 {
 				return exitErr
 			}
@@ -418,6 +446,25 @@ func (ds *DirectorySandbox) RunShellCommand(cmd, dir, shellName string) error {
 func (ds *DirectorySandbox) RunShellCommandEnv(cmd, dir, shellName string, extraEnv []string) error {
 	argv := ds.confinedArgv(buildArgv(cmd, shellName), dir)
 	return runArgvEnv(argv, dir, true, extraEnv)
+}
+
+// RunShellCommandCaptured is RunShellCommandEnv that ALSO tees stdout/stderr
+// into a bounded tail buffer for the agentic harness (P8.6). Confinement,
+// argv construction, and exit-code semantics are identical — capture changes
+// only where the bytes go, never what runs or under what restrictions.
+//
+// A nil capture selects the original inherited-fd path exactly, which matters:
+// see runArgvEnvCapture for why tee-ing is not free.
+//
+// Args: cmd/dir/shellName as RunShellCommand; extraEnv may be nil;
+// capture may be nil.
+// Returns: the same errors as RunShellCommand.
+// Complexity: O(command execution time).
+func (ds *DirectorySandbox) RunShellCommandCaptured(
+	cmd, dir, shellName string, extraEnv []string, capture *OutputCapture,
+) error {
+	argv := ds.confinedArgv(buildArgv(cmd, shellName), dir)
+	return runArgvEnvCapture(argv, dir, true, extraEnv, capture)
 }
 
 // WrapCommand executes the command strictly within the sandbox logic and, in

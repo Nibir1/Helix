@@ -224,6 +224,14 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 	if chunkMs <= 0 {
 		chunkMs = 300
 	}
+	// P12.4: a live HUD driven by the real microphone. This path reads the
+	// capture stream in chunks, so each one can be metered before it is sent
+	// upstream — the batch path cannot do this (sox writes a whole file with
+	// no incremental readback) and keeps the synthetic animation.
+	viz := ux.NewVoiceViz()
+	viz.Start(ux.VizListening)
+	defer viz.Stop()
+
 	scanner := speech.NewChunkScanner(time.Duration(chunkMs)*time.Millisecond, 16000)
 	chunks := make(chan speech.AudioFormat)
 	go func() {
@@ -236,6 +244,9 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 			if err != nil {
 				return
 			}
+			// Meter before forwarding: the waveform now tracks the actual mic
+			// instead of animating regardless of whether anything is heard.
+			viz.SetLevel(speech.ClipLevel(clip))
 			select {
 			case chunks <- clip:
 			case <-ctx.Done():
@@ -254,6 +265,17 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 
 	var last string
 	heard := false
+
+	// The HUD and the interim-transcript line share one terminal row, so the
+	// waveform hands the line over as soon as real words arrive: before that
+	// the meter answers "is the mic live?", after it the text is strictly more
+	// informative.
+	yieldLine := func() {
+		if viz.Running() {
+			viz.Stop()
+		}
+	}
+
 	finalize := func() (input.InputEvent, error) {
 		if !heard {
 			return input.InputEvent{}, speech.ErrNoSpeech
@@ -280,6 +302,7 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 			}
 			if !t.IsFinal {
 				if text != "" && text != last {
+					yieldLine()
 					last = text
 					fmt.Printf("\r[hearing] %s", text)
 				}
@@ -290,6 +313,7 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 				resetTimer(idle, 3*time.Second)
 				continue
 			}
+			yieldLine()
 			fmt.Print("\r\x1b[2K")
 			return finishVoiceTranscript(text, t)
 		case <-idle.C:

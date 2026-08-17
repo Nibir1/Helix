@@ -114,9 +114,10 @@ func main() {
 	}
 	defer func() { _ = db.Close() }()
 	_ = ai.InitProviders(ai.ProviderSettings{
-		Provider:      normalizeProviderName(cfg.Provider),
-		Model:         cfg.ProviderModel,
-		CustomBaseURL: cfg.CustomProviderBaseURL,
+		Provider:        normalizeProviderName(cfg.Provider),
+		Model:           cfg.ProviderModel,
+		CustomBaseURL:   cfg.CustomProviderBaseURL,
+		LlamaCppBaseURL: cfg.LLM.LlamaCppURL,
 	})
 	needsSetup := cfg.Provider == "" || !ai.ModelIsLoaded()
 	if !needsSetup {
@@ -201,6 +202,25 @@ func main() {
 			fmt.Fprintf(os.Stderr, "[voice] speak: %v\n", err)
 		}
 	}
+
+	// BlackBox Phase 11: arm the cloud→local brain failover. The interactive
+	// shell has no connectivity monitor (that is the daemon's job), so here the
+	// circuit breaker in internal/ai does the detecting: repeated availability
+	// failures trip it, and a half-open probe restores the cloud model later.
+	// A misconfigured fallback only warns — running unprotected is strictly
+	// better than refusing to start.
+	if err := ai.ConfigureLocalFallback(cfg.AIFallback()); err != nil {
+		color.Yellow("Local LLM fallback disabled: %v", err)
+	}
+	ai.SetFailoverNotice(func(msg string) {
+		// Printed as well as spoken: a silent brain swap would look like the
+		// model simply got worse. The user must be able to see it too when TTS
+		// is off or unavailable.
+		color.Yellow("[llm] %s", msg)
+		if agentCore.OnSpeak != nil {
+			agentCore.OnSpeak(msg)
+		}
+	})
 
 	// BlackBox Phase 5: opt-in camera vision seams (memory-only frames).
 	visionSvc := vision.NewCaptureService()

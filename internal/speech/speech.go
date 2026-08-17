@@ -170,7 +170,9 @@ func Speak(ctx context.Context, text string) error {
 	if err != nil {
 		return err
 	}
-	return audio.PlaySpeech(audio.SpeechFormat{
+	// Context-aware playback (P12.5): /say and daemon `remote say` are
+	// interruptible too, not just streamed replies.
+	return audio.PlaySpeechContext(ctx, audio.SpeechFormat{
 		Kind:       string(fmt_.Kind),
 		SampleRate: fmt_.SampleRate,
 		Channels:   fmt_.Channels,

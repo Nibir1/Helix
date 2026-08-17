@@ -297,6 +297,12 @@ func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) 
 		}
 	}
 
+	// Tool calls arrive fragmented across many SSE frames: the first carries
+	// the id and function name, later ones append slices of the JSON argument
+	// string, all keyed by index. They are accumulated here and emitted whole
+	// on the terminating frame, so consumers never see partial JSON (P8.7).
+	toolAcc := NewToolCallAccumulator()
+
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			return
@@ -310,7 +316,7 @@ func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) 
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
 		if data == "[DONE]" {
-			send(StreamChunk{Done: true})
+			send(StreamChunk{Done: true, ToolCalls: toolAcc.Assemble()})
 			return
 		}
 
@@ -319,6 +325,15 @@ func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) 
 				Delta struct {
 					Content          string `json:"content"`
 					ReasoningContent string `json:"reasoning_content"`
+					ToolCalls        []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
 				} `json:"delta"`
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
@@ -332,14 +347,21 @@ func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) 
 			continue
 		}
 
+		for _, tc := range parsed.Choices[0].Delta.ToolCalls {
+			toolAcc.Add(tc.Index, tc.ID, tc.Function.Name, tc.Function.Arguments)
+		}
+
 		if parsed.Choices[0].Delta.Content != "" {
 			if !send(StreamChunk{Content: parsed.Choices[0].Delta.Content}) {
 				return
 			}
 		}
 
-		if parsed.Choices[0].FinishReason == "stop" {
-			send(StreamChunk{Done: true})
+		// "tool_calls" is the finish reason when the model chose to call a
+		// tool instead of answering; treating it like "stop" (and shipping the
+		// accumulated calls) ends the stream correctly either way.
+		if fr := parsed.Choices[0].FinishReason; fr == "stop" || fr == "tool_calls" {
+			send(StreamChunk{Done: true, ToolCalls: toolAcc.Assemble()})
 			return
 		}
 	}

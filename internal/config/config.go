@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"helix/internal/ai"
 	"helix/internal/commands"
@@ -23,6 +24,7 @@ type Config struct {
 	CustomProviderBaseURL string                 `json:"custom_provider_base_url"`
 	UserPrefs             UserPrefs              `json:"user_preferences"`
 	Speech                SpeechConfig           `json:"speech"`
+	LLM                   LLMConfig              `json:"llm"`
 	Daemon                DaemonConfig           `json:"daemon"`
 	Vision                VisionConfig           `json:"vision"`
 	Ambient               AmbientConfig          `json:"ambient"`
@@ -83,6 +85,119 @@ type SpeechConfig struct {
 	WakeWord SpeechWakeConfig `json:"wake_word"`
 }
 
+// LLMFallbackConfig controls automatic cloud→local language-model failover
+// (BlackBox P11.2). It is the brain's counterpart to the speech chain's
+// local-first degradation.
+type LLMFallbackConfig struct {
+	// Enabled is a pointer because this is the project's first setting whose
+	// default is TRUE: with a plain bool, an absent `llm` section and an
+	// explicit `"enabled": false` are both the zero value, so a user could not
+	// turn the feature off. nil means "not specified" → default true.
+	Enabled  *bool  `json:"enabled,omitempty"`
+	Provider string `json:"provider"` // local runtime: "ollama" (default) | "llamacpp"
+	Model    string `json:"model"`    // "" → the provider's default model
+
+	// Threshold is how many consecutive availability failures trip the switch
+	// (0 → 2).
+	Threshold int `json:"threshold"`
+
+	// RetryAfterS is how long to stay local before probing the cloud provider
+	// again (0 → 120s).
+	RetryAfterS int `json:"retry_after_s"`
+
+	// EnsureReady lets `helix daemon` PULL the fallback model at startup when
+	// it is missing (P11.3). Default false: a model pull is a multi-gigabyte
+	// download, and guardrail §12 #1 makes downloads consent-gated. When false
+	// the daemon still VERIFIES the model and journals a warning if absent —
+	// the useful half of the check, without the surprise download.
+	EnsureReady bool `json:"ensure_ready"`
+}
+
+// LLMConfig groups language-model runtime settings (BlackBox Phase 11 §7).
+type LLMConfig struct {
+	// LlamaCppURL is a user-managed llama-server OpenAI-compatible base URL
+	// ("" → HELIX_LLAMACPP_URL → http://127.0.0.1:8080/v1).
+	LlamaCppURL string `json:"llamacpp_url"`
+
+	Fallback LLMFallbackConfig `json:"fallback"`
+}
+
+// LLMDefaults returns the default language-model resilience settings.
+//
+// Fallback is enabled by default, which is safe because arming it is not the
+// same as using it: the breaker health-checks the local provider before every
+// switch, so on a machine with no Ollama and no llama-server it never engages
+// and behavior is byte-identical to having it off.
+func LLMDefaults() LLMConfig {
+	on := true
+	return LLMConfig{
+		Fallback: LLMFallbackConfig{
+			Enabled:     &on,
+			Provider:    "ollama",
+			Threshold:   2,
+			RetryAfterS: 120,
+			EnsureReady: false,
+		},
+	}
+}
+
+// AIFallback converts the persisted section into the ai package's failover
+// settings, applying defaults for unset numeric fields. Both the interactive
+// shell and the daemon build their fallback from here so the two paths cannot
+// drift apart.
+func (cfg *Config) AIFallback() ai.LocalFallback {
+	f := cfg.LLM.Fallback
+	provider := f.Provider
+	if provider == "" {
+		provider = LLMDefaults().Fallback.Provider
+	}
+	retry := time.Duration(f.RetryAfterS) * time.Second
+	if f.RetryAfterS <= 0 {
+		retry = time.Duration(LLMDefaults().Fallback.RetryAfterS) * time.Second
+	}
+	return ai.LocalFallback{
+		Enabled:    f.FallbackEnabled(),
+		Provider:   provider,
+		Model:      f.Model,
+		Threshold:  f.Threshold,
+		RetryAfter: retry,
+	}
+}
+
+// FallbackEnabled reports the effective enable flag (unset → true).
+func (f LLMFallbackConfig) FallbackEnabled() bool {
+	if f.Enabled == nil {
+		return true
+	}
+	return *f.Enabled
+}
+
+// mergeLLM layers a partial `llm` section from the config file over the
+// defaults, field-wise — the same discipline mergeWakeWord established after an
+// empty section silently wiped the wake-word defaults.
+func mergeLLM(dst *LLMConfig, src LLMConfig) {
+	if src.LlamaCppURL != "" {
+		dst.LlamaCppURL = src.LlamaCppURL
+	}
+	if src.Fallback.Enabled != nil {
+		v := *src.Fallback.Enabled
+		dst.Fallback.Enabled = &v
+	}
+	if src.Fallback.Provider != "" {
+		dst.Fallback.Provider = src.Fallback.Provider
+	}
+	if src.Fallback.Model != "" {
+		dst.Fallback.Model = src.Fallback.Model
+	}
+	if src.Fallback.Threshold > 0 {
+		dst.Fallback.Threshold = src.Fallback.Threshold
+	}
+	if src.Fallback.RetryAfterS > 0 {
+		dst.Fallback.RetryAfterS = src.Fallback.RetryAfterS
+	}
+	dst.Fallback.EnsureReady = src.Fallback.EnsureReady
+}
+
 // DaemonConfig controls the BlackBox Phase 4 Living AI service (§7). The
 // interaction journal is always on in v1 (safe and /purge-able); Autostart is
 // honored by `helix daemon install` (RunAtLoad / KeepAlive / Restart=on-failure).
@@ -141,6 +256,7 @@ func DefaultConfig() (*Config, error) {
 			UserName:     "",
 			DebugMode:    false,
 		},
+		LLM:           LLMDefaults(),
 		ModelConfig:   ai.DefaultModelConfig(),
 		ExecuteConfig: commands.DefaultExecuteConfig(),
 	}
@@ -190,6 +306,9 @@ func (cfg *Config) LoadPreferences() error {
 	// enabling hands-free would silently produce a broken ""-phrase detector.
 	mergeWakeWord(&cfg.Speech.WakeWord, prefs.Speech.WakeWord)
 	applyWakeWordDefaults(&cfg.Speech.WakeWord)
+	// Field-wise so a partial or absent `llm` section keeps the defaults
+	// (fallback armed, Ollama, threshold 2).
+	mergeLLM(&cfg.LLM, prefs.LLM)
 	// Field-wise so unset daemon keys never clobber defaults.
 	if prefs.Daemon.SessionTurns > 0 {
 		cfg.Daemon.SessionTurns = prefs.Daemon.SessionTurns

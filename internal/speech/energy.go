@@ -58,3 +58,46 @@ func ClipDuration(audio AudioFormat) float64 {
 	}
 	return float64(len(samples)) / float64(audio.SampleRate)
 }
+
+// Level-meter constants for the voice HUD (BlackBox P12.4).
+const (
+	// levelFloorDB is the quietest level the meter shows movement for. Speech
+	// RMS lives roughly between −50 dBFS (a quiet room) and −10 dBFS (close
+	// talking), so the meter is mapped across that span rather than across the
+	// full linear 0..1 range — a linear meter would sit pinned near zero for
+	// all normal speech and look dead.
+	levelFloorDB = -50.0
+
+	// levelCeilDB is where the meter reads full scale.
+	levelCeilDB = -10.0
+)
+
+// ClipLevel converts a clip's RMS into a 0..1 meter reading for the voice HUD.
+//
+// The mapping is logarithmic (dBFS), not linear, because human loudness
+// perception is: a linear meter driven by RMS barely leaves the floor for
+// ordinary speech, which is exactly the "dead-looking waveform" this replaces.
+//
+// Args:
+//   - audio: a captured WAV chunk.
+//
+// Returns: 0 for silence or undecodable audio, 1 at levelCeilDB or louder.
+// Complexity: O(samples).
+func ClipLevel(audio AudioFormat) float64 {
+	return levelFromRMS(ClipRMS(audio))
+}
+
+// levelFromRMS maps a linear RMS value onto the meter's dB span.
+func levelFromRMS(rms float64) float64 {
+	if rms <= 0 {
+		return 0
+	}
+	db := 20 * math.Log10(rms)
+	if db <= levelFloorDB {
+		return 0
+	}
+	if db >= levelCeilDB {
+		return 1
+	}
+	return (db - levelFloorDB) / (levelCeilDB - levelFloorDB)
+}

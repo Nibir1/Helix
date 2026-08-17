@@ -28,8 +28,11 @@ import (
 	"helix/internal/config"
 	"helix/internal/confinement"
 	"helix/internal/diagnostics"
+	"helix/internal/edge"
+	"helix/internal/ollama"
 	"helix/internal/rag"
 	"helix/internal/shell"
+	"helix/internal/speech"
 	"helix/internal/utils"
 	"helix/internal/ux"
 
@@ -1286,6 +1289,9 @@ func handleDoctor() {
 	}
 	color.Cyan("Confinement backend: %s", confinement.BackendName())
 
+	// BlackBox P10.3: the edge-appliance picture.
+	printEdgeSection()
+
 	// BlackBox Phase 4: Living AI daemon presence.
 	if daemonRunning() {
 		color.Green("Daemon: running (Living AI)")
@@ -1305,6 +1311,155 @@ func handleDoctor() {
 	}
 }
 
+// printEdgeSection renders the "edge appliance" diagnostics block (P10.3).
+//
+// It exists because the two Linux edge gotchas fail SILENTLY: a CGO-free build
+// is structurally mute however the TTS provider is configured, and kernel
+// confinement degrades to none on an old kernel without stopping anything. On a
+// headless board those are invisible until something important does not happen,
+// so /doctor states them outright, with the fix attached.
+func printEdgeSection() {
+	rep := edge.Collect()
+
+	color.Cyan("--- Edge appliance ---")
+	color.Cyan("Platform: %s/%s", rep.OS, rep.Arch)
+	if rep.Board != "" {
+		color.Cyan("Board: %s", rep.Board)
+	}
+
+	// Build flavor — the audio_cgo gotcha (docs/edge_deployment.md §3.1).
+	if rep.SpeechSupported {
+		color.Green("Audio output: %s", rep.AudioBackend)
+	} else {
+		color.Yellow("Audio output: %s", rep.AudioBackend)
+		color.Yellow("  → Helix cannot speak on this build. To hear TTS: " +
+			"sudo apt install -y libasound2-dev && CGO_ENABLED=1 go build -tags audio_cgo ./cmd/helix")
+	}
+
+	// Confinement actually in force, not what the config hopes for.
+	if rep.Note == "" {
+		color.Green("Confinement in force: %s", rep.Confinement)
+	} else {
+		color.Yellow("Confinement in force: %s", rep.Confinement)
+		color.Yellow("  → %s", rep.Note)
+	}
+
+	// Microphone capture (CGO-free; sox/ffmpeg shell-out per ADR-003).
+	if rec, err := speech.DetectRecorder(); err == nil {
+		color.Green("Recorder: %s", rec)
+	} else {
+		color.Yellow("Recorder: none found — install sox (`sudo apt install -y sox`) for voice input")
+	}
+
+	printEdgeSidecars()
+	printEdgeThermals(rep)
+}
+
+// printEdgeSidecars probes the local services this device is configured to
+// depend on. Only LOCAL providers are listed: a cloud endpoint being reachable
+// is a network fact, already covered by the Network line above.
+func printEdgeSidecars() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	report := speech.Status(ctx)
+	for _, group := range [][]speech.ProviderStatusRow{report.STTStatus, report.TTSStatus} {
+		for _, row := range group {
+			if !row.Local {
+				continue
+			}
+			if row.Healthy {
+				color.Green("Sidecar %s: reachable", row.Name)
+			} else {
+				color.Yellow("Sidecar %s: unreachable (%s)", row.Name, row.HealthDetail)
+			}
+		}
+	}
+
+	// The offline brain (P11.2/P11.3): configured but unreachable or unpulled
+	// is the failure that only shows up during an outage, when it is too late.
+	cfg, err := config.DefaultConfig()
+	if err != nil {
+		return
+	}
+	fb := cfg.LLM.Fallback
+	if !fb.FallbackEnabled() {
+		color.Cyan("Offline LLM fallback: disabled")
+		return
+	}
+	provider := fb.Provider
+	if provider == "" {
+		provider = config.LLMDefaults().Fallback.Provider
+	}
+
+	if provider == "ollama" {
+		client := ollama.NewClient()
+		if herr := client.Health(ctx); herr != nil {
+			color.Yellow("Offline LLM (ollama): unreachable — %v", herr)
+			return
+		}
+		model := fb.Model
+		if model == "" {
+			model = ai.ActiveModel()
+		}
+		if model == "" {
+			color.Yellow("Offline LLM (ollama): running, but no fallback model configured (llm.fallback.model)")
+			return
+		}
+		if ollamaHasModel(ctx, client, model) {
+			color.Green("Offline LLM (ollama): ready — %s", model)
+		} else {
+			color.Yellow("Offline LLM (ollama): model %q NOT pulled — run `ollama pull %s`", model, model)
+		}
+		return
+	}
+
+	// llama.cpp is a user-managed sidecar with no pull API; reachability is
+	// the only thing Helix can honestly assert.
+	if p, gerr := ai.GetProviderByName(provider); gerr == nil {
+		if herr := p.HealthCheck(ctx); herr == nil {
+			color.Green("Offline LLM (%s): reachable", provider)
+		} else {
+			color.Yellow("Offline LLM (%s): unreachable — %v", provider, herr)
+		}
+	}
+}
+
+// ollamaHasModel reports whether a model tag is installed, tolerating the bare
+// name vs "name:tag" difference so an installed model is not reported missing.
+func ollamaHasModel(ctx context.Context, client *ollama.Client, model string) bool {
+	installed, err := client.ListModels(ctx)
+	if err != nil {
+		return false
+	}
+	for _, m := range installed {
+		if m.ID == model || strings.HasPrefix(m.ID, model+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// printEdgeThermals reports temperature and throttling. Sustained throttling is
+// the usual explanation for an appliance that "got slow" after working fine.
+func printEdgeThermals(rep edge.Report) {
+	if rep.ThermalC <= 0 {
+		if rep.ThermalErr != "" {
+			color.Cyan("Thermals: %s", rep.ThermalErr)
+		}
+		return
+	}
+	line := fmt.Sprintf("Thermals: %.1f°C (%s)", rep.ThermalC, edge.ThermalVerdict(rep.ThermalC))
+	if rep.ThermalC >= 80 {
+		color.Yellow(line)
+	} else {
+		color.Green(line)
+	}
+	if rep.Throttled {
+		color.Yellow("  → firmware reports a throttle event; sustained load is being capped")
+	}
+}
+
 func handleProviderStatus() {
 	color.Cyan("=== Provider Status ===")
 	lines := ai.ProviderStatus()
@@ -1313,6 +1468,18 @@ func handleProviderStatus() {
 	}
 	color.Cyan("Active Provider: %s", ai.ActiveProviderName())
 	color.Cyan("Active Model: %s", ai.ActiveModel())
+	// BlackBox P11.2: when the breaker is engaged the two lines above already
+	// name the LOCAL model, which would otherwise look like the user's own
+	// choice. Say why.
+	if ai.LocalFallbackActive() {
+		color.Yellow("Offline fallback: %s", ai.FailoverStatus())
+	} else {
+		color.Cyan("Offline fallback: %s", ai.FailoverStatus())
+	}
+	// BlackBox P8.7: which mechanism carries the plan. Worth surfacing because
+	// it explains a real behavior difference — native tool calling removes the
+	// JSON-repair retries the prompt path needs.
+	color.Cyan("Planner protocol: %s", ai.PlannerTransport())
 }
 
 func handleProviderCommand(args []string) {

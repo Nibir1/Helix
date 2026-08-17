@@ -32,3 +32,12 @@ func backendPlayError() {}
 
 // backendPlaySpeech explains why speech is silent on this build.
 func backendPlaySpeech(beep.Streamer) error { return ErrSpeechUnsupported }
+
+// backendName identifies this build's audio backend for /doctor (P10.3).
+// This is the single most consequential build-flavor fact on a Linux edge
+// device: the default CGO-free binary CANNOT speak, and without a way to see
+// that, a silent appliance looks like a broken TTS provider.
+func backendName() string { return "silent (CGO-free Linux build; no ALSA)" }
+
+// backendSpeechSupported reports whether TTS audio can actually be heard.
+func backendSpeechSupported() bool { return false }

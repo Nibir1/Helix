@@ -94,6 +94,30 @@ The heavy compute in the **cloud path is remote**, so a slow board runs it smoot
 has a network connection. Configure any path with `/voice-setup`; set a local fallback so a dropped
 network keeps voice alive (the failover chain flips local-first automatically — ADR-011/012).
 
+### 4.1 Keeping the *brain* alive too (Phase 11)
+
+Speech failover keeps a board hearing and speaking offline; the **LLM** needs its own fallback or
+Helix goes quiet in a different way — it hears you and cannot answer. Add an `llm` section:
+
+```jsonc
+"llm": {
+  "fallback": { "enabled": true, "provider": "ollama", "model": "qwen2.5:3b" }
+}
+```
+
+- `provider` is `ollama` on any board Ollama supports, or `llamacpp` for a user-run `llama-server`
+  (the Jetson Nano 1st-gen case — see §5).
+- The switch is a circuit breaker (ADR-016): repeated unreachable-provider errors or a connectivity
+  drop flip Helix to the local model with a spoken notice, and a periodic probe switches back.
+- It **health-checks the local model before switching**, so leaving this armed on a board with no
+  local runtime changes nothing — it simply never engages.
+- `ensure_ready: true` additionally lets `helix daemon` pull the Ollama model at startup. Left at
+  the default (`false`) the daemon only verifies and warns in the journal — deliberate, because a
+  multi-gigabyte download on a metered edge link should be your choice, not a side effect.
+
+Verify with `/provider status` (an "Offline fallback" line) or `helix remote status`
+(`llm_fallback`, `llm_local_mode`).
+
 ---
 
 ## §5. Per-device notes
@@ -117,6 +141,15 @@ network keeps voice alive (the failover chain flips local-first automatically �
   CUDA 10.2, Maxwell compute 5.3). **Ollama does not support this device.** A local LLM means
   building `llama.cpp` from source (CPU, or CUDA with the legacy toolkit — fiddly) and staying at a
   **1.5–3B Q4** model, which is tight in 4 GB shared with the GPU/OS.
+- **If you do build llama.cpp, Helix talks to it directly.** Run it as a sidecar and point Helix at
+  it — this is the `llamacpp` provider (ADR-016), and it is a valid offline-fallback target, so the
+  Nano can keep thinking through a network cut:
+  ```bash
+  llama-server -m ~/models/qwen2.5-3b-instruct-q4_k_m.gguf --port 8080 &
+  export HELIX_LLAMACPP_URL=http://127.0.0.1:8080   # or set llm.llamacpp_url in config.json
+  ```
+  Then set `llm.fallback.provider` to `llamacpp` (see §4). Helix never installs or downloads a
+  GGUF — `llama-server` is user-managed, like whisper.cpp and Piper.
 - **Recommended:** run the **cloud voice path** (Groq STT + `gpt-4o-mini-tts`). The Nano just needs
   `sox`/`ffmpeg`, a mic/speaker, and internet; the CPU limits don't matter because inference is
   remote. Treat local LLM as best-effort.
@@ -136,11 +169,70 @@ network keeps voice alive (the failover chain flips local-first automatically �
 
 ---
 
+## §5.1 Guided setup: `scripts/edge-setup.sh`
+
+Rather than following §3–§5 by hand, run the setup script on the device:
+
+```bash
+./scripts/edge-setup.sh --check      # detection only — safe on a live appliance
+./scripts/edge-setup.sh --dry-run    # print exactly what it would do
+./scripts/edge-setup.sh              # interactive; --yes to accept everything
+```
+
+It detects the architecture, board, kernel (Landlock availability), and package
+manager; installs `sox` and `bubblewrap` through the distro; and offers Ollama
+behind a **SHA-256-verified** install that refuses to run on a checksum mismatch.
+On a **Jetson Nano 1st-gen it declines Ollama outright** and points at the cloud
+path — matching §5's guidance rather than letting you install something that
+cannot work.
+
+What it deliberately does **not** do is download whisper.cpp, Piper, Kokoro, or
+openWakeWord. None of them publishes a stable, per-architecture, checksummable
+release artifact (whisper.cpp is built from source, Kokoro ships as a container),
+so a pinned auto-installer would rot into false assurance. They are user-managed
+sidecars; the script prints the exact commands for each.
+
+`--assume-board="..."` forces a board path, which is how you preview the Jetson
+behavior from a laptop.
+
+## §5.2 Running as a service on a headless board
+
+```bash
+helix daemon install     # writes ~/.config/systemd/user/helix-daemon.service
+```
+
+The emitted unit is edge-aware: it pulls in `network-online.target` (with
+`Wants=`, not merely `After=`, which alone is inert), bounds restart storms so a
+crash loop cannot hammer a small board, and carries commented `Environment=`
+lines for the knobs in §6.
+
+**The step that catches people out** is lingering. A `systemd --user` service
+stops at logout and does **not** start at boot unless the account has lingering
+enabled — so on an appliance nobody logs into, a perfectly installed daemon
+simply never runs:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+`helix daemon install` checks this for you and says so when it is off. Two more
+things a headless board usually needs:
+
+```bash
+sudo usermod -aG audio "$USER"          # microphone + speaker access (re-login)
+journalctl --user -u helix-daemon -f    # watch it run
+```
+
 ## §6. Post-deploy verification (any device)
 
 Run these inside Helix after install:
 
-- `/doctor` — full system diagnostics (recorder, sidecars, daemon, confinement backend).
+- `/doctor` — full system diagnostics, including an **"Edge appliance" section**:
+  detected board, whether this build can actually produce sound (the `audio_cgo`
+  question, answered for the running binary), which confinement backend is truly
+  in force plus how to fix it if it degraded, recorder presence, each local
+  sidecar's reachability, whether the offline-LLM fallback model is pulled, and
+  temperature with a throttling verdict.
 - `/voice-status` — STT/TTS chain health, which keys are set, recorder detection.
 - `/mictest` — 3-second capture self-test: proves the mic is actually being heard (level + dBFS +
   speech-gate verdict). The fastest way to catch a wrong input device on a headless board.

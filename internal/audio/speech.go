@@ -8,6 +8,7 @@
 package audio
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -41,6 +42,32 @@ var ErrSpeechUnsupported = errors.New("speech output requires an audio backend (
 // Returns: error if audio is disabled/unavailable or the clip is undecodable.
 // Complexity: O(len(Data)) decode + O(duration) playback.
 func PlaySpeech(f SpeechFormat, volume float64) error {
+	return PlaySpeechContext(context.Background(), f, volume)
+}
+
+// PlaySpeechContext is PlaySpeech that stops when ctx is cancelled — the
+// mechanism behind barge-in v2 (BlackBox P12.5).
+//
+// Cancellation works by ending the STREAM rather than by interrupting the
+// speaker: a wrapper reports "no more samples" once ctx is done, so playback
+// stops at the next buffer boundary. With the engine's 50 ms buffer that is
+// ~50 ms to silence, mid-sentence, without racing the audio backend or
+// touching the platform-specific files.
+//
+// Args:
+//   - ctx: cancellation for in-flight playback.
+//   - f: the clip to play.
+//   - volume: output gain (0..1; outside the range defaults to 1).
+//
+// Returns: ctx.Err() when interrupted, otherwise a playback error or nil.
+// Complexity: O(len(Data)) decode + O(duration) playback.
+func PlaySpeechContext(ctx context.Context, f SpeechFormat, volume float64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !IsEnabled() {
 		return errors.New("audio output is disabled (use /audio on)")
 	}
@@ -77,8 +104,31 @@ func PlaySpeech(f SpeechFormat, volume float64) error {
 		})
 	}
 
-	return backendPlaySpeech(beep.Take(SampleRate*maxSpeechSeconds, s))
+	if err := backendPlaySpeech(beep.Take(SampleRate*maxSpeechSeconds,
+		&ctxStreamer{base: s, ctx: ctx})); err != nil {
+		return err
+	}
+	// Report interruption to the caller so a barge-in is distinguishable from
+	// a clip that simply finished.
+	return ctx.Err()
 }
+
+// ctxStreamer ends a beep stream once its context is cancelled. beep pulls
+// samples, so returning (0, false) is how a source says "finished" — which is
+// exactly the semantics barge-in needs, and it stops within one buffer.
+type ctxStreamer struct {
+	base beep.Streamer
+	ctx  context.Context
+}
+
+func (c *ctxStreamer) Stream(out [][2]float64) (int, bool) {
+	if c.ctx.Err() != nil {
+		return 0, false
+	}
+	return c.base.Stream(out)
+}
+
+func (c *ctxStreamer) Err() error { return c.base.Err() }
 
 // decodeSpeech converts a SpeechFormat into a streamer plus its native rate.
 func decodeSpeech(f SpeechFormat) (beep.Streamer, beep.SampleRate, error) {
@@ -208,3 +258,13 @@ func (s *sliceStreamer) Stream(out [][2]float64) (int, bool) {
 }
 
 func (s *sliceStreamer) Err() error { return nil }
+
+// BackendName returns a human-readable name for this build's audio backend
+// (BlackBox P10.3). On Linux it distinguishes the default CGO-free binary
+// (silent) from an `-tags audio_cgo` build (speaker output).
+func BackendName() string { return backendName() }
+
+// SpeechSupported reports whether this build can play TTS audio at all.
+// False means the binary is structurally silent — no provider, key, or config
+// change will produce sound; the fix is a rebuild (docs/edge_deployment.md §3.1).
+func SpeechSupported() bool { return backendSpeechSupported() }
