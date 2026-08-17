@@ -20,15 +20,19 @@ import (
 	"helix/internal/commands"
 	"helix/internal/config"
 	"helix/internal/confinement"
+	"helix/internal/daemon"
 	"helix/internal/diagnostics"
 	"helix/internal/input"
+	"helix/internal/providers"
 	"helix/internal/rag"
 	"helix/internal/recon"
+	"helix/internal/session"
 	"helix/internal/shell"
 	"helix/internal/speech"
 	"helix/internal/stealth"
 	"helix/internal/utils"
 	"helix/internal/ux"
+	"helix/internal/vision"
 
 	"github.com/fatih/color"
 )
@@ -68,6 +72,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "update" {
 		runKnowledgeUpdate()
 		return
+	}
+	// BlackBox Phase 4: `helix daemon` / `helix remote ...` /
+	// `helix daemon install|uninstall|status`.
+	if handled, code := runDaemonCommand(os.Args[1:]); handled {
+		os.Exit(code)
 	}
 	if handled, code := maybeRunNonInteractive(); handled {
 		os.Exit(code)
@@ -172,7 +181,7 @@ func main() {
 	stealthExec := stealth.NewStealthExecutor(stealth.DefaultStealthConfig())
 	reconEng := recon.NewReconEngine(env, recon.DefaultReconConfig())
 	agentCore = agent.NewAgent(env, ragSystem, sandbox, execConfig, cfg.UserPrefs.TypingEffect, gui, stealthExec, reconEng)
-	agentCore.OnSlashCommand = func(input string) bool { return handleSlashCommand(input) }
+	agentCore.Slash = agent.SlashFunc(handleSlashCommand)
 	histPath := homeDir + "/.helix_history"
 	history, _ := utils.LoadHistory(histPath)
 
@@ -190,12 +199,72 @@ func main() {
 		}
 	}
 
+	// BlackBox Phase 5: opt-in camera vision seams (memory-only frames).
+	visionSvc := vision.NewCaptureService()
+	agentCore.VisionEnabled = func() bool {
+		if !cfg.Vision.Enabled {
+			return false
+		}
+		if cfg.Vision.Provider != "" {
+			return ai.ProviderVisionCapable(cfg.Vision.Provider)
+		}
+		return ai.VisionCapable()
+	}
+	agentCore.VisionCapture = func(ctx context.Context) ([]byte, error) {
+		frame, err := visionSvc.CaptureFrame(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return frame.Data, nil
+	}
+	agentCore.VisionCall = func(prompt string, image []byte) (string, error) {
+		parts := []providers.MessagePart{{Type: providers.PartImage, ImageData: image}}
+		var resp string
+		var err error
+		providerName := cfg.Vision.Provider
+		if providerName != "" {
+			resp, err = ai.RunVisionModelWithProvider(prompt, parts, providerName)
+		} else {
+			providerName = ai.ActiveProviderName()
+			resp, err = ai.RunVisionModel(prompt, parts)
+		}
+		journalVisionEvent("frame", providerName, 1)
+		return resp, err
+	}
+	// §10 frame-to-insight metric: resolve the answering provider exactly as
+	// VisionCall does, then log the sample to ~/.helix/metrics/vision.jsonl.
+	agentCore.OnVisionMetric = func(metric string, latency time.Duration) {
+		provider := cfg.Vision.Provider
+		if provider == "" {
+			provider = ai.ActiveProviderName()
+		}
+		logVisionLatency(metric, latency, provider)
+	}
+
 	fmt.Println("⚡ Helix Native Shell. Type '/help' for SOS or 'exit' to quit.")
+
+	// BlackBox Phase 4B: stateful awareness for the interactive session too
+	// (conversation memory + safe-subset undo journal).
+	if sess, err := session.NewRingStore(session.DefaultCapacity); err == nil {
+		agentCore.Session = sess
+	}
+	if undo, err := session.NewUndoJournal(); err == nil {
+		agentCore.Undo = undo
+	}
+
+	// §10 E2E voice-command latency (wake→execution start, ≤6s local): set
+	// when a wake event fires, measured at dispatch of the next voice turn.
+	var lastWakeAt time.Time
+
 	for {
+		// TTY heartbeat: the daemon's voice loop yields the microphone to
+		// the foreground session while this lock stays fresh.
+		daemon.Heartbeat()
+
 		var ev input.InputEvent
 		if voiceModeActive {
 			var verr error
-			ev, verr = voiceTurn()
+			ev, verr = voiceTurnWithRetry()
 			if verr != nil {
 				if verr == errVoiceStopped {
 					continue // kill phrase: mode line already announced it
@@ -238,6 +307,10 @@ func main() {
 		// keep working); stealth MemoryOnly only suppresses the on-disk file.
 		history = append(history, ev.Text)
 		shell.PrintTransient(ev.Text)
+		if ev.Channel == input.ChannelVoice && !lastWakeAt.IsZero() {
+			logVoiceLatency("wake_to_exec", time.Since(lastWakeAt), ev.Meta)
+			lastWakeAt = time.Time{}
+		}
 		agentCore.HandleInputEvent(ev)
 		gui.PrintSuccess("Helix :: GRID STATUS :: CLEAR")
 		fmt.Print("\x1b]133;D;0\x07")
@@ -246,8 +319,11 @@ func main() {
 		// wake-only listening (no transcription) until a wake event fires or
 		// the idle window expires; then the next loop iteration runs another
 		// voice turn. Disabled wake config = classic push-to-talk per turn.
-		if voiceModeActive && wakeListenUntilArmed() {
-			continue
+		if voiceModeActive {
+			if wakeEv, ok := wakeListenUntilArmed(); ok {
+				lastWakeAt = wakeEv.DetectedAt
+				continue
+			}
 		}
 	}
 }

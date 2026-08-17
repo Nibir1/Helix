@@ -18,9 +18,12 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 
+	"helix/internal/ai"
 	"helix/internal/commands"
 	"helix/internal/input"
+	"helix/internal/session"
 )
 
 // VoicePolicy configures ADR-005 enforcement. Defaults in DefaultVoicePolicy.
@@ -64,10 +67,17 @@ func VoiceDenyList() []VoiceDeniedAction {
 // channel + metadata for the Voice Risk Policy, applies the transcript
 // confidence gate, then delegates to the standard HandleInput pipeline —
 // classify → plan → firewall → risk tiers → sandbox all still apply.
+// With Phase 4B statefulness it also serves "undo that" from the undo
+// journal and records the turn into session memory.
 func (a *Agent) HandleInputEvent(ev input.InputEvent) {
 	a.channel = input.ChannelText
 	a.turnMeta = ev.Meta
-	defer func() { a.channel = input.ChannelText; a.turnMeta = nil }()
+	a.lastResponse = ""
+	defer func() {
+		a.channel = input.ChannelText
+		a.turnMeta = nil
+		a.recordTurn(ev)
+	}()
 
 	if ev.Channel != "" && ev.Channel.Valid() {
 		a.channel = ev.Channel
@@ -78,14 +88,85 @@ func (a *Agent) HandleInputEvent(ev input.InputEvent) {
 		if conf, ok := numericMeta(ev.Meta, "stt_confidence"); ok && conf > 0 &&
 			conf < policy.MinTranscriptConfidence {
 			a.speak("I did not catch that clearly. Could you repeat it?")
-			a.ux.PrintWarning(fmt.Sprintf(
+			a.render.PrintWarning(fmt.Sprintf(
 				"[voice policy] transcript confidence %.2f below gate %.2f — asking to repeat",
 				conf, policy.MinTranscriptConfidence))
 			return
 		}
 	}
 
+	// Safe-subset undo (roadmap 4B): a bare undo intent is answered from
+	// the journal; the reversal runs through the FULL safety pipeline.
+	if isUndoIntent(ev.Text) {
+		a.handleUndoRequest()
+		return
+	}
+
+	// BlackBox Phase 5: voice + eyes-on + deictic → capture one frame and
+	// answer through the vision model (memory-only).
+	if a.visionRequested(ev) {
+		a.handleVisionTurn(ev)
+		return
+	}
+
 	a.HandleInput(ev.Text)
+}
+
+// isUndoIntent matches bare undo utterances ("undo", "undo that", "undo the
+// last thing"). Anything more specific routes to the planner normally.
+func isUndoIntent(text string) bool {
+	t := strings.TrimRight(strings.TrimSpace(strings.ToLower(text)), ".!?")
+	switch t {
+	case "undo", "undo that", "undo this", "undo it", "undo the last thing", "undo the last command":
+		return true
+	}
+	return false
+}
+
+// handleUndoRequest offers the latest reversible action. The reversal is a
+// normal shell step: validation, risk tiers, sandbox, and the Voice Risk
+// Policy all apply — an undo must never be an execution bypass.
+func (a *Agent) handleUndoRequest() {
+	if a.Undo == nil {
+		a.render.PrintInfo("Undo journal not available in this session.")
+		return
+	}
+	entry, ok, err := a.Undo.Last()
+	if err != nil {
+		a.render.PrintError(fmt.Sprintf("Undo journal read failed: %v", err))
+		return
+	}
+	if !ok {
+		a.render.PrintInfo("Nothing reversible on the undo journal yet (commits are journalled).")
+		return
+	}
+
+	a.render.PrintWarning(fmt.Sprintf(
+		"Undo %q (%s)? Reversal: %s", entry.Description, entry.Timestamp.Format("15:04:05"), entry.ReversalCmd))
+	if !commands.AskForConfirmation("Run the reversal?") {
+		a.render.PrintWarning("Undo skipped")
+		return
+	}
+
+	step := ai.PlanStep{Tool: "shell", Command: entry.ReversalCmd}
+	if err := a.handleShellStep(step); err != nil {
+		a.render.PrintError(fmt.Sprintf("Undo failed: %v", err))
+		return
+	}
+	a.render.PrintSuccess(fmt.Sprintf("Undone: %s", entry.Description))
+	a.speak("Undone.")
+}
+
+// recordTurn stores the exchange in session memory (nil-safe).
+func (a *Agent) recordTurn(ev input.InputEvent) {
+	if a.Session == nil {
+		return
+	}
+	a.Session.Append(session.Turn{
+		Channel:  string(ev.Channel),
+		UserText: ev.Text,
+		Reply:    a.lastResponse,
+	})
 }
 
 // voiceActive reports whether the current turn originated from speech.

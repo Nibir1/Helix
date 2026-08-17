@@ -25,17 +25,19 @@ import (
 func speechConfigFrom(sc config.SpeechConfig) speech.Config {
 	return speech.Config{
 		STT: speech.STTConfig{
-			Provider:  sc.STT.Provider,
-			Model:     sc.STT.Model,
-			BaseURL:   sc.STT.BaseURL,
-			Fallbacks: sc.STT.Fallbacks,
+			Provider:      sc.STT.Provider,
+			Model:         sc.STT.Model,
+			BaseURL:       sc.STT.BaseURL,
+			Fallbacks:     sc.STT.Fallbacks,
+			StreamChunkMs: sc.STT.StreamChunkMs,
 		},
 		TTS: speech.TTSConfig{
-			Provider:  sc.TTS.Provider,
-			Model:     sc.TTS.Model,
-			Voice:     sc.TTS.Voice,
-			BaseURL:   sc.TTS.BaseURL,
-			Fallbacks: sc.TTS.Fallbacks,
+			Provider:    sc.TTS.Provider,
+			Model:       sc.TTS.Model,
+			Voice:       sc.TTS.Voice,
+			BaseURL:     sc.TTS.BaseURL,
+			Fallbacks:   sc.TTS.Fallbacks,
+			FirstByteMs: sc.TTS.FirstByteMs,
 		},
 	}
 }
@@ -313,6 +315,10 @@ func handleVoiceStatus() {
 		fmt.Printf("Recorder: %s\n", report.Recorder)
 	} else {
 		color.Yellow("Recorder: %s", report.RecorderErr)
+	}
+	if report.TTSLastLatencyMs > 0 {
+		fmt.Printf("Last TTS latency: %dms (budget %dms)\n",
+			report.TTSLastLatencyMs, report.TTSFirstByteBudgetMs)
 	}
 
 	printStatusRows("STT PROVIDERS", report.STTStatus)

@@ -40,7 +40,7 @@ func handlePurgeCommand() {
 	// Core data targets: secrets, knowledge DB (+ journals), caches, prefs,
 	// and history. Every one of these is recreated automatically on next boot.
 	targets := []purgeTarget{
-		{filepath.Join(helixDir, "secrets.json"), "provider API keys (all providers)"},
+		{filepath.Join(helixDir, "secrets.json"), "provider API keys (all providers, incl. STT/TTS)"},
 		{filepath.Join(helixDir, "openai_api_key"), "legacy OpenAI key file"},
 		{filepath.Join(helixDir, "helix.db"), "knowledge database (CVE / KEV / Exploit-DB / MITRE + FTS)"},
 		{filepath.Join(helixDir, "helix.db-wal"), "SQLite WAL journal"},
@@ -51,6 +51,16 @@ func handlePurgeCommand() {
 		{filepath.Join(helixDir, "config.json"), "user preferences and provider settings"},
 		{filepath.Join(home, ".helix_history"), "command history"},
 		{filepath.Join(helixDir, ".helix_history"), "legacy command history"},
+		// BlackBox artifacts (threat V5: voice/vision data is wipeable).
+		{filepath.Join(helixDir, "session.json"), "voice/session conversation memory"},
+		{filepath.Join(helixDir, "journal"), "interaction + undo journals"},
+		{filepath.Join(helixDir, "metrics"), "wake/latency metrics"},
+		{filepath.Join(helixDir, "voice_log"), "opt-in voice transcripts"},
+		{filepath.Join(helixDir, "trash"), "undo staging"},
+		{filepath.Join(helixDir, "daemon.sock"), "daemon IPC socket"},
+		{filepath.Join(helixDir, "daemon.conn.json"), "daemon connection info"},
+		{filepath.Join(helixDir, "active.lock"), "active-session lock"},
+		{filepath.Join(helixDir, "pricing.json"), "user pricing overrides"},
 	}
 
 	// Sweep log, temp, and crash-report artifacts from the Helix home.

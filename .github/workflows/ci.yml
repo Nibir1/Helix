@@ -51,17 +51,22 @@ jobs:
       - name: Run Fuzzing Smoke Test
         run: make fuzz-ci
         
-      - name: Build Binary
+      - name: Build Binary (CGO-free)
         run: go build -o dist/helix ./cmd/helix
+        env:
+          CGO_ENABLED: '0'
   
-  # Run the end-to-end TTY harness (Linux/macOS; the build tag skips Windows)
+  # Run the e2e harness on all three OSes. The PTY/`!windows` tests skip
+  # gracefully on Windows (build tag); the daemon-remote IPC test exercises
+  # the loopback-TCP transport there. Direct `go test` avoids a Make
+  # dependency on PowerShell runners.
   e2e:
-    name: E2E TTY Harness (${{ matrix.os }})
+    name: E2E Harness (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -75,4 +80,4 @@ jobs:
         run: go mod download
 
       - name: Run E2E Harness
-        run: make e2e
+        run: go test ./tests/e2e/... -count=1 -timeout 300s

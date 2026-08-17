@@ -28,30 +28,6 @@ import (
 	"helix/internal/rag"
 )
 
-// binPath is the compiled helix binary built once in TestMain.
-var binPath string
-
-// TestMain builds the helix binary once for all e2e tests.
-func TestMain(m *testing.M) {
-	tmp, err := os.MkdirTemp("", "helix-e2e-bin-*")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "e2e: temp dir:", err)
-		os.Exit(1)
-	}
-	binPath = filepath.Join(tmp, "helix")
-	build := exec.Command("go", "build", "-o", binPath, "helix/cmd/helix")
-	build.Stdout = os.Stdout
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "e2e: build failed: %v\n", err)
-		_ = os.RemoveAll(tmp)
-		os.Exit(1)
-	}
-	code := m.Run()
-	_ = os.RemoveAll(tmp)
-	os.Exit(code)
-}
-
 // ansiRe strips CSI color/cursor sequences and OSC shell-integration sequences
 // so assertions can match on plain text.
 var ansiRe = regexp.MustCompile("\x1b\\[[0-9;?]*[a-zA-Z]|\x1b\\][^\a]*\a")

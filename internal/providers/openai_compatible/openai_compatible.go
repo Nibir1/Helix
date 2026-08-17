@@ -4,6 +4,7 @@ package openaicompatible
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -83,7 +84,7 @@ func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan 
 
 	body := map[string]interface{}{
 		"model":    model,
-		"messages": req.Messages,
+		"messages": toWireMessages(req.Messages),
 		"stream":   true,
 	}
 
@@ -107,6 +108,43 @@ func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan 
 	url := strings.TrimSuffix(p.cfg.BaseURL, "/") + "/chat/completions"
 
 	return p.client.DoStream(ctx, url, headers, body)
+}
+
+// toWireMessages converts normalized ChatMessages to the OpenAI wire format.
+// Text-only messages keep the flat {"role","content"} shape; messages carrying
+// multimodal Parts become the content-array form (BlackBox Phase 5).
+func toWireMessages(messages []providers.ChatMessage) []map[string]any {
+	out := make([]map[string]any, 0, len(messages))
+	for _, m := range messages {
+		if len(m.Parts) == 0 {
+			out = append(out, map[string]any{"role": m.Role, "content": m.Content})
+			continue
+		}
+
+		content := make([]map[string]any, 0, len(m.Parts)+1)
+		if m.Content != "" {
+			content = append(content, map[string]any{"type": "text", "text": m.Content})
+		}
+		for _, p := range m.Parts {
+			switch p.Type {
+			case providers.PartText:
+				content = append(content, map[string]any{"type": "text", "text": p.Text})
+			case providers.PartImageURL:
+				content = append(content, map[string]any{
+					"type":      "image_url",
+					"image_url": map[string]any{"url": p.ImageURL},
+				})
+			case providers.PartImage:
+				b64 := base64.StdEncoding.EncodeToString(p.ImageData)
+				content = append(content, map[string]any{
+					"type":      "image_url",
+					"image_url": map[string]any{"url": "data:image/jpeg;base64," + b64},
+				})
+			}
+		}
+		out = append(out, map[string]any{"role": m.Role, "content": content})
+	}
+	return out
 }
 
 // ListModels fetches models from /models.

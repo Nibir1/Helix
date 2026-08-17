@@ -35,6 +35,10 @@ type Transcript struct {
 	Language   string  `json:"language,omitempty"`
 	Confidence float64 `json:"confidence,omitempty"` // 0..1; 0 = unknown
 	Provider   string  `json:"provider"`
+	// IsFinal marks a streaming transcript as the utterance-final result;
+	// false = interim partial (still speaking). Batch Transcribe always
+	// yields IsFinal=true.
+	IsFinal bool `json:"is_final,omitempty"`
 }
 
 // SynthesisOptions tune one text-to-speech request.

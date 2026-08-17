@@ -129,6 +129,9 @@ fuzz:
 	@go test ./internal/ai -run=^$$ -fuzz=FuzzParsePlanFromModelOutput -fuzztime=$(FUZZTIME)
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=$(FUZZTIME)
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=$(FUZZTIME)
+	@go test ./internal/speech -run=^$$ -fuzz=FuzzWAVHeaderInfo -fuzztime=$(FUZZTIME)
+	@go test ./internal/ambient -run=^$$ -fuzz=FuzzAnalyzer -fuzztime=$(FUZZTIME)
+	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=$(FUZZTIME)
 
 # CI smoke test: shorter duration to keep the pipeline fast.
 fuzz-ci:
@@ -139,6 +142,9 @@ fuzz-ci:
 	@go test ./internal/ai -run=^$$ -fuzz=FuzzParsePlanFromModelOutput -fuzztime=20s
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=20s
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=20s
+	@go test ./internal/speech -run=^$$ -fuzz=FuzzWAVHeaderInfo -fuzztime=20s
+	@go test ./internal/ambient -run=^$$ -fuzz=FuzzAnalyzer -fuzztime=20s
+	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=20s
 
 # Run the end-to-end TTY harness (Linux/macOS; the build tag skips Windows)
 e2e:

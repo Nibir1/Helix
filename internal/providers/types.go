@@ -6,10 +6,48 @@ import (
 	"context"
 )
 
-// ChatMessage is a text-only chat message for Phase 1.
+// MessagePartType enumerates the kinds of content a message part can carry.
+type MessagePartType string
+
+const (
+	// PartText is an additional text block.
+	PartText MessagePartType = "text"
+
+	// PartImageURL references an image by URL.
+	PartImageURL MessagePartType = "image_url"
+
+	// PartImage carries raw image bytes (base64-encoded at the adapter).
+	PartImage MessagePartType = "image"
+)
+
+// MessagePart is one multimodal content block (BlackBox Phase 5). It is an
+// in-memory extension: adapters translate Parts into their native wire format
+// (OpenAI content arrays, Anthropic vision blocks, Ollama images). Text-only
+// messages remain byte-identical on the wire.
+type MessagePart struct {
+	Type      MessagePartType `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ImageURL  string          `json:"image_url,omitempty"`
+	ImageData []byte          `json:"image_data,omitempty"` // base64 at the adapter
+}
+
+// ChatMessage is a chat message. Content holds plain text; Parts optionally
+// attaches multimodal blocks (Phase 5). Parts is excluded from the default
+// JSON encoding so existing text-only adapters are unchanged.
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string        `json:"role"`
+	Content string        `json:"content"`
+	Parts   []MessagePart `json:"-"`
+}
+
+// HasImages reports whether the message carries image parts.
+func (m ChatMessage) HasImages() bool {
+	for _, p := range m.Parts {
+		if p.Type == PartImage || p.Type == PartImageURL {
+			return true
+		}
+	}
+	return false
 }
 
 // ChatRequest is the normalized request sent to any provider.

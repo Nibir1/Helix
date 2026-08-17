@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"helix/internal/audio"
@@ -22,6 +23,11 @@ var (
 	mu         sync.RWMutex
 	registry   *Registry
 	ttsEnabled = true
+
+	// lastSynthMs records the most recent TTS synthesis round-trip latency — a
+	// conservative upper bound on first-byte time, surfaced in /voice-status
+	// against the configured budget (P7.2b).
+	lastSynthMs atomic.Int64
 )
 
 // Init builds the global registry: all builtin adapters registered, keys
@@ -57,7 +63,7 @@ func registerBuiltins(reg *Registry, cfg Config) {
 	} else {
 		sttModel, sttBase = "", ""
 	}
-	reg.RegisterSTT(NewDeepgramSTT(sttModel, sttBase))
+	reg.RegisterSTT(NewDeepgramStreamingSTT(sttModel, sttBase))
 
 	if cfg.STT.Provider == "whisper-local" {
 		sttModel, sttBase = cfg.STT.Model, cfg.STT.BaseURL
@@ -97,6 +103,16 @@ func Default() *Registry {
 	return registry
 }
 
+// StreamingSTT returns the primary STT provider when it supports streaming
+// transcription, or false before Init / for batch-only providers.
+func StreamingSTT() (StreamingSTTProvider, bool) {
+	reg := Default()
+	if reg == nil {
+		return nil, false
+	}
+	return reg.StreamingSTT()
+}
+
 // Transcribe runs the global STT failover chain.
 func Transcribe(ctx context.Context, clip AudioFormat) (Transcript, error) {
 	reg := Default()
@@ -106,7 +122,8 @@ func Transcribe(ctx context.Context, clip AudioFormat) (Transcript, error) {
 	return reg.Transcribe(ctx, clip)
 }
 
-// Synthesize runs the global TTS failover chain with the configured voice.
+// Synthesize runs the global TTS failover chain with the configured voice,
+// recording the round-trip latency for the /voice-status budget line.
 func Synthesize(ctx context.Context, text string) (AudioFormat, error) {
 	reg := Default()
 	if reg == nil {
@@ -114,8 +131,15 @@ func Synthesize(ctx context.Context, text string) (AudioFormat, error) {
 	}
 	cfg := reg.ActiveConfig()
 	opts := SynthesisOptions{Voice: cfg.TTS.Voice}
-	return reg.Synthesize(ctx, text, opts)
+	start := time.Now()
+	audio, err := reg.Synthesize(ctx, text, opts)
+	lastSynthMs.Store(time.Since(start).Milliseconds())
+	return audio, err
 }
+
+// LastSynthesizeLatencyMs returns the most recent TTS synthesis latency in
+// milliseconds (0 before the first synthesis).
+func LastSynthesizeLatencyMs() int64 { return lastSynthMs.Load() }
 
 // Speak synthesizes text and plays it through the Helix speaker stack
 // (audio.PlaySpeech, ADR-007). Explicit invocations (/say) bypass the TTS
@@ -147,6 +171,15 @@ func TTSEnabled() bool {
 	return ttsEnabled
 }
 
+// SetOfflineMode toggles local-first degradation for the global registry
+// (Phase 4, P4.10): the daemon flips it on when connectivity drops so STT/TTS
+// fail over to local sidecars. No-op before Init.
+func SetOfflineMode(on bool) {
+	if reg := Default(); reg != nil {
+		reg.SetOffline(on)
+	}
+}
+
 // ProviderStatusRow is one line of the /voice-status report.
 type ProviderStatusRow struct {
 	Name         string
@@ -160,13 +193,15 @@ type ProviderStatusRow struct {
 
 // StatusReport summarizes the speech subsystem for /voice-status.
 type StatusReport struct {
-	STTChain    []string
-	TTSChain    []string
-	STTStatus   []ProviderStatusRow
-	TTSStatus   []ProviderStatusRow
-	TTSEnabled  bool
-	Recorder    string
-	RecorderErr string
+	STTChain             []string
+	TTSChain             []string
+	STTStatus            []ProviderStatusRow
+	TTSStatus            []ProviderStatusRow
+	TTSEnabled           bool
+	Recorder             string
+	RecorderErr          string
+	TTSLastLatencyMs     int64 // 0 = never synthesized this process
+	TTSFirstByteBudgetMs int
 }
 
 // Status collects chains, per-provider health (chain providers only, bounded
@@ -187,6 +222,11 @@ func Status(ctx context.Context) StatusReport {
 
 	report.STTChain = reg.STTChain()
 	report.TTSChain = reg.TTSChain()
+	report.TTSLastLatencyMs = lastSynthMs.Load()
+	report.TTSFirstByteBudgetMs = reg.ActiveConfig().TTS.FirstByteMs
+	if report.TTSFirstByteBudgetMs <= 0 {
+		report.TTSFirstByteBudgetMs = 800
+	}
 
 	probe := func(ctx context.Context, ok bool, fn func(context.Context) error) (bool, string) {
 		if !ok {

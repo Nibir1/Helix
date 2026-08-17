@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -165,13 +166,27 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 		return nil, fmt.Errorf("ollama model is empty")
 	}
 
-	messages := make([]map[string]string, 0, len(req.Messages))
+	messages := make([]map[string]any, 0, len(req.Messages))
 
 	for _, msg := range req.Messages {
-		messages = append(messages, map[string]string{
+		m := map[string]any{
 			"role":    msg.Role,
 			"content": msg.Content,
-		})
+		}
+		// BlackBox Phase 5: attach base64 image parts for vision models
+		// (llava / gemma3). Ollama takes raw base64 (no data: prefix).
+		if msg.HasImages() {
+			var images []string
+			for _, p := range msg.Parts {
+				if p.Type == providers.PartImage && len(p.ImageData) > 0 {
+					images = append(images, base64.StdEncoding.EncodeToString(p.ImageData))
+				}
+			}
+			if len(images) > 0 {
+				m["images"] = images
+			}
+		}
+		messages = append(messages, m)
 	}
 
 	body := map[string]interface{}{

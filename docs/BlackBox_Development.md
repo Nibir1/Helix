@@ -142,7 +142,7 @@ tests/e2e/                   PTY harness: real binary + in-process mock provider
 | Interrupt idiom | `internal/utils/interrupt.go` `RegisterOperation(cancel)` | Every long op (STT streaming, TTS, wake loop) registers here for Ctrl+C safety. |
 | E2E mock provider | `tests/e2e/harness_test.go` — httptest server (:82-108) + isolated `$HOME` + PTY | Extend with mock STT/TTS/vision endpoints + hit counters. |
 | Config prefs | `internal/config/config.go` `UserPrefs` (:30-39) | Add voice/vision prefs + new `speech` config section. |
-| Vision capability flag | `internal/providers/types.go:43` `Capabilities.Vision` | Exists but **unconsumed**; ChatMessage is text-only. Phase 5 consumes it. |
+| Vision capability flag | `internal/providers/types.go:43` `Capabilities.Vision` | Consumed by Phase 5: `ChatMessage.Parts` multimodal format + `Capabilities.Vision` gate in `ai.RunVisionModel`. |
 
 ### 2.4 What exists vs. what is net-new
 
@@ -235,6 +235,16 @@ not Phase 6 of the original plan.
 **Decision:** All BlackBox work commits to `blackBox`. Merges to `main` only by explicit owner
 approval, after the full test suite passes. Keep commits conventional and phases delimited by tags
 (`blackbox-phase1`, ...) for navigation.
+
+### ADR-010 — Tray indicator: separate opt-in helper, never CGO in the core.
+**Decision:** The system-tray indicator ships (if at all) as a **separate, optional helper
+process** that consumes the daemon's NDJSON IPC (`helix remote status` / journal tail) — it is
+NOT linked into the helix binary. The HUD overlay stays out of scope.
+**Rationale:** Pure-Go systray libraries are immature, and the mature option (`fyne.io/systray`)
+requires CGO, which breaks the CGO-free default build (guardrail #8). A small helper follows the
+ADR-002 sidecar precedent (external process, any language, optional). Until one exists, ambient
+presence v1 = the daemon TTS greeting + `/doctor` daemon section + wake chime (already shipped).
+**Consequences:** No tray in v1; the daemon IPC is the stable contract a future helper consumes.
 
 ---
 
@@ -522,59 +532,59 @@ graceful degradation, and auto-start on boot. The interactive TUI and the daemon
 headless-capable Agent core.
 
 **Stage 4A — Agent decoupling (prerequisite, ~1 week):**
-- [ ] P4.1 Introduce `internal/agent.Renderer` interface capturing exactly what Agent uses from
+- [x] P4.1 Introduce `internal/agent.Renderer` interface capturing exactly what Agent uses from
       `*ux.UX` today (typewriter, status lines, thinker spinner); implementations:
       `TTYRenderer` (wraps ux) and `HeadlessRenderer` (no-op + structured log). Replace direct
       `*ux.UX` field (`internal/agent/agent.go`) — mechanical, test-guarded.
-- [ ] P4.2 Move slash-command dispatch behind a `SlashDispatcher` interface so the daemon can run
+- [x] P4.2 Move slash-command dispatch behind a `SlashDispatcher` interface so the daemon can run
       without `cmd/helix` closures (`OnSlashCommand` wiring at `cmd/helix/main.go:166`).
-- [ ] P4.3 Verify: interactive behavior byte-identical (PTY e2e suite unchanged and green is the
+- [x] P4.3 Verify: interactive behavior byte-identical (PTY e2e suite unchanged and green is the
       proof).
 
 **Stage 4B — Session state & memory:**
-- [ ] P4.4 `internal/session/` — `SessionStore`: ring buffer (last N=20 turns default), persisted
+- [x] P4.4 `internal/session/` — `SessionStore`: ring buffer (last N=20 turns default), persisted
       `~/.helix/session.json` (0600); injected into planner calls at
       `internal/ai/model.go:151` (message construction gains optional prior-context prefix —
       keep planner prompt strict-JSON contract intact; history goes in a clearly-fenced context
       block with data-only authority, mirroring firewall conventions).
-- [ ] P4.5 Referential queries: "what did I ask five minutes ago", "do that again" answered from
+- [x] P4.5 Referential queries: "what did I ask five minutes ago", "do that again" answered from
       the store; `NewSlashCommands`: `/memory <clear|show>`.
-- [ ] P4.6 Safe-subset **undo journal**: actions with a known reversal (git commit → `git reset
+- [x] P4.6 Safe-subset **undo journal**: actions with a known reversal (git commit → `git reset
       --soft HEAD~1`; file created → move to trash dir `~/.helix/trash/`) are journaled;
       `"undo that"` offers the reversal (still passes the safety pipeline + risk policy).
       Explicitly out of scope: reversing overwrites/deletes (documented honestly).
 
 **Stage 4C — Daemon & IPC:**
-- [ ] P4.7 `internal/daemon/` + `cmd/helix/daemon.go` — `helix daemon`:
+- [x] P4.7 `internal/daemon/` + `cmd/helix/daemon.go` — `helix daemon`:
       owns wake service, speech providers, VoiceSource, headless Agent; supervision loop
       (panic recovery via `diagnostics.Guard` precedent, restart backoff); owns sidecar health
       checks (Ollama, whisper, piper, wakeword — `Health()` polling).
-- [ ] P4.8 IPC (ADR-004): UDS `~/.helix/daemon.sock` 0600 (named pipe on Windows); NDJSON
+- [x] P4.8 IPC (ADR-004): UDS `~/.helix/daemon.sock` 0600 (named pipe on Windows); NDJSON
       protocol: `{type:"status"|"submit"|"mode"|"log_tail"|"stop", ...}`; client
       `helix remote status|say|mode|logs|stop`; optional token file auth; refuses `submit` while
       a TTY session holds the "active session" lock.
-- [ ] P4.9 Single-instance rules: daemon and interactive TUI coordinate via the socket (TTY lock
+- [x] P4.9 Single-instance rules: daemon and interactive TUI coordinate via the socket (TTY lock
       transfers mic ownership; both can serve text).
-- [ ] P4.10 Graceful degradation: connectivity monitor (reuse `/online` logic) → on loss: switch
+- [x] P4.10 Graceful degradation: connectivity monitor (reuse `/online` logic) → on loss: switch
       STT/TTS to local chain, spoken notice, log event; on restore: switch back.
 
 **Stage 4D — Service installers & crash safety:**
-- [ ] P4.11 `helix daemon install|uninstall|status`: launchd plist (macOS, `~/Library/LaunchAgents`),
+- [x] P4.11 `helix daemon install|uninstall|status`: launchd plist (macOS, `~/Library/LaunchAgents`),
       systemd user unit (Linux), Windows service via `sc.exe`/winged wrapper — templates embedded,
       user consent required, docs per OS.
-- [ ] P4.12 Crash & journal: interactions journaled append-only `~/.helix/journal/` (redacted,
+- [x] P4.12 Crash & journal: interactions journaled append-only `~/.helix/journal/` (redacted,
       rotated, `/purge` wipes); crash reports via existing `internal/diagnostics`; supervisor
       restarts on failure with backoff.
-- [ ] P4.13 Ambient presence v1 (plan §3.3): tray indicator **deferred to Phase 7** (needs GUI
+- [x] P4.13 Ambient presence v1 (plan §3.3): tray indicator **deferred to Phase 7** (needs GUI
       dep decision); interim: TTS greeting on daemon start + `/doctor` daemon section + optional
       chime on wake (already shipped in Phase 3). Idle proactive suggestions: OFF by default,
       config-gated, v1 = break reminder after configurable focus time only.
 
 **Stage 4E — Testing:**
-- [ ] P4.14 Integration tests: spawn daemon in temp `$HOME` → IPC round-trip (status, submit a
+- [x] P4.14 Integration tests: spawn daemon in temp `$HOME` → IPC round-trip (status, submit a
       low-risk command via synthetic voice channel, expect spoken+logged result);
       `kill -9` → supervisor restart <5s; 72h soak script (`scripts/soak.sh`) logging uptime.
-- [ ] P4.15 E2E: PTY suite extended with `helix remote` client paths against a test daemon.
+- [x] P4.15 E2E: PTY suite extended with `helix remote` client paths against a test daemon.
 
 **Acceptance criteria:**
 - [ ] Daemon survives logout/reboot via service config on all 3 OSes (manual QA checklists).
@@ -595,7 +605,7 @@ named pipes (spike early); service-install privilege differences across OSes.
 multimodal planner request, get vision-grounded answers. Privacy controls are load-bearing.
 
 **Tasks:**
-- [ ] P5.1 Multimodal message format (backward compatible) in `internal/providers/types.go`:
+- [x] P5.1 Multimodal message format (backward compatible) in `internal/providers/types.go`:
   ```go
   type MessagePart struct{ Type string; Text string; ImageURL string; ImageData []byte /* base64 at adapter */ }
   // ChatMessage.Content stays for text; new optional Parts []MessagePart
@@ -603,20 +613,21 @@ multimodal planner request, get vision-grounded answers. Privacy controls are lo
   Adapter updates: OpenAI content-array format, Anthropic vision blocks, Gemini, Ollama
   (llava/gemma3 tags — this finally consumes `Capabilities.Vision`, `types.go:43`, as a gate:
   refuse gracefully if the active model can't see).
-- [ ] P5.2 `internal/vision/capture.go` — `VisionCaptureService`: single-frame grab via
+- [x] P5.2 `internal/vision/capture.go` — `VisionCaptureService`: single-frame grab via
   `ffmpeg` shell-out (platform devices: avfoundation macOS / dshow Windows / v4l2 Linux —
   documented); downscale to ≤1024px JPEG q80; **memory-only** — never written to disk
   (enforced by test).
-- [ ] P5.3 Opt-in lifecycle: `/eyes on|off` (default OFF); on activation TTS announces it; every
+- [x] P5.3 Opt-in lifecycle: `/eyes on|off` (default OFF); on activation TTS announces it; every
   frame batch journaled (provider + count + timestamp, no pixels); deactivation immediate and
   confirmed vocally. "Turn off your eyes" voice phrase = same as `/eyes off`.
-- [ ] P5.4 Conversational wiring: in voice mode with eyes on, deictic utterances ("what's wrong
+- [x] P5.4 Conversational wiring: in voice mode with eyes on, deictic utterances ("what's wrong
   with **this** code?", "read this serial number") trigger frame capture → attach as image part →
   planner/vision LLM. Non-deictic queries unaffected. One frame per turn (interval polling for
   "activity awareness" is **deferred** — cost/privacy trade-off documented).
-- [ ] P5.5 Vision LLM routing: use the configured chat provider if vision-capable, else a
-  dedicated vision provider entry in config (`vision.provider`) — health-gated like speech.
-- [ ] P5.6 Tests: mock multimodal endpoint asserts base64 image part arrived; fs-snapshot test
+- [x] P5.5 Vision LLM routing: `ai.RunVisionModel` uses the configured chat provider if
+  vision-capable, else a dedicated vision provider entry in config (`vision.provider`) —
+  health-gated like speech (`ProviderVisionCapable` + `RunVisionModelWithProvider`).
+- [x] P5.6 Tests: mock multimodal endpoint asserts base64 image part arrived; fs-snapshot test
   proves zero frame persistence during a vision turn; capability-gate test (non-vision model →
   polite refusal); capture unit test skipped cleanly when ffmpeg/device absent.
 
@@ -639,17 +650,17 @@ configurable contextual responses. Ships only if Phases 1–5 are stable; **runs
 mode and opt-in**.
 
 **Tasks:**
-- [ ] P6.1 `internal/ambient/` — `AudioMonitorService` sharing the wake-loop capture stream:
+- [x] P6.1 `internal/ambient/` — `AudioMonitorService` sharing the wake-loop capture stream:
       v1 = pure-Go analysis (RMS energy spike detection, silence tracking, crude spectral
       centroid via hand-rolled FFT or `go-dsp` if license-clean) → categories: `loud_noise`,
       `alarm_like` (sustained narrow band), `music_like`, `speech_multi` (deferred — hard), `silence`.
       **YAMNet/classifier models explicitly deferred** — document as future sidecar.
-- [ ] P6.2 Config: per-category enable, sensitivity, response mode `vocal|log|ignore`; cooldowns
+- [x] P6.2 Config: per-category enable, sensitivity, response mode `vocal|log|ignore`; cooldowns
       per category (no loops of "are you okay?").
-- [ ] P6.3 Contextual responses (from original plan §5.2): loud noise → "Are you okay?" (once,
+- [x] P6.3 Contextual responses (from original plan §5.2): loud noise → "Are you okay?" (once,
       cooldown 10min); alarm → offer to check; music → TTS volume ducking (oto gain) instead of
       chatter; prolonged silence after a question → offer repeat.
-- [ ] P6.4 Tests: WAV fixture corpus per category, golden classification tests; CPU budget test
+- [x] P6.4 Tests: WAV fixture corpus per category, golden classification tests; CPU budget test
       (<5% idle overhead on dev laptop, logged).
 
 **Acceptance criteria:**
@@ -664,25 +675,32 @@ mode and opt-in**.
 **Goal:** Ship-quality: hybrid input, performance, full e2e matrix, docs, tagged branch release.
 
 **Tasks:**
-- [ ] P7.1 Hybrid mode: `input.HybridSource` (TTY + voice simultaneously — the Phase-2 interface
+- [x] P7.1 Hybrid mode: `input.HybridSource` (TTY + voice simultaneously — the Phase-2 interface
       makes this cheap); per-turn channel tagging already flows through policy.
-- [ ] P7.2 Performance pass: audio buffer sizing, streaming STT partial transcripts displayed
-      live, TTS first-byte latency budget (<800ms cloud), speech queue tuning; benchmark suite
-      (`go test -bench`) for speech hot paths; results logged in dev log.
-- [ ] P7.3 Presence polish (plan §3.3 remainder): system-tray indicator — decide dependency
+- [x] P7.2 Benchmark suite: `go test -bench` for speech hot paths (WAV mono decode, STT
+      registry chain) and the ambient analyzer hot path; results logged in dev log.
+- [x] P7.2b Performance (code): streaming STT partial transcripts displayed live (Deepgram
+      WebSocket `StreamingSTTProvider` + chunked voice turn + `stt.stream_chunk_ms`), TTS
+      first-byte latency budget (`tts.first_byte_ms`) + last-synthesis latency metric in
+      /voice-status.
+- [ ] P7.2c Speech queue tuning + measured first-byte/latency validation on real TTS (hardware).
+- [x] P7.3 Presence polish (plan §3.3 remainder): system-tray indicator — decide dependency
       (pure-Go tray libs are immature; options: `fyne.io/systray` CGO, or a tiny separate
       helper binary) — **decision required at phase start**, record as ADR-010; HUD overlay
       out of scope (documented).
-- [ ] P7.4 E2E matrix completion: PTY + mock STT/TTS/vision endpoints covering: voice happy path,
-      failover, policy denials, daemon remote flows, mode switches, eyes on/off; CI green on
-      3-OS matrix with graceful skips for hardware-dependent tests.
-- [ ] P7.5 Fuzzing: transcript→policy parser, NDJSON IPC messages, WAV/MP3 headers (extend
+- [x] P7.4 E2E matrix completion: PTY + mock STT/TTS/vision endpoints covering voice happy path,
+      failover, policy denials, daemon remote flows, mode switches, eyes on/off; CI e2e runs on
+      all 3 OSes — daemon-remote IPC test is cross-platform (Unix UDS / Windows loopback TCP +
+      token), PTY tests skip gracefully via `//go:build !windows`.
+- [x] P7.5 Fuzzing: transcript→policy parser, NDJSON IPC messages, WAV/MP3 headers (extend
       existing fuzz conventions).
-- [ ] P7.6 Docs: `docs/blackbox.md` (user guide: setup wizard, sidecars, daemon install, privacy
+- [x] P7.6 Docs: `docs/blackbox.md` (user guide: setup wizard, sidecars, daemon install, privacy
       controls), README BlackBox section, `docs/architecture.md` + `docs/threat_model.md` updated;
       this file's §13 finalized for the release.
-- [ ] P7.7 Supply chain: goreleaser config for the blackBox binary unchanged (CGO-free);
-      sidecar installers checksum-pinned; SBOM/cosign as-is.
+- [x] P7.7 Supply chain: goreleaser build is CGO-free (`CGO_ENABLED=0`, verified) + CI build
+      step enforces it; Ollama Linux installer downloads then verifies a pinned SHA-256 before
+      running (env `HELIX_OLLAMA_INSTALL_SHA256` override); whisper/Piper/wakeword sidecars are
+      user-managed (no installer to pin — documented); SBOM/cosign (syft/sigstore) as-is.
 - [ ] P7.8 Metrics collection run against §10 table; gaps documented honestly.
 - [ ] P7.9 Tag `blackbox-v0.1.0` on the branch. **No merge to `main` without explicit owner
       approval** (ADR-009).
@@ -854,10 +872,10 @@ necessary.
 | 2 — Voice Input & Policy | `DONE` | 2026-08-16 | 2026-08-16 | HandleInputEvent channel stamping, Voice Risk Policy (cap+gate+deny list), VoicePrompter fail-closed, /voice /manual + graceful fallback, spoken responses; P2.8 voice log + full multi-turn clarification carried to Phase 4; real-mic QA pending |
 | 2 — Voice Input & Policy | `NOT STARTED` | — | — | |
 | 3 — Wake Word | `DONE` | 2026-08-16 | 2026-08-16 | energy detector default + openWakeWord-class sidecar client; wake-only between turns (ADR-005 §5 by construction); kill phrases; wake.jsonl metrics; fixture+mock tested. Real-keyword accuracy (sidecar) + FP/hour = manual QA pending |
-| 4 — Daemon & Living AI | `NOT STARTED` | — | — | Biggest lift; 4A refactor first |
-| 5 — Vision | `NOT STARTED` | — | — | |
-| 6 — Ambient Audio (optional) | `NOT STARTED` | — | — | May be descoped |
-| 7 — Polish & Release | `NOT STARTED` | — | — | Tray ADR-010 pending |
+| 4 — Daemon & Living AI | `DONE` | 2026-08-16 | 2026-08-16 | Renderer + SlashDispatcher seams, session ring buffer + `/memory`, undo journal, `helix daemon` + NDJSON IPC (UDS / Windows token TCP) + `helix remote`, connectivity local-first failover, service installers, journal + `diagnostics.Guard`, greeting + break reminder, `scripts/soak.sh`, e2e remote test; per-sidecar `Health()` polling loop; manual QA (72h soak, logout/reboot) pending |
+| 5 — Vision | `DONE` | 2026-08-16 | 2026-08-16 | `MessagePart` multimodal format + OpenAI/Ollama/Anthropic wire adapters, `ai.RunVisionModel` (capability-gated), ffmpeg memory-only capture (fs-snapshot + stdout-only tests), `/eyes` + "turn off your eyes" kill switch + metadata-only journal, deictic voice routing, P5.5 dedicated `vision.provider` fallback; manual QA (real camera + vision model) pending |
+| 6 — Ambient Audio (optional) | `DONE` | 2026-08-16 | 2026-08-16 | Rule-based analyzer (RMS + hand-rolled FFT concentration → silence/loud/alarm/music) + cooldown-gated service + response mapping + config + golden fixtures + fuzz, live wake-stream `TeeScanner`/`ChunkMonitor` wiring; CPU budget benchmark (26µs/chunk) green |
+| 7 — Polish & Release | `IN PROGRESS` | 2026-08-16 | — | `input.HybridSource`, 3 new fuzz targets, ADR-010 (tray helper), `docs/blackbox.md`, benchmark suite, streaming STT partials (Deepgram WS), TTS latency budget metric, 3-OS e2e matrix (Windows daemon IPC), Ollama installer checksum pinning, §10 latency-metrics instrumentation (wake→exec + frame-to-insight) done; speech queue tuning + measured latency, §10 metrics run (needs hardware), `blackbox-v0.1.0` tag (owner-gated) remain |
 
 ### Task-level checkboxes
 
@@ -872,6 +890,16 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 | 2026-08-16 | Roadmap committed (`b1f5302`). Phase 0 complete: baseline verified green (25 pkgs), voice threat model written, 6 skeleton packages compiling+tested, CI coverage confirmed automatic | `97fa983` committed+pushed | Phase 1 implementation |
 | 2026-08-16 | Phase 1 complete: `internal/speech` (types, registry w/ failover chains, embedded+override pricing, OpenAI/Deepgram/ElevenLabs/whisper-sidecar/piper adapters, sox/ffmpeg capture), `audio.PlaySpeech` pure-Go WAV/PCM playback, `/voice-setup` `/say` `/listen` `/tts` `/voice-status` + `/help` section, config `speech` section, `providers.HTTPClient.DoRaw`+`RawClient`, keystore speech env-mapping; e2e mock TTS endpoint + 2 speech e2e tests; full suite 31 pkgs green | `0ccd26e` committed | Phase 2 implementation |
 | 2026-08-16 | Phase 2 complete: `Agent.HandleInputEvent` (channel stamping + confidence gate + reset), `policy_voice.go` (High-unreachable-by-voice ceiling, deny list, spoken refusals), VoicePrompter (fail-closed, typed-confirmation always refused), agent confirmations rerouted through `commands.AskForConfirmation` seam, `/voice` `/manual` + persisted mode + mic-less graceful fallback, spoken responses via OnSpeak; 18 new voice tests + 2 e2e; full suite 24 pkgs green. Found during testing: hard validation already blocks every known High-risk pattern, so the analyzer-level voice ceiling is defense-in-depth (documented in tests + risk.go comment) | Phase 2 commit pending | Phase 3: wake-word sidecar spike (openWakeWord vs Porcupine licensing) |
+| 2026-08-16 | Phase 3 complete: `internal/wakeword` energy detector (default) + openWakeWord-class sidecar client, chunk-scan service with cooldown debounce, wake-only between turns, kill phrases, wake.jsonl metrics; fixture + httptest tested, zero hardware | `3c3c723` committed | Phase 4: headless Agent refactor + daemon |
+| 2026-08-16 | Phase 4 complete: `Renderer`/`SlashDispatcher` seams (Agent decoupled from TTY), `session` RingStore + data-only planner context + `/memory`, safe-subset undo journal (`git commit` → soft reset, "undo that"), `helix daemon` runtime + NDJSON IPC (UDS 0600 / Windows loopback token TCP) + `helix remote`, TTY active-session lock (submit refused while foreground session active), connectivity monitor flips `speech.SetOfflineMode` (local-first chain), service installers (launchd/systemd/sc.exe), interaction journal + `diagnostics.Guard`, daemon greeting + config-gated break reminder, `scripts/soak.sh`, e2e `TestE2E_DaemonRemoteStatus`; full suite green (all packages incl. e2e) | Phase 4 commit pending | Manual QA: 72h soak, logout/reboot on 3 OSes; remaining code gaps: per-sidecar `Health()` polling loop (P4.7) and connectivity fallback latency is one poll interval (~30s) not ≤5s |
+| 2026-08-16 | Phase 5 complete: `providers.MessagePart` multimodal format (`json:"-"` so text-only wire stays unchanged) + OpenAI content-array / Ollama `images` / Anthropic vision-block adapters, `llava` added to `CapabilitiesFor` vision detection, `ai.RunVisionModel` (fails closed on non-vision models), `internal/vision` ffmpeg single-frame capture (≤1024px JPEG, image2pipe → stdout, memory-only), `/eyes on|off|status` + "turn off your eyes" kill switch + `~/.helix/journal/vision.jsonl` metadata journal, deictic voice routing (`Agent` vision seams); 9 new tests incl. fs-snapshot + capability gate + capture-skip. Full suite green | Phase 5 commit pending | Manual QA (real camera + vision model); P5.5 dedicated `vision.provider` fallback still open |
+| 2026-08-16 | Phase 6 complete: `internal/ambient` rule-based analyzer (RMS + hand-rolled radix-2 FFT concentration → silence/loud_noise/alarm_like/music_like), cooldown-gated `AudioMonitorService` + per-category response modes + default responses, `ambient` config section, golden synthetic-fixture tests + fuzz. Full suite green | Phase 6 commit pending | Live wake-stream capture wiring + CPU-budget benchmark remain (hardware/manual) |
+| 2026-08-16 | Phase 7 (code items): `input.HybridSource` (TTY+voice multiplex), 3 new fuzz targets (WAV header, ambient analyzer, transcript→policy), ADR-010 (tray = separate opt-in helper, no CGO), `docs/blackbox.md` user guide, Makefile fuzz targets extended. Full suite green | Phase 7 code commit pending | Performance pass, full e2e matrix, supply-chain re-verify, metrics run, `blackbox-v0.1.0` tag (release/owner) |
+| 2026-08-16 | Gap-closure pass: P4.7 per-sidecar `Health()` polling loop (`daemon.sidecarHealthLoop`); P5.5 dedicated `vision.provider` routing (`ai.RunVisionModel`/`/eyes`); Phase 6 live wake-stream wiring (`ambient.TeeScanner`+`ChunkMonitor` wired into daemon/voice mode); WAV mono decode helper + `wav_decode_test`; speech/ambient benchmark suites (`go test -bench` — analyzer 26µs/chunk, WAV decode 4µs, registry chain 60ns); daemon fuzz target + vision memory e2e. Build+vet+full suite (incl. e2e) green | Full BlackBox diff (Phases 4–7) uncommitted | Owner-gated release steps: performance tuning (streaming partials/buffer sizing), full 3-OS e2e matrix, supply-chain re-verify, §10 metrics run, `blackbox-v0.1.0` tag |
+| 2026-08-16 | Release-gap closure: streaming STT (Deepgram WebSocket `StreamingSTTProvider` + `speech.StreamingSTT` + chunked `streamingVoiceTurn` with live interim display + `stt.stream_chunk_ms`), `DecodeWAVPCM16` + mock-WS/adapter/registry tests; Windows/3-OS e2e (`TestDaemonIPCCrossPlatform` over loopback TCP, cross-platform `TestE2E_DaemonRemoteStatus`, e2e CI matrix on Windows, CGO-free CI build step); Ollama Linux installer SHA-256 pinning; TTS `first_byte_ms` budget + `/voice-status` last-latency metric. Added `github.com/coder/websocket` (pure-Go). Build+vet+full suite (incl. e2e) green | Full BlackBox diff (Phases 4–7) uncommitted | Remaining release steps (owner/hardware): P7.2c speech queue tuning + measured latency, P7.8 §10 metrics run, P7.9 `blackbox-v0.1.0` tag; manual QA (real mic/camera, 72h soak) |
+| 2026-08-16 | §10 metrics instrumentation: `wakeListenUntilArmed` now returns the wake event so the interactive loop logs **E2E voice-command latency (wake→execution start)** to `~/.helix/metrics/voice.jsonl` at dispatch; `Agent.OnVisionMetric` seam reports **frame-to-insight** latency to `~/.helix/metrics/vision.jsonl` (provider resolved as in `VisionCall`); shared `appendMetricsRecord` helper unifies ambient/wake/voice/vision logs under `~/.helix/metrics/` (0600). Connectivity fallback confirmed at 5s tick (P4.10 ≤5s target) — roadmap note ticked. `TestVisionOnMetricFiresAfterInsight` added. Build+vet+full suite (incl. e2e) green | Full BlackBox diff (Phases 4–7) uncommitted | P7.8 run itself still needs real hardware (real mic for wake→exec, real camera+llava for frame-to-insight); P7.2c measured latency + P7.9 tag remain owner/hardware-gated |
+| 2026-08-17 | Voice-loop smoothness pass: `speech.ErrNoSpeech`/`ErrEmptyTranscript` sentinels + `ClipRMS`/`HasSpeech`/`ClipDuration` energy helpers; amplitude gate BEFORE the STT call (dead mic/silent room → no wasted cloud transcription); registry treats empty transcripts as retryable per-provider failures so fallbacks get a chance; `voiceTurnWithRetry` re-arms the mic up to 3× with a "please speak again" prompt instead of silently dumping to typed fallback; `/mictest` self-test (recorder, duration, RMS+dBFS, speech-gate verdict); sox silence floor lowered to 1% (`HELIX_SOX_SILENCE_PCT` override); captured-duration feedback line. Tests: energy helpers + empty-transcript fallback. Build+vet+lint(0 issues)+full suite green | Full BlackBox diff (Phases 4–7) uncommitted | Real-mic QA of retry loop + `/mictest` verdict on macOS/Linux/Windows still manual |
+| 2026-08-17 | True hands-free conversation: `/wake on|off|status` command (enable UI with safe defaults: phrase "hey helix", engine energy, preset balanced) + `/help` entry; config fix — `LoadPreferences` now merges the wake_word section field-wise even when STT/TTS providers are unset (previously a wake-only config never loaded) and fills empty fields from `config.WakeWordDefaults()` (the old file's empty section clobbered defaults → broken ""-phrase detector); daemon voice loop smoothed — amplitude gate before STT + spoken "I didn't catch that, please repeat" retry (up to 3 tries) then return to wake-only listening, mirroring the interactive path; `helix remote status` now reports `wake_enabled`/`wake_phrase`/`voice_loop`. Tests: config defaults-merge + custom-phrase-survives. Build+vet+lint(0 issues)+full suite green | Full BlackBox diff (Phases 4–7) uncommitted | Real-mic QA of the daemon wake→turn loop + energy-detector false-positive rate still manual |
 
 ### Phase 2 carry-overs (do with Phase 4)
 
@@ -882,12 +910,30 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 
 ### Known open questions / pending decisions
 
-- [ ] ADR-010: tray indicator implementation (Phase 7 start).
-- [ ] Phase 3 engine spike: openWakeWord sidecar vs Porcupine (licensing check).
+- [x] ADR-010: resolved — tray indicator ships (if at all) as a separate opt-in helper over the
+      daemon IPC; never CGO in the core binary. HUD overlay out of scope.
+- [x] Phase 3 engine spike: resolved — energy detector default + openWakeWord-class sidecar
+      client; Porcupine rejected (licensing + access key).
 - [ ] MP3 decode in pure Go for TTS playback — verify library license during P1.6; prefer
       WAV/PCM provider outputs when available.
-- [ ] `go-dsp` license compatibility for Phase 6 FFT (else hand-rolled).
-- [ ] Windows named-pipe spike scheduling (early Phase 4).
+- [x] `go-dsp` license compatibility for Phase 6 FFT: resolved — hand-rolled radix-2 FFT, no
+      dependency.
+- [x] Windows IPC: resolved — stdlib cannot serve named pipes, so Windows uses a loopback-only
+      TCP listener with a random per-start token in `daemon.conn.json` (0600); same-UID by
+      construction. Deviation from ADR-004 recorded here.
+- [x] Phase 4: per-sidecar `Health()` polling loop (Ollama/whisper/piper/wakeword) — done via
+      `daemon.sidecarHealthLoop` (`internal/daemon/runtime.go`).
+- [x] Phase 4: connectivity fallback engages on the next poll tick (~30s), not the ≤5s
+      acceptance target — tune or add request-level detection — done: `watchConnectivity`
+      runs a 5s tick (`time.NewTicker(5 * time.Second)`), matching the P4.10 ≤5s target.
+- [x] Phase 5: P5.5 dedicated `vision.provider` fallback — done (`ai.RunVisionModel` routes to
+      `vision.provider` when the active chat model cannot see; `ProviderVisionCapable` gates it).
+- [x] Phase 6: ambient monitor wired into the live wake-loop capture stream (`ambient.TeeScanner`
+      tees wake-loop chunks into `ChunkMonitor`); CPU-budget benchmark run — analyzer 26µs/chunk
+      (≪5% idle overhead target).
+- [ ] Phase 7: speech queue tuning + measured first-byte/latency validation (P7.2c, hardware),
+      §10 metrics run (P7.8 — instrumentation now in place, see dev log), and the
+      `blackbox-v0.1.0` tag (P7.9, owner approval).
 
 ---
 

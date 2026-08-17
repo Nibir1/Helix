@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"helix/internal/providers"
@@ -21,6 +22,8 @@ type STTConfig struct {
 	Model     string   `json:"model"`
 	BaseURL   string   `json:"base_url"` // overrides the provider default (tests, proxies)
 	Fallbacks []string `json:"fallbacks"`
+	// StreamChunkMs is the streaming capture chunk length (0 → 300ms).
+	StreamChunkMs int `json:"stream_chunk_ms"`
 }
 
 // TTSConfig selects the active text-to-speech provider and its fallback chain.
@@ -30,6 +33,8 @@ type TTSConfig struct {
 	Voice     string   `json:"voice"`
 	BaseURL   string   `json:"base_url"`
 	Fallbacks []string `json:"fallbacks"`
+	// FirstByteMs is the TTS first-byte latency budget (0 → 800ms).
+	FirstByteMs int `json:"first_byte_ms"`
 }
 
 // Config is the full speech subsystem selection.
@@ -46,12 +51,13 @@ const (
 
 // Registry holds all registered speech providers plus the active selection.
 type Registry struct {
-	mu     sync.RWMutex
-	stt    map[string]STTProvider
-	tts    map[string]TTSProvider
-	keys   *providers.KeyStore
-	client *providers.HTTPClient
-	cfg    Config
+	mu      sync.RWMutex
+	stt     map[string]STTProvider
+	tts     map[string]TTSProvider
+	keys    *providers.KeyStore
+	client  *providers.HTTPClient
+	cfg     Config
+	offline bool // Phase 4 graceful degradation: local-first chain ordering
 }
 
 // NewRegistry creates a speech registry over the shared keystore and HTTP
@@ -142,6 +148,23 @@ func (r *Registry) SetConfig(cfg Config) {
 	r.cfg = cfg
 }
 
+// SetOffline toggles local-first degradation (Phase 4, P4.10): when true the
+// STT/TTS failover chains prefer local sidecars over cloud providers so the
+// daemon keeps transcribing/speaking without internet; false restores the
+// configured order.
+func (r *Registry) SetOffline(on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.offline = on
+}
+
+// Offline reports the degradation state.
+func (r *Registry) Offline() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.offline
+}
+
 // ActiveConfig returns the stored selection.
 func (r *Registry) ActiveConfig() Config {
 	r.mu.RLock()
@@ -196,6 +219,12 @@ func (r *Registry) STTChain() []string {
 	for _, f := range r.cfg.STT.Fallbacks {
 		appendIf(f)
 	}
+	if r.offline {
+		localFirst(chain, func(name string) bool {
+			p, ok := r.stt[name]
+			return ok && p.IsLocal()
+		})
+	}
 	return chain
 }
 
@@ -217,7 +246,40 @@ func (r *Registry) TTSChain() []string {
 	for _, f := range r.cfg.TTS.Fallbacks {
 		appendIf(f)
 	}
+	if r.offline {
+		localFirst(chain, func(name string) bool {
+			p, ok := r.tts[name]
+			return ok && p.IsLocal()
+		})
+	}
 	return chain
+}
+
+// localFirst reorders names so entries where isLocal reports true come first,
+// preserving relative order within each group.
+func localFirst(names []string, isLocal func(string) bool) {
+	var local, remote []string
+	for _, n := range names {
+		if isLocal(n) {
+			local = append(local, n)
+		} else {
+			remote = append(remote, n)
+		}
+	}
+	copy(names, append(local, remote...))
+}
+
+// StreamingSTT returns the primary STT provider when it supports streaming
+// transcription (Deepgram WebSocket). The voice turn uses it to show live
+// partials; callers fall back to batch capture when this reports false.
+func (r *Registry) StreamingSTT() (StreamingSTTProvider, bool) {
+	chain := r.STTChain()
+	if len(chain) == 0 {
+		return nil, false
+	}
+	p, _ := r.STTProvider(chain[0])
+	s, ok := p.(StreamingSTTProvider)
+	return s, ok
 }
 
 // Transcribe runs the STT failover chain: the first provider that succeeds
@@ -238,6 +300,13 @@ func (r *Registry) Transcribe(ctx context.Context, audio AudioFormat) (Transcrip
 		p, _ := r.STTProvider(name)
 		t, err := p.Transcribe(ctx, audio)
 		if err == nil {
+			// A provider that returns empty text heard no words — treat it as
+			// a retryable failure so fallbacks get a chance, and so the voice
+			// loop can re-arm the mic instead of dispatching "" to the agent.
+			if strings.TrimSpace(t.Text) == "" {
+				errs = append(errs, fmt.Errorf("%s: %w", name, ErrEmptyTranscript))
+				continue
+			}
 			return t, nil
 		}
 		errs = append(errs, fmt.Errorf("%s: %w", name, err))

@@ -10,12 +10,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"helix/internal/ambient"
 	"helix/internal/audio"
 	"helix/internal/commands"
 	"helix/internal/input"
@@ -108,9 +111,57 @@ func handleManualCommand() {
 // input event. The transcript is echoed like a typed line would be. The
 // capture registers with the interrupt manager so Ctrl+C cancels recording
 // instead of killing Helix.
+//
+// When the active STT provider supports streaming, voiceTurn shows interim
+// partials live and finalizes on the utterance-final result; a failed stream
+// dial degrades to the proven batch path.
 func voiceTurn() (input.InputEvent, error) {
 	audio.PlayAlert() // ready cue
 
+	if s, ok := speech.StreamingSTT(); ok {
+		ev, err := streamingVoiceTurn(s)
+		if err == nil {
+			return ev, nil
+		}
+		if !errors.Is(err, errStreamDial) {
+			// Kill phrase, empty result, or a stream that started but produced
+			// nothing — do not silently re-record over these.
+			return ev, err
+		}
+		color.Yellow("streaming unavailable (%v); using batch capture", err)
+	}
+	return batchVoiceTurn()
+}
+
+// maxVoiceRetries is how many times the mic re-arms after a silent/empty turn
+// before falling back to typed input. Never zero — the shell must not brick.
+const maxVoiceRetries = 3
+
+// voiceTurnWithRetry runs one voice turn, re-arming the mic on silence or an
+// empty transcript with a gentle prompt instead of silently switching to
+// typing. Real errors (provider down, capture failure) still degrade to the
+// typed fallback so a broken mic never strands the user.
+func voiceTurnWithRetry() (input.InputEvent, error) {
+	for attempt := 0; ; attempt++ {
+		ev, err := voiceTurn()
+		if err == nil {
+			return ev, nil
+		}
+		if errors.Is(err, speech.ErrNoSpeech) || errors.Is(err, speech.ErrEmptyTranscript) {
+			if attempt >= maxVoiceRetries {
+				return ev, err
+			}
+			color.Yellow("I didn't catch that — please speak again (attempt %d/%d)",
+				attempt+1, maxVoiceRetries)
+			// voiceTurn plays the ready cue itself — no extra beep here.
+			continue
+		}
+		return ev, err
+	}
+}
+
+// batchVoiceTurn is the original record-whole-clip→transcribe path (Phase 2).
+func batchVoiceTurn() (input.InputEvent, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
 	unreg := utils.RegisterOperation(cancel)
 	defer unreg()
@@ -121,15 +172,129 @@ func voiceTurn() (input.InputEvent, error) {
 		return input.InputEvent{}, fmt.Errorf("capture: %w", err)
 	}
 
+	// Amplitude gate BEFORE the STT round-trip: a dead mic or a silent room
+	// must not burn a cloud transcription (and return a confusing empty
+	// result) — re-arm the mic instead.
+	if !speech.HasSpeech(clip, 0) {
+		return input.InputEvent{}, speech.ErrNoSpeech
+	}
+	if d := speech.ClipDuration(clip); d > 0 {
+		fmt.Printf("captured %.1fs — transcribing…\n", d)
+	}
+
 	tctx, tcancel := context.WithTimeout(ctx, 60*time.Second)
 	defer tcancel()
 	transcript, err := speech.Transcribe(tctx, clip)
 	if err != nil {
 		return input.InputEvent{}, fmt.Errorf("transcribe: %w", err)
 	}
-	text := strings.TrimSpace(transcript.Text)
+	return finishVoiceTranscript(strings.TrimSpace(transcript.Text), transcript)
+}
+
+// errStreamDial marks a failure to open the streaming connection (distinct
+// from a stream that started but delivered no final).
+var errStreamDial = errors.New("stream dial failed")
+
+// streamingVoiceTurn streams 300ms chunks to the provider, echoes interim
+// partials, and returns on the utterance-final transcript. A 3s silence gap
+// finalizes the turn so a silent mic doesn't hang the shell.
+func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	unreg := utils.RegisterOperation(cancel)
+	defer unreg()
+	defer cancel()
+
+	chunkMs := cfg.Speech.STT.StreamChunkMs
+	if chunkMs <= 0 {
+		chunkMs = 300
+	}
+	scanner := speech.NewChunkScanner(time.Duration(chunkMs)*time.Millisecond, 16000)
+	chunks := make(chan speech.AudioFormat)
+	go func() {
+		defer close(chunks)
+		for {
+			cctx, ccancel := context.WithTimeout(ctx, 3*time.Second)
+			clip, err := scanner.NextChunk(cctx)
+			ccancel()
+			if err != nil {
+				return
+			}
+			select {
+			case chunks <- clip:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	stream, err := s.Stream(ctx, chunks)
+	if err != nil {
+		return input.InputEvent{}, fmt.Errorf("%w: %v", errStreamDial, err)
+	}
+
+	idle := time.NewTimer(3 * time.Second)
+	defer idle.Stop()
+
+	var last string
+	heard := false
+	finalize := func() (input.InputEvent, error) {
+		if !heard {
+			return input.InputEvent{}, speech.ErrNoSpeech
+		}
+		if last == "" {
+			return input.InputEvent{}, speech.ErrEmptyTranscript
+		}
+		fmt.Print("\r\x1b[2K")
+		return finishVoiceTranscript(last, speech.Transcript{Text: last, Provider: s.Name(), IsFinal: true})
+	}
+
+	for {
+		select {
+		case t, ok := <-stream:
+			if !ok {
+				return finalize()
+			}
+			heard = true
+			text := strings.TrimSpace(t.Text)
+			if !t.IsFinal {
+				if text != "" && text != last {
+					last = text
+					fmt.Printf("\r[hearing] %s", text)
+				}
+				resetTimer(idle, 3*time.Second)
+				continue
+			}
+			if text == "" {
+				resetTimer(idle, 3*time.Second)
+				continue
+			}
+			fmt.Print("\r\x1b[2K")
+			return finishVoiceTranscript(text, t)
+		case <-idle.C:
+			return finalize()
+		case <-ctx.Done():
+			return finalize()
+		}
+	}
+}
+
+// resetTimer restarts a time.Timer, draining a pending fire if needed.
+func resetTimer(t *time.Timer, d time.Duration) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
+}
+
+// finishVoiceTranscript applies kill-switch checks and stamps the input event
+// shared by the batch and streaming turn paths.
+func finishVoiceTranscript(text string, transcript speech.Transcript) (input.InputEvent, error) {
+	text = strings.TrimSpace(text)
 	if text == "" {
-		return input.InputEvent{}, fmt.Errorf("empty transcript")
+		return input.InputEvent{}, speech.ErrEmptyTranscript
 	}
 
 	conf := fmt.Sprintf(", confidence %.2f", transcript.Confidence)
@@ -142,6 +307,13 @@ func voiceTurn() (input.InputEvent, error) {
 	// dispatch. The /manual slash form also works when spoken as "/manual".
 	if isVoiceKillPhrase(text) {
 		exitVoiceMode(true)
+		return input.InputEvent{}, errVoiceStopped
+	}
+
+	// Vision privacy kill switch (threat V4): "turn off your eyes" deactivates
+	// /eyes immediately WITHOUT leaving voice mode.
+	if isEyesOffPhrase(text) {
+		setVisionEnabled(false)
 		return input.InputEvent{}, errVoiceStopped
 	}
 
@@ -177,16 +349,17 @@ func isVoiceKillPhrase(text string) bool {
 // shell falls back to push-to-talk turns.
 const wakeIdleWindow = 60 * time.Second
 
-// wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns
-// true when a wake event fires (caller runs another voice turn), false on
+// wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns the
+// wake event when it fires (caller runs another voice turn), ok=false on
 // window expiry, disabled config, or scanner failure (fall back to
-// push-to-talk turns).
-func wakeListenUntilArmed() bool {
+// push-to-talk turns). The DetectedAt timestamp feeds the §10 wake→execution
+// latency metric.
+func wakeListenUntilArmed() (wakeword.WakeEvent, bool) {
 	if speech.Default() == nil || !cfg.Speech.WakeWord.Enabled {
-		return false
+		return wakeword.WakeEvent{}, false
 	}
 	if _, err := speech.DetectRecorder(); err != nil {
-		return false
+		return wakeword.WakeEvent{}, false
 	}
 
 	preset := wakeword.Preset(cfg.Speech.WakeWord.SensitivityPreset)
@@ -203,8 +376,14 @@ func wakeListenUntilArmed() bool {
 	if chunkMs <= 0 {
 		chunkMs = 1500
 	}
+	// Phase 6: ambient awareness shares the wake capture stream when opted in.
+	scanner := wakeword.Scanner(wakeword.NewSoXScanner(time.Duration(chunkMs)*time.Millisecond, 16000))
+	if cfg.Ambient.Enabled {
+		scanner = ambient.Tee(scanner, interactiveAmbientMonitor())
+	}
+
 	svc, err := wakeword.NewService(
-		wakeword.NewSoXScanner(time.Duration(chunkMs)*time.Millisecond, 16000),
+		scanner,
 		detector,
 		wakeword.Config{
 			Phrase:   cfg.Speech.WakeWord.Phrase,
@@ -212,7 +391,7 @@ func wakeListenUntilArmed() bool {
 			OnError:  func(error) {},
 		})
 	if err != nil {
-		return false
+		return wakeword.WakeEvent{}, false
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), wakeIdleWindow)
@@ -222,7 +401,7 @@ func wakeListenUntilArmed() bool {
 
 	events, err := svc.Start(ctx)
 	if err != nil {
-		return false
+		return wakeword.WakeEvent{}, false
 	}
 	defer func() { _ = svc.Stop() }()
 
@@ -231,15 +410,72 @@ func wakeListenUntilArmed() bool {
 	case ev := <-events:
 		logWakeEvent(ev)
 		audio.PlayAlert()
-		return true
+		return ev, true
 	case <-ctx.Done():
-		return false
+		return wakeword.WakeEvent{}, false
 	}
 }
 
-// logWakeEvent appends one wake event to the local metrics journal
-// (~/.helix/metrics/wake.jsonl, local only, never transmitted).
-func logWakeEvent(ev wakeword.WakeEvent) {
+// interactiveAmbientMonitor builds the monitor for the interactive wake loop.
+func interactiveAmbientMonitor() *ambient.ChunkMonitor {
+	enabled := map[ambient.Category]bool{}
+	for name, on := range cfg.Ambient.Categories {
+		enabled[ambient.Category(name)] = on
+	}
+	svc := ambient.NewServiceFromOptions(cfg.Ambient.Sensitivity,
+		ambient.ResponseModeFromString(cfg.Ambient.ResponseMode), enabled)
+	mon := ambient.NewChunkMonitor(svc)
+	mon.OnSpeak = func(text string) {
+		if agentCore != nil && agentCore.OnSpeak != nil {
+			agentCore.OnSpeak(text)
+		}
+	}
+	mon.OnLog = func(ev ambient.Event) {
+		appendAmbientEvent(ev)
+	}
+	return mon
+}
+
+// handleMicTest implements /mictest — a 3-second self-test that answers the
+// question "is the AI actually hearing me?": it reports the recorder, how
+// much audio was captured, the measured level (RMS + dBFS), and whether that
+// clears the speech gate the voice loop uses. Wrong input device or a muted
+// system mic shows up here immediately.
+func handleMicTest() {
+	recorder, err := speech.DetectRecorder()
+	if err != nil {
+		color.Red("%v", err)
+		return
+	}
+	fmt.Printf("Mic test (recorder: %s) — speak now for up to 3s...\n", recorder)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	clip, err := speech.RecordClip(ctx, speech.CaptureOptions{MaxDuration: 3 * time.Second})
+	if err != nil {
+		color.Red("Capture failed: %v", err)
+		return
+	}
+
+	rms := speech.ClipRMS(clip)
+	dB := 0.0
+	if rms > 0 {
+		dB = 20 * math.Log10(rms)
+	}
+	status := "QUIET — check your input device / system mic level"
+	if speech.HasSpeech(clip, 0) {
+		status = "speech detected ✓"
+	}
+	fmt.Printf("Captured %.1fs — level %.3f (%.0f dBFS) — %s\n",
+		speech.ClipDuration(clip), rms, dB, status)
+	color.Cyan("If this reads QUIET, run /voice-status to confirm the STT chain, then check macOS")
+	color.Cyan("System Settings ▸ Sound ▸ Input (or the OS equivalent) for the active microphone.")
+}
+
+// appendMetricsRecord appends one JSON line to ~/.helix/metrics/<name>.jsonl
+// (0600, local only, never transmitted). All §10 "measured by metrics log"
+// numbers land here so the release run can be audited from one directory.
+func appendMetricsRecord(name string, fields map[string]any) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
@@ -248,19 +484,62 @@ func logWakeEvent(ev wakeword.WakeEvent) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "wake.jsonl"),
+	f, err := os.OpenFile(filepath.Join(dir, name+".jsonl"),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	line, err := json.Marshal(map[string]any{
-		"ts":     ev.DetectedAt.UTC().Format(time.RFC3339),
-		"score":  ev.Score,
-		"phrase": ev.Phrase,
-	})
+	line, err := json.Marshal(fields)
 	if err != nil {
 		return
 	}
 	_, _ = f.Write(append(line, '\n'))
+}
+
+// appendAmbientEvent records one ambient event to the local metrics journal
+// (~/.helix/metrics/ambient.jsonl, local only, never transmitted).
+func appendAmbientEvent(ev ambient.Event) {
+	appendMetricsRecord("ambient", map[string]any{
+		"ts":        time.Now().UTC().Format(time.RFC3339),
+		"category":  string(ev.Category),
+		"intensity": ev.Intensity,
+	})
+}
+
+// logWakeEvent appends one wake event to the local metrics journal
+// (~/.helix/metrics/wake.jsonl, local only, never transmitted).
+func logWakeEvent(ev wakeword.WakeEvent) {
+	appendMetricsRecord("wake", map[string]any{
+		"ts":     ev.DetectedAt.UTC().Format(time.RFC3339),
+		"score":  ev.Score,
+		"phrase": ev.Phrase,
+	})
+}
+
+// logVoiceLatency records an E2E voice-metrics sample (wake→execution start,
+// §10 target ≤6s local). meta carries the STT provider/confidence for context.
+func logVoiceLatency(metric string, d time.Duration, meta map[string]any) {
+	fields := map[string]any{
+		"ts":      time.Now().UTC().Format(time.RFC3339),
+		"metric":  metric,
+		"latency": d.Milliseconds(),
+	}
+	for _, k := range []string{"stt_provider", "stt_confidence"} {
+		if v, ok := meta[k]; ok {
+			fields[k] = v
+		}
+	}
+	appendMetricsRecord("voice", fields)
+}
+
+// logVisionLatency records a frame-to-insight sample (§10 target ≤5s
+// best-effort on llava). provider is the vision LLM that answered.
+func logVisionLatency(metric string, d time.Duration, provider string) {
+	appendMetricsRecord("vision", map[string]any{
+		"ts":       time.Now().UTC().Format(time.RFC3339),
+		"metric":   metric,
+		"latency":  d.Milliseconds(),
+		"provider": provider,
+	})
 }

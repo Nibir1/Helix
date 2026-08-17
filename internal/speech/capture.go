@@ -81,8 +81,15 @@ func RecordClip(ctx context.Context, opts CaptureOptions) (AudioFormat, error) {
 			"-r", fmt.Sprint(opts.SampleRate), "-c", "1", "-b", "16", "-e", "signed-integer",
 			path}
 		if !opts.NoSilenceStop {
-			// Stop after 2s below 3% amplitude (crude VAD for utterances).
-			args = append(args, "silence", "1", "0.1", "3%", "1", "2.0", "3%")
+			// Stop after 2s below the silence floor (crude VAD for
+			// utterances). 1% by default — sensitive enough to catch quiet
+			// speech, high enough to ignore most room noise; override with
+			// HELIX_SOX_SILENCE_PCT (e.g. "2%") for noisy rooms.
+			sil := os.Getenv("HELIX_SOX_SILENCE_PCT")
+			if sil == "" {
+				sil = "1%"
+			}
+			args = append(args, "silence", "1", "0.1", sil, "1", "2.0", sil)
 		}
 		args = append(args, "trim", "0", fmt.Sprintf("%.1f", opts.MaxDuration.Seconds()))
 		cmd = exec.CommandContext(ctx, args[0], args[1:]...)
@@ -114,6 +121,38 @@ func RecordClip(ctx context.Context, opts CaptureOptions) (AudioFormat, error) {
 	}
 	return AudioFormat{Kind: KindWAV, SampleRate: rate, Channels: channels, Bytes: data}, nil
 }
+
+// ChunkScanner yields fixed-length, silence-ungated WAV chunks for streaming
+// STT. It mirrors the wake-word scanner but lives here so streaming does not
+// depend on the wakeword package.
+type ChunkScanner struct {
+	chunkDuration time.Duration
+	sampleRate    int
+}
+
+// NewChunkScanner builds a chunk scanner (default 300ms at 16 kHz).
+func NewChunkScanner(chunkDuration time.Duration, sampleRate int) *ChunkScanner {
+	if chunkDuration <= 0 {
+		chunkDuration = 300 * time.Millisecond
+	}
+	if sampleRate <= 0 {
+		sampleRate = 16000
+	}
+	return &ChunkScanner{chunkDuration: chunkDuration, sampleRate: sampleRate}
+}
+
+// NextChunk records one fixed-length clip with silence gating disabled (quiet
+// chunks are expected mid-utterance and must still yield audio).
+func (c *ChunkScanner) NextChunk(ctx context.Context) (AudioFormat, error) {
+	return RecordClip(ctx, CaptureOptions{
+		MaxDuration:   c.chunkDuration,
+		SampleRate:    c.sampleRate,
+		NoSilenceStop: true,
+	})
+}
+
+// Close releases any scanner resources (recording is stateless per chunk).
+func (c *ChunkScanner) Close() error { return nil }
 
 // ffmpegInputFormat returns the platform capture demuxer.
 func ffmpegInputFormat() string {

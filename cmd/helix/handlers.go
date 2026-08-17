@@ -111,12 +111,20 @@ func handleSlashCommand(input string) bool {
 		handleVoiceCommand(input)
 	case "/manual":
 		handleManualCommand()
+	case "/wake":
+		handleWakeCommand(input)
 	case "/say":
 		handleSayCommand(input)
 	case "/tts":
 		handleTTSCommand(input)
 	case "/listen":
 		handleListenCommand(input)
+	case "/mictest":
+		handleMicTest()
+	case "/memory":
+		handleMemoryCommand(input)
+	case "/eyes":
+		handleEyesCommand(input)
 	case "/purge":
 		handlePurgeCommand()
 	case "/crash":
@@ -305,14 +313,18 @@ func handleHelp() {
 	helpLine(colWidth, "/git <request>", "Natural language git operations with safety")
 	helpLine(colWidth, "/audio <on|off>", "Toggle tonal audio feedback")
 	helpLine(colWidth, "/typewrite-all <on|off>", "Toggle typewriter effect for ALL output")
+	helpLine(colWidth, "/memory <show|clear>", "Show or wipe conversation memory")
 	helpSection("VOICE (BLACKBOX)")
 	helpLine(colWidth, "/voice-setup", "Configure STT/TTS providers with live pricing")
 	helpLine(colWidth, "/voice-status", "Speech chain health, keys, and recorder state")
 	helpLine(colWidth, "/voice [off]", "Enter voice mode (speak instead of type)")
 	helpLine(colWidth, "/manual", "Return to keyboard input (voice safety valve)")
+	helpLine(colWidth, "/wake <on|off>", "Hands-free: listen for the wake phrase without touching the keyboard")
 	helpLine(colWidth, "/say <text>", "Speak text through the TTS chain")
 	helpLine(colWidth, "/listen [sec]", "Record and transcribe one clip (max 60s)")
+	helpLine(colWidth, "/mictest", "3s self-test: is the mic actually being heard?")
 	helpLine(colWidth, "/tts <on|off>", "Toggle automatic spoken responses")
+	helpLine(colWidth, "/eyes <on|off>", "Toggle opt-in camera vision (memory-only)")
 	helpSection("DANGER ZONE")
 	helpLine(colWidth, "/purge", "Wipe ALL Helix data (keys, DBs, caches) for a fresh start")
 	helpSection("TIPS & ACCELERATION")
@@ -679,6 +691,55 @@ func handleStealthCommand(input string) {
 		if agentCore != nil {
 			agentCore.EnableStealth(false)
 		}
+	}
+}
+
+// -------------------------------------------------------
+// /memory — BlackBox Phase 4B conversation memory
+// -------------------------------------------------------
+
+func handleMemoryCommand(input string) {
+	args := strings.Fields(input)
+	action := "show"
+	if len(args) >= 2 {
+		action = strings.ToLower(args[1])
+	}
+
+	if agentCore == nil || agentCore.Session == nil {
+		color.Red("Session memory is not available in this session.")
+		return
+	}
+
+	switch action {
+	case "show", "list", "ls", "":
+		turns := agentCore.Session.Recent(agentCore.Session.Len())
+		if len(turns) == 0 {
+			color.Cyan("Conversation memory is empty.")
+			return
+		}
+		color.Cyan("Conversation memory (%d turns, oldest first):", len(turns))
+		for _, t := range turns {
+			channel := t.Channel
+			if channel == "" {
+				channel = "text"
+			}
+			fmt.Printf("  [%s] (%s) %s\n", t.Timestamp.Format("15:04:05"), channel, truncStr(t.UserText, 80))
+			if t.Reply != "" {
+				fmt.Printf("         ↳ %s\n", truncStr(t.Reply, 80))
+			}
+		}
+	case "clear", "wipe", "reset":
+		if !commands.AskForConfirmation("Clear all conversation memory?") {
+			color.Yellow("Memory clear cancelled.")
+			return
+		}
+		if err := agentCore.Session.Clear(); err != nil {
+			color.Red("Memory clear failed: %v", err)
+			return
+		}
+		color.Green("Conversation memory cleared.")
+	default:
+		color.Yellow("Usage: /memory <show|clear>")
 	}
 }
 
@@ -1186,6 +1247,13 @@ func handleDoctor() {
 		color.Cyan("Sandbox: %s", sandbox.ModeString())
 	}
 	color.Cyan("Confinement backend: %s", confinement.BackendName())
+
+	// BlackBox Phase 4: Living AI daemon presence.
+	if daemonRunning() {
+		color.Green("Daemon: running (Living AI)")
+	} else {
+		color.Yellow("Daemon: not running — start it with `helix daemon`")
+	}
 
 	if summaries := diagnostics.ListReports(); len(summaries) > 0 {
 		color.Yellow("Pending crash reports (%d):", len(summaries))

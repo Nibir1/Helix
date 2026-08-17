@@ -5,6 +5,7 @@ package anthropic
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -161,8 +162,8 @@ func (p *Provider) HealthCheck(ctx context.Context) error {
 	return err
 }
 
-func buildMessages(messages []providers.ChatMessage) ([]map[string]string, string) {
-	out := make([]map[string]string, 0, len(messages))
+func buildMessages(messages []providers.ChatMessage) ([]map[string]any, string) {
+	out := make([]map[string]any, 0, len(messages))
 	system := ""
 
 	for _, msg := range messages {
@@ -170,7 +171,31 @@ func buildMessages(messages []providers.ChatMessage) ([]map[string]string, strin
 		case "system":
 			system = msg.Content
 		case "user", "assistant":
-			out = append(out, map[string]string{
+			// BlackBox Phase 5: vision blocks become a content array.
+			if msg.HasImages() {
+				blocks := make([]map[string]any, 0, len(msg.Parts)+1)
+				if msg.Content != "" {
+					blocks = append(blocks, map[string]any{"type": "text", "text": msg.Content})
+				}
+				for _, p := range msg.Parts {
+					switch p.Type {
+					case providers.PartText:
+						blocks = append(blocks, map[string]any{"type": "text", "text": p.Text})
+					case providers.PartImage:
+						blocks = append(blocks, map[string]any{
+							"type": "image",
+							"source": map[string]any{
+								"type":       "base64",
+								"media_type": "image/jpeg",
+								"data":       base64.StdEncoding.EncodeToString(p.ImageData),
+							},
+						})
+					}
+				}
+				out = append(out, map[string]any{"role": msg.Role, "content": blocks})
+				continue
+			}
+			out = append(out, map[string]any{
 				"role":    msg.Role,
 				"content": msg.Content,
 			})

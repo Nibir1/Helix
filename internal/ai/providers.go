@@ -95,6 +95,15 @@ func RegisterCustomProvider(baseURL, apiKey string) error {
 	return nil
 }
 
+// GetProviderByName returns a registered provider without switching the active
+// one (BlackBox Phase 5 dedicated vision-provider routing).
+func GetProviderByName(name string) (providers.AIProvider, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("provider registry not initialized")
+	}
+	return registry.Get(name)
+}
+
 // UseProvider sets the active provider.
 func UseProvider(name string) error {
 	if registry == nil {

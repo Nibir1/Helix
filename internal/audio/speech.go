@@ -60,7 +60,7 @@ func PlaySpeech(f SpeechFormat, volume float64) error {
 		volume = 1
 	}
 
-	var s beep.Streamer = streamer
+	s := streamer
 	if sr != beep.SampleRate(SampleRate) {
 		s = beep.Resample(3, sr, beep.SampleRate(SampleRate), s)
 	}

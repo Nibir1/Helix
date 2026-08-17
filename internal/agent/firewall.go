@@ -201,18 +201,18 @@ Proposed commands: %s`, userInput, strings.Join(cmds, " ; "))
 	cfg := ai.ModelConfig{Temperature: 0.0, TopP: 0.9, MaxTokens: 24}
 	raw, err := criticRun(prompt, cfg)
 	if err != nil {
-		a.ux.PrintWarning("Instruction Firewall: critic unreachable — failing closed.")
+		a.render.PrintWarning("Instruction Firewall: critic unreachable — failing closed.")
 		return false
 	}
 	if os.Getenv("HELIX_DEBUG") == "1" {
-		a.ux.PrintDebug(fmt.Sprintf("Critic raw response: %s", raw))
+		a.render.PrintDebug(fmt.Sprintf("Critic raw response: %s", raw))
 	}
 	verdict := parseCriticVerdict(raw)
 	if verdict == "yes" {
 		return true
 	}
 	if verdict != "no" && os.Getenv("HELIX_DEBUG") == "1" {
-		a.ux.PrintDebug(fmt.Sprintf("Critic returned unparseable verdict, failing closed: %q", raw))
+		a.render.PrintDebug(fmt.Sprintf("Critic returned unparseable verdict, failing closed: %q", raw))
 	}
 	return false
 }
