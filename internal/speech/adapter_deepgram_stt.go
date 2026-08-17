@@ -13,7 +13,7 @@ import (
 
 const (
 	deepgramDefaultBaseURL = "https://api.deepgram.com/v1"
-	deepgramDefaultModel   = "nova-2"
+	deepgramDefaultModel   = "nova-3"
 )
 
 // deepgramSTT implements STTProvider against POST /listen.

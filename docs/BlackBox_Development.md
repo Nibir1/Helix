@@ -246,6 +246,65 @@ ADR-002 sidecar precedent (external process, any language, optional). Until one 
 presence v1 = the daemon TTS greeting + `/doctor` daemon section + wake chime (already shipped).
 **Consequences:** No tray in v1; the daemon IPC is the stable contract a future helper consumes.
 
+### ADR-011 — Cheapest-good speech defaults; providers are swappable data.
+**Decision (2026-08-17):** The recommended cloud defaults are **Groq `whisper-large-v3-turbo`**
+for STT (~$0.04/hr, large-model accuracy, ~200× real time) and **OpenAI `gpt-4o-mini-tts`** for
+TTS (~$12/1M chars, natural, streaming). Deepgram Nova-3/Aura-2 remain first-class for
+lowest-latency streaming; ElevenLabs stays for maximum voice quality. Selection is data
+(`pricing.json` + wizard), never hardcoded routing.
+**Rationale:** A voice-first assistant that is always listening must be cheap per minute or it is
+unusable. Groq turbo is 4–25× cheaper than the previous default with equal accuracy; batch-POST of
+VAD-endpointed utterances is the natural pattern for a wake-word assistant and adds only
+~300–500 ms. (Research log: 2026-08-17 session.)
+**Consequences:** Groq has no WebSocket streaming — live word-by-word partials require Deepgram
+(kept as the streaming option). New keystore env mapping `GROQ_API_KEY`.
+
+### ADR-012 — Local Pi-5 stack: Kokoro/Piper TTS + whisper-family STT + small Ollama LLM, all sidecars.
+**Decision (2026-08-17):** The recommended Raspberry Pi 5 (8 GB) fully-local stack is
+**openWakeWord → whisper.cpp/faster-whisper (or sherpa-onnx streaming Zipformer for live partials)
+→ a 3B-class Ollama model (qwen2.5:3b / llama3.2:3b, Q4) → Kokoro-82M (quality) or Piper (lowest
+latency) TTS**, every ML component an external HTTP sidecar (ADR-002). Kokoro rides the
+OpenAI-compatible `kokoro-local` adapter; whisper.cpp rides `whisper-local`.
+**Rationale:** Preserves the CGO-free core; matches the Home-Assistant Wyoming ecosystem so users
+can reuse existing add-ons; keeps the private/offline path first-class. Expected fully-local
+voice-to-first-audio ~1–1.5 s with sentence-streamed TTS.
+**Consequences:** New `kokoro-local` TTS adapter. Pi deployment doc + `helix doctor` sidecar checks
+scoped in Phase 10.
+
+### ADR-013 — Genuine agentic harness: bounded plan→act→observe→replan, opt-in, pipeline-preserving.
+**Decision (2026-08-17):** Helix gains an iterative harness (`internal/agent/harness.go`): after a
+plan executes, the per-step **observation trace** (success/failure + sanitized error) is fed back
+to the planner as a **data-only fenced block**, and the planner may self-correct or chain a
+follow-up, bounded by a step budget (default 4). Off by default; `/agentic on` enables it and the
+preference persists.
+**Rationale:** The old planner was single-shot: a failed step aborted the turn with no recovery,
+and the model never saw what its commands did. Closing the observe→replan loop is the core of a
+"living AI" that gets work done. Opt-in + bounded keeps cost and behavior predictable.
+**Guardrail:** Every follow-up plan re-enters the SAME pipeline (`planFirewallExecute`) — classify
+is skipped (already an agent turn) but planner, Instruction Firewall, risk tiers, Voice Risk
+Policy, sandbox, and confinement all run each iteration. The harness decides only *whether* to
+plan again; it never executes anything itself and never relaxes a control (guardrail #3 intact).
+The observation block carries `authority="data-only"` and is sanitized (no backticks/braces/tags)
+so command output can never become an instruction.
+
+### ADR-014 — Sentence-pipelined TTS for time-to-first-audio.
+**Decision (2026-08-17):** Spoken replies play sentence-by-sentence with one-ahead synthesis
+(`speech.SpeakStream`): sentence N+1 is fetched from the TTS chain while sentence N plays. Time to
+first audio becomes one short sentence's synthesis, not the whole paragraph's.
+**Rationale:** The "JARVIS answers instantly" feel is dominated by first-audio latency, not total
+synthesis time. Pipelining is a pure client-side win that works with every TTS provider (cloud or
+local) and needs no streaming-TTS endpoint.
+**Consequences:** Barge-in cancels at a sentence boundary (ctx cancellation between chunks) — good
+enough for v1; sub-sentence interrupt stays future work.
+
+### ADR-015 — Sci-fi voice HUD extends the Thinker pattern, never a GUI dependency.
+**Decision (2026-08-17):** Voice-mode visual feedback (`internal/ux/voiceviz.go`) is a single-line
+animated HUD in the existing TrueColor Helix palette — listening waveform, decode sweep, speaking
+wave, wake-standby breathing pulse — built on the proven `Thinker` machinery (100 ms frame ticker,
+cursor hide/heal, TTY-gated no-op). No GUI/framebuffer dependency; daemon/headless renders nothing.
+**Rationale:** Delivers the "living AI" presence the vision calls for while honoring the CGO-free,
+terminal-native, single-binary philosophy (guardrail #8).
+
 ---
 
 ## §4. Target architecture (end state)
@@ -710,6 +769,157 @@ release tagged.
 
 ---
 
+---
+
+## §6B. Living-AI Roadmap — Phases 8–12 (added 2026-08-17)
+
+> These phases turn Helix from "voice-capable" into a **true living AI** (JARVIS archetype):
+> cheap always-on speech, a genuine agentic harness, a Raspberry-Pi appliance build, offline
+> resilience, and sci-fi presence. Phases 8, 11, and 12 landed their core code on 2026-08-17;
+> Phases 9–10 are hardware-gated. Same guardrails (§12), same "every phase ends green" rule.
+
+---
+
+### Phase 8 — Genuine Agentic Harness *(core DONE 2026-08-17)*
+
+**Goal:** Close the single-shot planner into a bounded plan→act→observe→replan loop so Helix
+recovers from failures and chains follow-ups (ADR-013).
+
+**Tasks:**
+- [x] P8.1 Refactor the inline step loop into `executePlanSteps` returning a `StepObservation`
+      trace (index, tool, command/action, ok, err) — behavior-identical for the single-shot path.
+- [x] P8.2 Extract `planFirewallExecute` (planner → firewall 1/2/3 → prepareSafePlan → execute)
+      so the harness re-runs the FULL safety pipeline per iteration with no duplication.
+- [x] P8.3 `internal/agent/harness.go` — `agenticFollowUp`: replans on a failed step, stops on a
+      fully-successful plan, bounded by `MaxAgenticSteps` (default 4). Observation trace fed back
+      as an `authority="data-only"` fenced block, sanitized against fence-breakout.
+- [x] P8.4 `/agentic on|off|status` toggle + persisted `user_preferences.agentic_mode`; wired in
+      `main.go` and `/help`.
+- [x] P8.5 Tests: completion detection, data-only fencing + injection sanitization, budget cap.
+- [ ] P8.6 **Output capture (next):** tee command stdout/stderr into a bounded per-step buffer and
+      include a truncated tail in the observation block, so the planner can react to *what a
+      command printed*, not just its exit status. (Needs a capture-capable sandbox runner —
+      scoped, not yet built.)
+- [ ] P8.7 **Provider-native tool calling (next):** replace prompt-enforced JSON with function
+      calling where the provider supports it (`Capabilities.ToolUse`), reducing planner retries.
+- [ ] P8.8 **Streaming token render (next):** render planner/chat tokens live instead of buffering
+      the whole response in `CollectChat`.
+
+**Acceptance:** a voice-initiated multi-step task that hits a recoverable error self-corrects
+within the step budget (manual QA with a real model); single-shot behavior unchanged with
+`/agentic off` (existing suite proves it).
+
+---
+
+### Phase 9 — Cheapest-Good Speech Defaults & Local-First Chains *(core DONE 2026-08-17)*
+
+**Goal:** Make always-on voice affordable and resilient (ADR-011/012).
+
+**Tasks:**
+- [x] P9.1 Groq STT adapter (`groq`, OpenAI-compatible audio API, `whisper-large-v3-turbo`).
+- [x] P9.2 Deepgram Aura-2 TTS adapter (`deepgram` TTS, linear16 WAV, ~300 ms first byte).
+- [x] P9.3 Kokoro local TTS adapter (`kokoro-local`, OpenAI-compatible Kokoro-FastAPI sidecar).
+- [x] P9.4 `pricing.json` refresh: Groq turbo + gpt-4o-mini-tts recommended; Nova-3, Aura-2,
+      Kokoro added; wizard persists the chosen model (`APIModel()` — local entries send no model).
+- [x] P9.5 Keystore `GROQ_API_KEY` mapping; registry registers all new adapters.
+- [x] P9.6 Adapter contract tests (Groq STT, Aura-2 TTS, Kokoro local flags).
+- [ ] P9.7 **Recommended chain presets (next):** one-key wizard picks — "Cheapest cloud"
+      (Groq + gpt-4o-mini-tts), "Lowest latency" (Deepgram Nova-3 + Aura-2), "Fully local/private"
+      (whisper-local + Kokoro/Piper) — each pre-filling primary + local fallback.
+- [ ] P9.8 Manual QA: real Groq key round trip; real Kokoro-FastAPI sidecar.
+
+**Acceptance:** `/voice-setup` shows Groq/gpt-4o-mini-tts as recommended with honest $/mo estimates;
+failover chain includes a local sidecar by default so a dropped network keeps voice alive.
+
+---
+
+### Phase 10 — Linux Edge-Device Deployment *(hardware-gated; matrix DONE 2026-08-17)*
+
+**Goal:** Make Helix a first-class citizen on Linux edge devices — Raspberry Pi (4/5), NVIDIA
+Jetson, generic arm64/amd64 mini-PCs, and other SBCs — with an honest, per-board capability matrix
+rather than a single Pi-only target (ADR-012). Cloud voice path everywhere; fully-local where the
+board can host the sidecars.
+
+**Design principle (verified):** the core is CGO-free Go and cross-compiles to `arm64`/`amd64`/
+`armv7`/`riscv64` (a static binary that ignores the device's glibc — the key to the Jetson Nano's
+frozen Ubuntu 18.04). Only two things are device-specific beyond arch: **`audio_cgo` + libasound**
+for on-device speaker output, and **bubblewrap** to preserve kernel confinement where Landlock
+(kernel ≥ 5.13) is unavailable.
+
+**Tasks:**
+- [x] P10.1 `docs/edge_deployment.md` — the deployment matrix: build flags per arch, the two Linux
+      gotchas (audio_cgo, confinement fallback), cloud/hybrid/local path guidance, and per-device
+      notes for Pi 5, Pi 4, **Jetson Nano (1st-gen)**, amd64 mini-PC, generic arm64 SBC, and RISC-V.
+- [ ] P10.2 `scripts/edge-setup.sh` (consent-gated, checksum-pinned like the Ollama installer):
+      detects arch/board, installs sox + bubblewrap, and — where supported — Ollama + a size-matched
+      model, whisper.cpp server, Kokoro-FastAPI/Piper, openWakeWord. Refuses/warns on unsupported
+      combos (e.g. Ollama on Jetson Nano 1st-gen) and points at the cloud path instead.
+- [ ] P10.3 `/doctor` gains an "edge appliance" section: arch + build flavor (audio_cgo?),
+      confinement backend actually in force (bwrap/landlock/none), recorder present, each configured
+      sidecar reachable, model pulled, thermals/throttling note.
+- [ ] P10.4 `systemd --user` unit template for `helix daemon` on headless boards (`helix daemon
+      install` already emits launchd/systemd/sc.exe — extend the Linux template with edge notes).
+- [ ] P10.5 Manual QA on real hardware:
+      - Pi 5 fully-local: wake→first-audio ≤ ~2.5 s, sustained CPU/thermal check.
+      - **Jetson Nano (1st-gen), cloud path:** wake→first-audio over Groq + gpt-4o-mini-tts;
+        confirm `audio_cgo` speaker build and bwrap-confinement fallback.
+      - amd64 mini-PC fully-local: reference "strong local box" numbers for §10.
+
+**Acceptance:** each documented board reaches hands-free conversation from its matrix row; the
+Jetson Nano (1st-gen) converses smoothly on the cloud path; the Pi 5 / amd64 boxes converse offline
+end-to-end.
+
+---
+
+### Phase 11 — Offline LLM Resilience *(partial — daemon init fixed 2026-08-17)*
+
+**Goal:** Helix keeps thinking when the cloud is gone (not just keeps hearing/speaking).
+
+**Tasks:**
+- [x] P11.1 **Daemon provider init (was a silent-failure bug):** `daemon.New` now calls
+      `ai.InitProviders` from persisted config — previously every daemon planner/chat call failed
+      "no provider configured" and IPC submits returned an empty reply.
+- [ ] P11.2 **Automatic LLM failover (next):** on repeated cloud-provider failure (or the
+      connectivity monitor firing), transparently switch the planner/chat provider to a local
+      Ollama model, mirroring the existing speech `SetOfflineMode` local-first flip; switch back on
+      restore, with a spoken notice.
+- [ ] P11.3 **Ensure-local-ready:** when a local fallback is configured, `helix daemon` verifies
+      the Ollama model is pulled at startup (reuse `ollama.EnsureRunning` + pull).
+- [ ] P11.4 llama.cpp: either implement the `llamacpp` provider (GGUF over the OpenAI-compatible
+      llama-server) or remove the dead `llamacpp` vestiges and document Ollama as the one local
+      runtime. **Decision required at phase start.**
+
+**Acceptance:** cloud cut mid-conversation → within ~5 s Helix answers from the local model with a
+spoken "switching to local intelligence" notice; restore switches back.
+
+---
+
+### Phase 12 — Sci-Fi Presence & Voice UX Polish *(core DONE 2026-08-17)*
+
+**Goal:** The "living AI" feel — instant speech, reactive visuals, resilient hands-free loop.
+
+**Tasks:**
+- [x] P12.1 `internal/ux/voiceviz.go` — voice HUD (listening waveform / decode sweep / speaking
+      wave / wake-standby breathing pulse), Thinker-pattern, TTY-gated (ADR-015). Wired into the
+      batch voice turn and the wake-standby window.
+- [x] P12.2 `speech.SpeakStream` — sentence-pipelined TTS (one-ahead synthesis) for fast
+      first-audio (ADR-014); wired into both the interactive and daemon `OnSpeak` seams.
+- [x] P12.3 Voice-loop smoothness/bug fixes (from the 2026-08-17 audit): persistent gapless
+      `StreamRecorder` (no per-chunk process-spawn gaps), phantom-wake guard (closed-channel
+      check), silent-capture → `ErrNoSpeech` (no 80 s dead-air hang), wake-scanner retry (survives
+      quiet rooms), `sox`-vs-`rec` binary fix, VoicePrompter now prints questions (visible when TTS
+      is down), Deepgram `speech_final` endpointing (no mid-utterance truncation).
+- [ ] P12.4 **Live amplitude feed (next):** tap the capture stream to drive `VoiceViz.SetLevel`
+      for a truly mic-reactive waveform (infra noted in the audit: `ambient.Tee` + `DecodeWAVMono`).
+- [ ] P12.5 **Barge-in v2 (next):** cancel in-flight `SpeakStream` on a wake/keypress mid-sentence
+      (v1 cancels at sentence boundaries).
+- [ ] P12.6 Manual QA: HUD readability across terminals; first-audio latency with a real TTS key.
+
+**Acceptance:** voice mode shows live sci-fi feedback; spoken replies begin within one sentence's
+synthesis; a quiet room never hangs or phantom-wakes (fixture + manual QA).
+
+---
+
 ### Post-BlackBox roadmap (parked, from original plan — do NOT scope into phases above)
 
 Multi-user voice profiles · smart-home integration (Home Assistant) · proactive AI (calendar/email
@@ -870,12 +1080,16 @@ necessary.
 | 0 — Decisions & Threat Model | `DONE` | 2026-08-16 | 2026-08-16 | Baseline green; ADRs ratified; `docs/threat_model_voice.md` written; 6 skeleton packages compiling+tested; CI covers them automatically |
 | 1 — Speech Provider Layer | `DONE` | 2026-08-16 | 2026-08-16 | speech pkg (types/registry/failover/pricing/5 adapters/capture), audio.PlaySpeech (WAV/PCM, MP3 skipped by design), /voice-setup /say /listen /tts /voice-status, 40+ new tests green; manual QA (audible /say, real whisper.cpp) pending |
 | 2 — Voice Input & Policy | `DONE` | 2026-08-16 | 2026-08-16 | HandleInputEvent channel stamping, Voice Risk Policy (cap+gate+deny list), VoicePrompter fail-closed, /voice /manual + graceful fallback, spoken responses; P2.8 voice log + full multi-turn clarification carried to Phase 4; real-mic QA pending |
-| 2 — Voice Input & Policy | `NOT STARTED` | — | — | |
 | 3 — Wake Word | `DONE` | 2026-08-16 | 2026-08-16 | energy detector default + openWakeWord-class sidecar client; wake-only between turns (ADR-005 §5 by construction); kill phrases; wake.jsonl metrics; fixture+mock tested. Real-keyword accuracy (sidecar) + FP/hour = manual QA pending |
 | 4 — Daemon & Living AI | `DONE` | 2026-08-16 | 2026-08-16 | Renderer + SlashDispatcher seams, session ring buffer + `/memory`, undo journal, `helix daemon` + NDJSON IPC (UDS / Windows token TCP) + `helix remote`, connectivity local-first failover, service installers, journal + `diagnostics.Guard`, greeting + break reminder, `scripts/soak.sh`, e2e remote test; per-sidecar `Health()` polling loop; manual QA (72h soak, logout/reboot) pending |
 | 5 — Vision | `DONE` | 2026-08-16 | 2026-08-16 | `MessagePart` multimodal format + OpenAI/Ollama/Anthropic wire adapters, `ai.RunVisionModel` (capability-gated), ffmpeg memory-only capture (fs-snapshot + stdout-only tests), `/eyes` + "turn off your eyes" kill switch + metadata-only journal, deictic voice routing, P5.5 dedicated `vision.provider` fallback; manual QA (real camera + vision model) pending |
 | 6 — Ambient Audio (optional) | `DONE` | 2026-08-16 | 2026-08-16 | Rule-based analyzer (RMS + hand-rolled FFT concentration → silence/loud/alarm/music) + cooldown-gated service + response mapping + config + golden fixtures + fuzz, live wake-stream `TeeScanner`/`ChunkMonitor` wiring; CPU budget benchmark (26µs/chunk) green |
 | 7 — Polish & Release | `IN PROGRESS` | 2026-08-16 | — | `input.HybridSource`, 3 new fuzz targets, ADR-010 (tray helper), `docs/blackbox.md`, benchmark suite, streaming STT partials (Deepgram WS), TTS latency budget metric, 3-OS e2e matrix (Windows daemon IPC), Ollama installer checksum pinning, §10 latency-metrics instrumentation (wake→exec + frame-to-insight) done; speech queue tuning + measured latency, §10 metrics run (needs hardware), `blackbox-v0.1.0` tag (owner-gated) remain |
+| 8 — Agentic Harness | `CORE DONE` | 2026-08-17 | — | `executePlanSteps`+`planFirewallExecute` refactor, `harness.go` bounded plan→act→observe→replan (data-only fenced observations, ADR-013), `/agentic` toggle + persisted pref, 4 harness tests. Output capture / native tool-calling / streaming render = next (P8.6–8.8) |
+| 9 — Cheap Speech Defaults | `CORE DONE` | 2026-08-17 | — | Groq STT + Aura-2 TTS + Kokoro-local adapters, pricing.json refresh (Groq turbo & gpt-4o-mini-tts recommended, ADR-011), `GROQ_API_KEY` mapping, wizard persists model, contract tests. Chain presets + real-key QA = next |
+| 10 — Linux Edge-Device Deployment | `MATRIX DONE` | 2026-08-17 | — | `docs/edge_deployment.md` — per-board matrix (Pi 5/4, Jetson Nano 1st-gen, amd64 mini-PC, arm64 SBC, RISC-V): build flags per arch, `audio_cgo` + confinement-fallback gotchas, cloud/hybrid/local path guidance. `scripts/edge-setup.sh`, `/doctor` edge section, systemd template, hardware QA remain (hardware-gated) |
+| 11 — Offline LLM Resilience | `PARTIAL` | 2026-08-17 | — | Daemon `ai.InitProviders` bug fixed (was silent no-provider failure); automatic cloud→local LLM failover + ensure-local-ready + llamacpp decision remain |
+| 12 — Sci-Fi Presence & UX | `CORE DONE` | 2026-08-17 | — | `voiceviz.go` HUD (ADR-015), `SpeakStream` sentence-pipelined TTS (ADR-014), persistent gapless `StreamRecorder`, phantom-wake/silent-hang/wake-retry/sox-rec/prompter-print/Deepgram-endpointing fixes. Live amplitude feed + barge-in v2 + QA remain |
 
 ### Task-level checkboxes
 
@@ -900,6 +1114,8 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 | 2026-08-16 | §10 metrics instrumentation: `wakeListenUntilArmed` now returns the wake event so the interactive loop logs **E2E voice-command latency (wake→execution start)** to `~/.helix/metrics/voice.jsonl` at dispatch; `Agent.OnVisionMetric` seam reports **frame-to-insight** latency to `~/.helix/metrics/vision.jsonl` (provider resolved as in `VisionCall`); shared `appendMetricsRecord` helper unifies ambient/wake/voice/vision logs under `~/.helix/metrics/` (0600). Connectivity fallback confirmed at 5s tick (P4.10 ≤5s target) — roadmap note ticked. `TestVisionOnMetricFiresAfterInsight` added. Build+vet+full suite (incl. e2e) green | Full BlackBox diff (Phases 4–7) uncommitted | P7.8 run itself still needs real hardware (real mic for wake→exec, real camera+llava for frame-to-insight); P7.2c measured latency + P7.9 tag remain owner/hardware-gated |
 | 2026-08-17 | Voice-loop smoothness pass: `speech.ErrNoSpeech`/`ErrEmptyTranscript` sentinels + `ClipRMS`/`HasSpeech`/`ClipDuration` energy helpers; amplitude gate BEFORE the STT call (dead mic/silent room → no wasted cloud transcription); registry treats empty transcripts as retryable per-provider failures so fallbacks get a chance; `voiceTurnWithRetry` re-arms the mic up to 3× with a "please speak again" prompt instead of silently dumping to typed fallback; `/mictest` self-test (recorder, duration, RMS+dBFS, speech-gate verdict); sox silence floor lowered to 1% (`HELIX_SOX_SILENCE_PCT` override); captured-duration feedback line. Tests: energy helpers + empty-transcript fallback. Build+vet+lint(0 issues)+full suite green | Full BlackBox diff (Phases 4–7) uncommitted | Real-mic QA of retry loop + `/mictest` verdict on macOS/Linux/Windows still manual |
 | 2026-08-17 | True hands-free conversation: `/wake on|off|status` command (enable UI with safe defaults: phrase "hey helix", engine energy, preset balanced) + `/help` entry; config fix — `LoadPreferences` now merges the wake_word section field-wise even when STT/TTS providers are unset (previously a wake-only config never loaded) and fills empty fields from `config.WakeWordDefaults()` (the old file's empty section clobbered defaults → broken ""-phrase detector); daemon voice loop smoothed — amplitude gate before STT + spoken "I didn't catch that, please repeat" retry (up to 3 tries) then return to wake-only listening, mirroring the interactive path; `helix remote status` now reports `wake_enabled`/`wake_phrase`/`voice_loop`. Tests: config defaults-merge + custom-phrase-survives. Build+vet+lint(0 issues)+full suite green | Full BlackBox diff (Phases 4–7) uncommitted | Real-mic QA of the daemon wake→turn loop + energy-detector false-positive rate still manual |
+| 2026-08-17 | **Edge-device deployment matrix (Phase 10).** Generalized Phase 10 from Pi-5-only to a full Linux edge-device matrix after confirming the core cross-compiles CGO-free to `arm64`/`armv7` (verified builds). New `docs/edge_deployment.md`: build flags per arch; the two Linux gotchas (`audio_cgo`+libasound for on-device TTS output, bubblewrap fallback where Landlock/kernel≥5.13 is absent); cloud/hybrid/local path guidance; per-board notes for Pi 5, Pi 4, **NVIDIA Jetson Nano (1st-gen)**, amd64 mini-PC, generic arm64 SBC, RISC-V. Key finding: Jetson Nano 1st-gen runs the core fine (static binary sidesteps its frozen Ubuntu 18.04/glibc 2.27) but Ollama is unsupported (Maxwell/CUDA 10.2/kernel 4.9) → cloud voice path recommended; kernel 4.9 → no Landlock → install bwrap. Phase 10 tasks + tracker updated | Docs only; no code change | `scripts/edge-setup.sh`, `/doctor` edge section, systemd template, hardware QA (P10.2–10.5) |
+| 2026-08-17 | **Living-AI pass (Phases 8/9/11/12 core).** Two parallel audits (voice pipeline + agent/daemon) surfaced ~20 real bugs; fixed the load-bearing ones and built the new capabilities. **Bugs:** daemon never called `ai.InitProviders` (every daemon AI request silently no-op'd → fixed, P11.1); `defer diagnostics.Guard(...)` missing `()` in 2 goroutines (panics went unguarded); double-stop panic (`sync.Once`); phantom wake on closed channel; silent capture hung 80 s (→ `ErrNoSpeech` retry); wake scanner died in a quiet room (retry budget + `NoSilenceStop`); `DetectRecorder` returned "sox" but `RecordClip` ran `rec` (split rec/sox binaries); `/voice-setup` wiped wake+tuning config (field-wise merge) and never persisted the chosen model; VoicePrompter never printed questions (invisible confirmations when TTS down); Deepgram finalized on `is_final` not `speech_final` (mid-utterance truncation → segment accumulation); streaming producer leaked goroutine+HTTP body after ctx cancel (ctx-aware send); undo journal never popped (double-undo rewound an unjournalled commit → `Pop()`); commit journalled for undo even when HEAD didn't move (baseline test failure → `HeadCommit()` guard); ElevenLabs ignored speed; HybridSource leaked on partial start. **New capabilities:** agentic harness (`harness.go`, `executePlanSteps`/`planFirewallExecute` refactor, `/agentic` toggle, ADR-013); Groq STT + Deepgram Aura-2 TTS + Kokoro-local TTS adapters + pricing refresh (ADR-011/012); `SpeakStream` sentence-pipelined TTS (ADR-014); `voiceviz.go` sci-fi voice HUD (ADR-015); persistent gapless `StreamRecorder` replacing per-chunk spawns. New ADRs 011–015; new Phases 8–12 (§6B). ~15 new tests. `go build`+`go vet`+full suite incl. e2e (26 pkgs) green | Full BlackBox diff (Phases 4–12) uncommitted | Hardware/owner-gated: real-key QA (Groq/Kokoro/TTS mic), Pi appliance build (Phase 10), automatic cloud→local LLM failover (P11.2), agentic output-capture (P8.6), barge-in v2 (P12.5) |
 
 ### Phase 2 carry-overs (do with Phase 4)
 

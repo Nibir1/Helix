@@ -97,7 +97,7 @@ func runRemoteClient(args []string) int {
 			color.Red("say needs text")
 			return 2
 		}
-		req = daemon.Request{Type: daemon.TypeSubmit, Text: "/say " + strings.Join(args[1:], " ")}
+		req = daemon.Request{Type: daemon.TypeSay, Text: strings.Join(args[1:], " ")}
 	case "submit":
 		if len(args) < 2 {
 			color.Red("submit needs text")

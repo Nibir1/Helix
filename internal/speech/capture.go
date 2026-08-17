@@ -10,9 +10,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -31,11 +33,14 @@ type CaptureOptions struct {
 	NoSilenceStop bool
 }
 
-// DetectRecorder returns "sox", "ffmpeg", or an error naming what to install.
-// sox is preferred: its `silence` effect gives free trailing-silence stop.
+// DetectRecorder returns the concrete recorder binary — "rec", "sox", or
+// "ffmpeg" — or an error naming what to install. sox is preferred: its
+// `silence` effect gives free trailing-silence stop. The distinction between
+// "rec" and "sox" matters: minimal sox packages ship without the `rec`
+// symlink, and invoking the wrong binary fails every capture.
 func DetectRecorder() (string, error) {
 	if _, err := exec.LookPath("rec"); err == nil {
-		return "sox", nil
+		return "rec", nil
 	}
 	if _, err := exec.LookPath("sox"); err == nil {
 		return "sox", nil
@@ -76,10 +81,19 @@ func RecordClip(ctx context.Context, opts CaptureOptions) (AudioFormat, error) {
 
 	var cmd *exec.Cmd
 	switch recorder {
-	case "sox":
-		args := []string{"rec", "-q",
-			"-r", fmt.Sprint(opts.SampleRate), "-c", "1", "-b", "16", "-e", "signed-integer",
-			path}
+	case "rec", "sox":
+		var args []string
+		if recorder == "rec" {
+			args = []string{"rec", "-q",
+				"-r", fmt.Sprint(opts.SampleRate), "-c", "1", "-b", "16", "-e", "signed-integer",
+				path}
+		} else {
+			// Plain sox: `-d` is the default-device input; output-format flags
+			// sit between input and output file.
+			args = []string{"sox", "-q", "-d",
+				"-r", fmt.Sprint(opts.SampleRate), "-c", "1", "-b", "16", "-e", "signed-integer",
+				path}
+		}
 		if !opts.NoSilenceStop {
 			// Stop after 2s below the silence floor (crude VAD for
 			// utterances). 1% by default — sensitive enough to catch quiet
@@ -112,6 +126,13 @@ func RecordClip(ctx context.Context, opts CaptureOptions) (AudioFormat, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) < 44 {
+		// A deadline with zero audio means the silence gate never opened —
+		// nobody spoke. Report ErrNoSpeech so the voice loop re-arms the mic
+		// instead of dumping the user to typed fallback with a scary error.
+		// (Explicit Ctrl+C cancellation keeps the plain error path.)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return AudioFormat{}, ErrNoSpeech
+		}
 		return AudioFormat{}, fmt.Errorf("%s produced no audio (cancelled?)", recorder)
 	}
 
@@ -122,12 +143,129 @@ func RecordClip(ctx context.Context, opts CaptureOptions) (AudioFormat, error) {
 	return AudioFormat{Kind: KindWAV, SampleRate: rate, Channels: channels, Bytes: data}, nil
 }
 
+// StreamRecorder is a single long-lived recorder process piping raw 16-bit
+// mono PCM to stdout. Chunk consumers slice the continuous stream in-process,
+// eliminating the per-chunk process-spawn gaps (50-200ms of lost audio per
+// chunk) that plagued the record-a-file-per-chunk design. This is the capture
+// backbone for streaming STT, wake scanning, and ambient monitoring.
+type StreamRecorder struct {
+	mu         sync.Mutex
+	cmd        *exec.Cmd
+	out        io.ReadCloser
+	cancel     context.CancelFunc
+	sampleRate int
+	closed     bool
+}
+
+// NewStreamRecorder starts the recorder process (rec/sox/ffmpeg). The caller
+// must Close it; the process also dies with the passed context.
+func NewStreamRecorder(ctx context.Context, sampleRate int) (*StreamRecorder, error) {
+	recorder, err := DetectRecorder()
+	if err != nil {
+		return nil, err
+	}
+	if sampleRate <= 0 {
+		sampleRate = 16000
+	}
+
+	rctx, cancel := context.WithCancel(ctx)
+	var cmd *exec.Cmd
+	rate := fmt.Sprint(sampleRate)
+	switch recorder {
+	case "rec":
+		cmd = exec.CommandContext(rctx, "rec", "-q",
+			"-t", "raw", "-r", rate, "-c", "1", "-b", "16", "-e", "signed-integer", "-")
+	case "sox":
+		cmd = exec.CommandContext(rctx, "sox", "-q", "-d",
+			"-t", "raw", "-r", rate, "-c", "1", "-b", "16", "-e", "signed-integer", "-")
+	case "ffmpeg":
+		cmd = exec.CommandContext(rctx, "ffmpeg", "-hide_banner", "-loglevel", "error",
+			"-f", ffmpegInputFormat(), "-i", ffmpegInputDevice(),
+			"-f", "s16le", "-ar", rate, "-ac", "1", "-")
+	default:
+		cancel()
+		return nil, ErrNoRecorder
+	}
+
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("stream recorder pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("stream recorder start: %w", err)
+	}
+
+	return &StreamRecorder{cmd: cmd, out: out, cancel: cancel, sampleRate: sampleRate}, nil
+}
+
+// ReadChunk blocks until one chunk of the given duration has been captured
+// and returns it as a WAV clip (gapless with its neighbors). Cancellation of
+// ctx closes the recorder, unblocking the read.
+func (r *StreamRecorder) ReadChunk(ctx context.Context, d time.Duration) (AudioFormat, error) {
+	if d <= 0 {
+		d = 300 * time.Millisecond
+	}
+	n := int(float64(r.sampleRate)*d.Seconds()) * 2 // 16-bit mono
+	buf := make([]byte, n)
+
+	type result struct {
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, err := io.ReadFull(r.out, buf)
+		done <- result{err}
+	}()
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			return AudioFormat{}, fmt.Errorf("stream capture: %w", res.err)
+		}
+		return AudioFormat{
+			Kind:       KindWAV,
+			SampleRate: r.sampleRate,
+			Channels:   1,
+			Bytes:      EncodeWAVPCM16(buf, r.sampleRate, 1),
+		}, nil
+	case <-ctx.Done():
+		// Unblock the pending read by killing the recorder; the stream is
+		// unusable after this, matching Scanner retry-then-rebuild semantics.
+		r.Close()
+		<-done
+		return AudioFormat{}, ctx.Err()
+	}
+}
+
+// SampleRate reports the stream's capture rate.
+func (r *StreamRecorder) SampleRate() int { return r.sampleRate }
+
+// Close terminates the recorder process. Idempotent.
+func (r *StreamRecorder) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil
+	}
+	r.closed = true
+	r.cancel()
+	_ = r.out.Close()
+	_ = r.cmd.Wait()
+	return nil
+}
+
 // ChunkScanner yields fixed-length, silence-ungated WAV chunks for streaming
-// STT. It mirrors the wake-word scanner but lives here so streaming does not
-// depend on the wakeword package.
+// STT. It prefers a persistent StreamRecorder (gapless); when the stream
+// cannot start it degrades to one recorder process per chunk.
 type ChunkScanner struct {
 	chunkDuration time.Duration
 	sampleRate    int
+
+	mu       sync.Mutex
+	rec      *StreamRecorder
+	fallback bool
 }
 
 // NewChunkScanner builds a chunk scanner (default 300ms at 16 kHz).
@@ -141,9 +279,40 @@ func NewChunkScanner(chunkDuration time.Duration, sampleRate int) *ChunkScanner 
 	return &ChunkScanner{chunkDuration: chunkDuration, sampleRate: sampleRate}
 }
 
-// NextChunk records one fixed-length clip with silence gating disabled (quiet
-// chunks are expected mid-utterance and must still yield audio).
+// NextChunk returns the next gapless chunk from the persistent stream, or —
+// in fallback mode — records one fixed-length clip with silence gating
+// disabled (quiet chunks are expected mid-utterance and must yield audio).
 func (c *ChunkScanner) NextChunk(ctx context.Context) (AudioFormat, error) {
+	c.mu.Lock()
+	if !c.fallback && c.rec == nil {
+		rec, err := NewStreamRecorder(context.Background(), c.sampleRate)
+		if err != nil {
+			c.fallback = true
+		} else {
+			c.rec = rec
+		}
+	}
+	rec := c.rec
+	c.mu.Unlock()
+
+	if rec != nil {
+		clip, err := rec.ReadChunk(ctx, c.chunkDuration)
+		if err == nil {
+			return clip, nil
+		}
+		// Dead stream (device yanked, process killed): drop to per-chunk
+		// recording for this call; the next call retries the stream.
+		c.mu.Lock()
+		if c.rec == rec {
+			_ = rec.Close()
+			c.rec = nil
+		}
+		c.mu.Unlock()
+		if ctx.Err() != nil {
+			return AudioFormat{}, err
+		}
+	}
+
 	return RecordClip(ctx, CaptureOptions{
 		MaxDuration:   c.chunkDuration,
 		SampleRate:    c.sampleRate,
@@ -151,8 +320,17 @@ func (c *ChunkScanner) NextChunk(ctx context.Context) (AudioFormat, error) {
 	})
 }
 
-// Close releases any scanner resources (recording is stateless per chunk).
-func (c *ChunkScanner) Close() error { return nil }
+// Close releases the persistent recorder (if any).
+func (c *ChunkScanner) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.rec != nil {
+		err := c.rec.Close()
+		c.rec = nil
+		return err
+	}
+	return nil
+}
 
 // ffmpegInputFormat returns the platform capture demuxer.
 func ffmpegInputFormat() string {

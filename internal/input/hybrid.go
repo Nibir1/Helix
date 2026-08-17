@@ -24,9 +24,20 @@ func NewHybridSource(sources ...Source) *HybridSource {
 // The output channel closes when all sources have closed or ctx is cancelled.
 func (h *HybridSource) Events(ctx context.Context) (<-chan InputEvent, error) {
 	streams := make([]<-chan InputEvent, 0, len(h.sources))
-	for _, src := range h.sources {
+	for i, src := range h.sources {
 		ch, err := src.Events(ctx)
 		if err != nil {
+			// Already-started sources must be released and drained, or their
+			// goroutines/recorders leak on a partial start.
+			for _, started := range h.sources[:i] {
+				_ = started.Close()
+			}
+			for _, sch := range streams {
+				go func(c <-chan InputEvent) {
+					for range c {
+					}
+				}(sch)
+			}
 			return nil, err
 		}
 		streams = append(streams, ch)

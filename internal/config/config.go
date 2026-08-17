@@ -40,7 +40,8 @@ type UserPrefs struct {
 	SafeMode     bool   `json:"safe_mode"`
 	UserName     string `json:"user_name"`
 	DebugMode    bool   `json:"debug_mode"`
-	VoiceMode    bool   `json:"voice_mode"` // BlackBox Phase 2: default input channel
+	VoiceMode    bool   `json:"voice_mode"`   // BlackBox Phase 2: default input channel
+	AgenticMode  bool   `json:"agentic_mode"` // iterative plan→act→observe→replan harness
 }
 
 // SpeechSTTConfig selects the speech-to-text provider chain (BlackBox §7).

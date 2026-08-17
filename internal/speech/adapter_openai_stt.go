@@ -48,6 +48,30 @@ func NewOpenAISTT(model, baseURL string) STTProvider {
 	}
 }
 
+const (
+	groqDefaultSTTBaseURL = "https://api.groq.com/openai/v1"
+	groqDefaultSTTModel   = "whisper-large-v3-turbo"
+)
+
+// NewGroqSTT builds the Groq Whisper adapter (OpenAI-compatible audio API).
+// At ~$0.04/hour with large-v3-turbo accuracy and ~200x-real-time inference,
+// this is the price/performance default for cloud transcription.
+func NewGroqSTT(model, baseURL string) STTProvider {
+	if model == "" {
+		model = groqDefaultSTTModel
+	}
+	if baseURL == "" {
+		baseURL = groqDefaultSTTBaseURL
+	}
+	return &openaiSTT{
+		name:    "groq",
+		display: "Groq Whisper Turbo",
+		baseURL: baseURL,
+		model:   model,
+		local:   false,
+	}
+}
+
 // NewWhisperLocalSTT builds the local whisper.cpp sidecar adapter.
 func NewWhisperLocalSTT(model, baseURL string) STTProvider {
 	if baseURL == "" {

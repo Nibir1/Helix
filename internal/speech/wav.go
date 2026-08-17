@@ -12,6 +12,32 @@ import (
 	"math"
 )
 
+// EncodeWAVPCM16 wraps raw 16-bit little-endian PCM in a minimal RIFF/WAVE
+// header. Used by the stream recorder so gapless PCM chunks stay compatible
+// with every WAV-consuming path (energy gate, adapters, detectors).
+func EncodeWAVPCM16(pcm []byte, sampleRate, channels int) []byte {
+	if channels <= 0 {
+		channels = 1
+	}
+	byteRate := sampleRate * channels * 2
+	out := make([]byte, 44+len(pcm))
+	copy(out[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(out[4:8], uint32(36+len(pcm)))
+	copy(out[8:12], "WAVE")
+	copy(out[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(out[16:20], 16)
+	binary.LittleEndian.PutUint16(out[20:22], 1) // PCM
+	binary.LittleEndian.PutUint16(out[22:24], uint16(channels))
+	binary.LittleEndian.PutUint32(out[24:28], uint32(sampleRate))
+	binary.LittleEndian.PutUint32(out[28:32], uint32(byteRate))
+	binary.LittleEndian.PutUint16(out[32:34], uint16(channels*2))
+	binary.LittleEndian.PutUint16(out[34:36], 16)
+	copy(out[36:40], "data")
+	binary.LittleEndian.PutUint32(out[40:44], uint32(len(pcm)))
+	copy(out[44:], pcm)
+	return out
+}
+
 // wavHeaderInfo extracts sample rate and channel count from a RIFF/WAVE
 // buffer. Supports PCM (format 1) and IEEE float (format 3) — enough for every
 // provider and recorder Helix speaks to.

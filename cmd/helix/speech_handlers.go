@@ -67,6 +67,7 @@ func handleVoiceSetup() {
 	if choice > 0 {
 		entry := sttRows[choice-1]
 		sttCfg.Provider = entry.Provider
+		sttCfg.Model = entry.APIModel()
 		if entry.RequiresKey {
 			key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", entry.Provider)))
 			if key == "" {
@@ -95,6 +96,7 @@ func handleVoiceSetup() {
 	if choice > 0 {
 		entry := ttsRows[choice-1]
 		ttsCfg.Provider = entry.Provider
+		ttsCfg.Model = entry.APIModel()
 		if entry.RequiresKey {
 			key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", entry.Provider)))
 			if key == "" {
@@ -121,7 +123,18 @@ func handleVoiceSetup() {
 		return
 	}
 
-	cfg.Speech = config.SpeechConfig{STT: sttCfg, TTS: ttsCfg}
+	// Field-wise merge: the wizard only owns the sections the user actually
+	// selected. WakeWord config and per-section tuning (StreamChunkMs,
+	// FirstByteMs) must survive a re-run — a whole-struct replace here used
+	// to silently disable /wake and wipe custom phrases.
+	if sttCfg.Provider != "" {
+		sttCfg.StreamChunkMs = cfg.Speech.STT.StreamChunkMs
+		cfg.Speech.STT = sttCfg
+	}
+	if ttsCfg.Provider != "" {
+		ttsCfg.FirstByteMs = cfg.Speech.TTS.FirstByteMs
+		cfg.Speech.TTS = ttsCfg
+	}
 	if err := cfg.SavePreferences(); err != nil {
 		color.Red("Failed to save preferences: %v", err)
 	}

@@ -24,6 +24,7 @@ import (
 	"helix/internal/input"
 	"helix/internal/speech"
 	"helix/internal/utils"
+	"helix/internal/ux"
 	"helix/internal/wakeword"
 
 	"github.com/fatih/color"
@@ -161,14 +162,22 @@ func voiceTurnWithRetry() (input.InputEvent, error) {
 }
 
 // batchVoiceTurn is the original record-whole-clip→transcribe path (Phase 2).
+// A silent room ends the turn after ~25s (ErrNoSpeech → gentle retry) instead
+// of the old 80s dead-air hang.
 func batchVoiceTurn() (input.InputEvent, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	unreg := utils.RegisterOperation(cancel)
 	defer unreg()
 	defer cancel()
 
+	viz := ux.NewVoiceViz()
+	viz.Start(ux.VizListening)
 	clip, err := speech.RecordClip(ctx, speech.CaptureOptions{MaxDuration: 12 * time.Second})
 	if err != nil {
+		viz.Stop()
+		if errors.Is(err, speech.ErrNoSpeech) {
+			return input.InputEvent{}, speech.ErrNoSpeech
+		}
 		return input.InputEvent{}, fmt.Errorf("capture: %w", err)
 	}
 
@@ -176,15 +185,22 @@ func batchVoiceTurn() (input.InputEvent, error) {
 	// must not burn a cloud transcription (and return a confusing empty
 	// result) — re-arm the mic instead.
 	if !speech.HasSpeech(clip, 0) {
+		viz.Stop()
 		return input.InputEvent{}, speech.ErrNoSpeech
 	}
-	if d := speech.ClipDuration(clip); d > 0 {
-		fmt.Printf("captured %.1fs — transcribing…\n", d)
-	}
+	viz.SetState(ux.VizTranscribing)
 
-	tctx, tcancel := context.WithTimeout(ctx, 60*time.Second)
+	// Transcription gets its own budget — a capture that used most of the
+	// 25s window must not starve the STT round trip.
+	tctx, tcancel := context.WithTimeout(context.Background(), 60*time.Second)
+	tunreg := utils.RegisterOperation(tcancel)
+	defer tunreg()
 	defer tcancel()
 	transcript, err := speech.Transcribe(tctx, clip)
+	viz.Stop()
+	if d := speech.ClipDuration(clip); d > 0 && err == nil {
+		fmt.Printf("captured %.1fs\n", d)
+	}
 	if err != nil {
 		return input.InputEvent{}, fmt.Errorf("transcribe: %w", err)
 	}
@@ -212,6 +228,7 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 	chunks := make(chan speech.AudioFormat)
 	go func() {
 		defer close(chunks)
+		defer func() { _ = scanner.Close() }()
 		for {
 			cctx, ccancel := context.WithTimeout(ctx, 3*time.Second)
 			clip, err := scanner.NextChunk(cctx)
@@ -254,8 +271,13 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 			if !ok {
 				return finalize()
 			}
-			heard = true
 			text := strings.TrimSpace(t.Text)
+			if text != "" {
+				// Only actual words count as "heard" — empty frames from a
+				// silent mic must report ErrNoSpeech (retry prompt says
+				// "speak again"), not ErrEmptyTranscript.
+				heard = true
+			}
 			if !t.IsFinal {
 				if text != "" && text != last {
 					last = text
@@ -405,10 +427,19 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, bool) {
 	}
 	defer func() { _ = svc.Stop() }()
 
-	fmt.Println("[wake] listening for the wake phrase (nothing is transcribed until it fires)...")
+	viz := ux.NewVoiceViz()
+	viz.Start(ux.VizStandby)
+	defer viz.Stop()
 	select {
-	case ev := <-events:
+	case ev, ok := <-events:
+		if !ok {
+			// Scanner failure closed the channel — a zero-value event here is
+			// NOT a wake. Fall back to push-to-talk instead of phantom-arming
+			// the mic (the exact moment the mic is most likely broken).
+			return wakeword.WakeEvent{}, false
+		}
 		logWakeEvent(ev)
+		viz.Stop()
 		audio.PlayAlert()
 		return ev, true
 	case <-ctx.Done():

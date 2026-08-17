@@ -32,6 +32,16 @@ type PricingEntry struct {
 	Notes        string  `json:"notes"`
 }
 
+// APIModel returns the model identifier to persist in config and send to the
+// provider API. Local sidecar entries use display-only model text ("piper
+// (sidecar)") — for those the adapter default (empty) is correct.
+func (e PricingEntry) APIModel() string {
+	if e.Local {
+		return ""
+	}
+	return e.Model
+}
+
 type pricingFile struct {
 	Version int            `json:"version"`
 	Note    string         `json:"note"`

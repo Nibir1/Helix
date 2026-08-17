@@ -10,9 +10,13 @@ import (
 	"net/http"
 )
 
-const openaiDefaultTTSModel = "tts-1"
+// openaiDefaultTTSModel is gpt-4o-mini-tts: cheaper than tts-1 (~$12/1M chars
+// vs $15) with better prosody and streaming support — the current
+// price/performance default for cloud speech output.
+const openaiDefaultTTSModel = "gpt-4o-mini-tts"
 
-// openaiTTS implements TTSProvider against POST /audio/speech.
+// openaiTTS implements TTSProvider against POST /audio/speech. Also serves
+// OpenAI-compatible local sidecars (Kokoro-FastAPI) via the local flag.
 type openaiTTS struct {
 	name    string
 	display string
@@ -20,6 +24,7 @@ type openaiTTS struct {
 	model   string
 	voice   string
 	key     string
+	local   bool
 }
 
 // NewOpenAITTS builds the cloud OpenAI TTS adapter.
@@ -36,16 +41,42 @@ func NewOpenAITTS(model, voice, baseURL string) TTSProvider {
 	return &openaiTTS{name: "openai", display: "OpenAI TTS", baseURL: baseURL, model: model, voice: voice}
 }
 
+const kokoroLocalDefaultURL = "http://127.0.0.1:8880/v1"
+
+// NewKokoroLocalTTS builds the Kokoro local sidecar adapter (ADR-002).
+// Kokoro-FastAPI exposes the OpenAI /audio/speech contract on port 8880;
+// Kokoro-82M gives near-cloud voice quality, free and offline, and runs on a
+// Raspberry Pi 5 at ~1x real time.
+func NewKokoroLocalTTS(model, voice, baseURL string) TTSProvider {
+	if model == "" {
+		model = "kokoro"
+	}
+	if voice == "" {
+		voice = "af_heart"
+	}
+	if baseURL == "" {
+		baseURL = kokoroLocalDefaultURL
+	}
+	return &openaiTTS{
+		name:    "kokoro-local",
+		display: "Kokoro (local sidecar)",
+		baseURL: baseURL,
+		model:   model,
+		voice:   voice,
+		local:   true,
+	}
+}
+
 func (p *openaiTTS) Name() string         { return p.name }
 func (p *openaiTTS) DisplayName() string  { return p.display }
 func (p *openaiTTS) SetAPIKey(key string) { p.key = key }
-func (p *openaiTTS) RequiresAPIKey() bool { return true }
-func (p *openaiTTS) IsLocal() bool        { return false }
+func (p *openaiTTS) RequiresAPIKey() bool { return !p.local }
+func (p *openaiTTS) IsLocal() bool        { return p.local }
 func (p *openaiTTS) DefaultModel() string { return p.model }
 
 // Synthesize returns WAV bytes for the text.
 func (p *openaiTTS) Synthesize(ctx context.Context, text string, opts SynthesisOptions) (AudioFormat, error) {
-	if p.key == "" {
+	if p.RequiresAPIKey() && p.key == "" {
 		return AudioFormat{}, fmt.Errorf("%s: missing API key", p.name)
 	}
 	if text == "" {
@@ -72,7 +103,10 @@ func (p *openaiTTS) Synthesize(ctx context.Context, text string, opts SynthesisO
 		return AudioFormat{}, err
 	}
 
-	headers := map[string]string{"Authorization": "Bearer " + p.key}
+	headers := map[string]string{}
+	if p.key != "" {
+		headers["Authorization"] = "Bearer " + p.key
+	}
 	data, err := sharedClient.DoRaw(ctx, http.MethodPost,
 		p.baseURL+"/audio/speech", headers, "application/json", payload)
 	if err != nil {
@@ -89,8 +123,21 @@ func (p *openaiTTS) Synthesize(ctx context.Context, text string, opts SynthesisO
 	return AudioFormat{Kind: KindWAV, SampleRate: rate, Channels: channels, Bytes: data}, nil
 }
 
-// HealthCheck verifies the key against /models.
+// HealthCheck verifies the key against /models. For the local sidecar ANY
+// HTTP response proves reachability (server versions differ in routes).
 func (p *openaiTTS) HealthCheck(ctx context.Context) error {
+	if p.local {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
+		if err != nil {
+			return err
+		}
+		resp, err := sharedClient.RawClient().Do(req)
+		if err != nil {
+			return fmt.Errorf("%s unreachable: %w", p.name, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return nil
+	}
 	data, err := sharedClient.DoRaw(ctx, http.MethodGet, p.baseURL+"/models",
 		map[string]string{"Authorization": "Bearer " + p.key}, "", nil)
 	if err != nil {

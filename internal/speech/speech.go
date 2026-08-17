@@ -58,6 +58,13 @@ func registerBuiltins(reg *Registry, cfg Config) {
 	}
 	reg.RegisterSTT(NewOpenAISTT(sttModel, sttBase))
 
+	if cfg.STT.Provider == "groq" {
+		sttModel, sttBase = cfg.STT.Model, cfg.STT.BaseURL
+	} else {
+		sttModel, sttBase = "", ""
+	}
+	reg.RegisterSTT(NewGroqSTT(sttModel, sttBase))
+
 	if cfg.STT.Provider == "deepgram" {
 		sttModel, sttBase = cfg.STT.Model, cfg.STT.BaseURL
 	} else {
@@ -79,12 +86,26 @@ func registerBuiltins(reg *Registry, cfg Config) {
 	}
 	reg.RegisterTTS(NewOpenAITTS(ttsModel, ttsVoice, ttsBase))
 
+	if cfg.TTS.Provider == "deepgram" {
+		ttsModel, ttsBase = cfg.TTS.Model, cfg.TTS.BaseURL
+	} else {
+		ttsModel, ttsBase = "", ""
+	}
+	reg.RegisterTTS(NewDeepgramTTS(ttsModel, ttsBase))
+
 	if cfg.TTS.Provider == "elevenlabs" {
 		ttsModel, ttsVoice, ttsBase = cfg.TTS.Model, cfg.TTS.Voice, cfg.TTS.BaseURL
 	} else {
 		ttsModel, ttsVoice, ttsBase = "", "", ""
 	}
 	reg.RegisterTTS(NewElevenLabsTTS(ttsModel, ttsVoice, ttsBase))
+
+	if cfg.TTS.Provider == "kokoro-local" {
+		ttsModel, ttsVoice, ttsBase = cfg.TTS.Model, cfg.TTS.Voice, cfg.TTS.BaseURL
+	} else {
+		ttsModel, ttsVoice, ttsBase = "", "", ""
+	}
+	reg.RegisterTTS(NewKokoroLocalTTS(ttsModel, ttsVoice, ttsBase))
 
 	if cfg.TTS.Provider == "piper-local" {
 		ttsBase = cfg.TTS.BaseURL

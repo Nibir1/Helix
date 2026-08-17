@@ -64,6 +64,84 @@ func TestOpenAISTTMultipartAndResponse(t *testing.T) {
 	}
 }
 
+func TestGroqSTTContract(t *testing.T) {
+	var gotModel, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai/v1/audio/transcriptions" {
+			http.NotFound(w, r)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+		_ = r.ParseMultipartForm(10 << 20)
+		gotModel = r.FormValue("model")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"groq heard you","language":"en"}`))
+	}))
+	defer srv.Close()
+
+	p := NewGroqSTT("", srv.URL+"/openai/v1")
+	p.SetAPIKey("gsk-x")
+	if p.Name() != "groq" || !p.RequiresAPIKey() || p.IsLocal() {
+		t.Fatalf("groq flags wrong: name=%s key=%v local=%v", p.Name(), p.RequiresAPIKey(), p.IsLocal())
+	}
+	out, err := p.Transcribe(ctx(t), AudioFormat{Kind: KindWAV, Bytes: makeWAV([]int16{1, 2, 3}, 16000, 1)})
+	if err != nil {
+		t.Fatalf("transcribe: %v", err)
+	}
+	if out.Text != "groq heard you" || out.Provider != "groq" {
+		t.Fatalf("wrong transcript: %+v", out)
+	}
+	if gotModel != "whisper-large-v3-turbo" {
+		t.Errorf("model field = %q", gotModel)
+	}
+	if gotAuth != "Bearer gsk-x" {
+		t.Errorf("auth = %q", gotAuth)
+	}
+}
+
+func TestDeepgramAuraTTSContract(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/speak" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Token dg-key" {
+			http.Error(w, "bad auth", http.StatusUnauthorized)
+			return
+		}
+		if !strings.Contains(r.URL.RawQuery, "encoding=linear16") {
+			http.Error(w, "must request linear16", http.StatusBadRequest)
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["text"] != "aura online" {
+			t.Errorf("text = %q", body["text"])
+		}
+		w.Header().Set("Content-Type", "audio/wav")
+		_, _ = w.Write(makeWAV([]int16{5, -5}, 24000, 1))
+	}))
+	defer srv.Close()
+
+	p := NewDeepgramTTS("", srv.URL+"/v1")
+	p.SetAPIKey("dg-key")
+	out, err := p.Synthesize(ctx(t), "aura online", SynthesisOptions{})
+	if err != nil {
+		t.Fatalf("synthesize: %v", err)
+	}
+	if out.Kind != KindWAV || out.SampleRate != 24000 {
+		t.Fatalf("wrong audio format: %+v", out)
+	}
+}
+
+func TestKokoroLocalSendsNoAuthRequired(t *testing.T) {
+	p := NewKokoroLocalTTS("", "", "http://127.0.0.1:1/v1")
+	if p.RequiresAPIKey() || !p.IsLocal() || p.Name() != "kokoro-local" {
+		t.Fatalf("kokoro-local flags wrong: name=%s key=%v local=%v",
+			p.Name(), p.RequiresAPIKey(), p.IsLocal())
+	}
+}
+
 func TestOpenAISTTMissingKey(t *testing.T) {
 	p := NewOpenAISTT("", "http://127.0.0.1:1")
 	if _, err := p.Transcribe(ctx(t), AudioFormat{Kind: KindWAV, Bytes: makeWAV(nil, 16000, 1)}); err == nil ||
@@ -105,7 +183,7 @@ func TestOpenAITTSRequestAndWAVResponse(t *testing.T) {
 		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["model"] != "tts-1" || body["response_format"] != "wav" {
+		if body["model"] != "gpt-4o-mini-tts" || body["response_format"] != "wav" {
 			t.Errorf("unexpected payload: %+v", body)
 		}
 		if body["input"] != "systems nominal" {
@@ -166,7 +244,7 @@ func TestDeepgramContract(t *testing.T) {
 			http.Error(w, "bad auth", http.StatusUnauthorized)
 			return
 		}
-		if !strings.Contains(r.URL.RawQuery, "model=nova-2") {
+		if !strings.Contains(r.URL.RawQuery, "model=nova-3") {
 			http.Error(w, "missing model", http.StatusBadRequest)
 			return
 		}

@@ -15,6 +15,10 @@ import (
 	"helix/internal/speech"
 )
 
+// maxConsecutiveScanErrs ends the scan loop after this many back-to-back
+// scanner failures (a healthy chunk resets the count).
+const maxConsecutiveScanErrs = 5
+
 // Detector scores one audio chunk for wake potential.
 type Detector interface {
 	Wake(clip speech.AudioFormat) (score float64, woke bool, err error)
@@ -75,6 +79,7 @@ func (s *service) Start(ctx context.Context) (<-chan WakeEvent, error) {
 		defer cancel()
 
 		var lastWake time.Time
+		consecutiveErrs := 0
 		for {
 			if runCtx.Err() != nil {
 				return
@@ -90,8 +95,21 @@ func (s *service) Start(ctx context.Context) (<-chan WakeEvent, error) {
 				if s.cfg.OnError != nil {
 					s.cfg.OnError(err)
 				}
-				return // scanner exhausted/failed: end the loop cleanly
+				// Transient chunk failures (recorder restart, device hiccup,
+				// per-chunk timeout in a quiet room) must not kill hands-free
+				// listening; only persistent failure ends the loop.
+				consecutiveErrs++
+				if consecutiveErrs >= maxConsecutiveScanErrs {
+					return
+				}
+				select {
+				case <-time.After(200 * time.Millisecond):
+				case <-runCtx.Done():
+					return
+				}
+				continue
 			}
+			consecutiveErrs = 0
 
 			score, woke, err := s.detector.Wake(clip)
 			if err != nil {
@@ -131,11 +149,15 @@ func (s *service) Stop() error {
 	return s.scanner.Close()
 }
 
-// soxScanner records fixed-length chunks via the speech capture utility
-// (sox preferred for its fast start; ffmpeg fallback), yielding WAV clips.
+// soxScanner yields fixed-length WAV chunks for wake scanning. It rides the
+// shared speech.ChunkScanner, which prefers a persistent gapless PCM stream
+// (one recorder process for the whole standby window — no per-chunk spawn
+// latency, no audio lost at chunk boundaries, and words that straddle a
+// boundary stay intact) and silently degrades to per-chunk recording with
+// silence gating DISABLED (quiet chunks are expected in standby and must
+// yield a clip, not an error).
 type soxScanner struct {
-	chunkDuration time.Duration
-	sampleRate    int
+	inner *speech.ChunkScanner
 }
 
 // NewSoXScanner builds the production chunk scanner.
@@ -146,14 +168,11 @@ func NewSoXScanner(chunkDuration time.Duration, sampleRate int) Scanner {
 	if sampleRate <= 0 {
 		sampleRate = 16000
 	}
-	return &soxScanner{chunkDuration: chunkDuration, sampleRate: sampleRate}
+	return &soxScanner{inner: speech.NewChunkScanner(chunkDuration, sampleRate)}
 }
 
 func (s *soxScanner) NextChunk(ctx context.Context) (speech.AudioFormat, error) {
-	return speech.RecordClip(ctx, speech.CaptureOptions{
-		MaxDuration: s.chunkDuration,
-		SampleRate:  s.sampleRate,
-	})
+	return s.inner.NextChunk(ctx)
 }
 
-func (s *soxScanner) Close() error { return nil }
+func (s *soxScanner) Close() error { return s.inner.Close() }

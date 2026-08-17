@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"helix/internal/agent"
+	"helix/internal/ai"
 	"helix/internal/ambient"
 	"helix/internal/commands"
 	"helix/internal/config"
@@ -43,26 +44,48 @@ func (failClosedPrompter) AskTypedConfirmation(string, string) bool { return fal
 // IPC submits can return the reply text.
 type daemonRenderer struct {
 	agent.HeadlessRenderer
-	mu   sync.Mutex
-	last string
+	mu      sync.Mutex
+	last    string
+	lastErr string
 }
 
 func (d *daemonRenderer) PrintAIMessage(t string, _ bool) {
 	d.mu.Lock()
-	if len(t) > 500 {
-		d.last = t[:500]
-	} else {
-		d.last = t
-	}
+	d.last = truncateRunes(t, 2000)
 	d.mu.Unlock()
 }
 
-func (d *daemonRenderer) takeLast() string {
+// PrintError captures the last error so IPC submits can report failure
+// instead of returning {"ok":true,"reply":""} — a failed plan used to be
+// indistinguishable from success over the wire.
+func (d *daemonRenderer) PrintError(t string) {
+	d.mu.Lock()
+	d.lastErr = truncateRunes(t, 2000)
+	d.mu.Unlock()
+}
+
+// truncateRunes caps a string at n runes WITHOUT splitting a UTF-8 sequence
+// mid-rune (a byte-slice cut could corrupt the final character).
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+// takeResult returns the captured reply and error, clearing both.
+func (d *daemonRenderer) takeResult() (reply, errText string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	out := d.last
-	d.last = ""
-	return out
+	reply, errText = d.last, d.lastErr
+	d.last, d.lastErr = "", ""
+	return
+}
+
+func (d *daemonRenderer) takeLast() string {
+	reply, _ := d.takeResult()
+	return reply
 }
 
 // Daemon is the persistent service.
@@ -77,6 +100,7 @@ type Daemon struct {
 	mu        sync.Mutex // serializes submits (the agent turn loop is single-threaded)
 	startedAt time.Time
 	stopping  chan struct{}
+	stopOnce  sync.Once // guards close(stopping) against repeated/racing stop requests
 
 	breakReminderMin int // focus-break reminder cadence; 0 = off
 
@@ -92,6 +116,24 @@ func New() (*Daemon, error) {
 	cfg, err := config.DefaultConfig()
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
+	}
+
+	// CRITICAL: the daemon runs BEFORE main() reaches its own ai.InitProviders
+	// call, so without this every planner/chat request in the daemon fails
+	// with "no AI provider configured" and IPC submits silently return an
+	// empty reply. Initialize the LLM registry from persisted config here.
+	if ierr := ai.InitProviders(ai.ProviderSettings{
+		Provider:      cfg.Provider,
+		Model:         cfg.ProviderModel,
+		CustomBaseURL: cfg.CustomProviderBaseURL,
+	}); ierr != nil {
+		return nil, fmt.Errorf("ai providers: %w", ierr)
+	}
+	if cfg.Provider != "" {
+		_ = ai.UseProvider(cfg.Provider)
+		if cfg.ProviderModel != "" {
+			ai.UseModel(cfg.ProviderModel)
+		}
 	}
 
 	journal, err := NewJournal()
@@ -139,9 +181,9 @@ func New() (*Daemon, error) {
 		if !speech.TTSEnabled() {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		_ = speech.Speak(ctx, text)
+		_ = speech.SpeakStream(ctx, text)
 	}
 	commands.SetPrompter(failClosedPrompter{})
 
@@ -169,14 +211,21 @@ func (d *Daemon) Handle(ctx context.Context, req Request) Response {
 		return d.statusResponse()
 	case TypeSubmit:
 		return d.Submit(req)
+	case TypeSay:
+		return d.sayRequest(ctx, req)
 	case TypeMode:
 		return d.modeRequest(req)
 	case TypeLogTail:
 		return Response{Type: TypeResponse, OK: true,
 			Meta: map[string]any{"entries": d.journal.Tail(20)}}
 	case TypeStop:
-		d.journal.Record("lifecycle", "", "", "stop requested via IPC")
-		close(d.stopping)
+		// Concurrent IPC connections mean two stop requests can race; a bare
+		// close() would panic ("close of closed channel"). sync.Once makes
+		// stop idempotent.
+		d.stopOnce.Do(func() {
+			d.journal.Record("lifecycle", "", "", "stop requested via IPC")
+			close(d.stopping)
+		})
 		return Response{Type: TypeResponse, OK: true, Meta: map[string]any{"stopping": true}}
 	default:
 		return Response{Type: TypeResponse, OK: false,
@@ -242,7 +291,29 @@ func (d *Daemon) Submit(req Request) Response {
 
 	d.journal.Record("submit", string(channel), text, "")
 	d.agent.HandleInputEvent(input.InputEvent{Text: text, Channel: channel, Meta: req.Meta})
-	return Response{Type: TypeResponse, OK: true, Meta: map[string]any{"reply": d.renderer.takeLast()}}
+	reply, errText := d.renderer.takeResult()
+	if errText != "" {
+		d.journal.Record("submit", string(channel), text, "error: "+errText)
+		return Response{Type: TypeResponse, OK: false, Error: errText,
+			Meta: map[string]any{"reply": reply}}
+	}
+	return Response{Type: TypeResponse, OK: true, Meta: map[string]any{"reply": reply}}
+}
+
+// sayRequest speaks text via the TTS chain (the `helix remote say` verb).
+// Unlike Submit, it never touches the agent pipeline — it is pure output.
+func (d *Daemon) sayRequest(ctx context.Context, req Request) Response {
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return Response{Type: TypeResponse, OK: false, Error: "empty say"}
+	}
+	sctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if err := speech.Speak(sctx, text); err != nil {
+		return Response{Type: TypeResponse, OK: false, Error: err.Error()}
+	}
+	d.journal.Record("say", "", text, "")
+	return Response{Type: TypeResponse, OK: true}
 }
 
 // Run serves IPC and background loops until ctx cancellation or TypeStop.

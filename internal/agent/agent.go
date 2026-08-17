@@ -87,6 +87,13 @@ type Agent struct {
 	// (metric name + elapsed) for the §10 metrics log. Wired by main (which
 	// resolves the answering provider); nil = no metric recorded.
 	OnVisionMetric func(metric string, latency time.Duration)
+
+	// Agentic enables the iterative plan→act→observe→replan harness
+	// (harness.go). Off by default: a single-shot plan is the safe, familiar
+	// behavior. /agentic on flips it for multi-step, self-correcting tasks.
+	Agentic bool
+	// MaxAgenticSteps bounds harness iterations (0 → defaultMaxAgenticSteps).
+	MaxAgenticSteps int
 }
 
 // NewAgent creates a new Agent instance.
@@ -280,6 +287,24 @@ func (a *Agent) HandleInput(userInput string) {
 		cwd,
 	)
 
+	obs, planned := a.planFirewallExecute(userInput, envDesc, ragContext, canary)
+
+	// Agentic harness (opt-in): when a plan executed and a step failed, feed
+	// the failure back to the planner and let it self-correct, bounded by a
+	// step budget. Every follow-up plan re-enters the SAME safety pipeline —
+	// the loop never bypasses classify → firewall → risk tiers → sandbox
+	// (guardrail #3). Disabled by default; /agentic on enables it.
+	if planned && a.Agentic {
+		a.agenticFollowUp(userInput, envDesc, ragContext, obs)
+	}
+}
+
+// planFirewallExecute runs one plan→firewall→execute cycle. It returns the
+// per-step observation trace and whether a plan actually executed (false when
+// planning failed, the critic quarantined, a canary fired, or a chat fallback
+// answered instead). Extracted from HandleInput so the agentic harness can
+// re-run the full pipeline per iteration without duplicating any safety layer.
+func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary string) ([]StepObservation, bool) {
 	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
 
 	// HELIX THINKER: animate the neural link while the planner reasons.
@@ -309,7 +334,7 @@ func (a *Agent) HandleInput(userInput string) {
 		// Ctrl+C aborts planning gracefully.
 		if errors.Is(err, context.Canceled) {
 			a.render.PrintWarning("Operation cancelled.")
-			return
+			return nil, false
 		}
 
 		a.render.PrintError(fmt.Sprintf("Planner model error: %v", err))
@@ -318,7 +343,7 @@ func (a *Agent) HandleInput(userInput string) {
 		// That previously caused the second hang: planner timeout followed by
 		// chat fallback timeout/cancellation.
 		if errors.Is(err, context.DeadlineExceeded) {
-			return
+			return nil, false
 		}
 
 		think.Start()
@@ -327,13 +352,13 @@ func (a *Agent) HandleInput(userInput string) {
 
 		if chatErr != nil {
 			a.render.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
-			return
+			return nil, false
 		}
 
 		if !a.promoteFallbackScript(resp) {
 			a.render.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		}
-		return
+		return nil, false
 	}
 
 	rawPlanOutput = strings.TrimSpace(rawPlanOutput)
@@ -342,7 +367,7 @@ func (a *Agent) HandleInput(userInput string) {
 	// retrieved data into its plan. Abort with an injection alert.
 	if canaryEchoed(canary, rawPlanOutput) {
 		a.render.PrintError("INJECTION ALERT: retrieved-content canary echoed in plan; execution aborted.")
-		return
+		return nil, false
 	}
 
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
@@ -355,13 +380,13 @@ func (a *Agent) HandleInput(userInput string) {
 
 		if chatErr != nil {
 			a.render.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
-			return
+			return nil, false
 		}
 
 		if !a.promoteFallbackScript(resp) {
 			a.render.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		}
-		return
+		return nil, false
 	}
 
 	// FIREWALL 2: risk-gated critic pass.
@@ -374,13 +399,13 @@ func (a *Agent) HandleInput(userInput string) {
 
 		if chatErr != nil {
 			a.render.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
-			return
+			return nil, false
 		}
 
 		if !a.promoteFallbackScript(resp) {
 			a.render.PrintAIMessage(strings.TrimSpace(resp), a.typingEffect)
 		}
-		return
+		return nil, false
 	}
 
 	// FIREWALL 3: provenance escalation.
@@ -394,6 +419,28 @@ func (a *Agent) HandleInput(userInput string) {
 		plan = safePlan
 	}
 
+	return a.executePlanSteps(plan, escalated), true
+}
+
+// StepObservation records the outcome of one executed plan step. It is the
+// feedback the agentic harness (harness.go) hands back to the planner so the
+// next iteration can react to what actually happened — the "observe" half of
+// the plan→act→observe loop.
+type StepObservation struct {
+	Index   int
+	Tool    string
+	Action  string
+	Command string
+	OK      bool
+	Err     string
+}
+
+// executePlanSteps runs a validated plan's steps through the safety pipeline
+// and returns a per-step observation trace. It aborts on the first failing
+// step (unchanged single-shot behavior); the returned trace lets the agentic
+// harness replan from the failure instead of giving up.
+func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []StepObservation {
+	obs := make([]StepObservation, 0, len(plan.Steps))
 	for i, step := range plan.Steps {
 		if len(plan.Steps) > 1 {
 			a.render.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
@@ -404,6 +451,7 @@ func (a *Agent) HandleInput(userInput string) {
 		// exception is if the firewall escalated the command due to provenance.
 		step.Trusted = !escalated[step.Command]
 
+		o := StepObservation{Index: i, Tool: step.Tool, Action: step.Action, Command: step.Command, OK: true}
 		switch step.Tool {
 		case "response":
 			a.handleResponseStep(step)
@@ -411,31 +459,42 @@ func (a *Agent) HandleInput(userInput string) {
 		case "shell":
 			if err := a.handleShellStepWithEscalation(step, escalated[step.Command]); err != nil {
 				a.render.PrintError(fmt.Sprintf("Shell step failed: %v", err))
-				return
+				o.OK, o.Err = false, err.Error()
+				obs = append(obs, o)
+				return obs
 			}
 
 		case "git":
 			if err := a.handleGitStep(step); err != nil {
 				a.render.PrintError(fmt.Sprintf("Git step failed: %v", err))
-				return
+				o.OK, o.Err = false, err.Error()
+				obs = append(obs, o)
+				return obs
 			}
 
 		case "package":
 			if err := a.handlePackageStep(step); err != nil {
 				a.render.PrintError(fmt.Sprintf("Package step failed: %v", err))
-				return
+				o.OK, o.Err = false, err.Error()
+				obs = append(obs, o)
+				return obs
 			}
 
 		case "recon":
 			if err := a.handleReconStep(step); err != nil {
 				a.render.PrintError(fmt.Sprintf("Recon step failed: %v", err))
-				return
+				o.OK, o.Err = false, err.Error()
+				obs = append(obs, o)
+				return obs
 			}
 
 		default:
 			a.render.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
+			o.OK, o.Err = false, "unknown tool"
 		}
+		obs = append(obs, o)
 	}
+	return obs
 }
 
 // promoteFallbackScript offers to execute fenced shell blocks found in a chat
@@ -995,11 +1054,19 @@ func (a *Agent) handleGitStep(step ai.PlanStep) error {
 		return fmt.Errorf("missing git action")
 	}
 	a.render.PrintCommand(fmt.Sprintf("git action: %s", action))
+	headBefore := ""
+	if a.Undo != nil && strings.EqualFold(action, "commit") {
+		headBefore = a.gitManager.HeadCommit()
+	}
 	err := a.gitManager.ExecutePlannedAction(action, step.Args)
 
 	// BlackBox Phase 4B: journal the only v1-reversible action — a commit —
 	// so "undo that" can offer a soft reset (through the full pipeline).
-	if err == nil && a.Undo != nil && strings.EqualFold(action, "commit") {
+	// Journal ONLY when HEAD actually moved: the commit path returns nil for
+	// idempotent no-ops (clean tree), and undoing those would soft-reset a
+	// pre-existing commit the user never asked to touch.
+	if err == nil && a.Undo != nil && strings.EqualFold(action, "commit") &&
+		a.gitManager.HeadCommit() != headBefore {
 		msg := step.Args["message"]
 		if msg == "" {
 			msg = "last commit"

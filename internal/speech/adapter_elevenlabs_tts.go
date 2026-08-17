@@ -62,10 +62,14 @@ func (p *elevenlabsTTS) Synthesize(ctx context.Context, text string, opts Synthe
 		voice = opts.Voice
 	}
 
-	payload, err := json.Marshal(map[string]any{
+	body := map[string]any{
 		"text":     text,
 		"model_id": p.model,
-	})
+	}
+	if opts.Speed > 0 && opts.Speed != 1.0 {
+		body["voice_settings"] = map[string]any{"speed": opts.Speed}
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return AudioFormat{}, err
 	}

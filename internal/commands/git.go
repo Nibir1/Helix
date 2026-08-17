@@ -412,6 +412,21 @@ func (gm *GitManager) executeCommitWithMessage(message string) error {
 	return gm.sandbox.WrapCommand(commitCmd, gm.execConfig, gm.env)
 }
 
+// HeadCommit returns the current HEAD commit hash, or "" when the working
+// directory is not a git repository (or has no commits yet). Callers use it
+// to detect whether an action actually created a commit (undo journaling
+// must never record a no-op commit — reversing one would soft-reset a
+// pre-existing commit).
+func (gm *GitManager) HeadCommit() string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = gm.getCurrentDir()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // parseMultiCommands splits a multi-command string into individual commands
 func (gm *GitManager) parseMultiCommands(multiCommand string) []string {
 	commands := strings.Split(multiCommand, ";")

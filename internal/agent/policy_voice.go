@@ -153,6 +153,12 @@ func (a *Agent) handleUndoRequest() {
 		a.render.PrintError(fmt.Sprintf("Undo failed: %v", err))
 		return
 	}
+	// Consume the entry only after a successful reversal: a reversal may run
+	// once. Without this, "undo that" twice reruns `git reset --soft HEAD~1`
+	// and rewinds a commit that was never journalled as reversible.
+	if _, _, perr := a.Undo.Pop(); perr != nil {
+		a.render.PrintDebug(fmt.Sprintf("undo journal pop: %v", perr))
+	}
 	a.render.PrintSuccess(fmt.Sprintf("Undone: %s", entry.Description))
 	a.speak("Undone.")
 }

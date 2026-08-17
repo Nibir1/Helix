@@ -58,7 +58,7 @@ func TestDeepgramStreamingInterimAndFinal(t *testing.T) {
 		_ = conn.Write(ctx, websocket.MessageText, []byte(
 			`{"type":"Results","is_final":false,"channel":{"alternatives":[{"transcript":"hello","confidence":0.5}]}}`))
 		_ = conn.Write(ctx, websocket.MessageText, []byte(
-			`{"type":"Results","is_final":true,"channel":{"alternatives":[{"transcript":"hello world","confidence":0.95}]},"metadata":{"language":"en"}}`))
+			`{"type":"Results","is_final":true,"speech_final":true,"channel":{"alternatives":[{"transcript":"hello world","confidence":0.95}]},"metadata":{"language":"en"}}`))
 	}))
 	defer srv.Close()
 
@@ -98,6 +98,68 @@ func TestDeepgramStreamingInterimAndFinal(t *testing.T) {
 	}
 	if !got[1].IsFinal || got[1].Text != "hello world" || got[1].Language != "en" {
 		t.Fatalf("second should be final 'hello world' (en): %+v", got[1])
+	}
+}
+
+// TestDeepgramStreamingAccumulatesSegments is the mid-utterance-pause
+// regression test: `is_final` alone finalizes a SEGMENT, not the utterance.
+// A natural pause used to truncate the command at the first segment; the
+// utterance must instead accumulate until `speech_final` fires.
+func TestDeepgramStreamingAccumulatesSegments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+		ctx := context.Background()
+		for {
+			typ, data, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			if typ == websocket.MessageText && strings.Contains(string(data), "CloseStream") {
+				break
+			}
+		}
+		// Segment 1 locks in at a natural pause (is_final, NOT speech_final)…
+		_ = conn.Write(ctx, websocket.MessageText, []byte(
+			`{"type":"Results","is_final":true,"channel":{"alternatives":[{"transcript":"delete the","confidence":0.9}]}}`))
+		// …then the utterance completes.
+		_ = conn.Write(ctx, websocket.MessageText, []byte(
+			`{"type":"Results","is_final":true,"speech_final":true,"channel":{"alternatives":[{"transcript":"temp directory","confidence":0.9}]}}`))
+	}))
+	defer srv.Close()
+
+	p := NewDeepgramStreamingSTT("", srv.URL+"/v1")
+	p.SetAPIKey("test-key")
+	streamer := p.(StreamingSTTProvider)
+
+	chunks := make(chan AudioFormat, 1)
+	chunks <- AudioFormat{Kind: KindWAV, SampleRate: 16000, Channels: 1,
+		Bytes: makeWAV([]int16{1, 2, 3, 4}, 16000, 1)}
+	close(chunks)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := streamer.Stream(ctx, chunks)
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+
+	var final *Transcript
+	for tr := range stream {
+		if tr.IsFinal {
+			trCopy := tr
+			final = &trCopy
+		}
+	}
+	if final == nil {
+		t.Fatal("no final transcript emitted")
+	}
+	if final.Text != "delete the temp directory" {
+		t.Fatalf("segments must accumulate across pauses; got final %q", final.Text)
 	}
 }
 

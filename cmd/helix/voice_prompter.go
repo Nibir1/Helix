@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -90,7 +91,10 @@ func (v *VoicePrompter) AskTypedConfirmation(label, requiredPhrase string) bool 
 }
 
 func (v *VoicePrompter) say(text string) {
-	// Terminal echo keeps mixed-mode sessions coherent.
+	// Terminal echo FIRST: if TTS is down (no key, silent build, no speaker)
+	// the user must still SEE the question — otherwise confirmations become
+	// invisible auto-declines with zero explanation.
+	fmt.Printf("[voice] %s\n", text)
 	speaker := v.Speak
 	if speaker == nil {
 		return

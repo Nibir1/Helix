@@ -21,6 +21,7 @@ import "time"
 const (
 	TypeStatus   = "status"   // client → daemon: report health/state
 	TypeSubmit   = "submit"   // client → daemon: inject an input event
+	TypeSay      = "say"      // client → daemon: speak text via the TTS chain
 	TypeMode     = "mode"     // client ↔ daemon: query or change voice/manual mode
 	TypeLogTail  = "log_tail" // client → daemon: tail recent journal entries
 	TypeStop     = "stop"     // client → daemon: graceful shutdown

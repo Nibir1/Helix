@@ -97,6 +97,47 @@ func (j *UndoJournal) Last() (UndoEntry, bool, error) {
 	return e, true, nil
 }
 
+// Pop removes and returns the most recent entry (ok=false when empty). Undo
+// is consuming: an entry may only be reversed once — otherwise "undo that"
+// twice would run the reversal again and rewind a commit that was never
+// journalled as reversible.
+func (j *UndoJournal) Pop() (UndoEntry, bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	data, err := os.ReadFile(j.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return UndoEntry{}, false, nil
+		}
+		return UndoEntry{}, false, err
+	}
+	lines := splitNonEmpty(data)
+	if len(lines) == 0 {
+		return UndoEntry{}, false, nil
+	}
+	var e UndoEntry
+	if err := json.Unmarshal(lines[len(lines)-1], &e); err != nil {
+		return UndoEntry{}, false, fmt.Errorf("undo journal tail corrupt: %w", err)
+	}
+
+	// Rewrite the journal without the popped entry (atomic via temp+rename).
+	var buf []byte
+	for _, l := range lines[:len(lines)-1] {
+		buf = append(buf, l...)
+		buf = append(buf, '\n')
+	}
+	tmp := j.path + ".tmp"
+	if err := os.WriteFile(tmp, buf, 0o600); err != nil {
+		return UndoEntry{}, false, err
+	}
+	if err := os.Rename(tmp, j.path); err != nil {
+		_ = os.Remove(tmp)
+		return UndoEntry{}, false, err
+	}
+	return e, true, nil
+}
+
 // GitCommitReversal returns the standard reversal command for the most
 // recent commit (soft reset keeps the changes staged).
 const GitCommitReversal = "git reset --soft HEAD~1"

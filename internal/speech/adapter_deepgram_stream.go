@@ -44,7 +44,7 @@ func NewDeepgramStreamingSTT(model, baseURL string) STTProvider {
 func (p *deepgramStreamingSTT) streamURL() string {
 	return p.baseURL + "/listen?model=" + p.model +
 		"&encoding=linear16&sample_rate=16000&interim_results=true" +
-		"&smart_format=true&punctuate=true&endpointing=true"
+		"&smart_format=true&punctuate=true&endpointing=300&utterance_end_ms=1200"
 }
 
 // Stream consumes chunked audio and emits interim/final transcripts until the
@@ -93,26 +93,94 @@ func (p *deepgramStreamingSTT) Stream(ctx context.Context, chunks <-chan AudioFo
 	}()
 
 	// Reader: emits Results frames until the server closes or ctx cancels.
+	// Deepgram's `is_final` only finalizes a SEGMENT of the utterance; the
+	// utterance itself ends at `speech_final` (or an UtteranceEnd frame).
+	// Finalizing on the first is_final used to truncate commands at natural
+	// mid-sentence pauses — so segments accumulate here and the caller only
+	// sees IsFinal=true once endpointing actually fired.
 	go func() {
 		defer close(out)
 		defer close(done)
 		defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+		var segments []string
+		joined := func(extra string) string {
+			parts := segments
+			if extra != "" {
+				parts = append(append([]string{}, segments...), extra)
+			}
+			return strings.TrimSpace(strings.Join(parts, " "))
+		}
+		emit := func(t Transcript) bool {
+			select {
+			case out <- t:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
 		for {
 			typ, data, err := conn.Read(ctx)
 			if err != nil {
+				// Connection ended with accumulated finals: flush them so a
+				// server-side close never eats a transcribed utterance.
+				if text := joined(""); text != "" {
+					emit(Transcript{Text: text, Provider: "deepgram", IsFinal: true})
+				}
 				return
 			}
 			if typ != websocket.MessageText {
 				continue
 			}
-			t, ok := parseDeepgramTranscript(data)
-			if !ok {
+
+			t, segFinal, kind := parseDeepgramFrame(data)
+			switch kind {
+			case dgFrameUtteranceEnd:
+				if text := joined(""); text != "" {
+					if !emit(Transcript{Text: text, Provider: "deepgram", IsFinal: true}) {
+						return
+					}
+					segments = nil
+				}
+				continue
+			case dgFrameOther:
 				continue
 			}
-			select {
-			case out <- t:
-			case <-ctx.Done():
-				return
+
+			text := strings.TrimSpace(t.Text)
+			switch {
+			case t.IsFinal: // speech_final: the utterance is complete
+				if text != "" {
+					segments = append(segments, text)
+				}
+				full := joined("")
+				segments = nil
+				if full == "" {
+					continue
+				}
+				t.Text = full
+				if !emit(t) {
+					return
+				}
+			case segFinal: // segment locked in, utterance continues
+				if text != "" {
+					segments = append(segments, text)
+				}
+				if full := joined(""); full != "" {
+					t.Text = full
+					t.IsFinal = false
+					if !emit(t) {
+						return
+					}
+				}
+			default: // interim partial
+				if full := joined(text); full != "" {
+					t.Text = full
+					if !emit(t) {
+						return
+					}
+				}
 			}
 		}
 	}()
@@ -141,14 +209,25 @@ func toLinear16(clip AudioFormat) ([]byte, error) {
 	}
 }
 
-// parseDeepgramTranscript decodes a Deepgram streaming Results frame. Non-Results
-// frames (Metadata, SpeechStarted, UtteranceEnd, Error) are ignored; the Error
-// type ends the stream naturally since the caller observes no final result.
-func parseDeepgramTranscript(data []byte) (Transcript, bool) {
+// dgFrameKind classifies a Deepgram streaming frame for the reader loop.
+type dgFrameKind int
+
+const (
+	dgFrameResults dgFrameKind = iota
+	dgFrameUtteranceEnd
+	dgFrameOther
+)
+
+// parseDeepgramFrame decodes one Deepgram streaming frame. For Results frames
+// the returned Transcript carries IsFinal = speech_final (utterance complete);
+// segmentFinal reports is_final (this SEGMENT is locked in, utterance may
+// continue). Metadata/SpeechStarted/Error frames classify as dgFrameOther.
+func parseDeepgramFrame(data []byte) (t Transcript, segmentFinal bool, kind dgFrameKind) {
 	var msg struct {
-		Type    string `json:"type"`
-		IsFinal bool   `json:"is_final"`
-		Channel struct {
+		Type        string `json:"type"`
+		IsFinal     bool   `json:"is_final"`
+		SpeechFinal bool   `json:"speech_final"`
+		Channel     struct {
 			Alternatives []struct {
 				Transcript string  `json:"transcript"`
 				Confidence float64 `json:"confidence"`
@@ -159,20 +238,34 @@ func parseDeepgramTranscript(data []byte) (Transcript, bool) {
 		} `json:"metadata"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
-		return Transcript{}, false
+		return Transcript{}, false, dgFrameOther
+	}
+	if msg.Type == "UtteranceEnd" {
+		return Transcript{}, false, dgFrameUtteranceEnd
 	}
 	if msg.Type != "Results" || len(msg.Channel.Alternatives) == 0 {
-		return Transcript{}, false
+		return Transcript{}, false, dgFrameOther
 	}
 	alt := msg.Channel.Alternatives[0]
-	if !msg.IsFinal && strings.TrimSpace(alt.Transcript) == "" {
-		return Transcript{}, false
-	}
 	return Transcript{
 		Text:       alt.Transcript,
 		Language:   msg.Metadata.Language,
 		Confidence: alt.Confidence,
 		Provider:   "deepgram",
-		IsFinal:    msg.IsFinal,
-	}, true
+		IsFinal:    msg.SpeechFinal,
+	}, msg.IsFinal, dgFrameResults
+}
+
+// parseDeepgramTranscript is the legacy single-frame view kept for tests:
+// Results frames map to a Transcript whose IsFinal reflects segment finality.
+func parseDeepgramTranscript(data []byte) (Transcript, bool) {
+	t, segFinal, kind := parseDeepgramFrame(data)
+	if kind != dgFrameResults {
+		return Transcript{}, false
+	}
+	if !segFinal && !t.IsFinal && strings.TrimSpace(t.Text) == "" {
+		return Transcript{}, false
+	}
+	t.IsFinal = t.IsFinal || segFinal
+	return t, true
 }

@@ -132,6 +132,8 @@ func (k *KeyStore) envName(provider string) string {
 	// (BlackBox internal/speech namespacing, ADR-005-era conventions).
 	case "stt.openai", "tts.openai":
 		return "OPENAI_API_KEY"
+	case "stt.groq", "tts.groq":
+		return "GROQ_API_KEY"
 	case "stt.deepgram", "tts.deepgram":
 		return "DEEPGRAM_API_KEY"
 	case "stt.elevenlabs", "tts.elevenlabs":

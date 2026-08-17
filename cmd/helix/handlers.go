@@ -121,6 +121,8 @@ func handleSlashCommand(input string) bool {
 		handleListenCommand(input)
 	case "/mictest":
 		handleMicTest()
+	case "/agentic":
+		handleAgenticCommand(input)
 	case "/memory":
 		handleMemoryCommand(input)
 	case "/eyes":
@@ -314,6 +316,7 @@ func handleHelp() {
 	helpLine(colWidth, "/audio <on|off>", "Toggle tonal audio feedback")
 	helpLine(colWidth, "/typewrite-all <on|off>", "Toggle typewriter effect for ALL output")
 	helpLine(colWidth, "/memory <show|clear>", "Show or wipe conversation memory")
+	helpLine(colWidth, "/agentic <on|off>", "Iterative harness: observe step results & self-correct")
 	helpSection("VOICE (BLACKBOX)")
 	helpLine(colWidth, "/voice-setup", "Configure STT/TTS providers with live pricing")
 	helpLine(colWidth, "/voice-status", "Speech chain health, keys, and recorder state")
@@ -697,6 +700,41 @@ func handleStealthCommand(input string) {
 // -------------------------------------------------------
 // /memory — BlackBox Phase 4B conversation memory
 // -------------------------------------------------------
+
+// handleAgenticCommand toggles the iterative agentic harness: /agentic [on|off|status].
+func handleAgenticCommand(input string) {
+	if agentCore == nil {
+		color.Red("Agent is not available in this session.")
+		return
+	}
+	arg := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(input, "/agentic")))
+	switch arg {
+	case "on", "enable":
+		agentCore.Agentic = true
+		cfg.UserPrefs.AgenticMode = true
+		_ = cfg.SavePreferences()
+		color.Green("Agentic harness ON — Helix will observe step results and self-correct across up to %d follow-ups.", agenticStepBudget())
+		color.Cyan("Every follow-up plan still passes the full safety pipeline. Use /agentic off to return to single-shot planning.")
+	case "off", "disable":
+		agentCore.Agentic = false
+		cfg.UserPrefs.AgenticMode = false
+		_ = cfg.SavePreferences()
+		color.Yellow("Agentic harness OFF — single-shot planning restored.")
+	default:
+		state := "OFF"
+		if agentCore.Agentic {
+			state = "ON"
+		}
+		color.Cyan("Agentic harness: %s (step budget %d). Toggle with /agentic on|off.", state, agenticStepBudget())
+	}
+}
+
+func agenticStepBudget() int {
+	if agentCore != nil && agentCore.MaxAgenticSteps > 0 {
+		return agentCore.MaxAgenticSteps
+	}
+	return 4
+}
 
 func handleMemoryCommand(input string) {
 	args := strings.Fields(input)

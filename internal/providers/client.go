@@ -82,7 +82,7 @@ func (c *HTTPClient) DoStream(
 	go func() {
 		defer close(ch)
 		defer func() { _ = resp.Body.Close() }()
-		parseOpenAIStream(resp.Body, ch)
+		parseOpenAIStream(ctx, resp.Body, ch)
 	}()
 
 	return ch, nil
@@ -279,12 +279,28 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func parseOpenAIStream(r io.Reader, ch chan<- StreamChunk) {
+func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) {
 	scanner := bufio.NewScanner(r)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 4*1024*1024)
 
+	// send delivers a chunk but returns false if the consumer abandoned the
+	// stream (ctx cancelled/timed out). Without this, a full 100-chunk buffer
+	// blocks the producer forever after CollectChat returns on ctx.Done(),
+	// leaking the goroutine and its HTTP body — costly in the long-lived daemon.
+	send := func(c StreamChunk) bool {
+		select {
+		case ch <- c:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
 	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return
+		}
 		line := strings.TrimSpace(scanner.Text())
 
 		if line == "" || !strings.HasPrefix(line, "data:") {
@@ -294,7 +310,7 @@ func parseOpenAIStream(r io.Reader, ch chan<- StreamChunk) {
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
 		if data == "[DONE]" {
-			ch <- StreamChunk{Done: true}
+			send(StreamChunk{Done: true})
 			return
 		}
 
@@ -317,17 +333,19 @@ func parseOpenAIStream(r io.Reader, ch chan<- StreamChunk) {
 		}
 
 		if parsed.Choices[0].Delta.Content != "" {
-			ch <- StreamChunk{Content: parsed.Choices[0].Delta.Content}
+			if !send(StreamChunk{Content: parsed.Choices[0].Delta.Content}) {
+				return
+			}
 		}
 
 		if parsed.Choices[0].FinishReason == "stop" {
-			ch <- StreamChunk{Done: true}
+			send(StreamChunk{Done: true})
 			return
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		ch <- StreamChunk{Error: fmt.Errorf("stream read error: %w", err)}
+		send(StreamChunk{Error: fmt.Errorf("stream read error: %w", err)})
 	}
 }
 

@@ -134,7 +134,7 @@ func main() {
 	ragSystem = rag.NewSystem(env, db)
 	ragSystem.SetSilent(true)
 	go func() {
-		defer diagnostics.Guard("rag-bootstrap")
+		defer diagnostics.Guard("rag-bootstrap")() // Guard returns the recovery closure; it must be CALLED
 		_ = ragSystem.Initialize()
 		// FIX: Use the unified debug toggle instead of reading the env var directly.
 		if err := rag.KnowledgeBootstrap(context.Background(), db); err != nil &&
@@ -156,7 +156,7 @@ func main() {
 	dbg := utils.IsDebugMode()
 	audioDone := make(chan error, 1)
 	go func() {
-		defer diagnostics.Guard("audio-init")
+		defer diagnostics.Guard("audio-init")() // Guard returns the recovery closure; it must be CALLED
 		audioDone <- audio.Init()
 	}()
 	select {
@@ -182,6 +182,7 @@ func main() {
 	reconEng := recon.NewReconEngine(env, recon.DefaultReconConfig())
 	agentCore = agent.NewAgent(env, ragSystem, sandbox, execConfig, cfg.UserPrefs.TypingEffect, gui, stealthExec, reconEng)
 	agentCore.Slash = agent.SlashFunc(handleSlashCommand)
+	agentCore.Agentic = cfg.UserPrefs.AgenticMode
 	histPath := homeDir + "/.helix_history"
 	history, _ := utils.LoadHistory(histPath)
 
@@ -192,9 +193,11 @@ func main() {
 		if !speech.TTSEnabled() {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		if err := speech.Speak(ctx, text); err != nil && utils.IsDebugMode() {
+		// SpeakStream begins playback after the first sentence synthesizes
+		// (one-ahead pipelining) instead of waiting for the whole reply.
+		if err := speech.SpeakStream(ctx, text); err != nil && utils.IsDebugMode() {
 			fmt.Fprintf(os.Stderr, "[voice] speak: %v\n", err)
 		}
 	}
