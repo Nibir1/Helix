@@ -71,3 +71,57 @@ func TestRunVisionModelRoutesImagePart(t *testing.T) {
 		t.Fatalf("image part did not reach the provider: %q", out)
 	}
 }
+
+// visionFake is a provider whose DEFAULT model differs from the model a user
+// would select — the shape that exposed the bug.
+type visionFake struct {
+	providers.AIProvider
+	name         string
+	defaultModel string
+}
+
+func (f *visionFake) Name() string         { return f.name }
+func (f *visionFake) DefaultModel() string { return f.defaultModel }
+func (f *visionFake) IsLocal() bool        { return false }
+func (f *visionFake) Capabilities() providers.Capabilities {
+	return providers.CapabilitiesFor(f.name, f.defaultModel)
+}
+
+// VisionCapable must ask about the SELECTED model. It used to read
+// activeProvider.Capabilities(), and every implementation of that computes its
+// flags from the provider's DEFAULT model — so selecting gpt-4o asked "can the
+// default model see?" and /eyes on refused on the answer.
+func TestVisionCapableUsesTheSelectedModel(t *testing.T) {
+	oldProvider, oldModel := activeProvider, activeModel
+	t.Cleanup(func() { activeProvider, activeModel = oldProvider, oldModel })
+
+	// Default model is text-only; the user selected a multimodal one.
+	activeProvider = &visionFake{name: "openai", defaultModel: "gpt-3.5-turbo"}
+
+	activeModel = "gpt-4o"
+	if !VisionCapable() {
+		t.Error("selecting gpt-4o must make vision available, whatever the provider default is")
+	}
+
+	activeModel = "gpt-3.5-turbo"
+	if VisionCapable() {
+		t.Error("a text-only selection must not report vision")
+	}
+
+	// No selection falls back to the provider default, which is the honest
+	// answer when there is nothing else to go on.
+	activeModel = ""
+	if VisionCapable() {
+		t.Error("with no selection the text-only default must not report vision")
+	}
+}
+
+func TestVisionCapableWithNoProvider(t *testing.T) {
+	oldProvider, oldModel := activeProvider, activeModel
+	t.Cleanup(func() { activeProvider, activeModel = oldProvider, oldModel })
+
+	activeProvider, activeModel = nil, "gpt-4o"
+	if VisionCapable() {
+		t.Error("no provider means no vision, whatever the model string says")
+	}
+}

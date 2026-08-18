@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -366,5 +367,59 @@ func TestIsAvailabilityError(t *testing.T) {
 				t.Fatalf("isAvailabilityError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+// The status line hardcoded the word "cloud". Failing over between two LOCAL
+// providers is a supported configuration (llama.cpp primary with Ollama behind
+// it — docs/edge_deployment.md §5), and calling llama.cpp "the cloud model" made
+// the status read as though Helix had misunderstood its own config.
+func TestFailoverStatusNamesTheActualProviders(t *testing.T) {
+	h := newFailoverHarness(t, errUnreachable, true)
+
+	failoverMu.Lock()
+	activeProvider, activeModel = &failoverFake{name: "llamacpp", local: true, healthy: true}, "local-gguf"
+	failoverMu.Unlock()
+
+	armed := FailoverStatus()
+	if !strings.Contains(armed, "llamacpp") {
+		t.Errorf("armed status must name the provider it protects, got %q", armed)
+	}
+	if strings.Contains(armed, "cloud") {
+		t.Errorf("a local primary must not be described as cloud: %q", armed)
+	}
+	if !strings.Contains(armed, "ollama") {
+		t.Errorf("armed status must name the fallback, got %q", armed)
+	}
+	_ = h
+}
+
+// While degraded, the retry line has to name the provider that will be retried,
+// not "cloud" — which is wrong whenever the displaced provider was local.
+func TestFailoverStatusDegradedNamesTheDisplacedProvider(t *testing.T) {
+	h := newFailoverHarness(t, errUnreachable, true)
+	h.cloud.failNext = 2
+
+	for i := 0; i < 2; i++ {
+		if _, err := RunModel("hello"); err == nil {
+			t.Fatal("expected the call to fail")
+		}
+	}
+	if !LocalFallbackActive() {
+		t.Fatal("precondition: the breaker should have tripped")
+	}
+	notice := h.awaitNotice(t)
+	if !strings.Contains(notice, "cloud") {
+		t.Errorf("the notice should name the displaced provider %q, got %q", "cloud", notice)
+	}
+
+	status := FailoverStatus()
+	// The harness's primary is literally named "cloud", so this asserts the name
+	// is INTERPOLATED rather than hardcoded: both halves must appear.
+	if !strings.Contains(status, "ollama") || !strings.Contains(status, "cloud") {
+		t.Errorf("degraded status must name both providers, got %q", status)
+	}
+	if !strings.Contains(status, "retry in") {
+		t.Errorf("degraded status must keep the retry window, got %q", status)
 	}
 }

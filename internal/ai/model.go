@@ -335,21 +335,70 @@ func ToolCallingAvailable() bool {
 // VisionCapable reports whether the active provider/model can process images
 // (BlackBox Phase 5 capability gate).
 //
+// It resolves the SELECTED model, exactly as ToolCallingAvailable does a few
+// lines above. It used to read activeProvider.Capabilities(), and every
+// implementation of that method computes its flags from the provider's DEFAULT
+// model — so picking gpt-4o and running /eyes on asked "can the default model
+// see?" and refused on the answer. The two capability gates in this file now
+// resolve the model the same way.
+//
 // Args: none.
 // Returns: bool.
 // Complexity: O(1).
 func VisionCapable() bool {
-	return activeProvider != nil && activeProvider.Capabilities().Vision
+	p, model, _ := resolveProvider()
+	if p == nil {
+		return false
+	}
+	if model == "" {
+		model = p.DefaultModel()
+	}
+	return providers.SupportsVision(p.Name(), model)
 }
 
 // ProviderVisionCapable reports whether a named provider can see; an empty
 // name means the active provider.
+//
+// For a NAMED provider there is no selected model — vision.provider is a
+// dedicated routing target that runVisionModel calls with that provider's
+// default model — so the default is the honest thing to test here.
 func ProviderVisionCapable(name string) bool {
 	if name == "" {
 		return VisionCapable()
 	}
 	p, err := GetProviderByName(name)
-	return err == nil && p.Capabilities().Vision
+	if err != nil {
+		return false
+	}
+	return providers.SupportsVision(p.Name(), p.DefaultModel())
+}
+
+// VisionCapableProviders returns the registered providers that could serve as
+// vision.provider, using each one's default model.
+//
+// It exists so the /eyes refusal can name real options instead of telling the
+// user to "set one first" and leaving them to guess which of nine providers
+// qualifies — the same reasoning that made the voice wizard print valid voices at
+// the moment of asking.
+//
+// Args: none.
+// Returns: sorted provider names (nil before the registry is built).
+// Complexity: O(providers).
+func VisionCapableProviders() []string {
+	if registry == nil {
+		return nil
+	}
+	var out []string
+	for _, name := range registry.Names() {
+		p, err := registry.Get(name)
+		if err != nil {
+			continue
+		}
+		if providers.SupportsVision(name, p.DefaultModel()) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // RunVisionModel sends a multimodal prompt (text + image parts) to the active

@@ -27,9 +27,12 @@
 // Firewall → risk tiers → Voice Risk Policy → sandbox → confinement. Failover
 // cannot relax a control, and it is not an input channel.
 //
-// Honesty note: degrading swaps a large cloud model for a small local one, so
-// plan quality genuinely drops. That is why the switch always announces itself
-// rather than degrading silently.
+// Honesty note: degrading usually swaps a large cloud model for a small local
+// one, so plan quality genuinely drops. That is why the switch always announces
+// itself rather than degrading silently. "Usually", because the primary is not
+// necessarily cloud — llama.cpp primary with Ollama behind it is a supported
+// all-local configuration, so every user-facing string names the provider it is
+// actually talking about instead of assuming the word "cloud" applies.
 package ai
 
 import (
@@ -183,12 +186,13 @@ func SetOfflineMode(on bool) {
 
 	if on {
 		if !degraded {
-			degradeLocked("I lost the cloud model. Switching to local intelligence.")
+			degradeLocked(fmt.Sprintf("I lost the %s model. Switching to local intelligence.",
+				primaryNameLocked()))
 		}
 		return
 	}
 	if degraded {
-		restoreLocked("Cloud model restored.")
+		restoreLocked(fmt.Sprintf("The %s model is restored.", displacedNameLocked()))
 	}
 	consecutiveFailures = 0
 }
@@ -210,14 +214,43 @@ func FailoverStatus() string {
 		return "disabled"
 	}
 	if degraded {
-		return fmt.Sprintf("ACTIVE — using local %s (cloud retry in %s)",
-			fallbackCfg.Provider, remainingLocked().Round(time.Second))
+		return fmt.Sprintf("ACTIVE — using local %s (%s retry in %s)",
+			fallbackCfg.Provider, displacedNameLocked(), remainingLocked().Round(time.Second))
 	}
 	// Deliberately not "ready": readiness is only known at switch time, when
 	// degradeLocked health-checks the provider. Claiming a fallback is ready
 	// when it might not be pulled is exactly the false comfort P11.3 exists to
 	// remove.
-	return fmt.Sprintf("armed — will switch to %s if the cloud model fails", fallbackCfg.Provider)
+	return fmt.Sprintf("armed — will switch to %s if %s fails",
+		fallbackCfg.Provider, primaryNameLocked())
+}
+
+// primaryNameLocked names the provider the breaker is currently protecting.
+// Callers must hold failoverMu.
+//
+// It exists because this line used to say "if the cloud model fails" no matter
+// what was selected. Failing over between two LOCAL providers is a supported and
+// sensible configuration — llama.cpp primary with Ollama behind it is exactly the
+// edge-box story in docs/edge_deployment.md §5 — and describing llama.cpp as
+// "the cloud model" made the status line read as though Helix had misunderstood
+// its own configuration.
+func primaryNameLocked() string {
+	if degraded {
+		return displacedNameLocked()
+	}
+	if activeProvider != nil {
+		return activeProvider.Name()
+	}
+	return "the active model"
+}
+
+// displacedNameLocked names the provider the breaker stepped away from (the one
+// a half-open probe will retry). Callers must hold failoverMu.
+func displacedNameLocked() string {
+	if savedProvider != nil {
+		return savedProvider.Name()
+	}
+	return "the previous model"
 }
 
 func remainingLocked() time.Duration {
@@ -256,12 +289,19 @@ func resolveProvider() (providers.AIProvider, string, bool) {
 //
 // Complexity: O(1) plus one local health check on the flip.
 func noteCallResult(err error, probing bool) {
+	// Record what this call proves about the active provider BEFORE the breaker
+	// logic, and under a different lock: the breaker deliberately ignores
+	// non-availability errors, but the status line must still know the brain
+	// could not answer (see brain_health.go).
+	noteBrainCall(err, probing)
+
 	failoverMu.Lock()
 	defer failoverMu.Unlock()
 
 	if err == nil {
 		if probing {
-			restoreLocked("Cloud model reachable again. Switching back.")
+			restoreLocked(fmt.Sprintf("The %s model is reachable again. Switching back.",
+				displacedNameLocked()))
 			return
 		}
 		consecutiveFailures = 0
@@ -288,7 +328,8 @@ func noteCallResult(err error, probing bool) {
 	if consecutiveFailures < thresholdLocked() {
 		return
 	}
-	degradeLocked("The cloud model is not responding. Switching to local intelligence.")
+	degradeLocked(fmt.Sprintf("The %s model is not responding. Switching to local intelligence.",
+		primaryNameLocked()))
 }
 
 func thresholdLocked() int {

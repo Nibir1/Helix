@@ -87,6 +87,12 @@ func setupLlamaCppProvider() error {
 	defer cancel()
 
 	if herr := p.HealthCheck(ctx); herr != nil {
+		// Record it, do not just print it. This probe is the only hard evidence
+		// Helix has before the first model call, and the per-turn status line used
+		// to report CLEAR right after this very warning because the failover
+		// breaker had not yet seen two failed calls.
+		ai.NoteProviderUnreachable(llamacpp.Name, herr.Error())
+
 		kind, hint := llamacpp.Diagnose(herr, url)
 		if kind == llamacpp.DiagnosisForeignServer {
 			color.Yellow("A DIFFERENT service is answering on %s.", url)
@@ -107,6 +113,7 @@ func setupLlamaCppProvider() error {
 		return nil
 	}
 
+	ai.NoteProviderReachable(llamacpp.Name)
 	color.Green("llama-server reachable.")
 	return nil
 }
@@ -191,11 +198,16 @@ func selectRemoteModel(provider string) error {
 	defaultModel := ai.DefaultModelForProvider(provider)
 
 	if err != nil {
+		// A model list that cannot be fetched is a reachability fact about the
+		// provider the user is selecting right now. Recording it keeps the status
+		// line from claiming CLEAR on a shell that cannot answer anything.
+		ai.NoteProviderUnreachable(provider, err.Error())
 		color.Yellow("Could not fetch live model list: %v", err)
 		color.Yellow("Using default model: %s", defaultModel)
 		ai.UseModel(defaultModel)
 		return nil
 	}
+	ai.NoteProviderReachable(provider)
 
 	if len(models) == 0 {
 		ai.UseModel(defaultModel)

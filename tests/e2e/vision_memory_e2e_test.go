@@ -15,8 +15,11 @@ func TestE2E_EyesRefusedWithoutVisionModel(t *testing.T) {
 	h := newHarness(t, unusedPlan)
 	defer h.Close()
 
+	// The refusal must name the model it rejected and stay actionable — the old
+	// "No vision-capable model is configured — set one first." said neither which
+	// model failed nor which provider would work.
 	h.WriteLine("/eyes on")
-	if err := h.Expect("No vision-capable model is configured", 10*time.Second); err != nil {
+	if err := h.Expect("cannot process images", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 

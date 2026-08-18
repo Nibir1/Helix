@@ -34,6 +34,14 @@ type gridSignals struct {
 
 	// LocalLLM is true while the cloud→local brain failover is engaged (P11.2).
 	LocalLLM bool
+
+	// Brain is the last known reachability of the active LLM provider.
+	//
+	// Without it the line could print CLEAR on a shell that cannot answer
+	// anything: the failover breaker needs two failed model CALLS to trip, so a
+	// session that has only run slash commands leaves it untripped even after the
+	// startup probe reported "connection refused" (see internal/ai/brain_health.go).
+	Brain ai.BrainHealth
 }
 
 // gridStatus is the rendered verdict for one turn.
@@ -62,8 +70,15 @@ const gridStatusPrefix = "Helix :: GRID STATUS :: "
 func evaluateGridStatus(s gridSignals) gridStatus {
 	var reasons []string
 
+	// Worst first. A brain that cannot answer outranks everything else here:
+	// nothing Helix does this turn works without it.
+	if r := s.Brain.Reason(); r != "" && !s.LocalLLM {
+		reasons = append(reasons, "brain: "+r)
+	}
 	if s.LocalLLM {
-		reasons = append(reasons, "brain: local model (cloud unreachable)")
+		// The breaker already moved to the local model, so the failure it is
+		// covering is history — reporting both would read as two problems.
+		reasons = append(reasons, "brain: local model (primary unreachable)")
 	}
 	if s.Offline {
 		reasons = append(reasons, "offline mode: local providers first")
@@ -87,7 +102,10 @@ func evaluateGridStatus(s gridSignals) gridStatus {
 // currentGridSignals samples the live subsystems. Pure reads of state they
 // already hold — no network, no health checks, no audio device.
 func currentGridSignals() gridSignals {
-	sig := gridSignals{LocalLLM: ai.LocalFallbackActive()}
+	sig := gridSignals{
+		LocalLLM: ai.LocalFallbackActive(),
+		Brain:    ai.LastBrainHealth(),
+	}
 	if reg := speech.Default(); reg != nil {
 		sig.STT = reg.LastSTTHealth()
 		sig.TTS = reg.LastTTSHealth()

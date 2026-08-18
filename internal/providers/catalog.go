@@ -176,6 +176,59 @@ func SupportsToolUse(provider, model string) bool {
 	return false
 }
 
+// visionModelSubstrings are model-name fragments that mark a multimodal model
+// regardless of provider. Substring, not prefix: vendors bury the marker
+// mid-name ("qwen2.5-vl-7b", "llama-3.2-11b-vision-instruct").
+var visionModelSubstrings = []string{
+	// Explicitly-named multimodal builds.
+	"vision", "llava", "-vl", "vl-", "moondream", "minicpm-v", "bakllava",
+	// Families that are multimodal across the board.
+	"gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4-mini",
+	"claude-3", "claude-4", "claude-sonnet", "claude-opus", "claude-haiku",
+	"gemini", "gemma3", "gemma4",
+	"pixtral", "grok-2-vision", "grok-4",
+	"qwen2.5-vl", "qwen3-vl", "glm-4v", "glm-4.5v",
+	"internvl", "phi-3.5-vision", "phi-4-multimodal",
+}
+
+// SupportsVision reports whether a provider/model pair can process images.
+//
+// It replaces a three-substring test (`vision`, `gemma3`, `llava`) that missed
+// essentially every mainstream multimodal model — gpt-4o, every Claude 3/4, all
+// Gemini, and Ollama's own shipped default `gemma4:e2b`. The consequence was not
+// subtle: /eyes on refused with "No vision-capable model is configured" on
+// providers that see perfectly well, so the whole Phase 5 camera path was
+// unreachable on a normal cloud setup.
+//
+// Matching is on the MODEL name, deliberately: vision is a per-model property,
+// and a provider-level allowlist would claim vision for a text-only model from a
+// vendor that also ships multimodal ones.
+//
+// Args:
+//   - provider: registry provider name (currently advisory; kept for symmetry
+//     with SupportsToolUse and for future provider-level carve-outs).
+//   - model: the model that will actually be called.
+//
+// Returns: true when images can be sent.
+// Complexity: O(len(visionModelSubstrings)).
+func SupportsVision(provider, model string) bool {
+	_ = provider
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" {
+		return false
+	}
+	// Embedding endpoints share provider names but take no images.
+	if strings.Contains(m, "embedding") {
+		return false
+	}
+	for _, frag := range visionModelSubstrings {
+		if strings.Contains(m, frag) {
+			return true
+		}
+	}
+	return false
+}
+
 // CapabilitiesFor returns capability flags for a provider/model pair.
 func CapabilitiesFor(provider, model string) Capabilities {
 	model = strings.ToLower(model)
@@ -186,7 +239,7 @@ func CapabilitiesFor(provider, model string) Capabilities {
 		Chat:       true,
 		Planner:    GetContextLimit(model) >= 8_192,
 		Embeddings: provider == "openai" || provider == "ollama",
-		Vision:     strings.Contains(model, "vision") || strings.Contains(model, "gemma3") || strings.Contains(model, "llava"),
+		Vision:     SupportsVision(provider, model),
 		Local:      local,
 		Remote:     !local,
 		Streaming:  true,

@@ -24,7 +24,9 @@ func handleEyesCommand(raw string) {
 	switch arg {
 	case "on", "enable":
 		if !visionAvailable() {
-			color.Yellow("No vision-capable model is configured (active model or vision.provider) — set one first.")
+			for _, line := range visionUnavailableHelp() {
+				color.Yellow("%s", line)
+			}
 			return
 		}
 		setVisionEnabled(true)
@@ -36,6 +38,14 @@ func handleEyesCommand(raw string) {
 			state = "on"
 		}
 		fmt.Printf("Eyes: %s (frames per turn: %d)\n", state, visionMaxFrames())
+		// Say whether it CAN be turned on. Reporting only the toggle meant
+		// /eyes status looked fine on a setup where /eyes on could never succeed
+		// — the same gap /wake status had against its own banner.
+		if visionAvailable() {
+			color.Green("Vision model: %s — ready", visionRouteDescription())
+		} else {
+			color.Yellow("Vision model: %s — cannot see; /eyes on will refuse", visionRouteDescription())
+		}
 	default:
 		color.Yellow("Usage: /eyes <on|off|status>")
 	}
@@ -55,6 +65,54 @@ func visionAvailable() bool {
 		return ai.ProviderVisionCapable(cfg.Vision.Provider)
 	}
 	return ai.VisionCapable()
+}
+
+// visionRouteDescription names the provider/model that vision would actually
+// use, so the user can tell the dedicated-provider route from the active-chat
+// route at a glance.
+func visionRouteDescription() string {
+	if cfg.Vision.Provider != "" {
+		return fmt.Sprintf("%s (vision.provider)", cfg.Vision.Provider)
+	}
+	provider, model := ai.ActiveProviderName(), ai.ActiveModel()
+	if provider == "" {
+		return "no chat provider selected"
+	}
+	if model == "" {
+		return fmt.Sprintf("%s (no model selected)", provider)
+	}
+	return fmt.Sprintf("%s / %s (active chat provider)", provider, model)
+}
+
+// visionUnavailableHelp explains a refused /eyes on and how to fix it.
+//
+// The old single line — "No vision-capable model is configured (active model or
+// vision.provider) — set one first." — is accurate and useless: it names neither
+// which model was rejected, nor which of the nine registered providers would
+// qualify, nor where the setting lives. Helix knows all three.
+//
+// Args: none.
+// Returns: the lines to print, in order.
+// Complexity: O(providers).
+func visionUnavailableHelp() []string {
+	lines := []string{
+		fmt.Sprintf("Camera vision needs a multimodal model. %s cannot process images.",
+			visionRouteDescription()),
+	}
+
+	capable := ai.VisionCapableProviders()
+	if len(capable) == 0 {
+		// Naming an empty list would be worse than saying so plainly.
+		return append(lines,
+			"None of the registered providers offers a vision-capable default model.",
+			"Switch to a multimodal model with /provider use <name> then /model <id>",
+			"(e.g. gpt-4o, a claude-* model, or an Ollama llava/gemma3 build).")
+	}
+	return append(lines,
+		"Vision-capable providers registered here: "+strings.Join(capable, ", "),
+		"Either select one for chat:      /provider use <name>",
+		"or route ONLY frames to one by setting \"provider\" under \"vision\"",
+		"in ~/.helix/config.json — chat stays on your current model.")
 }
 
 // setVisionEnabled flips the opt-in and confirms vocally + in the journal.

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"helix/internal/ai"
 	"helix/internal/speech"
 )
 
@@ -112,5 +113,61 @@ func TestChainHealthReasonIsEmptyWhenClean(t *testing.T) {
 				t.Errorf("reason = %q, want empty", r)
 			}
 		})
+	}
+}
+
+// The screenshot case: llama.cpp selected with nothing listening, the startup
+// banner already saying "every planner and chat request will fail" — and the
+// per-turn line reporting CLEAR, because the failover breaker needs two failed
+// model CALLS and a session of slash commands never supplies them.
+func TestGridStatusDegradedWhenBrainIsUnreachable(t *testing.T) {
+	got := evaluateGridStatus(gridSignals{
+		Brain: ai.BrainHealth{
+			Attempted: true, Provider: "llamacpp",
+			Detail: "dial tcp 127.0.0.1:8080: connect: connection refused",
+		},
+	})
+
+	if !got.Degraded {
+		t.Fatalf("a shell that cannot reach its model is not CLEAR: %q", got.Line)
+	}
+	for _, want := range []string{"DEGRADED", "brain", "llamacpp"} {
+		if !strings.Contains(got.Line, want) {
+			t.Errorf("line = %q, want it to mention %q", got.Line, want)
+		}
+	}
+}
+
+// An unknown brain (nothing called, nothing probed) is not a failure.
+func TestGridStatusUnknownBrainIsClear(t *testing.T) {
+	if got := evaluateGridStatus(gridSignals{Brain: ai.BrainHealth{}}); got.Degraded {
+		t.Errorf("an unprobed provider must not read as broken: %q", got.Line)
+	}
+	healthy := evaluateGridStatus(gridSignals{
+		Brain: ai.BrainHealth{Attempted: true, OK: true, Provider: "llamacpp"},
+	})
+	if healthy.Degraded {
+		t.Errorf("a reachable provider must be CLEAR: %q", healthy.Line)
+	}
+}
+
+// Once the breaker has moved to the local model the failure it is covering is
+// history: reporting both would read as two separate problems.
+func TestGridStatusFailoverReportsOneBrainReason(t *testing.T) {
+	got := evaluateGridStatus(gridSignals{
+		LocalLLM: true,
+		Brain: ai.BrainHealth{
+			Attempted: true, Provider: "openai", Detail: "i/o timeout",
+		},
+	})
+
+	if !got.Degraded {
+		t.Fatal("running on the fallback brain is degraded")
+	}
+	if n := strings.Count(got.Line, "brain:"); n != 1 {
+		t.Errorf("want exactly one brain reason, got %d: %q", n, got.Line)
+	}
+	if !strings.Contains(got.Line, "local model") {
+		t.Errorf("line = %q, want it to say the local model is in force", got.Line)
 	}
 }

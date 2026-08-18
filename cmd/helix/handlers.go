@@ -30,6 +30,7 @@ import (
 	"helix/internal/diagnostics"
 	"helix/internal/edge"
 	"helix/internal/ollama"
+	"helix/internal/providers/llamacpp"
 	"helix/internal/rag"
 	"helix/internal/shell"
 	"helix/internal/speech"
@@ -1468,6 +1469,7 @@ func handleProviderStatus() {
 	}
 	color.Cyan("Active Provider: %s", ai.ActiveProviderName())
 	color.Cyan("Active Model: %s", ai.ActiveModel())
+	printActiveProviderHealth()
 	// BlackBox P11.2: when the breaker is engaged the two lines above already
 	// name the LOCAL model, which would otherwise look like the user's own
 	// choice. Say why.
@@ -1480,6 +1482,51 @@ func handleProviderStatus() {
 	// it explains a real behavior difference — native tool calling removes the
 	// JSON-repair retries the prompt path needs.
 	color.Cyan("Planner protocol: %s", ai.PlannerTransport())
+}
+
+// printActiveProviderHealth probes the active provider and says whether it can
+// actually answer.
+//
+// The listing above it only reports API-key state, which says nothing at all
+// about a local provider: an llama.cpp with nothing listening on its port showed
+// up as "local/no key (active)" while the startup banner had just said "every
+// planner and chat request will fail". A status command that cannot tell those
+// two situations apart is the same defect /voice-status had.
+//
+// Probing here is deliberate and matches /voice-status: this is an explicit
+// diagnostic the user asked for, not the turn loop (which reads the recorded
+// state instead). The result is recorded, so the next GRID STATUS line agrees
+// with what this printed.
+func printActiveProviderHealth() {
+	if ai.ActiveProviderName() == "" {
+		color.Yellow("Reachability: no provider selected — run /provider use <name>")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := ai.CheckActiveProvider(ctx); err != nil {
+		color.Red("Reachability: UNREACHABLE — %v", err)
+		for _, line := range activeProviderHint(err) {
+			color.Yellow("  %s", line)
+		}
+		return
+	}
+	color.Green("Reachability: ok")
+}
+
+// activeProviderHint returns the actionable follow-up for an unreachable active
+// provider. llama.cpp gets its dedicated diagnosis (a foreign service on the
+// port reads very differently from nothing listening); everything else gets the
+// generic pointer, since a cloud outage has no local fix.
+func activeProviderHint(err error) []string {
+	if ai.ActiveProviderName() != llamacpp.Name {
+		return []string{"Check connectivity and the API key, or /provider use <name> to switch."}
+	}
+	url := llamacpp.BaseURL(cfg.LLM.LlamaCppURL)
+	_, hint := llamacpp.Diagnose(err, url)
+	return strings.Split(hint, "\n")
 }
 
 func handleProviderCommand(args []string) {
@@ -1537,6 +1584,11 @@ func displayProviderStatus() {
 	for _, line := range lines {
 		color.Cyan(line)
 	}
+	// /provider status and /provider-status are separate handlers; both must
+	// answer "can the selected brain actually be reached?", or which one the user
+	// happened to type decides whether they find out.
+	color.Cyan("Active Provider: %s", ai.ActiveProviderName())
+	printActiveProviderHealth()
 }
 
 func handleAudioCommand(input string) {
