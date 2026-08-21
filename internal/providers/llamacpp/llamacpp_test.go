@@ -180,8 +180,23 @@ func TestDiagnoseDistinguishesForeignServerFromSilence(t *testing.T) {
 	if kind != DiagnosisUnreachable {
 		t.Fatalf("a dial failure means nobody is listening, got kind=%v", kind)
 	}
-	if !strings.Contains(hint, "Nothing is listening") || !strings.Contains(hint, "llama-server -m") {
-		t.Errorf("unreachable hint should say to start the server:\n%s", hint)
+	if !strings.Contains(hint, "Nothing is listening") {
+		t.Errorf("unreachable hint should say nothing is listening:\n%s", hint)
+	}
+	// The next step depends on whether llama-server exists on THIS machine, so
+	// assert that there is one either way rather than pinning the wording to
+	// whichever case the test host happens to be in.
+	if _, installed := ServerInstalled(); installed {
+		if !strings.Contains(hint, "llama-server -m") {
+			t.Errorf("with the binary present the hint should say how to start it:\n%s", hint)
+		}
+	} else {
+		if !strings.Contains(hint, "NOT INSTALLED") {
+			t.Errorf("without the binary the hint should say so:\n%s", hint)
+		}
+		if strings.Contains(hint, "llama-server -m /path") {
+			t.Errorf("must not print a launch command for a binary that is absent:\n%s", hint)
+		}
 	}
 	if strings.Contains(hint, "another service") {
 		t.Error("a dial failure must not blame a port conflict")

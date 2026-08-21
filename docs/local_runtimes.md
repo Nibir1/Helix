@@ -34,7 +34,51 @@ provider and is a valid target for the offline failover chain.
 **If Ollama runs on your machine, use Ollama.** Reach for llama.cpp when it does
 not, or when you want a specific quantization Ollama does not package.
 
-### Yes — llama.cpp can serve the models Ollama already pulled
+### Installing llama.cpp
+
+It is a *build*, not a package, on most platforms — there is no
+`apt install llama.cpp`. Where Homebrew is available the bottle is a signed
+prebuilt binary and a single command, so Helix offers to run it for you:
+
+```bash
+brew install llama.cpp
+```
+
+Everywhere else it prints the CMake build instead of offering to run it. That
+line is deliberate: building llama.cpp means choosing a GPU backend (CUDA, Metal,
+Vulkan, CPU), and that is the user's decision, not Helix's — the same reasoning
+as ADR-002. A Homebrew bottle makes no such choice, which is why it is the one
+case Helix will execute.
+
+Helix checks whether the binary exists before suggesting any launch command. If
+you have a healthy Ollama and no llama.cpp, it says so — llama.cpp is not the
+easier option unless Ollama cannot serve your hardware.
+
+### Yes — llama.cpp downloads models too
+
+It is not "Ollama pulls, llama.cpp doesn't". `llama-server -hf <org>/<repo>`
+fetches a GGUF from Hugging Face, caches it, and serves it — one command, no
+separate download step, no token for public models:
+
+```bash
+llama-server -hf ggml-org/gemma-4-E2B-it-GGUF --port 8080
+```
+
+Later launches reuse the cached copy. A bare `llama-server` (or
+`--models-dir PATH`) auto-discovers what is already cached and lists it at
+`GET /models`.
+
+So there is never a reason to install Ollama merely to obtain weights for
+llama.cpp. Helix's setup flow lists what is already on disk first — the llama.cpp
+cache *and* Ollama's blobs — and only then offers `-hf` downloads sized to the
+machine's RAM.
+
+Cache locations, checked in this order: `$LLAMA_CACHE`, `$HF_HUB_CACHE`,
+`$HF_HOME/hub`, `~/.cache/llama.cpp`, `~/.cache/huggingface/hub`. The location
+moved from llama.cpp's own cache to the shared Hugging Face hub cache, so both
+generations are searched.
+
+### And it can serve the models Ollama already pulled
 
 Same files, no copy and no conversion. Ollama stores weights as plain GGUF,
 content-addressed:
@@ -239,9 +283,15 @@ often each is the cause:
 
    On other platforms there is no default culprit to name, so Helix hands over
    `lsof -nP -iTCP:<port> -sTCP:LISTEN` instead of guessing.
-4. **Placeholder model** — `local-gguf` still showing after selection means
+4. **Not installed vs not running.** These need different fixes, and Helix says
+   which one you have. `llama-server` is a build, not a package, on most
+   platforms — on macOS with Homebrew it is `brew install llama.cpp`; elsewhere
+   see the install hint Helix prints. If you have a working Ollama and no
+   llama.cpp, the wizard will say so and point you at Ollama, because llama.cpp
+   is not the easier option unless Ollama cannot serve your hardware.
+5. **Placeholder model** — `local-gguf` still showing after selection means
    `llama-server` did not report a model; expect conservative capability
    defaults and no vision.
-5. **Mute build** — a CGO-free build cannot play audio however TTS is
+6. **Mute build** — a CGO-free build cannot play audio however TTS is
    configured. `/version` and `/doctor` state the build flavor; rebuild with
    `CGO_ENABLED=1 go build -tags audio_cgo ./cmd/helix`.

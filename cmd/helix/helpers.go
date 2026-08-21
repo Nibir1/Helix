@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -102,12 +104,33 @@ func setupLlamaCppProvider() error {
 		for _, line := range strings.Split(hint, "\n") {
 			color.Yellow("  %s", line)
 		}
+
+		// Whether llama-server exists decides the advice, and Diagnose already
+		// made that call (it is the package that can check). Reuse it here so
+		// /provider-status and this wizard cannot disagree.
+		_, installed := llamacpp.ServerInstalled()
 		color.Yellow("  Override the endpoint with HELIX_LLAMACPP_URL or llm.llamacpp_url.")
+
+		// Offer to install it, then walk the user to a running server. Each stage
+		// only runs when the previous one is satisfied, so nobody is shown a
+		// launch command for a binary they do not have, or a model list for a
+		// runtime that cannot start.
+		if !installed {
+			installed = offerLlamaCppInstall()
+		}
+		if installed {
+			guideLlamaCppModel(llamacpp.BaseURL(cfg.LLM.LlamaCppURL))
+		} else {
+			// No binary: the Ollama weights are context for later, and a working
+			// Ollama is a genuine alternative worth naming.
+			suggestOllamaInstead(false)
+			suggestOllamaWeightsForLlamaCpp(false)
+		}
+
 		// Selecting it anyway leaves the shell unable to answer ANYTHING, so
 		// say that plainly rather than letting the next prompt fail with a raw
 		// 404 from whatever else is on that port.
-		color.Yellow("  Until it responds, every planner and chat request will fail.")
-		suggestOllamaWeightsForLlamaCpp()
+		color.Yellow("Until llama-server responds, every planner and chat request will fail.")
 		if !commands.AskForConfirmation("Select llama.cpp anyway?") {
 			return fmt.Errorf("llama.cpp not usable at %s", url)
 		}
@@ -590,7 +613,7 @@ func confirmKeyForProvider(provider, key string) bool {
 // stored content-addressed, with no extension and no name, so nobody finds them
 // by looking. llama.cpp reads GGUF by magic bytes rather than filename, so the
 // blob path works directly — no copy, no conversion, no second download.
-func suggestOllamaWeightsForLlamaCpp() {
+func suggestOllamaWeightsForLlamaCpp(serverInstalled bool) {
 	models, err := ollama.LocalGGUFs()
 	if err != nil || len(models) == 0 {
 		return
@@ -598,7 +621,15 @@ func suggestOllamaWeightsForLlamaCpp() {
 
 	fmt.Println()
 	color.Cyan("You already have %d GGUF model(s) on disk from Ollama.", len(models))
-	color.Cyan("llama.cpp can serve them directly — same files, no copy or conversion:")
+	if !serverInstalled {
+		// Without the binary this is context for later, not a command to run
+		// now. Presenting it as the latter is how a user ends up pasting a
+		// "command not found".
+		color.Cyan("Once llama-server is installed it can serve them directly — same files,")
+		color.Cyan("no copy or conversion:")
+	} else {
+		color.Cyan("llama.cpp can serve them directly — same files, no copy or conversion:")
+	}
 
 	const shown = 5
 	for i, m := range models {
@@ -609,5 +640,196 @@ func suggestOllamaWeightsForLlamaCpp() {
 		color.Cyan("  %-28s %5.1f GB", m.Name, m.SizeGB())
 		color.Cyan("    llama-server -m %s --port 8080", m.Path)
 	}
-	color.Yellow("Ollama and llama-server cannot serve the same port at once; stop one first.")
+	// Accuracy matters here: Ollama listens on 11434 and llama-server on 8080, so
+	// they do NOT collide by default — an earlier version of this line claimed
+	// they did. The real cost of running both is memory, since each loads its own
+	// copy of the weights.
+	color.Yellow("Ollama (11434) and llama-server (8080) can run side by side, but each")
+	color.Yellow("loads its own copy of the weights — stop one if RAM is tight.")
+	color.Yellow("Note: whisper.cpp also defaults to 8080; /doctor reports that clash.")
+}
+
+// suggestOllamaInstead points at a working Ollama when llama.cpp is not
+// installed.
+//
+// llama.cpp earns its place on hardware Ollama cannot serve (see
+// docs/local_runtimes.md); it is not the easier option anywhere else. When the
+// user has picked it, does not have it, and has a healthy Ollama already, saying
+// so is more useful than walking them through a build they may not need.
+func suggestOllamaInstead(llamaInstalled bool) {
+	if llamaInstalled {
+		return // they have it; the choice is theirs and it is a valid one
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	client := ollama.NewClient()
+	if err := client.Health(ctx); err != nil {
+		return // no working alternative to offer
+	}
+
+	fmt.Println()
+	color.Green("Ollama IS running on this machine and does the same job.")
+	if models, err := client.ListModels(ctx); err == nil && len(models) > 0 {
+		color.Green("  It already has: %s", strings.Join(modelIDs(models, 4), ", "))
+	}
+	color.Green("  Answer N here and choose \"Ollama (local)\" instead — no build required.")
+	color.Cyan("  llama.cpp is for hardware Ollama cannot serve; see docs/local_runtimes.md.")
+}
+
+// modelIDs renders up to max model names for a one-line summary.
+func modelIDs(models []providers.ModelInfo, max int) []string {
+	out := make([]string, 0, max+1)
+	for i, m := range models {
+		if i == max {
+			out = append(out, fmt.Sprintf("and %d more", len(models)-max))
+			break
+		}
+		out = append(out, m.ID)
+	}
+	return out
+}
+
+// offerLlamaCppInstall installs llama.cpp when there is one unambiguous command
+// for it, returning whether the binary is present afterwards.
+//
+// The narrowness is deliberate (see llamacpp.InstallCommand): a Homebrew bottle
+// is a prebuilt binary and a single command, whereas building llama.cpp means
+// choosing a GPU backend, which is the user's decision and not Helix's.
+func offerLlamaCppInstall() bool {
+	cmdLine, ok := llamacpp.InstallCommand()
+	if !ok {
+		// Instructions were already printed by Diagnose; nothing to offer.
+		return false
+	}
+
+	fmt.Println()
+	color.Cyan("Helix can install it for you:")
+	color.Cyan("  %s", cmdLine)
+	if !commands.AskForConfirmation("Run that now?") {
+		color.Yellow("Skipped. Run it yourself and re-select llama.cpp when done.")
+		return false
+	}
+
+	err := runCancellableProgressWithTimeout(
+		"INSTALLING LLAMA.CPP",
+		30*time.Minute,
+		func(ctx context.Context, progress func(string, int64, int64)) error {
+			progress("INSTALLING LLAMA.CPP", 0, 0)
+			return runShellInstall(ctx, cmdLine)
+		},
+	)
+	if err != nil {
+		color.Red("Install failed: %v", err)
+		color.Yellow("Run it manually: %s", cmdLine)
+		return false
+	}
+
+	// Trust the check, not the exit code: a package manager can succeed while
+	// putting the binary somewhere this process cannot see (a PATH that does not
+	// include the keg until a new shell).
+	path, present := llamacpp.ServerInstalled()
+	if !present {
+		color.Yellow("Install reported success but llama-server is still not on PATH.")
+		color.Yellow("Open a new shell, or add Homebrew's bin directory to PATH.")
+		return false
+	}
+	color.Green("Installed: %s", path)
+	return true
+}
+
+// runShellInstall executes an install command through the shell.
+func runShellInstall(ctx context.Context, cmdLine string) error {
+	fields := strings.Fields(cmdLine)
+	if len(fields) == 0 {
+		return fmt.Errorf("empty install command")
+	}
+	// Executed as argv, never through a shell: the command is a constant from
+	// llamacpp.InstallCommand, and running it via `sh -c` would add an
+	// interpreter for no benefit.
+	c := exec.CommandContext(ctx, fields[0], fields[1:]...)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
+// guideLlamaCppModel walks an installed-but-idle llama-server to a running one.
+//
+// The order answers "does llama.cpp pull models like Ollama?" in the most useful
+// way: it lists what is ALREADY on disk first (including Ollama's own blobs,
+// which llama.cpp reads directly), and only then offers a download. It does pull
+// — `-hf` fetches from Hugging Face and caches it — so there is never a reason
+// to install a second runtime just to obtain weights.
+func guideLlamaCppModel(endpoint string) {
+	port := "8080"
+	if u, err := url.Parse(endpoint); err == nil && u.Port() != "" {
+		port = u.Port()
+	}
+
+	cached := llamacpp.CachedModels()
+	ollamaModels, _ := ollama.LocalGGUFs()
+
+	if len(cached) == 0 && len(ollamaModels) == 0 {
+		fmt.Println()
+		color.Cyan("No GGUF models found on this machine yet.")
+		color.Cyan("llama.cpp downloads them itself — no other tool needed:")
+		printLlamaCppPullOptions(port)
+		return
+	}
+
+	fmt.Println()
+	color.Green("Models already on disk. Start llama-server with one of these:")
+
+	const shown = 4
+	printed := 0
+	for _, m := range cached {
+		if printed == shown {
+			break
+		}
+		color.Cyan("  %-34s %5.1f GB   (llama.cpp cache)", truncStr(m.Name, 34), m.SizeGB())
+		color.Cyan("    %s", llamacpp.ServeCommand(m.Path, port))
+		printed++
+	}
+	for _, m := range ollamaModels {
+		if printed == shown {
+			break
+		}
+		color.Cyan("  %-34s %5.1f GB   (pulled by Ollama)", truncStr(m.Name, 34), m.SizeGB())
+		color.Cyan("    %s", llamacpp.ServeCommand(m.Path, port))
+		printed++
+	}
+	if total := len(cached) + len(ollamaModels); total > printed {
+		color.Cyan("  ... and %d more", total-printed)
+	}
+
+	if len(ollamaModels) > 0 {
+		color.Yellow("Ollama's GGUFs load directly — same files, no copy or conversion.")
+	}
+	fmt.Println()
+	color.Cyan("Or download a different one:")
+	printLlamaCppPullOptions(port)
+}
+
+// printLlamaCppPullOptions lists -hf download commands suited to this hardware.
+func printLlamaCppPullOptions(port string) {
+	hw := providers.DetectHardware()
+	var offered int
+	for _, rec := range providers.RecommendLocalModels(hw) {
+		if rec.Runtime != "llamacpp" || rec.HFRepo == "" {
+			continue
+		}
+		color.Cyan("  %s", rec.DisplayName)
+		color.Cyan("    %s", llamacpp.PullCommand(rec.HFRepo, port))
+		offered++
+	}
+	if offered == 0 {
+		// RecommendLocalModels filters on RAM, so a very small machine can end
+		// up with nothing. Say that rather than printing an empty list.
+		color.Yellow("  No recommended model fits %d GB of RAM.", hw.RAMGB)
+		color.Yellow("  Browse GGUFs at https://huggingface.co/models?library=gguf and use:")
+		color.Yellow("    %s", llamacpp.PullCommand("<org>/<repo>", port))
+		return
+	}
+	color.Yellow("  The download is cached, so later launches reuse it.")
 }
