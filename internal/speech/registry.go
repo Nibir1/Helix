@@ -388,7 +388,7 @@ func (r *Registry) Transcribe(ctx context.Context, audio AudioFormat) (Transcrip
 			r.recordSTTHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return t, nil
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		errs = append(errs, labelProviderErr(name, err))
 		failed = append(failed, name)
 	}
 
@@ -418,7 +418,7 @@ func (r *Registry) Synthesize(ctx context.Context, text string, opts SynthesisOp
 			r.recordTTSHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return audio, nil
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		errs = append(errs, labelProviderErr(name, err))
 		failed = append(failed, name)
 	}
 
@@ -476,7 +476,7 @@ func (r *Registry) SynthesizeStream(
 			r.recordTTSHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return stream, name, nil
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		errs = append(errs, labelProviderErr(name, err))
 		failed = append(failed, name)
 	}
 
@@ -493,3 +493,20 @@ func (r *Registry) SynthesizeStream(
 // errNoStreamingTTS marks "no provider in the chain streams" — an expected,
 // non-error condition that simply selects the buffered path.
 var errNoStreamingTTS = errors.New("no streaming TTS provider in chain")
+
+// labelProviderErr ensures a chain error names its provider exactly once.
+//
+// Every shipped adapter already self-labels, so an unconditional prefix here
+// produced "piper-local: piper-local: HTTP 403" in the failover message. But
+// dropping the prefix outright would leave an adapter that forgets to label
+// itself anonymous in a multi-provider failure — the one place the name matters
+// most. Prefixing only when it is absent gets both.
+func labelProviderErr(name string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.HasPrefix(err.Error(), name) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", name, err)
+}

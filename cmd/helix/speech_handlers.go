@@ -212,12 +212,51 @@ func handleVoiceSetup() {
 	}
 
 	color.Green("Voice link configured.")
-	fmt.Println("Try: /say Voice link online    |    /listen 5")
+
+	// Verify BEFORE claiming success. The wizard used to print "configured" and
+	// stop, so a selection that could never work — a sidecar that is not running,
+	// or a port owned by something else — only surfaced later as a failed /say,
+	// by which point the wizard looked like it had succeeded.
+	verifySpeechSelection()
+
 	if rec, rerr := speech.DetectRecorder(); rerr != nil {
 		color.Yellow("Microphone note: %v", rerr)
 	} else {
 		fmt.Printf("Recorder detected: %s\n", rec)
 	}
+	fmt.Println("Try: /say Voice link online    |    /listen 5")
+}
+
+// verifySpeechSelection probes the newly selected chain and reports what it found.
+func verifySpeechSelection() {
+	// Endpoint collisions first: they explain a "reachable" probe that then fails
+	// every request, and no per-provider check can see them.
+	reportEndpointConflicts()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	report := speech.Status(ctx)
+	problems := 0
+	for _, group := range [][]speech.ProviderStatusRow{report.STTStatus, report.TTSStatus} {
+		for _, row := range group {
+			if !row.InChain || row.Healthy {
+				continue
+			}
+			problems++
+			color.Red("%s is in your chain but not answering.", row.Name)
+			for _, line := range providerDetailLines(row) {
+				color.Yellow("  %s", line)
+			}
+		}
+	}
+
+	if problems == 0 {
+		color.Green("Chain verified: every selected provider answered.")
+		return
+	}
+	color.Yellow("%d selected provider(s) cannot serve a request yet.", problems)
+	color.Yellow("Fix the above, then re-check with /voice-status — no need to re-run the wizard.")
 }
 
 // filterCatalog narrows pricing rows to registered providers of one kind.

@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -97,16 +98,48 @@ func TestTurnRecordedIntoSession(t *testing.T) {
 }
 
 func TestGitCommitJournaledForUndo(t *testing.T) {
-	ag, _, undo := newTestAgentWithState(t)
-	_ = ag
+	// Run genuinely OUTSIDE a repository, which is what this test always claimed
+	// to be doing.
+	//
+	// It used to run in the package directory — inside the Helix repo — and rely
+	// on `git commit` failing for want of staged changes. That is not a
+	// guarantee: with anything staged, the commit SUCCEEDS, and the test creates
+	// a real commit in the developer's repository titled "will fail outside a
+	// repo". That happened. A unit test must not be able to write to the history
+	// of the tree it is testing, so the working directory is now a temp dir with
+	// no .git, and the failure path is asserted rather than hoped for.
+	t.Chdir(t.TempDir())
 
-	// A commit step that FAILS must not be journalled (nothing to undo).
-	if err := ag.handleGitStep(ai.PlanStep{Tool: "git", Action: "commit",
-		Args: map[string]string{"message": "will fail outside a repo"}}); err == nil {
-		t.Log("commit succeeded (repo present?) — failure path not exercised")
+	ag, _, undo := newTestAgentWithState(t)
+
+	err := ag.handleGitStep(ai.PlanStep{Tool: "git", Action: "commit",
+		Args: map[string]string{"message": "will fail outside a repo"}})
+	if err == nil {
+		t.Fatal("a commit outside a repository must fail")
 	}
+
+	// A commit step that FAILS must not be journalled — there is nothing to undo.
 	if _, ok, _ := undo.Last(); ok {
-		// Only assert the failure case when the commit actually failed.
 		t.Fatal("failed commit must not be journalled")
+	}
+}
+
+// TestGitStepNeverCommitsOutsideItsWorkingDir is a guard on the guard: it pins
+// the property that made the bug above possible, so a future refactor that
+// resolves the repo from somewhere other than the working directory fails here
+// rather than in someone's git history.
+func TestGitStepNeverCommitsOutsideItsWorkingDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	ag, _, _ := newTestAgentWithState(t)
+	if err := ag.handleGitStep(ai.PlanStep{Tool: "git", Action: "commit",
+		Args: map[string]string{"message": "must not reach any repository"}}); err == nil {
+		t.Fatal("a git step in a non-repository directory must fail")
+	}
+
+	// And it must not have created one either.
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		t.Fatal("the git step initialized a repository in the working directory")
 	}
 }

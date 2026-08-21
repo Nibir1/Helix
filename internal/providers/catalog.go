@@ -176,6 +176,56 @@ func SupportsToolUse(provider, model string) bool {
 	return false
 }
 
+// MaxTokensField is the request field that bounds a completion.
+const (
+	// FieldMaxTokens is the original OpenAI parameter, and what every
+	// OpenAI-COMPATIBLE server understands (llama.cpp, Ollama, Groq, DeepSeek,
+	// xAI, GLM, Kimi, Qwen). It stays the default for that reason.
+	FieldMaxTokens = "max_tokens"
+
+	// FieldMaxCompletionTokens is OpenAI's replacement. Reasoning models
+	// (GPT-5.x, o1, o3, o4) REJECT max_tokens outright with an
+	// unsupported_parameter 400, because that bound could not account for the
+	// internal reasoning tokens they generate.
+	FieldMaxCompletionTokens = "max_completion_tokens"
+)
+
+// maxCompletionTokensModels are the model-name prefixes that require
+// FieldMaxCompletionTokens.
+//
+// Prefix matching on the MODEL, not the provider: an OpenAI-compatible proxy
+// ("custom") may well be serving gpt-5, and OpenAI itself still serves older
+// models that only accept max_tokens. Note that gpt-4-turbo accepts ONLY
+// max_tokens, so this cannot be widened to "everything OpenAI".
+var maxCompletionTokensModels = []string{
+	"gpt-5", "o1", "o1-mini", "o1-preview", "o3", "o3-mini", "o4", "o4-mini",
+}
+
+// PreferredMaxTokensField returns the completion-bound field to send first.
+//
+// It is a starting guess, not a verdict: the adapter recovers from a wrong guess
+// by reading the server's own correction and retrying once, then remembering the
+// answer. That matters because this list ages — a model released tomorrow will
+// not be in it, and a hardcoded table alone would fail closed on exactly the
+// newest models.
+func PreferredMaxTokensField(provider, model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	for _, prefix := range maxCompletionTokensModels {
+		if m == prefix || strings.HasPrefix(m, prefix+"-") || strings.HasPrefix(m, prefix+".") {
+			return FieldMaxCompletionTokens
+		}
+	}
+	return FieldMaxTokens
+}
+
+// AlternateMaxTokensField returns the other field, for the retry.
+func AlternateMaxTokensField(field string) string {
+	if field == FieldMaxCompletionTokens {
+		return FieldMaxTokens
+	}
+	return FieldMaxCompletionTokens
+}
+
 // visionModelSubstrings are model-name fragments that mark a multimodal model
 // regardless of provider. Substring, not prefix: vendors bury the marker
 // mid-name ("qwen2.5-vl-7b", "llama-3.2-11b-vision-instruct").

@@ -67,6 +67,16 @@ func NewKokoroLocalTTS(model, voice, baseURL string) TTSProvider {
 	}
 }
 
+// wrapErr labels a failure with the provider, adding a full local diagnosis for
+// a sidecar (where the cause is usually the environment) and a plain prefix for
+// a cloud provider (where it is usually the key or the network).
+func (p *openaiTTS) wrapErr(err error) error {
+	if !p.local {
+		return fmt.Errorf("%s: %w", p.name, err)
+	}
+	return LocalDiagnosis(p.name, serverOrigin(p.baseURL), kokoroStartCmd, kokoroCfgKey, err)
+}
+
 func (p *openaiTTS) Name() string         { return p.name }
 func (p *openaiTTS) DisplayName() string  { return p.display }
 func (p *openaiTTS) SetAPIKey(key string) { p.key = key }
@@ -110,7 +120,7 @@ func (p *openaiTTS) Synthesize(ctx context.Context, text string, opts SynthesisO
 	data, err := sharedClient.DoRaw(ctx, http.MethodPost,
 		p.baseURL+"/audio/speech", headers, "application/json", payload)
 	if err != nil {
-		return AudioFormat{}, fmt.Errorf("%s: %w", p.name, err)
+		return AudioFormat{}, p.wrapErr(err)
 	}
 	if len(data) < 44 || string(data[:4]) != "RIFF" {
 		return AudioFormat{}, fmt.Errorf("%s: unexpected non-WAV response (%d bytes)", p.name, len(data))

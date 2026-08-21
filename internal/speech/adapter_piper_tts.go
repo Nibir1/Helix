@@ -20,8 +20,6 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
-
-	"helix/internal/providers"
 )
 
 // piperDefaultBaseURL is piper.http_server's default bind address.
@@ -133,14 +131,19 @@ func (p *piperTTS) Synthesize(ctx context.Context, text string, _ SynthesisOptio
 		data, err := sharedClient.DoRaw(ctx, http.MethodGet, p.synthURL(route, text), nil, "", nil)
 		if err != nil {
 			lastErr = err
-			if providers.IsNotFound(err) && len(p.routes) > 1 {
+			// Any 4xx means "not here" on THIS route: 404 for a missing path,
+			// 403/401 for a server that refuses everything (an AirPlay Receiver
+			// squatting on port 5000 does exactly this). Walk on and let the
+			// diagnosis below explain whatever the last one was. Only a 404 used
+			// to continue, so a 403 aborted the walk and surfaced as a bare
+			// "HTTP 403:" with an empty body and no explanation.
+			if isClientError(err) && len(p.routes) > 1 {
 				continue
 			}
-			return AudioFormat{}, fmt.Errorf("%s: %w", p.name, err)
+			return AudioFormat{}, p.diagnose(err)
 		}
 		if len(data) < 44 || string(data[:4]) != "RIFF" {
-			lastErr = fmt.Errorf("%s answered on %s with %d bytes that are not WAV",
-				p.origin, route, len(data))
+			lastErr = fmt.Errorf("answered on %s with %d bytes that are not WAV", route, len(data))
 			continue
 		}
 
@@ -156,7 +159,13 @@ func (p *piperTTS) Synthesize(ctx context.Context, text string, _ SynthesisOptio
 	if lastErr == nil {
 		lastErr = errors.New("no synthesis route responded")
 	}
-	return AudioFormat{}, fmt.Errorf("%s: %w", p.name, lastErr)
+	return AudioFormat{}, p.diagnose(lastErr)
+}
+
+// diagnose turns a failure into an explanation naming the endpoint, the likely
+// cause, and the fix.
+func (p *piperTTS) diagnose(err error) error {
+	return LocalDiagnosis(p.name, p.origin, piperStartCmd, piperCfgKey, err)
 }
 
 // piperMaxHeaderBytes bounds how much of a response may be consumed looking for
@@ -213,7 +222,7 @@ func (p *piperTTS) SynthesizeStream(
 	if lastErr == nil {
 		lastErr = errors.New("no synthesis route responded")
 	}
-	return StreamedAudio{}, fmt.Errorf("%s: %w", p.name, lastErr)
+	return StreamedAudio{}, p.diagnose(lastErr)
 }
 
 // readWAVStreamHeader consumes a RIFF/WAVE header from r, leaving the reader

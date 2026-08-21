@@ -396,6 +396,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 		// That previously caused the second hang: planner timeout followed by
 		// chat fallback timeout/cancellation.
 		if errors.Is(err, context.DeadlineExceeded) {
+			a.speakBrainFailure(err)
 			return nil, false
 		}
 
@@ -632,6 +633,11 @@ func (a *Agent) chatFallback(userInput string, think thinkerShim) {
 
 	if chatErr != nil {
 		a.render.PrintError(fmt.Sprintf("Chat fallback failed: %v", chatErr))
+		// A voice user is not reading the terminal. Both the planner error and
+		// this one used to print and stop, so a spoken turn against an
+		// unreachable model produced total silence — indistinguishable from a
+		// mic that stopped working.
+		a.speakBrainFailure(chatErr)
 		return
 	}
 
@@ -1630,4 +1636,39 @@ func extractMutatedFiles(cmd string) []string {
 	}
 
 	return uniqueStrings(files)
+}
+
+// speakBrainFailure tells a voice user, out loud, that the model could not be
+// reached.
+//
+// Silence is the worst possible response here: the terminal shows the error and
+// a DEGRADED status line, but someone speaking to the shell sees neither, and a
+// turn that produces no sound at all is indistinguishable from a broken
+// microphone. The spoken form is deliberately short and free of provider detail
+// — the terminal has that — and names the one command that explains it.
+func (a *Agent) speakBrainFailure(err error) {
+	if !a.voiceActive() {
+		return
+	}
+	a.speak(brainFailureUtterance(err))
+}
+
+// brainFailureUtterance picks the spoken wording for a model failure.
+func brainFailureUtterance(err error) string {
+	if err == nil {
+		return "I could not reach the model. The terminal has the details."
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "deadline exceeded"), strings.Contains(msg, "timeout"):
+		return "The model timed out. The terminal has the details."
+	case strings.Contains(msg, "no ai provider"):
+		return "No model is configured. Run slash setup in the terminal."
+	case strings.Contains(msg, "api key"):
+		return "The model rejected the API key. Run slash provider status in the terminal."
+	case strings.Contains(msg, "unsupported_parameter"), strings.Contains(msg, "invalid_request"):
+		return "The model rejected the request. The terminal has the details."
+	default:
+		return "I could not reach the model. The terminal has the details, and slash provider status will say why."
+	}
 }

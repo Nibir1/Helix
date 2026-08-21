@@ -168,13 +168,18 @@ yet do:
 ## 7. Setup
 
 ```text
-/voice-setup     configure STT and TTS providers with live pricing
+/voice-setup     configure STT and TTS providers, then verify the chain
 /voice-status    chains, health, endpoints, resolved routes, spoken vocabulary
 /mictest         3-second check: is the microphone actually being heard?
 /voice           enter voice mode
 /manual          back to the keyboard (also stops a reply mid-sentence)
 ```
 
+`/voice-setup` probes what you selected before reporting success, so a sidecar
+that is not running (or a port owned by something else) is named at setup rather
+than surfacing later as a failed `/say`.
+
 Local, offline chain: whisper.cpp for STT and Piper or Kokoro for TTS. See
 [local_runtimes.md](local_runtimes.md) for ports and launch commands — and note
-that whisper.cpp's stock port collides with llama.cpp's.
+two traps there: whisper.cpp's stock port collides with llama.cpp's, and on macOS
+AirPlay Receiver owns Piper's default port 5000.

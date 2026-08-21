@@ -164,6 +164,16 @@ silence (an empty transcript is a pass — the *route* is what is being verified
 and piper-local synthesizes one short word and requires actual RIFF/WAVE bytes
 back. A foreign service on the port fails, and says so.
 
+Route walking treats **any 4xx** as "not on this route" — 404 for a missing path,
+401/403 for a server refusing everything — so one squatted route no longer aborts
+the search before the other is tried. A **5xx** does stop it: that is the right
+endpoint failing, and looking elsewhere would report the wrong cause.
+
+`/voice-setup` now verifies the chain before declaring success. It used to print
+"Voice link configured" and stop, so a selection that could never work only
+surfaced later as a failed `/say` — by which point the wizard appeared to have
+succeeded.
+
 ---
 
 ## 4. Setup commands
@@ -208,8 +218,27 @@ often each is the cause:
    one.
 2. **Nothing listening** — the sidecar is not running. The status line carries
    the exact launch command.
-3. **Something else listening** — a foreign service answers. Now detected rather
-   than reported as healthy; on macOS with port 5000, suspect AirPlay Receiver.
+3. **Something else listening** — a foreign service answers. Detected rather
+   than reported as healthy, and diagnosed rather than reported as a bare status.
+   A 403 from a local sidecar is near-proof of this: a local service has no
+   credentials to reject. On macOS port 5000 the answer is almost always AirPlay
+   Receiver, and Helix says so:
+
+   ```
+   piper-local at http://127.0.0.1:5000: something IS listening and refused the request (HTTP 403).
+     That is not this sidecar — a local one has no credentials to reject.
+     On this platform port 5000 is normally macOS AirPlay Receiver.
+     Either turn it off — System Settings → General → AirDrop & Handoff →
+     AirPlay Receiver → Off — or move the sidecar to a free port:
+       (it currently holds port 5000)
+     Then start the sidecar on a free port:
+       python3 -m piper.http_server -m en_US-lessac-medium.onnx --port 5001
+     And point Helix at it:
+       /config tts-url <url>
+   ```
+
+   On other platforms there is no default culprit to name, so Helix hands over
+   `lsof -nP -iTCP:<port> -sTCP:LISTEN` instead of guessing.
 4. **Placeholder model** — `local-gguf` still showing after selection means
    `llama-server` did not report a model; expect conservative capability
    defaults and no vision.

@@ -24,8 +24,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-
-	"helix/internal/providers"
 )
 
 const (
@@ -226,14 +224,14 @@ func (p *openaiSTT) Transcribe(ctx context.Context, audio AudioFormat) (Transcri
 			p.origin+route, headers, contentType, body)
 		if err != nil {
 			lastErr = err
-			// Only a 404 is evidence of a wrong route. A 401, 413, or 500 is a
-			// real answer from the right endpoint and must not be masked by
-			// retrying somewhere else.
-			if providers.IsNotFound(err) && len(p.routes) > 1 {
+			// Any 4xx means "not on this route": 404 for a missing path,
+			// 401/403 for a server that refuses everything. A 5xx is the right
+			// endpoint failing and must not be masked by trying elsewhere.
+			if isClientError(err) && len(p.routes) > 1 {
 				p.forgetRoute(route)
 				continue
 			}
-			return Transcript{}, fmt.Errorf("%s: %w", p.name, err)
+			return Transcript{}, p.wrapErr(err)
 		}
 
 		out, perr := parseTranscription(data)
@@ -246,7 +244,7 @@ func (p *openaiSTT) Transcribe(ctx context.Context, audio AudioFormat) (Transcri
 				p.forgetRoute(route)
 				continue
 			}
-			return Transcript{}, fmt.Errorf("%s: %w", p.name, perr)
+			return Transcript{}, p.wrapErr(perr)
 		}
 
 		p.rememberRoute(route)
@@ -257,7 +255,17 @@ func (p *openaiSTT) Transcribe(ctx context.Context, audio AudioFormat) (Transcri
 	if lastErr == nil {
 		lastErr = errors.New("no transcription route responded")
 	}
-	return Transcript{}, fmt.Errorf("%s: %w", p.name, lastErr)
+	return Transcript{}, p.wrapErr(lastErr)
+}
+
+// wrapErr labels a failure with the provider, adding a full local diagnosis for
+// a sidecar (where the cause is usually the environment, not the request) and a
+// plain prefix for a cloud provider (where it is usually the key or the network).
+func (p *openaiSTT) wrapErr(err error) error {
+	if !p.local {
+		return fmt.Errorf("%s: %w", p.name, err)
+	}
+	return LocalDiagnosis(p.name, p.origin, whisperStartCmd, whisperCfgKey, err)
 }
 
 // buildForm renders the multipart body. whisper.cpp's /inference and the OpenAI
@@ -413,5 +421,5 @@ func (p *openaiSTT) HealthCheck(ctx context.Context) error {
 	if lastErr == nil {
 		lastErr = errors.New("no transcription route responded")
 	}
-	return fmt.Errorf("%s: %w", p.name, lastErr)
+	return p.wrapErr(lastErr)
 }
