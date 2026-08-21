@@ -7,7 +7,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"helix/internal/config"
 	"helix/internal/speech"
@@ -16,9 +15,8 @@ import (
 )
 
 // handleWakeCommand implements /wake <on|off|status>.
-func handleWakeCommand(raw string) {
-	arg := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(raw, "/wake")))
-	switch arg {
+func handleWakeCommand(c cmdArgs) {
+	switch c.Lower() {
 	case "on", "enable":
 		enableWakeWord()
 	case "off", "disable":

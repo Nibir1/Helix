@@ -44,6 +44,15 @@ type UserPrefs struct {
 	DebugMode    bool   `json:"debug_mode"`
 	VoiceMode    bool   `json:"voice_mode"`   // BlackBox Phase 2: default input channel
 	AgenticMode  bool   `json:"agentic_mode"` // iterative plan→act→observe→replan harness
+
+	// AgenticSteps bounds harness iterations (0 → the agent's built-in
+	// default). Persisted so /agentic steps <n> survives a restart.
+	AgenticSteps int `json:"agentic_steps,omitempty"`
+
+	// Permission is the approval posture: plan | cautious | ask | auto. It
+	// replaces DefaultMode, which was written to config from the start and
+	// never read by anything.
+	Permission string `json:"permission,omitempty"`
 }
 
 // SpeechSTTConfig selects the speech-to-text provider chain (BlackBox §7).

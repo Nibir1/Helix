@@ -154,62 +154,140 @@ Using an advanced **Input Classification Engine** (`internal/shell/classify.go`)
 
 ## Comprehensive Command Reference
 
-Helix exposes a rich set of slash commands for system control, intelligence gathering, and UX tuning.
+Helix exposes a rich set of slash commands for system control, the agentic harness, intelligence gathering, and UX tuning. Every command below is defined in one registry (`cmd/helix/registry_tables.go`), which is also what `/help`, Tab completion, and the did-you-mean suggester read — so the menu cannot drift from the code.
+
+At the prompt: **Tab** completes a slash command (or a path), **`/help <command>`** prints one command's full detail, and a mistyped command suggests the closest matches.
 
 ### Core & Navigation
 | Command | Description |
 | :--- | :--- |
-| `/help` | Show the SOS protocol and command menu. |
-| `/about` | Display the Helix philosophy, ASCII banner, and creator info. |
-| `/setup` | Unified setup wizard (Identity, AI Provider configuration). |
-| `/status` | Check background RAG indexing, AI provider, and audio engine status. |
-| `/doctor` | Run full system diagnostics (DB ping, network, confinement backend, and local crash reports). |
-| `/online` | Check internet connectivity for remote AI and threat feeds. |
-| `/debug <on\|off>` | Toggle verbose byte-level debug logging. |
-| `/cd <dir>` | Change directory (sandbox-aware). |
+| `/help [command]` | Show this menu, or full detail for one command |
+| `/about` | Helix philosophy, banner & creator |
+| `/version` | Version, build flavor, and platform |
+| `/setup` | Unified setup wizard (identity, AI provider) |
+| `/config [key [value]]` | Show or change persisted settings |
+| `/cd [dir]` | Change directory (sandbox-aware) |
+| `/status` | Session state: RAG, provider, harness, sandbox, hooks |
+| `/doctor` | Full system diagnostics, including edge and sidecar checks |
+| `/online` | Check internet connectivity |
+| `/debug <on\|off>` | Toggle verbose debug logging |
+
+### Session & Context
+| Command | Description |
+| :--- | :--- |
+| `/context` | What the model is being told, and how big it is |
+| `/cost` | Model traffic for this session, by purpose |
+| `/memory [show\|clear]` | Show or wipe conversation memory |
+| `/clear` | Archive and clear the conversation, then clear the screen |
+| `/compact [focus]` | Summarize the conversation into one dense turn |
+| `/resume [id]` | List archived conversations, or reload one |
+| `/export [path]` | Write the conversation to a Markdown transcript |
+| `/history [pattern]` | Search this machine's Helix command history |
+
+Nothing here destroys a transcript. `/clear`, `/compact`, `/memory clear`, and `/resume` all archive the conversation to `~/.helix/sessions/` (0600) before replacing it, and `/resume` lists the archive.
+
+`/cost` and `/context` report **estimated** token counts (~4 characters per token). No provider in the registry returns a usage block on the streaming path Helix uses, so an exact count is not available to report — call counts, failures, byte counts, and latency are exact. Helix ships no price table: rates change without notice, and a stale hardcoded rate is worse than an honest token count.
+
+### Agentic Harness
+| Command | Description |
+| :--- | :--- |
+| `/agentic [on\|off\|steps <n>]` | Iterative harness: observe step results and self-correct |
+| `/plan <request>` | Show the plan for a request without executing anything |
+| `/permissions [mode]` | Approval posture: plan, cautious, ask, or auto |
+| `/todo [add\|start\|done\|rm\|...]` | Task list the planner can see |
+| `/tools` | The harness tool vocabulary and each tool's gate |
+| `/hooks [list\|add\|rm\|test\|...]` | Run your own commands around tool execution |
+| `/undo` | Reverse the most recent journalled action |
+| `/dry-run` | Toggle command execution preview mode |
+
+**Approval posture** (`/permissions`) layers on top of the risk tiers and never replaces them:
+
+| Mode | Behavior |
+| :--- | :--- |
+| `plan` | Nothing executes. Steps are printed as a plan with their risk tier. |
+| `cautious` | Every command asks first, including low risk. |
+| `ask` | Default: low runs, medium asks, high is blocked. |
+| `auto` | Medium risk is auto-approved. |
+
+High-risk commands stay blocked in **every** mode, typed confirmations stay typed, the sandbox still validates every command, and the Voice Risk Policy still caps anything arriving by voice. The mode can only change the question Helix asks about commands it was already willing to consider.
+
+**Hooks** (`/hooks`) run your own commands around tool execution — the escape hatch for policy Helix cannot know about ("never touch the prod kubeconfig", "gofmt after any write", "log every push"). See [docs/harness.md](docs/harness.md) for the security model; in short: hooks come only from `~/.helix/hooks.json`, they run *after* every built-in gate, and a blocking pre-hook can subtract permission but never grant it.
+
+### Code & Repository
+| Command | Description |
+| :--- | :--- |
+| `/init [--force]` | Study this repository and write HELIX.md project context |
+| `/diff [--staged] [path...]` | Show the working tree diff with a summary |
+| `/review [--staged] [path...]` | AI review of the current diff |
+| `/commit [message]` | Commit staged work, writing the message from the diff |
+| `/git <request>` | Natural-language git operations with safety gates |
+| `/web <query\|url>` | Guarded web search or page fetch |
+| `/explain <command\|technique>` | Defensive analysis: techniques, detections, mitigations |
+
+`/init` writes a `HELIX.md` that Helix then loads on every turn in that directory tree (`AGENTS.md` and `CLAUDE.md` are recognized too). Like retrieved knowledge and conversation memory, it is injected as a **zero-authority** fenced block: it can inform the planner and can never command it.
+
+`/commit` never stages anything for you — what you staged is what gets committed.
 
 ### AI & Providers
-| Command | Description |
-| :--- | :--- |
-| `/provider <name>` | Switch AI provider (openai, anthropic, ollama etc.). |
-| `/provider-status` | Show detailed provider health and API key status. |
-| `/model <id>` | Switch the active AI model. |
-| `/test-basic-ai` | Smoke test the active AI model with a simple prompt. |
-| `/explain <cmd>` | AI-powered defensive analysis of a command or technique. |
+Local runtimes — llama.cpp, Ollama, whisper.cpp, Piper — have their own guide: [docs/local_runtimes.md](docs/local_runtimes.md). It covers which to use, how llama.cpp serves models Ollama already pulled, the llama.cpp/whisper.cpp port collision on 8080, and what the `local-gguf` placeholder was doing wrong.
 
-### Threat Intelligence & RAG
 | Command | Description |
 | :--- | :--- |
-| `/knowledge-update` | Fetch latest CVEs, CISA KEV, Exploits, and MITRE data. |
-| `/knowledge-status` | Show knowledge database row counts. |
-| `/knowledge-reindex` | Rebuild FTS5 search index. |
-| `/rag-status` | Show RAG indexing progress and vector stats. |
-| `/rag-reindex` | Trigger background RAG reindex. |
-| `/rag-rebuild` | Force full RAG knowledge base rebuild (with live progress). |
-| `/rag-reset` | Wipe all RAG vector data. |
+| `/provider [status\|list\|use <name>\|<name>]` | Switch or inspect the AI provider |
+| `/provider-status` | Provider health, keys, failover state, planner transport |
+| `/model [list\|use <id>\|<id>]` | Switch or list models on the active provider |
+| `/models` | List models the active provider offers |
+| `/test-basic-ai` | Smoke test the active AI model |
+
+### RAG & Knowledge Base
+| Command | Description |
+| :--- | :--- |
+| `/rag-status` | RAG indexing progress and vector stats |
+| `/rag-reindex` | Trigger a background RAG reindex |
+| `/rag-rebuild` | Force a full RAG knowledge base rebuild |
+| `/rag-reset` | Wipe all RAG vector data |
+| `/knowledge-update` | Fetch latest CVEs, CISA KEV, exploits, MITRE ATT&CK |
+| `/knowledge-status` | Knowledge database row counts and last update |
+| `/knowledge-reindex` | Rebuild the FTS5 search index |
 
 ### Security, Recon & Stealth
 | Command | Description |
 | :--- | :--- |
-| `/vuln <query>` | Defensive vulnerability intel (CVE/EDB/MITRE lookup). |
-| `/scan authorize <ip>` | Authorize recon target with a written scope/reason. |
-| `/scan <ip>` | Run nmap/masscan on an authorized target. |
-| `/sandbox <mode>` | Directory confinement (`off`, `current`, `strict` [kernel-enforced]). |
-| `/stealth <on\|off>` | Private history mode (suppresses shell history, memory-only). |
-| `/crash <list\|view 1\|clear>` | Inspect and manage local crash diagnostics. |
-| `/dry-run` | Toggle command execution preview mode. |
+| `/vuln <CVE\|EDB\|T-ID\|query>` | Defensive vulnerability intelligence lookup |
+| `/scan [authorize\|revoke\|status] <target>` | Reconnaissance against an authorized target |
+| `/sandbox [off\|current\|strict]` | Directory confinement for every executed command |
+| `/stealth <on\|off>` | Private history mode (suppresses shell history) |
+| `/crash [list\|view <n>\|clear]` | Inspect and manage local crash diagnostics |
 
-### Git & Utilities
+### Voice & Perception
+See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits (capture is half-duplex — Ctrl+C interrupts a reply; talking over one needs echo cancellation that is not implemented).
+
 | Command | Description |
 | :--- | :--- |
-| `/git <request>` | Natural language git operations with safety confirmations. |
-| `/audio <on\|off>` | Toggle synthetic tonal audio feedback. |
-| `/typewrite-all <on\|off>` | Toggle typewriter effect for ALL output. |
+| `/voice [on\|off\|status]` | Enter or leave voice mode (speak instead of type) |
+| `/manual` | Return to keyboard input (voice safety valve) |
+| `/voice-setup` | Configure STT/TTS providers with live pricing |
+| `/voice-status` | Speech chain health, keys, and recorder state |
+| `/wake [on\|off\|status]` | Hands-free listening for the wake phrase |
+| `/say <text>` | Speak text through the TTS chain |
+| `/tts <on\|off>` | Toggle automatic spoken responses |
+| `/listen [seconds]` | Record and transcribe one clip (max 60s) |
+| `/mictest` | 3s self-test: is the mic actually being heard? |
+| `/eyes [on\|off\|status\|look]` | Opt-in camera vision (memory-only frames) |
+
+### Utilities
+| Command | Description |
+| :--- | :--- |
+| `/audio <on\|off>` | Toggle tonal audio feedback |
+| `/typewrite-all <on\|off>` | Typewriter effect for ALL output, not just AI replies |
 
 ### DANGER ZONE
 | Command | Description |
 | :--- | :--- |
-| `/purge` | Wipe ALL Helix data (keys, DBs, caches, crash reports) for a fresh start. |
+| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start |
+
+### Aliases
+`/?` `/h` `/sos` → `/help` · `/v` → `/version` · `/reset` → `/clear` · `/usage` → `/cost` · `/mode` → `/permissions` · `/intel` → `/vuln`
 
 ---
 

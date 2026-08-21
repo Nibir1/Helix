@@ -61,6 +61,13 @@ func handlePurgeCommand() {
 		{filepath.Join(helixDir, "daemon.conn.json"), "daemon connection info"},
 		{filepath.Join(helixDir, "active.lock"), "active-session lock"},
 		{filepath.Join(helixDir, "pricing.json"), "user pricing overrides"},
+		// Harness state. A purge that left these behind would hand the "clean
+		// slate" a task list, an archive of past conversations, and hook
+		// commands that still fire.
+		{filepath.Join(helixDir, "sessions"), "archived conversations (/resume)"},
+		{filepath.Join(helixDir, "exports"), "exported transcripts (/export)"},
+		{filepath.Join(helixDir, "todo.json"), "task list (/todo)"},
+		{filepath.Join(helixDir, "hooks.json"), "local policy hooks (/hooks)"},
 	}
 
 	// Sweep log, temp, and crash-report artifacts from the Helix home.

@@ -121,6 +121,16 @@ func RunModelWithConfig(prompt string, config ModelConfig) (string, error) {
 //
 // Complexity: O(1) provider round trip.
 func RunModelWithTimeout(prompt string, config ModelConfig, timeout time.Duration) (string, error) {
+	return runModelKind(KindChat, prompt, config, timeout)
+}
+
+// runModelKind is RunModelWithTimeout plus the accounting label. The label is
+// an explicit parameter rather than inferred state because the planner reaches
+// this path through RunPlannerWithRetry, and a session whose /cost report
+// blames "chat" for every planner retry explains nothing.
+func runModelKind(
+	kind CallKind, prompt string, config ModelConfig, timeout time.Duration,
+) (string, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", fmt.Errorf("empty prompt")
@@ -159,7 +169,9 @@ func RunModelWithTimeout(prompt string, config ModelConfig, timeout time.Duratio
 		MaxTokens:   config.MaxTokens,
 	}
 
+	started := time.Now()
 	out, err := providers.CollectChat(ctx, provider, req)
+	RecordCall(kind, provider.Name(), model, prompt, out, time.Since(started), err)
 	noteCallResult(err, probing)
 	if err != nil {
 		return "", err
@@ -226,21 +238,28 @@ func StreamModel(
 	}
 
 	var b strings.Builder
+	started := time.Now()
+	// One accounting entry per streamed call, on whichever branch ends it —
+	// including cancellation, which still consumed the prompt.
+	finish := func(cause error) (string, error) {
+		text := strings.TrimSpace(b.String())
+		RecordCall(KindChat, provider.Name(), model, prompt, text, time.Since(started), cause)
+		noteCallResult(cause, probing)
+		return text, cause
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			// Ctrl+C or timeout: keep whatever was already rendered.
-			noteCallResult(ctx.Err(), probing)
-			return strings.TrimSpace(b.String()), ctx.Err()
+			return finish(ctx.Err())
 
 		case chunk, ok := <-ch:
 			if !ok {
-				noteCallResult(nil, probing)
-				return strings.TrimSpace(b.String()), nil
+				return finish(nil)
 			}
 			if chunk.Error != nil {
-				noteCallResult(chunk.Error, probing)
-				return strings.TrimSpace(b.String()), chunk.Error
+				return finish(chunk.Error)
 			}
 			if chunk.Content != "" {
 				b.WriteString(chunk.Content)
@@ -249,8 +268,7 @@ func StreamModel(
 				}
 			}
 			if chunk.Done {
-				noteCallResult(nil, probing)
-				return strings.TrimSpace(b.String()), nil
+				return finish(nil)
 			}
 		}
 	}
@@ -300,6 +318,7 @@ func RunToolCall(
 	defer unreg()
 
 	temp := float64(config.Temperature)
+	started := time.Now()
 	res, err := providers.CollectChatResult(ctx, provider, providers.ChatRequest{
 		Model:       model,
 		Messages:    []providers.ChatMessage{{Role: "user", Content: prompt}},
@@ -308,6 +327,10 @@ func RunToolCall(
 		Tools:       tools,
 		ToolChoice:  choice,
 	})
+	// Tool-call arguments are the response here: billing only the assistant
+	// prose would under-report a planner turn to near zero.
+	RecordCall(KindTool, provider.Name(), model, prompt,
+		res.Text+toolCallText(res.ToolCalls), time.Since(started), err)
 	noteCallResult(err, probing)
 	if err != nil {
 		return res, err
@@ -464,11 +487,27 @@ func runVisionModel(prompt string, parts []providers.MessagePart, providerName s
 		MaxTokens:   DefaultModelConfig().MaxTokens,
 	}
 
+	started := time.Now()
 	out, err := providers.CollectChat(ctx, p, req)
+	RecordCall(KindVision, p.Name(), model, prompt, out, time.Since(started), err)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// toolCallText flattens tool-call names and arguments into the text the meter
+// bills as the response.
+func toolCallText(calls []providers.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range calls {
+		b.WriteString(c.Name)
+		b.WriteString(c.Arguments)
+	}
+	return b.String()
 }
 
 // ModelIsLoaded reports whether a provider is active.

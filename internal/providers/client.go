@@ -7,12 +7,50 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// StatusError is an HTTP response with a >= 400 status.
+//
+// It exists so callers can branch on the CODE instead of substring-matching the
+// message. Two places need that and were doing it by hand: llama.cpp's
+// diagnosis ("did something answer, or is nothing listening?") and the local
+// sidecar adapters, which discover which route a server exposes by trying one
+// and treating 404 as "wrong route" rather than "server is broken".
+//
+// The Error() text is byte-identical to the fmt.Errorf it replaced, so existing
+// message-based checks keep working while new code uses errors.As.
+type StatusError struct {
+	Code    int
+	Snippet string
+}
+
+// Error renders the status and a bounded body snippet.
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.Code, e.Snippet)
+}
+
+// StatusCode extracts an HTTP status from an error chain, reporting whether one
+// was present.
+func StatusCode(err error) (int, bool) {
+	var se *StatusError
+	if errors.As(err, &se) {
+		return se.Code, true
+	}
+	return 0, false
+}
+
+// IsNotFound reports whether err is a 404 — the signal that a route does not
+// exist on an otherwise live server.
+func IsNotFound(err error) bool {
+	code, ok := StatusCode(err)
+	return ok && code == http.StatusNotFound
+}
 
 // HTTPClient is a shared client for provider HTTP calls.
 type HTTPClient struct {
@@ -59,7 +97,7 @@ func (c *HTTPClient) DoJSON(
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(data))
+		return nil, &StatusError{Code: resp.StatusCode, Snippet: apiErrorSnippet(data)}
 	}
 
 	return data, nil
@@ -123,7 +161,7 @@ func (c *HTTPClient) DoRaw(
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(data))
+		return nil, &StatusError{Code: resp.StatusCode, Snippet: apiErrorSnippet(data)}
 	}
 
 	return data, nil
@@ -169,7 +207,7 @@ func (c *HTTPClient) doRaw(
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 			_ = resp.Body.Close()
 
-			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(errBody))
+			lastErr = &StatusError{Code: resp.StatusCode, Snippet: apiErrorSnippet(errBody)}
 
 			if !sleepCtx(ctx, c.retryDelay*time.Duration(attempt+1)) {
 				return nil, ctx.Err()
@@ -182,7 +220,7 @@ func (c *HTTPClient) doRaw(
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 			_ = resp.Body.Close()
 
-			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(errBody))
+			return nil, &StatusError{Code: resp.StatusCode, Snippet: apiErrorSnippet(errBody)}
 		}
 
 		return resp, nil
@@ -244,7 +282,7 @@ func (c *HTTPClient) do(
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 			_ = resp.Body.Close()
 
-			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(errBody))
+			lastErr = &StatusError{Code: resp.StatusCode, Snippet: apiErrorSnippet(errBody)}
 
 			if !sleepCtx(ctx, c.retryDelay*time.Duration(attempt+1)) {
 				return nil, ctx.Err()
@@ -257,7 +295,7 @@ func (c *HTTPClient) do(
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 			_ = resp.Body.Close()
 
-			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrorSnippet(errBody))
+			return nil, &StatusError{Code: resp.StatusCode, Snippet: apiErrorSnippet(errBody)}
 		}
 
 		return resp, nil

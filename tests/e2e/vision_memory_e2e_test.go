@@ -44,7 +44,9 @@ func TestE2E_HelpRendersBlackBoxCommands(t *testing.T) {
 	defer h.Close()
 
 	h.WriteLine("/help")
-	for _, cmd := range []string{"/eyes <on|off>", "/memory <show|clear>"} {
+	// Usage strings come from the command registry, so assert on the usage
+	// lines the registry actually publishes rather than a second hand-kept copy.
+	for _, cmd := range []string{"/eyes [on|off|status|look]", "/memory [show|clear]"} {
 		if err := h.Expect(cmd, 10*time.Second); err != nil {
 			t.Fatal(err)
 		}

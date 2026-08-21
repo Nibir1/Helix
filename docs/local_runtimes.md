@@ -1,0 +1,218 @@
+# Local runtimes: llama.cpp, Ollama, whisper.cpp, Piper
+
+Helix talks to four local services. All four are **user-managed sidecars**
+(ADR-002): Helix never links a GGUF runtime, never downloads weights for them,
+and never launches them. That keeps the core CGO-free and keeps model licensing
+and GPU setup where they belong — with you.
+
+This document exists because the defaults collide and the routes are not
+obvious, and both failures look identical from the outside: "the local thing
+doesn't work."
+
+---
+
+## 1. What each one is for
+
+| Service | Role | Helix provider | Stock port |
+| :--- | :--- | :--- | :--- |
+| **Ollama** | local LLM, with model management | `ollama` | 11434 |
+| **llama.cpp** (`llama-server`) | local LLM, no model management | `llamacpp` | **8080** |
+| **whisper.cpp** (`whisper-server`) | speech → text | `whisper-local` | **8080** |
+| **Piper** (`piper.http_server`) | text → speech | `piper-local` | 5000 |
+| **Kokoro-FastAPI** | text → speech, higher quality | `kokoro-local` | 8880 |
+
+### Ollama vs llama.cpp — why both?
+
+They do the same job. Ollama is the better experience: it pulls models, manages
+them, and Helix can install it for you. llama.cpp exists for the machines Ollama
+cannot serve — most concretely the first-generation Jetson Nano, frozen on
+JetPack 4.6 with CUDA 10.2 and Maxwell 5.3 (see
+[edge_deployment.md](edge_deployment.md) §5). On hardware like that a hand-built
+`llama-server` is the only local-LLM path, so it is registered as a first-class
+provider and is a valid target for the offline failover chain.
+
+**If Ollama runs on your machine, use Ollama.** Reach for llama.cpp when it does
+not, or when you want a specific quantization Ollama does not package.
+
+### Yes — llama.cpp can serve the models Ollama already pulled
+
+Same files, no copy and no conversion. Ollama stores weights as plain GGUF,
+content-addressed:
+
+```
+~/.ollama/models/blobs/sha256-<hex>          the GGUF itself
+~/.ollama/models/manifests/.../<model>/<tag> the JSON naming it
+```
+
+llama.cpp identifies GGUF by magic bytes rather than by filename, so a blob path
+works directly:
+
+```bash
+llama-server -m ~/.ollama/models/blobs/sha256-abc123... --port 8080
+```
+
+Finding *which* blob is which is the only hard part, and Helix does it for you:
+when you select llama.cpp and the server is not reachable, the setup flow lists
+your Ollama models with the exact `llama-server` command for each. Set
+`OLLAMA_MODELS` if your store is not in the default location.
+
+Two caveats worth knowing:
+
+- **One at a time.** Ollama and llama-server cannot both own a port, and running
+  two copies of a 7B model doubles your RAM for nothing. Stop one.
+- **Templates.** Ollama keeps the prompt template in its manifest, not in the
+  blob. llama-server uses the chat template embedded in the GGUF instead. For
+  nearly all modern GGUFs that is the same template; for an old or unusual quant
+  it may not be, which shows up as a model that answers but formats oddly.
+
+### What `local-gguf` meant
+
+It was a **placeholder label**, and it was causing real damage.
+
+`llama-server` serves whichever GGUF it was launched with and ignores the model
+name on the request, so there is nothing meaningful to send — hence a stand-in.
+But Helix also uses the model name as the key for *capability* lookups, so while
+the placeholder was active:
+
+- the context window fell back to the 8k default, and retrieved context was
+  clamped to a fraction of what a 128k-context model could accept;
+- `SupportsVision` was false, so `/eyes on` refused even with a multimodal GGUF
+  loaded;
+- `/status` and `/provider-status` printed `local-gguf`, which tells you nothing.
+
+`llama-server` *does* report the loaded model on `/v1/models`. Helix now asks,
+once, at selection and at startup, and replaces the placeholder with the real
+name — after which the context limit, vision detection, and status lines are all
+correct. If the server reports nothing, Helix says so and explains that
+conservative defaults are in force.
+
+---
+
+## 2. The port collision
+
+**llama.cpp and whisper.cpp both default to 8080.** These are the upstream
+defaults, not Helix's choices, and they cannot both be honored.
+
+Helix keeps both upstream defaults — changing either would break that project's
+documented launch command — and instead *reports the clash*. `/doctor` and
+`/voice-status` name it directly:
+
+```
+Endpoint conflict: 127.0.0.1:8080 is configured for llama.cpp (LLM) and whisper-local (STT)
+  → One process owns a port. Whichever service is running there will
+    answer the other's requests with a 404, which reads as "broken".
+```
+
+This matters because the symptom is so misleading: whichever service holds the
+port answers, so a naive health check sees a live socket and reports
+"reachable", while every actual request 404s.
+
+**Recommended layout** — keep the brain on 8080 and move speech:
+
+```bash
+llama-server  -m model.gguf                --port 8080
+whisper-server -m models/ggml-base.en.bin  --port 8081
+python3 -m piper.http_server -m voice.onnx --port 5001
+```
+
+```text
+/config stt-url http://127.0.0.1:8081
+/config tts-url http://127.0.0.1:5001
+```
+
+`/config stt-url` and `/config tts-url` rebuild the speech engine immediately, so
+the change applies in the running session.
+
+---
+
+## 3. Route discovery (why local speech used to fail)
+
+Both local speech adapters were pointed at routes their upstream servers do not
+serve. Each returned HTTP 404 for every request, which made the provider
+unusable as shipped:
+
+| Service | Helix used to request | What the server actually serves |
+| :--- | :--- | :--- |
+| whisper.cpp | `/v1/audio/transcriptions` | **`/inference`** (the OpenAI path exists only with `--inference-path`) |
+| Piper | `/api/tts` | **`/`** — `GET /?text=...` or `POST /` (that's the old Rhasspy path) |
+
+Both adapters now try the known routes in order, remember which one answered,
+and report it in `/voice-status`:
+
+```
+whisper-local  Whisper (local sidecar)  healthy  free  local
+    endpoint: http://127.0.0.1:8081  route: /inference
+```
+
+So a stock `whisper-server` and a stock `piper.http_server` both work with no
+flags, and an OpenAI-shaped sidecar (Speaches, Faster-Whisper-Server, LocalAI)
+keeps working as before.
+
+### Health checks now prove the service, not the socket
+
+Both local adapters used to treat *any* HTTP response — 404 included — as proof
+of life. That produced actively false diagnostics:
+
+- whisper.cpp has no `/models` route at all, so the probe could only ever find a
+  404, and reported it as healthy;
+- on macOS, **AirPlay Receiver owns port 5000** and answers HTTP, so
+  `/voice-status` showed Piper "reachable" on a machine where Piper was not
+  running and every spoken reply failed.
+
+Now each local probe does the real thing: whisper-local transcribes 200 ms of
+silence (an empty transcript is a pass — the *route* is what is being verified),
+and piper-local synthesizes one short word and requires actual RIFF/WAVE bytes
+back. A foreign service on the port fails, and says so.
+
+---
+
+## 4. Setup commands
+
+```bash
+# LLM — Ollama (preferred where supported)
+ollama serve && ollama pull llama3.1:8b
+
+# LLM — llama.cpp
+llama-server -m /path/to/model.gguf --port 8080
+export HELIX_LLAMACPP_URL=http://127.0.0.1:8080   # only if not the default
+
+# STT — whisper.cpp
+./build/bin/whisper-server -m models/ggml-base.en.bin --port 8081
+
+# TTS — Piper
+python3 -m piper.http_server -m en_US-lessac-medium.onnx --port 5001
+
+# TTS — Kokoro (better quality, heavier)
+docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu
+```
+
+Then in Helix:
+
+```text
+/provider use llamacpp      · select the local brain (resolves the real model name)
+/voice-setup                · pick STT/TTS providers and their endpoints
+/config stt-url <url>       · point local STT somewhere else
+/config tts-url <url>       · point local TTS somewhere else
+/voice-status               · chains, health, endpoints, and resolved routes
+/doctor                     · everything above plus conflicts, thermals, confinement
+```
+
+---
+
+## 5. Diagnosing "the local thing doesn't work"
+
+Run `/voice-status` (speech) or `/doctor` (everything) first. In order of how
+often each is the cause:
+
+1. **Endpoint conflict** — two services on one port. Reported explicitly; move
+   one.
+2. **Nothing listening** — the sidecar is not running. The status line carries
+   the exact launch command.
+3. **Something else listening** — a foreign service answers. Now detected rather
+   than reported as healthy; on macOS with port 5000, suspect AirPlay Receiver.
+4. **Placeholder model** — `local-gguf` still showing after selection means
+   `llama-server` did not report a model; expect conservative capability
+   defaults and no vision.
+5. **Mute build** — a CGO-free build cannot play audio however TTS is
+   configured. `/version` and `/doctor` state the build flavor; rebuild with
+   `CGO_ENABLED=1 go build -tags audio_cgo ./cmd/helix`.

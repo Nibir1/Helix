@@ -1,7 +1,14 @@
 // internal/speech/adapter_piper_tts.go
-// Purpose: Piper TTS sidecar adapter (rhasspy piper-http style service at
-// /api/tts, returning WAV). Local, free, offline — the private TTS default
-// (ADR-002).
+// Purpose: Piper TTS sidecar adapter. Local, free, offline — the private TTS
+// default (ADR-002).
+//
+// Route note: piper's own HTTP server (`python3 -m piper.http_server`) serves
+// synthesis at the ROOT path — GET /?text=... or POST / with the text as the
+// body — and returns audio/wav. This adapter previously requested /api/tts,
+// which is the older Rhasspy TTS API and does not exist on piper's server, so
+// against a stock `piper.http_server` every synthesis returned HTTP 404: the
+// offline TTS default was unusable as shipped. Both routes are now tried, root
+// first, and the winner is cached.
 package speech
 
 import (
@@ -12,15 +19,36 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
+
+	"helix/internal/providers"
 )
 
+// piperDefaultBaseURL is piper.http_server's default bind address.
+//
+// On macOS this port is a known hazard: AirPlay Receiver binds 5000 by default,
+// answers HTTP, and is not piper. That is why the health check below insists on
+// actual WAV bytes rather than accepting any response — see its comment.
 const piperDefaultBaseURL = "http://127.0.0.1:5000"
 
-// piperTTS implements TTSProvider against a local piper-http sidecar.
+const (
+	// piperRootRoute is piper.http_server's synthesis path.
+	piperRootRoute = "/"
+
+	// piperRhasspyRoute is the older Rhasspy TTS HTTP API path, kept as a
+	// fallback for people running that service.
+	piperRhasspyRoute = "/api/tts"
+)
+
+// piperTTS implements TTSProvider against a local piper HTTP sidecar.
 type piperTTS struct {
 	name    string
 	display string
-	baseURL string
+	origin  string
+	routes  []string
+
+	routeMu sync.Mutex
+	route   string
 }
 
 // NewPiperTTS builds the Piper sidecar adapter.
@@ -28,8 +56,58 @@ func NewPiperTTS(baseURL string) TTSProvider {
 	if baseURL == "" {
 		baseURL = piperDefaultBaseURL
 	}
-	return &piperTTS{name: "piper-local", display: "Piper (local sidecar)", baseURL: baseURL}
+	return &piperTTS{
+		name:    "piper-local",
+		display: "Piper (local sidecar)",
+		origin:  serverOrigin(baseURL),
+		routes:  dedupeRoutes(piperRootRoute, piperRhasspyRoute),
+	}
 }
+
+// synthURL builds the request URL for one route.
+func (p *piperTTS) synthURL(route, text string) string {
+	q := "?" + url.Values{"text": {text}}.Encode()
+	if route == "/" {
+		return p.origin + "/" + q
+	}
+	return p.origin + route + q
+}
+
+// candidateRoutes returns the cached winner first, then the rest.
+func (p *piperTTS) candidateRoutes() []string {
+	p.routeMu.Lock()
+	cached := p.route
+	p.routeMu.Unlock()
+
+	if cached == "" {
+		return p.routes
+	}
+	out := make([]string, 0, len(p.routes))
+	out = append(out, cached)
+	for _, r := range p.routes {
+		if r != cached {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func (p *piperTTS) rememberRoute(route string) {
+	p.routeMu.Lock()
+	p.route = route
+	p.routeMu.Unlock()
+}
+
+// ActiveRoute reports the synthesis path that last answered ("" before the
+// first success), for /voice-status.
+func (p *piperTTS) ActiveRoute() string {
+	p.routeMu.Lock()
+	defer p.routeMu.Unlock()
+	return p.route
+}
+
+// Endpoint reports the server origin, for diagnostics and conflict detection.
+func (p *piperTTS) Endpoint() string { return p.origin }
 
 func (p *piperTTS) Name() string         { return p.name }
 func (p *piperTTS) DisplayName() string  { return p.display }
@@ -38,26 +116,47 @@ func (p *piperTTS) RequiresAPIKey() bool { return false }
 func (p *piperTTS) IsLocal() bool        { return true }
 func (p *piperTTS) DefaultModel() string { return "piper" }
 
-// Synthesize fetches WAV bytes for the text from the sidecar.
+// Synthesize fetches WAV bytes for the text from the sidecar, trying each known
+// route until one returns actual audio.
+//
+// A non-WAV 200 is treated exactly like a 404: it means something that is not
+// piper is answering on this port (on macOS, most often AirPlay Receiver on
+// 5000). Continuing to the next route, and ultimately failing with that stated,
+// is far more useful than handing the player a chunk of HTML.
 func (p *piperTTS) Synthesize(ctx context.Context, text string, _ SynthesisOptions) (AudioFormat, error) {
 	if text == "" {
 		return AudioFormat{}, fmt.Errorf("%s: empty text", p.name)
 	}
 
-	u := p.baseURL + "/api/tts?" + url.Values{"text": {text}}.Encode()
-	data, err := sharedClient.DoRaw(ctx, http.MethodGet, u, nil, "", nil)
-	if err != nil {
-		return AudioFormat{}, fmt.Errorf("%s: %w", p.name, err)
-	}
-	if len(data) < 44 || string(data[:4]) != "RIFF" {
-		return AudioFormat{}, fmt.Errorf("%s: unexpected non-WAV response (%d bytes)", p.name, len(data))
+	var lastErr error
+	for _, route := range p.candidateRoutes() {
+		data, err := sharedClient.DoRaw(ctx, http.MethodGet, p.synthURL(route, text), nil, "", nil)
+		if err != nil {
+			lastErr = err
+			if providers.IsNotFound(err) && len(p.routes) > 1 {
+				continue
+			}
+			return AudioFormat{}, fmt.Errorf("%s: %w", p.name, err)
+		}
+		if len(data) < 44 || string(data[:4]) != "RIFF" {
+			lastErr = fmt.Errorf("%s answered on %s with %d bytes that are not WAV",
+				p.origin, route, len(data))
+			continue
+		}
+
+		rate, channels, werr := wavHeaderInfo(data)
+		if werr != nil {
+			lastErr = werr
+			continue
+		}
+		p.rememberRoute(route)
+		return AudioFormat{Kind: KindWAV, SampleRate: rate, Channels: channels, Bytes: data}, nil
 	}
 
-	rate, channels, err := wavHeaderInfo(data)
-	if err != nil {
-		return AudioFormat{}, fmt.Errorf("%s: %w", p.name, err)
+	if lastErr == nil {
+		lastErr = errors.New("no synthesis route responded")
 	}
-	return AudioFormat{Kind: KindWAV, SampleRate: rate, Channels: channels, Bytes: data}, nil
+	return AudioFormat{}, fmt.Errorf("%s: %w", p.name, lastErr)
 }
 
 // piperMaxHeaderBytes bounds how much of a response may be consumed looking for
@@ -94,19 +193,27 @@ func (p *piperTTS) SynthesizeStream(
 		return StreamedAudio{}, fmt.Errorf("%s: empty text", p.name)
 	}
 
-	u := p.baseURL + "/api/tts?" + url.Values{"text": {text}}.Encode()
-	resp, err := sharedClient.DoRequest(ctx, http.MethodGet, u, nil, nil)
-	if err != nil {
-		return StreamedAudio{}, fmt.Errorf("%s: %w", p.name, err)
+	var lastErr error
+	for _, route := range p.candidateRoutes() {
+		resp, err := sharedClient.DoRequest(ctx, http.MethodGet, p.synthURL(route, text), nil, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		rate, channels, herr := readWAVStreamHeader(resp.Body)
+		if herr != nil {
+			_ = resp.Body.Close()
+			lastErr = herr
+			continue
+		}
+		p.rememberRoute(route)
+		return StreamedAudio{SampleRate: rate, Channels: channels, Body: resp.Body}, nil
 	}
 
-	rate, channels, err := readWAVStreamHeader(resp.Body)
-	if err != nil {
-		_ = resp.Body.Close()
-		return StreamedAudio{}, fmt.Errorf("%s: %w", p.name, err)
+	if lastErr == nil {
+		lastErr = errors.New("no synthesis route responded")
 	}
-
-	return StreamedAudio{SampleRate: rate, Channels: channels, Body: resp.Body}, nil
+	return StreamedAudio{}, fmt.Errorf("%s: %w", p.name, lastErr)
 }
 
 // readWAVStreamHeader consumes a RIFF/WAVE header from r, leaving the reader
@@ -185,16 +292,17 @@ func readWAVStreamHeader(r io.Reader) (sampleRate int, channels int, err error) 
 	return 0, 0, errors.New("wav stream: no data chunk within the header bound")
 }
 
-// HealthCheck treats any HTTP response as proof the sidecar is alive.
+// HealthCheck synthesizes one short word and insists on getting WAV back.
+//
+// It used to accept ANY HTTP response as proof of life, which on macOS is
+// actively wrong: AirPlay Receiver owns port 5000 by default and answers HTTP,
+// so /voice-status reported piper "reachable" on a machine where piper was not
+// running at all and every spoken reply failed. Requiring real audio is the only
+// probe that tells those two situations apart, and it doubles as route
+// discovery.
 func (p *piperTTS) HealthCheck(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/", nil)
-	if err != nil {
+	if _, err := p.Synthesize(ctx, "ok", SynthesisOptions{}); err != nil {
 		return err
 	}
-	resp, err := sharedClient.RawClient().Do(req)
-	if err != nil {
-		return fmt.Errorf("%s unreachable: %w", p.name, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
 	return nil
 }

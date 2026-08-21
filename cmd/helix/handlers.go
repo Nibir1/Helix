@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"helix/internal/agent"
 	"helix/internal/ai"
 	"helix/internal/audio"
 	"helix/internal/commands"
@@ -29,9 +30,11 @@ import (
 	"helix/internal/confinement"
 	"helix/internal/diagnostics"
 	"helix/internal/edge"
+	"helix/internal/hooks"
 	"helix/internal/ollama"
 	"helix/internal/providers/llamacpp"
 	"helix/internal/rag"
+	"helix/internal/session"
 	"helix/internal/shell"
 	"helix/internal/speech"
 	"helix/internal/utils"
@@ -39,113 +42,6 @@ import (
 
 	"github.com/fatih/color"
 )
-
-// -------------------------------------------------------
-// MASTER DISPATCHER
-// -------------------------------------------------------
-
-func handleSlashCommand(input string) bool {
-	parts := strings.Fields(input)
-	if len(parts) == 0 {
-		return false
-	}
-	cmd := strings.ToLower(parts[0])
-	switch cmd {
-	case "/about":
-		handleAbout()
-	case "/help":
-		handleHelp()
-	case "/setup":
-		handleSetup()
-	case "/debug":
-		handleDebugCommand(input)
-	case "/sandbox":
-		handleSandboxCommand(input)
-	case "/cd":
-		handleChangeDirectory(input)
-	case "/git":
-		handleGitCommand(input)
-	case "/rag-status":
-		handleRAGStatus()
-	case "/rag-reindex":
-		handleRAGReindex()
-	case "/rag-reset":
-		handleRAGReset()
-	case "/rag-rebuild":
-		handleRAGRebuild()
-	case "/dry-run":
-		toggleDryRun()
-	case "/online":
-		checkOnlineStatus()
-	case "/test-basic-ai":
-		testBasicAI()
-	case "/stealth":
-		handleStealthCommand(input)
-	case "/scan":
-		handleQuickScan(parts)
-	case "/explain":
-		handleExplainCommand(input)
-	case "/vuln", "/intel":
-		handleVulnCommand(input)
-	case "/knowledge-update":
-		handleKnowledgeUpdate()
-	case "/knowledge-status":
-		handleKnowledgeStats()
-	case "/knowledge-reindex":
-		handleKnowledgeReindex()
-	case "/doctor":
-		handleDoctor()
-	case "/provider-status":
-		handleProviderStatus()
-	case "/provider":
-		handleProviderCommand(parts)
-	case "/model":
-		handleModelCommand(parts)
-	case "/status":
-		handleStatus()
-	case "/audio":
-		handleAudioCommand(input)
-	case "/typewrite-all":
-		handleTypewriteAllCommand(input)
-	case "/voice-setup":
-		handleVoiceSetup()
-	case "/voice-status":
-		handleVoiceStatus()
-	case "/voice":
-		handleVoiceCommand(input)
-	case "/manual":
-		handleManualCommand()
-	case "/wake":
-		handleWakeCommand(input)
-	case "/say":
-		handleSayCommand(input)
-	case "/tts":
-		handleTTSCommand(input)
-	case "/listen":
-		handleListenCommand(input)
-	case "/mictest":
-		handleMicTest()
-	case "/agentic":
-		handleAgenticCommand(input)
-	case "/memory":
-		handleMemoryCommand(input)
-	case "/eyes":
-		handleEyesCommand(input)
-	case "/purge":
-		handlePurgeCommand()
-	case "/crash":
-		handleCrashCommand(parts)
-	default:
-		// Absolute-path executables (e.g. /usr/bin/git) are NOT Helix
-		// control commands; let the normal pipeline handle them exactly
-		// as before. Real Helix commands never contain a second slash.
-		if strings.Contains(cmd[1:], "/") {
-			return false
-		}
-		handleUnknownSlashCommand(parts[0])
-	}
-	return true
-}
 
 // -------------------------------------------------------
 // /about — Helix philosophy & the creation
@@ -243,9 +139,8 @@ func handleSetup() {
 // /debug — Toggle Debug Logging
 // -------------------------------------------------------
 
-func handleDebugCommand(input string) {
-	args := strings.Fields(input)
-	if len(args) < 2 {
+func handleDebugCommand(c cmdArgs) {
+	if c.Empty() {
 		current := "OFF"
 		if utils.IsDebugMode() {
 			current = "ON"
@@ -254,7 +149,7 @@ func handleDebugCommand(input string) {
 		color.Yellow("Usage: /debug <on|off>")
 		return
 	}
-	switch strings.ToLower(args[1]) {
+	switch c.Sub() {
 	case "on", "enable":
 		utils.SetDebugMode(true)
 		_ = os.Setenv("HELIX_DEBUG", "1")
@@ -266,139 +161,11 @@ func handleDebugCommand(input string) {
 		cfg.UserPrefs.DebugMode = false
 		color.Yellow("Debug mode DISABLED")
 	default:
-		color.Red("Unknown debug setting: %s", args[1])
+		color.Red("Unknown debug setting: %s", c.Arg(0))
 		color.Yellow("Usage: /debug <on|off>")
 		return
 	}
 	_ = cfg.SavePreferences()
-}
-
-// -------------------------------------------------------
-// /help — SOS Protocol
-// -------------------------------------------------------
-
-func handleHelp() {
-	const colWidth = 28
-	rule := "  " + shell.Fg(shell.HexSubtle, strings.Repeat("─", 70))
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexPrimary, "⚡ HELIX NATIVE SHELL") + " " + shell.Fg(shell.HexRectifier, "// SOS PROTOCOL"))
-	fmt.Println(rule)
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "AI-native shell · natural language · MAN pages · threat intelligence"))
-	helpSection("CORE & NAVIGATION")
-	helpLine(colWidth, "/about", "Helix philosophy, banner & creator")
-	helpLine(colWidth, "/help", "Show this SOS menu")
-	helpLine(colWidth, "/setup", "Unified setup wizard (Identity, AI Provider)")
-	helpLine(colWidth, "/debug <on|off>", "Toggle verbose debug logging")
-	helpLine(colWidth, "/cd <dir>", "Change directory (sandbox-aware)")
-	helpLine(colWidth, "/status", "Check background RAG and AI provider status")
-	helpLine(colWidth, "/doctor", "Run full system diagnostics")
-	helpLine(colWidth, "/online", "Check internet connectivity")
-	helpSection("AI & PROVIDERS")
-	helpLine(colWidth, "/provider <name>", "Switch AI provider (openai, anthropic, ollama…)")
-	helpLine(colWidth, "/provider-status", "Show detailed provider health and API keys")
-	helpLine(colWidth, "/model <id>", "Switch active AI model")
-	helpLine(colWidth, "/test-basic-ai", "Smoke test the active AI model")
-	helpLine(colWidth, "/explain <cmd>", "AI-powered defensive analysis of a command")
-	helpSection("RAG & KNOWLEDGE BASE")
-	helpLine(colWidth, "/rag-status", "Show RAG indexing progress and vector stats")
-	helpLine(colWidth, "/rag-reindex", "Trigger background RAG reindex")
-	helpLine(colWidth, "/rag-rebuild", "Force full RAG knowledge base rebuild")
-	helpLine(colWidth, "/rag-reset", "Wipe all RAG vector data")
-	helpLine(colWidth, "/knowledge-update", "Fetch latest CVEs, CISA KEV, Exploits, MITRE")
-	helpLine(colWidth, "/knowledge-status", "Show knowledge database row counts")
-	helpLine(colWidth, "/knowledge-reindex", "Rebuild FTS5 search index")
-	helpSection("SECURITY, RECON & STEALTH")
-	helpLine(colWidth, "/vuln <query>", "Defensive vulnerability intel (CVE/EDB/MITRE lookup)")
-	helpLine(colWidth, "/scan authorize <ip>", "Authorize recon target (written scope)")
-	helpLine(colWidth, "/scan <ip>", "Run nmap/masscan on an authorized target")
-	helpLine(colWidth, "/sandbox <mode>", "Directory confinement (off, current, strict)")
-	helpLine(colWidth, "/stealth <on|off>", "Private history mode (suppresses shell history)")
-	helpLine(colWidth, "/crash <list|view 1|clear>", "Inspect and manage local crash diagnostics")
-	helpLine(colWidth, "/dry-run", "Toggle command execution preview mode")
-	helpSection("UTILITIES & GIT")
-	helpLine(colWidth, "/git <request>", "Natural language git operations with safety")
-	helpLine(colWidth, "/audio <on|off>", "Toggle tonal audio feedback")
-	helpLine(colWidth, "/typewrite-all <on|off>", "Toggle typewriter effect for ALL output")
-	helpLine(colWidth, "/memory <show|clear>", "Show or wipe conversation memory")
-	helpLine(colWidth, "/agentic <on|off>", "Iterative harness: observe step results & self-correct")
-	helpSection("VOICE (BLACKBOX)")
-	helpLine(colWidth, "/voice-setup", "Configure STT/TTS providers with live pricing")
-	helpLine(colWidth, "/voice-status", "Speech chain health, keys, and recorder state")
-	helpLine(colWidth, "/voice [off]", "Enter voice mode (speak instead of type)")
-	helpLine(colWidth, "/manual", "Return to keyboard input (voice safety valve)")
-	helpLine(colWidth, "/wake <on|off>", "Hands-free: listen for the wake phrase without touching the keyboard")
-	helpLine(colWidth, "/say <text>", "Speak text through the TTS chain")
-	helpLine(colWidth, "/listen [sec]", "Record and transcribe one clip (max 60s)")
-	helpLine(colWidth, "/mictest", "3s self-test: is the mic actually being heard?")
-	helpLine(colWidth, "/tts <on|off>", "Toggle automatic spoken responses")
-	helpLine(colWidth, "/eyes <on|off>", "Toggle opt-in camera vision (memory-only)")
-	helpSection("DANGER ZONE")
-	helpLine(colWidth, "/purge", "Wipe ALL Helix data (keys, DBs, caches) for a fresh start")
-	helpSection("TIPS & ACCELERATION")
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
-		shell.Fg(shell.HexTertiary, "⚡ NVD API KEY") + " " +
-		shell.Fg(shell.HexSubtle, "—") + " " +
-		shell.Fg(shell.HexText, "Accelerate knowledge sync from 40min → 10min"))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + "   " +
-		shell.Fg(shell.HexSubtle, "Get free key: ") +
-		shell.Fg(shell.HexSecondary, "https://nvd.nist.gov/developers/request-an-api-key"))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + "   " +
-		shell.Fg(shell.HexSubtle, "Set environment: ") +
-		shell.Fg(shell.HexSecondary, "export NVD_API_KEY=\"your-key-here\""))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
-		shell.Fg(shell.HexTertiary, "💡 NATURAL LANGUAGE") + " " +
-		shell.Fg(shell.HexSubtle, "—") + " " +
-		shell.Fg(shell.HexText, "Just type plain English"))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + "   " +
-		shell.Fg(shell.HexSubtle, "Example: ") +
-		shell.Fg(shell.HexSecondary, "\"find large files and delete them\""))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
-	helpSection("PROMPT ANATOMY")
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
-		shell.Seg(shell.HexPrimary, shell.HexVoid, " HELIX ") + shell.Fg(shell.HexSubtle, " identity  ") +
-		shell.Seg(shell.HexSecondary, shell.HexText, " ~/path ") + shell.Fg(shell.HexSubtle, " context  ") +
-		shell.Seg(shell.HexGrid, shell.HexTertiary, " main ") + shell.Fg(shell.HexSubtle, " telemetry  ") +
-		shell.Fg(shell.HexRectifier, "❯") + shell.Fg(shell.HexSubtle, " interactive"))
-	fmt.Println(rule)
-	fmt.Println()
-}
-
-func helpSection(title string) {
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ "+strings.ToUpper(title)))
-}
-
-func helpLine(colWidth int, cmd, desc string) {
-	pad := colWidth - len(cmd)
-	if pad < 2 {
-		pad = 2
-	}
-	fmt.Printf("  %s %s%s%s\n",
-		shell.Fg(shell.HexSubtle, "│"),
-		shell.Fg(shell.HexTertiary, cmd),
-		strings.Repeat(" ", pad),
-		shell.Fg(shell.HexText, desc),
-	)
-}
-
-// -------------------------------------------------------
-// Unknown slash command
-// -------------------------------------------------------
-
-func handleUnknownSlashCommand(cmd string) {
-	audio.PlayError()
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexRectifier, "⚠ UNRECOGNIZED SIGNAL") +
-		" " + shell.Fg(shell.HexSubtle, "::") +
-		" " + shell.Fg(shell.HexText, cmd))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
-		" " + shell.Fg(shell.HexText, "That command does not exist in the Helix grid."))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
-		" " + shell.Fg(shell.HexTertiary, "Execute /help") +
-		" " + shell.Fg(shell.HexText, "for the SOS protocol and full command menu."))
-	fmt.Println()
 }
 
 // -------------------------------------------------------
@@ -458,6 +225,55 @@ func handleStatus() {
 		color.Yellow("  Audio Engine: Inactive (Use /audio on)")
 	}
 
+	// Agentic harness + approval posture. These two decide how much happens
+	// without being asked, which makes them the most consequential lines here.
+	if agentCore != nil {
+		mode := agentCore.Permission()
+		line := fmt.Sprintf("  Permission mode: %s — %s", mode, mode.Describe())
+		if mode == agent.PermissionAsk {
+			color.Cyan(line)
+		} else {
+			color.Yellow(line)
+		}
+		if agentCore.Agentic {
+			color.Green("  Agentic harness: ON (step budget %d)", agenticStepBudget())
+		} else {
+			color.Yellow("  Agentic harness: OFF (single-shot planning)")
+		}
+		if n := agentCore.HookCount(); n > 0 {
+			color.Cyan("  Local policy hooks: %d loaded (/hooks)", n)
+		}
+	}
+
+	// Task list — open work the planner can see.
+	if todoList != nil {
+		counts := todoList.Counts()
+		open := counts[session.TodoPending] + counts[session.TodoInProgress] +
+			counts[session.TodoBlocked]
+		if open > 0 {
+			color.Cyan("  Tasks: %d open, %d done (/todo)", open, counts[session.TodoDone])
+		} else if counts[session.TodoDone] > 0 {
+			color.Cyan("  Tasks: all %d complete (/todo prune to clear)", counts[session.TodoDone])
+		}
+	}
+
+	// Project context.
+	if _, path, ok := loadProjectContext(); ok {
+		color.Cyan("  Project context: %s", path)
+	} else {
+		color.Yellow("  Project context: none here (/init writes HELIX.md)")
+	}
+
+	// Conversation memory and session spend.
+	if agentCore != nil && agentCore.Session != nil {
+		color.Cyan("  Conversation memory: %d/%d turns",
+			agentCore.Session.Len(), agentCore.Session.Capacity())
+	}
+	if usage := ai.Usage(); usage.Calls > 0 {
+		color.Cyan("  Model calls: %d (%d failed) · ~%d est. tokens (/cost)",
+			usage.Calls, usage.Failures, usage.EstTotalTokens())
+	}
+
 	// Stealth Mode
 	if agentCore != nil && agentCore.IsStealthEnabled() {
 		color.Magenta("  Stealth Mode: ENABLED (History suppression active)")
@@ -488,15 +304,21 @@ func handleStatus() {
 	}
 }
 
-func handleSandboxCommand(input string) {
-	args := strings.Fields(input)
-	if len(args) < 2 {
-		sandbox.PrintStatus()
-		color.Yellow("Usage: /sandbox <mode>")
-		color.Yellow("Modes: off, current, strict")
+func handleSandboxCommand(c cmdArgs) {
+	if sandbox == nil {
+		color.Red("Sandbox is not available in this session.")
 		return
 	}
-	mode := strings.ToLower(args[1])
+	if c.Empty() {
+		sandbox.PrintStatus()
+		color.Yellow("Usage: /sandbox <off|current|strict>")
+		color.Yellow("  off      no directory confinement")
+		color.Yellow("  current  confine to the current directory tree")
+		color.Yellow("  strict   current-dir confinement plus kernel confinement (%s)",
+			confinement.BackendName())
+		return
+	}
+	mode := c.Sub()
 	switch mode {
 	case "off", "disable", "none":
 		sandbox.SetMode(commands.SandboxDisabled)
@@ -510,8 +332,8 @@ func handleSandboxCommand(input string) {
 	}
 }
 
-func handleChangeDirectory(input string) {
-	targetDir := strings.TrimSpace(strings.TrimPrefix(input, "/cd"))
+func handleChangeDirectory(c cmdArgs) {
+	targetDir := c.Rest
 	if targetDir == "" {
 		current, _ := os.Getwd()
 		color.Cyan("Current directory: %s", current)
@@ -522,10 +344,16 @@ func handleChangeDirectory(input string) {
 	}
 }
 
-func handleGitCommand(input string) {
-	request := strings.TrimSpace(strings.TrimPrefix(input, "/git"))
+func handleGitCommand(c cmdArgs) {
+	request := c.Rest
 	if request == "" {
 		color.Red("Usage: /git <natural-language git operation>")
+		color.Yellow("Examples: /git commit everything with a sensible message")
+		color.Yellow("          /git show me what changed on this branch")
+		return
+	}
+	if gitManager == nil {
+		color.Red("Git manager is not available in this session.")
 		return
 	}
 	if err := gitManager.HandleGitRequest(request); err != nil {
@@ -608,14 +436,27 @@ func handleRAGReset() {
 		color.Red("RAG system not initialized")
 		return
 	}
-	color.Blue("Resetting all RAG data…")
-	home, _ := os.UserHomeDir()
+	color.Yellow("This deletes every RAG index and embedding cache on disk.")
+	if !commands.AskForConfirmation("Wipe all RAG vector data?") {
+		color.Yellow("RAG reset cancelled.")
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		color.Red("Cannot resolve the home directory: %v", err)
+		return
+	}
 	ragDir := filepath.Join(home, ".helix", "rag_index")
 	if err := os.RemoveAll(ragDir); err != nil {
 		color.Red("Failed to reset RAG data: %v", err)
 		return
 	}
-	color.Green("RAG reset completed.")
+	color.Green("RAG data deleted from %s.", ragDir)
+	// The running system still holds the state it loaded at boot, so it will
+	// keep answering retrievals from memory. Saying "reset completed" and
+	// stopping there made that look like a working empty index.
+	color.Yellow("The running RAG system still holds what it loaded at startup.")
+	color.Yellow("Run /rag-rebuild to index again now, or restart Helix for a clean load.")
 }
 
 func handleRAGRebuild() {
@@ -651,8 +492,15 @@ func handleRAGRebuild() {
 
 func toggleDryRun() {
 	execConfig.DryRun = !execConfig.DryRun
+	// The agent holds its own copy of the exec config, so flipping the shell's
+	// struct alone left dry-run advertised as ENABLED while the agent kept
+	// executing. Push it through.
+	if agentCore != nil {
+		agentCore.SetDryRun(execConfig.DryRun)
+	}
 	if execConfig.DryRun {
-		color.Yellow("Dry-run mode ENABLED — commands will not execute")
+		color.Yellow("Dry-run mode ENABLED — commands are printed, never executed")
+		color.Cyan("For a whole session that only plans, /permissions plan is the stronger form.")
 	} else {
 		color.Green("Dry-run mode DISABLED — commands will run normally")
 	}
@@ -668,28 +516,39 @@ func checkOnlineStatus() {
 }
 
 func testBasicAI() {
-	color.Cyan("Testing basic AI model responses…")
+	color.Cyan("Smoke testing %s (%s)…", ai.ActiveProviderName(), ai.ActiveModel())
 	think := ux.NewThinker("HELIX :: SMOKE TEST")
 	think.Start()
-	resp1, err := ai.RunModel("Say 'hello world'")
+	started := time.Now()
+	resp, err := ai.RunModel("Reply with exactly: hello world")
+	elapsed := time.Since(started)
 	think.Stop()
+
 	if err != nil {
-		color.Red("Test 1 failed: %v", err)
-	} else {
-		color.Green("Test 1: %s", strings.TrimSpace(resp1))
+		color.Red("Smoke test FAILED after %v: %v", elapsed.Round(time.Millisecond), err)
+		color.Yellow("Run /provider-status to see whether the brain is reachable at all.")
+		return
 	}
+	resp = strings.TrimSpace(resp)
+	if resp == "" {
+		// An empty 200 is a real and confusing failure mode on reasoning models
+		// that burn their token budget before emitting anything.
+		color.Yellow("The model answered in %v but returned NOTHING.", elapsed.Round(time.Millisecond))
+		color.Yellow("That usually means the token budget was consumed before any output.")
+		return
+	}
+	color.Green("Smoke test OK in %v: %s", elapsed.Round(time.Millisecond), truncStr(resp, 120))
 }
 
-func handleStealthCommand(input string) {
-	args := strings.Fields(input)
-	if len(args) < 2 {
+func handleStealthCommand(c cmdArgs) {
+	if c.Empty() {
 		if agentCore != nil {
 			color.Cyan("Stealth mode: %v", agentCore.IsStealthEnabled())
 		}
 		color.Yellow("Usage: /stealth <on|off>")
 		return
 	}
-	switch strings.ToLower(args[1]) {
+	switch c.Sub() {
 	case "on", "enable":
 		if agentCore != nil {
 			agentCore.EnableStealth(true)
@@ -706,13 +565,19 @@ func handleStealthCommand(input string) {
 // -------------------------------------------------------
 
 // handleAgenticCommand toggles the iterative agentic harness: /agentic [on|off|status].
-func handleAgenticCommand(input string) {
+func handleAgenticCommand(c cmdArgs) {
 	if agentCore == nil {
 		color.Red("Agent is not available in this session.")
 		return
 	}
-	arg := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(input, "/agentic")))
-	switch arg {
+	// /agentic steps <n> retunes the budget without leaving the command: the
+	// budget was previously a compile-time constant the help text advertised
+	// but nothing could change.
+	if c.Sub() == "steps" || c.Sub() == "budget" {
+		setAgenticBudget(c.Arg(1))
+		return
+	}
+	switch c.Lower() {
 	case "on", "enable":
 		agentCore.Agentic = true
 		cfg.UserPrefs.AgenticMode = true
@@ -733,6 +598,33 @@ func handleAgenticCommand(input string) {
 	}
 }
 
+// setAgenticBudget retunes the harness step budget for this session and
+// persists it, so a long multi-step task does not need a rebuild to get more
+// iterations than the default.
+func setAgenticBudget(raw string) {
+	if strings.TrimSpace(raw) == "" {
+		color.Cyan("Agentic step budget: %d. Set it with /agentic steps <1-20>.", agenticStepBudget())
+		return
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > maxAgenticStepBudget {
+		color.Red("Step budget must be a whole number between 1 and %d.", maxAgenticStepBudget)
+		return
+	}
+	agentCore.MaxAgenticSteps = n
+	cfg.UserPrefs.AgenticSteps = n
+	_ = cfg.SavePreferences()
+	color.Green("Agentic step budget set to %d.", n)
+	if !agentCore.Agentic {
+		color.Yellow("The harness is currently OFF — run /agentic on to use it.")
+	}
+}
+
+// maxAgenticStepBudget caps the harness. Each iteration is a full planner call
+// plus execution, so an unbounded budget is an unbounded bill and an unbounded
+// blast radius.
+const maxAgenticStepBudget = 20
+
 func agenticStepBudget() int {
 	if agentCore != nil && agentCore.MaxAgenticSteps > 0 {
 		return agentCore.MaxAgenticSteps
@@ -740,11 +632,10 @@ func agenticStepBudget() int {
 	return 4
 }
 
-func handleMemoryCommand(input string) {
-	args := strings.Fields(input)
+func handleMemoryCommand(c cmdArgs) {
 	action := "show"
-	if len(args) >= 2 {
-		action = strings.ToLower(args[1])
+	if !c.Empty() {
+		action = c.Sub()
 	}
 
 	if agentCore == nil || agentCore.Session == nil {
@@ -775,11 +666,21 @@ func handleMemoryCommand(input string) {
 			color.Yellow("Memory clear cancelled.")
 			return
 		}
+		// Archive before wiping, exactly as /clear does: a transcript is cheap
+		// to keep and impossible to get back.
+		turns := agentCore.SessionTurns()
+		archived, aerr := session.SaveSnapshot("memory-clear", turns)
+		if aerr != nil {
+			color.Yellow("Could not archive the conversation first: %v", aerr)
+		}
 		if err := agentCore.Session.Clear(); err != nil {
 			color.Red("Memory clear failed: %v", err)
 			return
 		}
-		color.Green("Conversation memory cleared.")
+		color.Green("Conversation memory cleared (%d turn(s)).", len(turns))
+		if archived != "" {
+			color.Cyan("Archived as %s — restore it with /resume %s", archived, archived)
+		}
 	default:
 		color.Yellow("Usage: /memory <show|clear>")
 	}
@@ -788,30 +689,49 @@ func handleMemoryCommand(input string) {
 // -------------------------------------------------------
 // RECON
 // -------------------------------------------------------
-func handleQuickScan(args []string) {
-	if len(args) < 2 {
-		color.Cyan("Usage: /scan authorize <target> --reason \"<written scope>\"")
+func handleQuickScan(c cmdArgs) {
+	if c.Empty() {
+		color.Cyan("Usage:")
+		color.Cyan("  /scan authorize <target> --reason \"<written scope>\"   record authorization")
+		color.Cyan("  /scan status                                          list authorized targets")
+		color.Cyan("  /scan revoke <target>                                 withdraw authorization")
+		color.Cyan("  /scan <target>                                        scan an authorized target")
+		color.Yellow("Authorization is required first: written scope is the record that this")
+		color.Yellow("was a permitted engagement, and Helix will not scan without it.")
 		return
 	}
 	if agentCore == nil {
 		color.Red("Agent not initialized")
 		return
 	}
-	switch strings.ToLower(args[1]) {
+	switch c.Sub() {
 	case "authorize":
-		if len(args) < 3 {
+		if c.Count() < 2 {
 			color.Red("Usage: /scan authorize <target> --reason \"<written scope>\"")
 			return
 		}
-		target := args[2]
+		target := c.Arg(1)
 		reason := "manual authorization"
-		for i, arg := range args {
-			if strings.EqualFold(arg, "--reason") && i+1 < len(args) {
-				reason = strings.Join(args[i+1:], " ")
+		for i, arg := range c.Fields {
+			if strings.EqualFold(arg, "--reason") && i+1 < len(c.Fields) {
+				// Strip the quotes the shell would normally have removed:
+				// --reason "web app pentest" arrived as a quoted first token and
+				// was recorded with the quote characters embedded.
+				reason = strings.Trim(strings.Join(c.Fields[i+1:], " "), `"'`)
 				break
 			}
 		}
 		agentCore.AuthorizeRecon(target, reason)
+	case "revoke", "deauthorize":
+		if c.Count() < 2 {
+			color.Red("Usage: /scan revoke <target>")
+			return
+		}
+		if agentCore.RevokeRecon(c.Arg(1)) {
+			color.Yellow("Authorization withdrawn for %s.", c.Arg(1))
+		} else {
+			color.Yellow("%s was not authorized.", c.Arg(1))
+		}
 	case "status":
 		targets := agentCore.ListAuthorizedReconTargets()
 		if len(targets) == 0 {
@@ -823,9 +743,10 @@ func handleQuickScan(args []string) {
 			color.Cyan("  • %s — %s", target, reason)
 		}
 	default:
-		target := args[1]
+		target := c.Arg(0)
 		if !agentCore.IsReconTargetAuthorized(target) {
 			color.Red("Target %q is not authorized for reconnaissance.", target)
+			color.Yellow("Authorize it first: /scan authorize %s --reason \"<written scope>\"", target)
 			return
 		}
 
@@ -884,10 +805,13 @@ func handleQuickScan(args []string) {
 // -------------------------------------------------------
 // /explain — defensive debrief
 // -------------------------------------------------------
-func handleExplainCommand(input string) {
-	args := strings.TrimSpace(strings.TrimPrefix(input, "/explain"))
+func handleExplainCommand(c cmdArgs) {
+	args := c.Rest
 	if args == "" {
 		color.Red("Usage: /explain <command or technique description>")
+		return
+	}
+	if !requireAgent() {
 		return
 	}
 	mitreContext := ""
@@ -908,12 +832,10 @@ User Request: %s
 FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lines.`, mitreContext, args)
 
 	explainConfig := ai.ModelConfig{Temperature: 0.7, TopP: 0.9, TopK: 40, MaxTokens: 2048}
-	think := ux.NewThinker("HELIX :: REASONING")
-	think.Start()
-	resp, err := ai.RunModelWithConfig(prompt, explainConfig)
-	think.Stop()
+	resp, err := agentCore.AskModel("HELIX :: REASONING", prompt, explainConfig)
 	if err != nil {
 		color.Red("AI call failed: %v", err)
+		color.Yellow("Run /provider-status to see whether the brain is reachable.")
 		return
 	}
 	cleaned := cleanDebrief(strings.TrimSpace(resp))
@@ -921,9 +843,10 @@ FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lin
 		color.Yellow("The AI model returned an empty explanation. Try rephrasing the request or checking /provider-status.")
 		return
 	}
-	if agentCore != nil {
-		agentCore.GetUX().PrintAIMessage(cleaned, agentCore.GetTypingEffect())
-	}
+	// PrintAnswer, not the raw UX call: this routes through the same seam as
+	// every other reply, so the debrief is spoken when TTS is on and recorded in
+	// session memory instead of vanishing.
+	agentCore.PrintAnswer(cleaned)
 }
 
 func listAvailableModels() {
@@ -1037,13 +960,8 @@ func handleKnowledgeStats() {
 	}
 }
 
-func handleVulnCommand(input string) {
-	fields := strings.Fields(input)
-	if len(fields) == 0 {
-		return
-	}
-	query := strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
-	query = strings.Trim(query, `"'`)
+func handleVulnCommand(c cmdArgs) {
+	query := strings.Trim(c.Rest, `"'`)
 	if query == "" {
 		color.Red("Usage: /vuln <CVE-ID|EDB-ID|MITRE-T-ID|search query>")
 		return
@@ -1300,6 +1218,35 @@ func handleDoctor() {
 		color.Yellow("Daemon: not running — start it with `helix daemon`")
 	}
 
+	// Local policy hooks: a hook file that failed to parse means NO hooks run,
+	// which is invisible until something the user believed was guarded goes
+	// through. State it here rather than only at startup.
+	if set, herr := hooks.Load(); herr != nil {
+		color.Red("Hooks: config failed to load — %v", herr)
+		color.Red("  → NO hooks are active. Fix or remove the file; /hooks shows its path.")
+	} else if len(set.Hooks) == 0 {
+		color.Cyan("Hooks: none configured")
+	} else {
+		blocking := 0
+		disabled := 0
+		for _, h := range set.Hooks {
+			if h.Disabled {
+				disabled++
+				continue
+			}
+			if h.Blocking {
+				blocking++
+			}
+		}
+		color.Green("Hooks: %d loaded (%d blocking, %d disabled)", len(set.Hooks), blocking, disabled)
+	}
+
+	if _, path, ok := loadProjectContext(); ok {
+		color.Green("Project context: %s", path)
+	} else {
+		color.Cyan("Project context: none in this directory tree (/init writes HELIX.md)")
+	}
+
 	if summaries := diagnostics.ListReports(); len(summaries) > 0 {
 		color.Yellow("Pending crash reports (%d):", len(summaries))
 		for _, s := range summaries {
@@ -1351,6 +1298,11 @@ func printEdgeSection() {
 	} else {
 		color.Yellow("Recorder: none found — install sox (`sudo apt install -y sox`) for voice input")
 	}
+
+	// Endpoint collisions BEFORE the reachability probes below: a probe that
+	// reports "reachable" on a port owned by a different service is the most
+	// misleading line /doctor can print, and this explains it.
+	reportEndpointConflicts()
 
 	printEdgeSidecars()
 	printEdgeThermals(rep)
@@ -1529,53 +1481,90 @@ func activeProviderHint(err error) []string {
 	return strings.Split(hint, "\n")
 }
 
-func handleProviderCommand(args []string) {
-	if len(args) == 1 {
+func handleProviderCommand(c cmdArgs) {
+	if c.Empty() {
 		displayProviderStatus()
 		return
 	}
-	switch strings.ToLower(args[1]) {
+	switch c.Sub() {
 	case "status":
 		displayProviderStatus()
+	case "list":
+		color.Cyan("Registered providers: %s", strings.Join(ai.ListProviders(), ", "))
+		color.Cyan("Active: %s (%s)", ai.ActiveProviderName(), ai.ActiveModel())
 	case "use":
-		if len(args) < 3 {
+		if c.Count() < 2 {
 			color.Red("Usage: /provider use <provider>")
+			color.Yellow("Registered: %s", strings.Join(ai.ListProviders(), ", "))
 			return
 		}
-		name := strings.ToLower(args[2])
-		if err := useProviderInteractive(name); err != nil {
-			color.Red("Provider switch failed: %v", err)
+		switchProvider(c.Arg(1))
+	default:
+		// /help has always documented "/provider <name>" while only
+		// "/provider use <name>" worked, so the documented form silently did
+		// nothing. Accept both: a bare argument that names a provider IS the
+		// switch request, and anything else says so instead of staying quiet.
+		name := c.Sub()
+		if ai.HasProvider(name) {
+			switchProvider(name)
 			return
 		}
-		cfg.Provider = name
-		cfg.ProviderModel = ai.ActiveModel()
-		_ = cfg.SavePreferences()
-		color.Green("Active provider: %s", name)
+		color.Red("Unknown provider or subcommand: %s", c.Arg(0))
+		color.Yellow("Usage: /provider [status|list|use <name>|<name>]")
+		color.Yellow("Registered: %s", strings.Join(ai.ListProviders(), ", "))
 	}
 }
 
-func handleModelCommand(args []string) {
-	if len(args) == 1 {
-		listAvailableModels()
+// switchProvider activates a provider and persists the choice.
+func switchProvider(name string) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if err := useProviderInteractive(name); err != nil {
+		color.Red("Provider switch failed: %v", err)
 		return
 	}
-	switch strings.ToLower(args[1]) {
-	case "list":
+	cfg.Provider = name
+	cfg.ProviderModel = ai.ActiveModel()
+	_ = cfg.SavePreferences()
+	color.Green("Active provider: %s (%s)", name, ai.ActiveModel())
+}
+
+func handleModelCommand(c cmdArgs) {
+	if c.Empty() {
+		color.Cyan("Active model: %s (%s)", ai.ActiveModel(), ai.ActiveProviderName())
+		color.Yellow("Usage: /model [list|use <model-id>|<model-id>]")
+		return
+	}
+	switch c.Sub() {
+	case "list", "ls":
 		listAvailableModels()
 	case "use":
-		if len(args) < 3 {
+		if c.Count() < 2 {
 			color.Red("Usage: /model use <model-id>")
 			return
 		}
-		model := strings.Join(args[2:], " ")
-		if err := useModelInteractive(ai.ActiveProviderName(), model); err != nil {
-			color.Red("Model switch failed: %v", err)
-			return
-		}
-		cfg.ProviderModel = ai.ActiveModel()
-		_ = cfg.SavePreferences()
-		color.Green("Active model: %s", ai.ActiveModel())
+		switchModel(c.From(1))
+	default:
+		// Same drift as /provider: "/model <id>" was documented but unhandled.
+		// A model ID is not enumerable offline, so a bare argument is taken as
+		// the ID and the provider reports if it is wrong.
+		switchModel(c.Rest)
 	}
+}
+
+// switchModel activates a model on the current provider and persists it.
+func switchModel(model string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		color.Red("Usage: /model use <model-id>")
+		return
+	}
+	if err := useModelInteractive(ai.ActiveProviderName(), model); err != nil {
+		color.Red("Model switch failed: %v", err)
+		return
+	}
+	cfg.ProviderModel = ai.ActiveModel()
+	_ = cfg.SavePreferences()
+	color.Green("Active model: %s", ai.ActiveModel())
 }
 
 func displayProviderStatus() {
@@ -1591,9 +1580,8 @@ func displayProviderStatus() {
 	printActiveProviderHealth()
 }
 
-func handleAudioCommand(input string) {
-	args := strings.Fields(input)
-	if len(args) < 2 {
+func handleAudioCommand(c cmdArgs) {
+	if c.Empty() {
 		current := "ON"
 		if !audio.IsEnabled() {
 			current = "OFF"
@@ -1606,7 +1594,7 @@ func handleAudioCommand(input string) {
 		color.Yellow("Usage: /audio <on|off>")
 		return
 	}
-	switch strings.ToLower(args[1]) {
+	switch c.Sub() {
 	case "on", "enable":
 		audio.SetEnabled(true)
 		if err := audio.EnsureReady(true); err != nil {
@@ -1621,6 +1609,9 @@ func handleAudioCommand(input string) {
 	case "off", "disable":
 		audio.SetEnabled(false)
 		color.Yellow("Audio disabled")
+	default:
+		color.Red("Unknown audio setting: %s", c.Arg(0))
+		color.Yellow("Usage: /audio <on|off>")
 	}
 }
 
@@ -1628,10 +1619,10 @@ func handleAudioCommand(input string) {
 // CRASH DIAGNOSTICS (/crash)
 // -------------------------------------------------------
 
-func handleCrashCommand(parts []string) {
+func handleCrashCommand(c cmdArgs) {
 	action := "list"
-	if len(parts) >= 2 {
-		action = strings.ToLower(parts[1])
+	if !c.Empty() {
+		action = c.Sub()
 	}
 
 	switch action {
@@ -1651,7 +1642,7 @@ func handleCrashCommand(parts []string) {
 		color.Cyan("Use '/crash clear' to safely delete them without wiping your config.")
 
 	case "view", "show", "cat", "read":
-		if len(parts) < 3 {
+		if c.Count() < 2 {
 			color.Red("Usage: /crash view <number>")
 			return
 		}
@@ -1661,7 +1652,7 @@ func handleCrashCommand(parts []string) {
 			return
 		}
 
-		idx, err := strconv.Atoi(parts[2])
+		idx, err := strconv.Atoi(c.Arg(1))
 		if err != nil || idx < 1 || idx > len(summaries) {
 			color.Red("Invalid report number. Use '/crash list' to see valid numbers (1-%d).", len(summaries))
 			return
@@ -1705,9 +1696,8 @@ func handleCrashCommand(parts []string) {
 // -------------------------------------------------------
 // /typewrite-all — Global Typewriter Effect Toggle
 // -------------------------------------------------------
-func handleTypewriteAllCommand(input string) {
-	args := strings.Fields(input)
-	if len(args) < 2 {
+func handleTypewriteAllCommand(c cmdArgs) {
+	if c.Empty() {
 		current := "OFF"
 		if cfg.UserPrefs.TypewriteAll {
 			current = "ON"
@@ -1717,9 +1707,14 @@ func handleTypewriteAllCommand(input string) {
 		return
 	}
 
-	gui := agentCore.GetUX()
+	// agentCore is nil in a session that failed to build an agent; reading its
+	// UX unconditionally turned a harmless toggle into a crash.
+	var gui *ux.UX
+	if agentCore != nil {
+		gui = agentCore.GetUX()
+	}
 
-	switch strings.ToLower(args[1]) {
+	switch c.Sub() {
 	case "on", "enable":
 		cfg.UserPrefs.TypewriteAll = true
 		if gui != nil {
@@ -1733,7 +1728,7 @@ func handleTypewriteAllCommand(input string) {
 		}
 		color.Yellow("Typewrite-all DISABLED — only AI output will use typewriter effect")
 	default:
-		color.Red("Unknown setting: %s", args[1])
+		color.Red("Unknown setting: %s", c.Arg(0))
 		color.Yellow("Usage: /typewrite-all <on|off>")
 		return
 	}

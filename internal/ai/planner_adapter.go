@@ -40,7 +40,7 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 	// handed a 30s cloud-sized budget would time out on the very attempt that
 	// was supposed to rescue the turn.
 	// Attempt 1: standard config.
-	raw, err := RunModelWithTimeout(prompt, cfg, plannerTimeout(true))
+	raw, err := runModelKind(KindPlanner, prompt, cfg, plannerTimeout(true))
 	if err == nil && isPlannerJSON(raw) {
 		return raw, nil
 	}
@@ -51,7 +51,7 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 		prompt,
 	)
 
-	raw2, err2 := RunModelWithTimeout(retryPrompt, cfg, plannerTimeout(false))
+	raw2, err2 := runModelKind(KindPlanner, retryPrompt, cfg, plannerTimeout(false))
 	if err2 == nil && isPlannerJSON(raw2) {
 		return raw2, nil
 	}
@@ -60,7 +60,7 @@ func RunPlannerWithRetry(prompt string) (string, error) {
 	cfgWarm := cfg
 	cfgWarm.Temperature = 0.4
 
-	raw3, err3 := RunModelWithTimeout(retryPrompt, cfgWarm, plannerTimeout(false))
+	raw3, err3 := runModelKind(KindPlanner, retryPrompt, cfgWarm, plannerTimeout(false))
 	if err3 == nil && isPlannerJSON(raw3) {
 		return raw3, nil
 	}

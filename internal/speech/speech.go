@@ -254,6 +254,16 @@ type ProviderStatusRow struct {
 	InChain      bool
 	Healthy      bool
 	HealthDetail string
+
+	// Endpoint is the local service's address ("" for cloud providers). The
+	// first question when a local sidecar misbehaves is "which address is this
+	// even talking to", and the answer used to live only in config.json.
+	Endpoint string
+
+	// Route is the path that last answered, for sidecars that discover their
+	// route (whisper.cpp serves /inference, an OpenAI-shaped server serves
+	// /v1/audio/transcriptions). Empty until a call succeeds.
+	Route string
 }
 
 // StatusReport summarizes the speech subsystem for /voice-status.
@@ -316,10 +326,12 @@ func Status(ctx context.Context) StatusReport {
 		if !inChain {
 			healthy, detail = false, "standby"
 		}
+		endpoint, route := localAddressing(p)
 		report.STTStatus = append(report.STTStatus, ProviderStatusRow{
 			Name: name, Display: p.DisplayName(), Local: p.IsLocal(),
 			RequiresKey: p.RequiresAPIKey(), HasKey: reg.Keys().Has(STTKeyPrefix + name),
 			InChain: inChain, Healthy: healthy, HealthDetail: detail,
+			Endpoint: endpoint, Route: route,
 		})
 	}
 
@@ -330,10 +342,12 @@ func Status(ctx context.Context) StatusReport {
 		if !inChain {
 			healthy, detail = false, "standby"
 		}
+		endpoint, route := localAddressing(p)
 		report.TTSStatus = append(report.TTSStatus, ProviderStatusRow{
 			Name: name, Display: p.DisplayName(), Local: p.IsLocal(),
 			RequiresKey: p.RequiresAPIKey(), HasKey: reg.Keys().Has(TTSKeyPrefix + name),
 			InChain: inChain, Healthy: healthy, HealthDetail: detail,
+			Endpoint: endpoint, Route: route,
 		})
 	}
 
@@ -356,4 +370,28 @@ func SaveTTSKey(name, key string) error {
 		return fmt.Errorf("speech not initialized")
 	}
 	return reg.SetTTSKey(name, key)
+}
+
+// endpointReporter is implemented by local sidecar adapters that can say which
+// address and route they are using. Optional by design: cloud adapters have a
+// fixed vendor endpoint and nothing useful to report here.
+type endpointReporter interface {
+	Endpoint() string
+}
+
+// routeReporter is implemented by adapters that discover their route.
+type routeReporter interface {
+	ActiveRoute() string
+}
+
+// localAddressing extracts the endpoint and resolved route from an adapter that
+// exposes them.
+func localAddressing(p any) (endpoint, route string) {
+	if e, ok := p.(endpointReporter); ok {
+		endpoint = e.Endpoint()
+	}
+	if r, ok := p.(routeReporter); ok {
+		route = r.ActiveRoute()
+	}
+	return endpoint, route
 }

@@ -38,6 +38,35 @@ func EncodeWAVPCM16(pcm []byte, sampleRate, channels int) []byte {
 	return out
 }
 
+// silentWAV builds a WAV of digital silence, used as a health-probe payload.
+//
+// A local STT sidecar has no /models route to ping, so the only honest probe is
+// a real transcription request — and the payload for that has to be audio.
+// Silence is the cheapest thing that is unambiguously valid: 200ms at 16 kHz
+// mono is 6,400 bytes, transcribes in milliseconds on any backend, and cannot
+// be mistaken for a meaningful utterance in a log.
+//
+// Args:
+//   - sampleRate: samples per second (<= 0 → 16000).
+//   - channels: channel count (<= 0 → 1).
+//   - ms: duration in milliseconds (<= 0 → 200).
+//
+// Returns: a complete PCM16 WAV.
+// Complexity: O(sampleRate * ms / 1000).
+func silentWAV(sampleRate, channels, ms int) []byte {
+	if sampleRate <= 0 {
+		sampleRate = 16000
+	}
+	if channels <= 0 {
+		channels = 1
+	}
+	if ms <= 0 {
+		ms = 200
+	}
+	frames := sampleRate * ms / 1000
+	return EncodeWAVPCM16(make([]byte, frames*channels*2), sampleRate, channels)
+}
+
 // wavHeaderInfo extracts sample rate and channel count from a RIFF/WAVE
 // buffer. Supports PCM (format 1) and IEEE float (format 3) — enough for every
 // provider and recorder Helix speaks to.

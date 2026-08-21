@@ -107,6 +107,7 @@ func setupLlamaCppProvider() error {
 		// say that plainly rather than letting the next prompt fail with a raw
 		// 404 from whatever else is on that port.
 		color.Yellow("  Until it responds, every planner and chat request will fail.")
+		suggestOllamaWeightsForLlamaCpp()
 		if !commands.AskForConfirmation("Select llama.cpp anyway?") {
 			return fmt.Errorf("llama.cpp not usable at %s", url)
 		}
@@ -115,7 +116,43 @@ func setupLlamaCppProvider() error {
 
 	ai.NoteProviderReachable(llamacpp.Name)
 	color.Green("llama-server reachable.")
+	reportResolvedLocalModel()
 	return nil
+}
+
+// reportResolvedLocalModel replaces the placeholder model label with whatever the
+// local runtime says it has loaded, and tells the user what that turned out to
+// be.
+//
+// This is not cosmetic. "local-gguf" is a display placeholder that was also
+// being used as the capability key, so while it was active Helix assumed an 8k
+// context window and no vision support regardless of what was really loaded.
+// Resolving it is what makes /eyes work against a multimodal GGUF and stops RAG
+// context from being clamped on a 128k model.
+func reportResolvedLocalModel() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resolved, changed := ai.ResolveActiveLocalModel(ctx)
+	if !changed {
+		if ai.IsPlaceholderModel(ai.ActiveModel()) {
+			color.Yellow("The server did not report a model name; Helix will keep the %q label.",
+				ai.ActiveModel())
+			color.Yellow("  Capability limits fall back to conservative defaults (8k context, no vision).")
+			color.Yellow("  Set the real one with /model use <name> if you know it.")
+		}
+		return
+	}
+
+	color.Green("Loaded model: %s", resolved)
+	color.Cyan("  Context window: %d tokens", providers.GetContextLimit(resolved))
+	if providers.SupportsVision(llamacpp.Name, resolved) {
+		color.Cyan("  Vision: supported — /eyes on will work with this model")
+	} else {
+		color.Cyan("  Vision: not detected in the model name — /eyes on will refuse")
+	}
+	cfg.ProviderModel = resolved
+	_ = cfg.SavePreferences()
 }
 
 func ensureRemoteAPIKey(provider string) error {
@@ -196,6 +233,14 @@ func selectRemoteModel(provider string) error {
 
 	models, err := ai.ListProviderModels(ctx)
 	defaultModel := ai.DefaultModelForProvider(provider)
+
+	// A local runtime's "default model" is a placeholder for whatever it has
+	// loaded. Offering that as the default would persist a label that makes
+	// Helix mis-read the model's context window and vision support, so prefer
+	// the first real name the runtime reports.
+	if ai.IsPlaceholderModel(defaultModel) && err == nil && len(models) > 0 {
+		defaultModel = models[0].ID
+	}
 
 	if err != nil {
 		// A model list that cannot be fetched is a reachability fact about the
@@ -534,4 +579,35 @@ func confirmKeyForProvider(provider, key string) bool {
 	color.Yellow("That key looks like a %s key, but you are configuring %q.", owner, provider)
 	color.Yellow("  %s", providers.KeyOwnerHint(provider, owner))
 	return commands.AskForConfirmation("Store it anyway?")
+}
+
+// suggestOllamaWeightsForLlamaCpp offers the GGUFs Ollama already downloaded as
+// launch targets for llama-server.
+//
+// This answers a question the setup flow otherwise leaves hanging: llama.cpp
+// needs a `-m /path/to/model.gguf`, and someone who has been using Ollama
+// already has several gigabytes of perfectly good GGUFs on disk. They are just
+// stored content-addressed, with no extension and no name, so nobody finds them
+// by looking. llama.cpp reads GGUF by magic bytes rather than filename, so the
+// blob path works directly — no copy, no conversion, no second download.
+func suggestOllamaWeightsForLlamaCpp() {
+	models, err := ollama.LocalGGUFs()
+	if err != nil || len(models) == 0 {
+		return
+	}
+
+	fmt.Println()
+	color.Cyan("You already have %d GGUF model(s) on disk from Ollama.", len(models))
+	color.Cyan("llama.cpp can serve them directly — same files, no copy or conversion:")
+
+	const shown = 5
+	for i, m := range models {
+		if i == shown {
+			color.Cyan("  ... and %d more", len(models)-shown)
+			break
+		}
+		color.Cyan("  %-28s %5.1f GB", m.Name, m.SizeGB())
+		color.Cyan("    llama-server -m %s --port 8080", m.Path)
+	}
+	color.Yellow("Ollama and llama-server cannot serve the same port at once; stop one first.")
 }

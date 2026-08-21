@@ -27,11 +27,47 @@ The entry point for all user input. It uses a weighted evidence system to classi
 - **Safety Layer**: Intercepts the plan to inject missing `git add` steps, normalize versions, and validate arguments before execution.
 
 ### 3. Shell Safety & Sandbox (`internal/commands/safety/`, `internal/commands/sandbox.go`)
-A 4-stage defensive pipeline:
+A defensive pipeline; each stage can only refuse, never grant:
 1. **Validation**: Unicode hazard detection, quote/brace balancing, and malicious pattern blocking.
 2. **Risk Classification**: Categorizes commands into Low, Medium, and High risk.
-3. **Sandbox Confinement**: Prevents write/delete operations outside the allowed directory tree.
-4. **Execution**: Runs the command via the detected native shell.
+3. **Approval Posture** (`internal/agent/permission.go`): the session's
+   `/permissions` mode decides which of those tiers is asked about. It layers on
+   top of the tiers and never replaces them — high risk stays blocked in every
+   mode, typed confirmations stay typed, and voice-originated plans stay capped.
+4. **Sandbox Confinement**: Prevents write/delete operations outside the allowed directory tree.
+5. **Local Policy Hooks** (`internal/hooks/`): user-defined commands from
+   `~/.helix/hooks.json`, fired last — after everything above has already
+   approved the step. A blocking pre-hook can deny it. Because hooks run at the
+   end, they can subtract permission and never add it. See `docs/harness.md`.
+6. **Execution**: Runs the command via the detected native shell.
+
+### 3a. Local Runtime Sidecars (`internal/providers/llamacpp/`, `internal/speech/`, `internal/edge/endpoints.go`)
+Four user-managed local services (ADR-002: Helix never launches them).
+
+- **Route discovery.** whisper.cpp serves transcription at `/inference`, not the
+  OpenAI path; Piper's own server serves synthesis at `/`, not `/api/tts`. Both
+  adapters try the known routes, cache the winner, and report it in
+  `/voice-status`. Pointing at one hardcoded route made both providers 404 on
+  every request.
+- **Health checks prove the service, not the socket.** A local probe performs the
+  real operation (transcribe 200 ms of silence; synthesize one word and require
+  RIFF bytes), because "something answered on this port" is not evidence — most
+  visibly on macOS, where AirPlay Receiver owns port 5000.
+- **Endpoint conflicts.** llama-server and whisper-server both default to 8080.
+  `edge.FindConflicts` groups configured endpoints by host:port and `/doctor` and
+  `/voice-status` name the clash, since whichever process owns the port answers
+  and makes a naive probe look healthy.
+- **Placeholder model resolution** (`internal/ai/local_model.go`). `local-gguf`
+  is a display label, but the model name is also the capability key — so while it
+  was active the context limit fell back to 8k and vision was reported
+  unsupported whatever was loaded. `llama-server` reports the real model on
+  `/v1/models`; Helix asks once and substitutes it.
+- **Ollama weight reuse** (`internal/ollama/blobs.go`). Ollama stores plain GGUF
+  content-addressed; llama.cpp reads GGUF by magic bytes, so those blobs can be
+  served directly. Helix reads the manifests to map names to blob paths and
+  prints the `llama-server` command.
+
+See `docs/local_runtimes.md`.
 
 ### 4. RAG & Threat Intelligence (`internal/rag/`)
 - **Vector Store**: TF-IDF and keyword-based search over 900+ indexed MAN pages.
@@ -41,6 +77,35 @@ A 4-stage defensive pipeline:
 ### 5. Terminal UX & Audio (`internal/shell/reader.go`, `internal/audio/`)
 - **SYNAPSE Prompt**: TrueColor animated prompt with glitch effects, git telemetry, and transient history.
 - **Synthetic Audio**: A `beep`/`oto` based synthesizer providing 350Hz data taps, 880Hz alerts, and 110Hz error buzzes synchronized with the typewriter effect.
+- **Completion**: Tab completes slash commands and paths, extending to the
+  longest common prefix and listing the alternatives. The command names come
+  from the registry via `shell.SetSlashCommands`, so completion cannot become a
+  stale second copy of the command list.
+
+### 5a. Command Registry (`cmd/helix/registry.go`, `registry_tables.go`)
+One table per command holding its name, aliases, usage line, help text,
+category, and handler. Dispatch, `/help`, `/help <command>`, Tab completion, and
+the did-you-mean suggester all read it, which makes help-vs-behavior drift
+unrepresentable — the class of bug where `/help` documented `/provider <name>`
+while only `/provider use <name>` worked. A test asserts the README's published
+command reference against the same table.
+
+### 5b. Session & Harness State (`internal/session/`, `internal/hooks/`, `internal/ai/meter.go`)
+- **Conversation ring** (`store.go`): bounded recent turns, persisted, injected
+  as a zero-authority fenced block. Slash commands are excluded — they are
+  control input, not conversation.
+- **Snapshots** (`snapshot.go`): every wipe (`/clear`, `/compact`,
+  `/memory clear`, `/resume`) archives first, so no path through the session
+  commands destroys a transcript.
+- **Task list** (`todo.go`): persisted open work, injected as data-only context
+  so the agentic harness can resume a multi-turn task.
+- **Usage meter** (`internal/ai/meter.go`): per-purpose call counts, failures,
+  latency, and *estimated* tokens behind `/cost`. Exact counts are unavailable
+  because no provider returns a usage block on the streaming path Helix uses;
+  every surface that prints an estimate says so.
+- **Project context** (`cmd/helix/dev_cmds.go`): `HELIX.md` / `AGENTS.md` /
+  `CLAUDE.md`, discovered by walking up from the working directory and fenced as
+  data-only — a committed file is content from whoever wrote the repository.
 
 ## Data Flow
 ```text
@@ -54,8 +119,24 @@ User Input → Classifier → [Shell Command] → Safety Pipeline → Sandbox �
                           ↓
                     Safety Layer (Fixes/Validates)
                           ↓
-                    Tool Executor (Git/Pkg/Shell/Recon)
+                    Tool Executor (Git/Pkg/Shell/Recon/Web)
+                          ↓
+                    Approval Posture → Sandbox → Pre-hook → exec → Post-hook
+                          ↓
+                    Observations → [agentic] replan (bounded, same pipeline)
 ```
+
+See `docs/harness.md` for the harness layer in full: tool vocabulary, approval
+postures, the task list, hooks, and what the model is told each turn.
+
+### 6a. Voice Command Routing (`cmd/helix/voice_commands.go`)
+A spoken transcript never contains a `/`, so the slash-command surface was
+unreachable by voice. A phrase table maps plain English onto command lines
+("what's on my list" → `/todo`), with "slash \<name\>" as the escape hatch for
+anything unphrased. Reachability is default-deny and declared in the command
+registry (`VoiceOK`, `VoiceReadOnly`), so the whole voice policy is one readable,
+testable table rather than a guard inside each handler — and a refusal is spoken,
+never silent. See `docs/voice.md`.
 
 ### 6. E2E TTY Harness (`tests/e2e/`)
 A pseudo-terminal (PTY) based end-to-end suite that boots the real `helix`

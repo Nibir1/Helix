@@ -144,22 +144,8 @@ func ReadLine(ctx PromptContext, highlighter *utils.SyntaxHighlighter, history [
 					e.updateSuggestion()
 				}
 			})
-		case 9: // Tab (basic file completion)
-			e.mutate(func() {
-				text := string(e.buf)
-				parts := strings.Fields(text)
-				if len(parts) > 0 {
-					lastWord := parts[len(parts)-1]
-					matches, _ := filepath.Glob(lastWord + "*")
-					if len(matches) == 1 {
-						prefix := text[:len(text)-len(lastWord)]
-						e.buf = []rune(prefix + matches[0])
-						e.cursor = len(e.buf)
-						e.hlDirty = true
-						e.suggestion = ""
-					}
-				}
-			})
+		case 9: // Tab (slash-command and path completion)
+			e.mutate(func() { e.completeAtCursor() })
 		case 27: // Escape sequences (arrows)
 			seq := make([]byte, 2)
 			if _, err := reader.Read(seq[:1]); err != nil {
@@ -469,4 +455,132 @@ func readLineCooked(prompt string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(buf[:n])), nil
+}
+
+// -------------------------------------------------------
+// TAB COMPLETION
+// -------------------------------------------------------
+
+var (
+	slashMu       sync.RWMutex
+	slashCommands []string
+)
+
+// SetSlashCommands publishes the dispatchable slash-command names so Tab can
+// complete them. cmd/helix calls this from its command-registry init, which is
+// what keeps completion from becoming a second, stale list of command names.
+func SetSlashCommands(names []string) {
+	slashMu.Lock()
+	slashCommands = append([]string(nil), names...)
+	slashMu.Unlock()
+}
+
+// SlashCommands returns the published command names.
+func SlashCommands() []string {
+	slashMu.RLock()
+	defer slashMu.RUnlock()
+	return append([]string(nil), slashCommands...)
+}
+
+// completeAtCursor completes the word under the cursor. Callers hold e.mu.
+//
+// It completes the SLASH COMMAND when the cursor is still in the first word and
+// that word starts with "/", and a filesystem path otherwise. Both share the
+// same rule: a single match is inserted, several matches extend to their
+// longest common prefix and are listed, and nothing found leaves the line
+// untouched. Extending to the common prefix is what makes Tab useful on a
+// registry where many names share a stem ("/rag-", "/knowledge-", "/voice-").
+func (e *editor) completeAtCursor() {
+	text := string(e.buf[:e.cursor])
+	start := strings.LastIndexAny(text, " \t") + 1
+	word := text[start:]
+
+	var matches []string
+	if start == 0 && strings.HasPrefix(word, "/") && !strings.Contains(word[1:], "/") {
+		matches = matchPrefix(SlashCommands(), strings.ToLower(word))
+	} else {
+		if word == "" {
+			return
+		}
+		globbed, _ := filepath.Glob(word + "*")
+		matches = globbed
+	}
+	if len(matches) == 0 {
+		return
+	}
+
+	insert := matches[0]
+	if len(matches) > 1 {
+		insert = longestCommonPrefix(matches)
+		// Nothing to extend: show the options instead of silently doing
+		// nothing, which is what the old single-match-only completer did.
+		if len(insert) <= len(word) {
+			e.printCompletions(matches)
+			return
+		}
+	}
+
+	tail := string(e.buf[e.cursor:])
+	e.buf = []rune(text[:start] + insert + tail)
+	e.cursor = len([]rune(text[:start] + insert))
+	e.hlDirty = true
+	e.suggestion = ""
+}
+
+// printCompletions lists candidates above a repainted prompt. Callers hold e.mu.
+func (e *editor) printCompletions(matches []string) {
+	const maxShown = 24
+	shown := matches
+	extra := 0
+	if len(shown) > maxShown {
+		extra = len(shown) - maxShown
+		shown = shown[:maxShown]
+	}
+
+	var b strings.Builder
+	b.WriteString("\r\033[J\r\n")
+	for i, m := range shown {
+		if i > 0 && i%6 == 0 {
+			b.WriteString("\r\n")
+		}
+		b.WriteString(fmt.Sprintf("  %-18s", m))
+	}
+	if extra > 0 {
+		b.WriteString(fmt.Sprintf("\r\n  ... and %d more", extra))
+	}
+	b.WriteString("\r\n")
+	_, _ = os.Stdout.WriteString(b.String())
+
+	// The listing scrolled our drawn block away; forget its geometry so the
+	// caller's repaint draws a fresh prompt instead of clearing the listing.
+	e.prevLines = 0
+	e.prevCursorLine = 0
+}
+
+// matchPrefix returns the candidates starting with prefix.
+func matchPrefix(candidates []string, prefix string) []string {
+	var out []string
+	for _, c := range candidates {
+		if strings.HasPrefix(c, prefix) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// longestCommonPrefix returns the longest prefix shared by every entry.
+func longestCommonPrefix(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	prefix := items[0]
+	for _, s := range items[1:] {
+		for !strings.HasPrefix(s, prefix) {
+			prefix = prefix[:len(prefix)-1]
+			if prefix == "" {
+				return ""
+			}
+		}
+	}
+	return prefix
 }

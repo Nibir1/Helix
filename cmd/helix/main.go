@@ -22,6 +22,7 @@ import (
 	"helix/internal/confinement"
 	"helix/internal/daemon"
 	"helix/internal/diagnostics"
+	"helix/internal/hooks"
 	"helix/internal/input"
 	"helix/internal/providers"
 	"helix/internal/rag"
@@ -123,6 +124,19 @@ func main() {
 	if !needsSetup {
 		_ = ai.UseProvider(cfg.Provider)
 		ai.UseModel(cfg.ProviderModel)
+		// A saved placeholder ("local-gguf") is a label, not a model: while it
+		// is active Helix assumes an 8k context and no vision whatever the
+		// runtime actually loaded. Ask the runtime once, in the background, so
+		// startup is not blocked on an unreachable sidecar.
+		go func() {
+			defer diagnostics.Guard("local-model-resolve")()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if resolved, changed := ai.ResolveActiveLocalModel(ctx); changed {
+				cfg.ProviderModel = resolved
+				_ = cfg.SavePreferences()
+			}
+		}()
 	} else {
 		if err := runNativeSetup(); err != nil {
 			color.Red("Setup failed: %v", err)
@@ -182,6 +196,12 @@ func main() {
 	stealthExec := stealth.NewStealthExecutor(stealth.DefaultStealthConfig())
 	reconEng := recon.NewReconEngine(env, recon.DefaultReconConfig())
 	agentCore = agent.NewAgent(env, ragSystem, sandbox, execConfig, cfg.UserPrefs.TypingEffect, gui, stealthExec, reconEng)
+	// /git shares the AGENT's git manager. This package used to declare its own
+	// and never assign it, so /git ran against a nil receiver carrying a
+	// zero-valued ExecuteConfig — SafeMode false, so the pre-execution safety
+	// check was skipped, and env.Shell empty, so commands ran under the wrong
+	// interpreter. One instance, correctly configured, removes both.
+	gitManager = agentCore.GitManager()
 	agentCore.Slash = agent.SlashFunc(handleSlashCommand)
 	agentCore.Agentic = cfg.UserPrefs.AgenticMode
 	histPath := homeDir + "/.helix_history"
@@ -275,6 +295,38 @@ func main() {
 		agentCore.Undo = undo
 	}
 
+	// The harness's own state: the task list the planner can see, the local
+	// policy hooks, the repository's project notes, and the approval posture.
+	if todos, err := session.NewTodoList(); err == nil {
+		todoList = todos
+		agentCore.Todos = todos
+	} else {
+		// A corrupt task file must not take the shell down with it, but it must
+		// not be silent either: the planner would then be planning against a
+		// task list the user believes it can see.
+		color.Yellow("Task list unavailable: %v", err)
+		color.Yellow("/todo is disabled this session; fix or delete ~/.helix/todo.json.")
+	}
+	if hookSet, err := hooks.Load(); err == nil {
+		agentCore.Hooks = hookSet
+	} else {
+		// Failing closed on load means NO hooks run — a user who added a
+		// blocking hook must hear that it is not guarding them.
+		color.Red("Hook configuration failed to load: %v", err)
+		color.Red("NO hooks are active this session. Run /hooks to see the config path.")
+	}
+	agentCore.ProjectContext = loadProjectContext
+	applyPersistedPermission()
+	if cfg.UserPrefs.AgenticSteps > 0 {
+		agentCore.MaxAgenticSteps = cfg.UserPrefs.AgenticSteps
+	}
+	if _, path, ok := loadProjectContext(); ok {
+		color.Cyan("Project context loaded from %s", path)
+	}
+
+	fireSessionHook(hooks.SessionStart)
+	defer fireSessionHook(hooks.SessionEnd)
+
 	// §10 E2E voice-command latency (wake→execution start, ≤6s local): set
 	// when a wake event fires, measured at dispatch of the next voice turn.
 	var lastWakeAt time.Time
@@ -291,6 +343,9 @@ func main() {
 			if verr != nil {
 				if verr == errVoiceStopped {
 					continue // kill phrase: mode line already announced it
+				}
+				if errors.Is(verr, errVoiceHandled) {
+					continue // spoken command already ran and answered
 				}
 				// Graceful degradation: mic/STT trouble must never brick the
 				// shell — offer one typed turn while staying in voice mode.
@@ -419,4 +474,48 @@ func runKnowledgeUpdate() {
 		os.Exit(1)
 	}
 	color.Green("Knowledge base updated successfully.")
+}
+
+// applyPersistedPermission restores the saved approval posture.
+//
+// It also migrates the old, dead `default_mode` preference: that field was
+// written to config from the very first release and read by nothing, so a user
+// who had set it was carrying a setting that never applied. Where it names a
+// real mode, honor it once and record it under the key that now works.
+func applyPersistedPermission() {
+	saved := strings.TrimSpace(cfg.UserPrefs.Permission)
+	migrated := false
+	if saved == "" {
+		saved = strings.TrimSpace(cfg.UserPrefs.DefaultMode)
+		migrated = saved != ""
+	}
+	if saved == "" {
+		return
+	}
+	mode, ok := agent.ParsePermissionMode(saved)
+	if !ok {
+		color.Yellow("Saved permission mode %q is not recognized; using the default (ask).", saved)
+		return
+	}
+	agentCore.SetPermission(mode)
+	if migrated {
+		cfg.UserPrefs.Permission = string(mode)
+		_ = cfg.SavePreferences()
+	}
+	if mode != agent.PermissionAsk {
+		// Any posture other than the default changes what happens without
+		// asking; starting a session in it silently would be a surprise.
+		color.Yellow("Permission mode: %s — %s", mode, mode.Describe())
+	}
+}
+
+// fireSessionHook runs the session-start / session-end hooks. Failures are
+// reported by the agent's hook runner; a hook cannot abort the session, because
+// there is no step here for it to deny.
+func fireSessionHook(ev hooks.Event) {
+	if agentCore == nil || agentCore.Hooks == nil {
+		return
+	}
+	wd, _ := os.Getwd()
+	agentCore.FireSessionHook(ev, wd)
 }

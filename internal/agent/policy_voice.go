@@ -73,6 +73,7 @@ func (a *Agent) HandleInputEvent(ev input.InputEvent) {
 	a.channel = input.ChannelText
 	a.turnMeta = ev.Meta
 	a.lastResponse = ""
+	a.turnWasControl = false
 	defer func() {
 		a.channel = input.ChannelText
 		a.turnMeta = nil
@@ -164,8 +165,13 @@ func (a *Agent) handleUndoRequest() {
 }
 
 // recordTurn stores the exchange in session memory (nil-safe).
+//
+// Slash commands are deliberately excluded: they are control input, not part of
+// the conversation. Including them polluted the planner's session context with
+// lines the user never said to the model, and left /clear unable to clear
+// itself.
 func (a *Agent) recordTurn(ev input.InputEvent) {
-	if a.Session == nil {
+	if a.Session == nil || a.turnWasControl {
 		return
 	}
 	a.Session.Append(session.Turn{

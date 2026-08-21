@@ -17,6 +17,9 @@
 # distribution directory
 /dist/
 
+# `go build ./cmd/...` drops the binary in the repo root
+/helix
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*

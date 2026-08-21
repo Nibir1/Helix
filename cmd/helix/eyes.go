@@ -19,9 +19,8 @@ import (
 )
 
 // handleEyesCommand implements /eyes <on|off|status>.
-func handleEyesCommand(raw string) {
-	arg := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(raw, "/eyes")))
-	switch arg {
+func handleEyesCommand(c cmdArgs) {
+	switch c.Lower() {
 	case "on", "enable":
 		if !visionAvailable() {
 			for _, line := range visionUnavailableHelp() {
@@ -32,6 +31,8 @@ func handleEyesCommand(raw string) {
 		setVisionEnabled(true)
 	case "off", "disable":
 		setVisionEnabled(false)
+	case "look", "describe", "see", "what do you see":
+		describeWhatIsSeen("")
 	case "", "status":
 		state := "off"
 		if cfg.Vision.Enabled {
@@ -47,7 +48,41 @@ func handleEyesCommand(raw string) {
 			color.Yellow("Vision model: %s — cannot see; /eyes on will refuse", visionRouteDescription())
 		}
 	default:
-		color.Yellow("Usage: /eyes <on|off|status>")
+		// "/eyes look <question>" — anything after the verb is the question.
+		if sub := c.Sub(); sub == "look" || sub == "describe" || sub == "see" {
+			describeWhatIsSeen(c.From(1))
+			return
+		}
+		color.Yellow("Usage: /eyes <on|off|status|look [question]>")
+	}
+}
+
+// describeWhatIsSeen captures one frame and answers a question about it.
+//
+// This is what makes the camera reachable by keyboard. The conversational vision
+// path only fires on a deictic utterance ("what is THIS?"), and it used to
+// additionally require the voice channel — so a typed session could turn /eyes
+// on and then have no way whatsoever to use it.
+func describeWhatIsSeen(question string) {
+	if agentCore == nil {
+		color.Red("The agent is not available in this session.")
+		return
+	}
+	if !cfg.Vision.Enabled {
+		color.Yellow("Eyes are off. Run /eyes on first.")
+		return
+	}
+	if !visionAvailable() {
+		for _, line := range visionUnavailableHelp() {
+			color.Yellow("%s", line)
+		}
+		return
+	}
+	// Say what is about to happen before the shutter: a camera that activates
+	// without a word is exactly the behavior the /eyes opt-in exists to avoid.
+	color.Cyan("Capturing one frame (memory only) via %s…", visionRouteDescription())
+	if err := agentCore.DescribeFrame(question); err != nil {
+		color.Red("Vision failed: %v", err)
 	}
 }
 

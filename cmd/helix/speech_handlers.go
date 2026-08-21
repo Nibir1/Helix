@@ -299,8 +299,8 @@ func askNumber(prompt string, max int) int {
 }
 
 // handleSayCommand synthesizes and speaks its argument through the TTS chain.
-func handleSayCommand(input string) {
-	text := strings.TrimSpace(strings.TrimPrefix(input, "/say"))
+func handleSayCommand(c cmdArgs) {
+	text := c.Rest
 	if text == "" {
 		fmt.Println("Usage: /say <text>")
 		return
@@ -333,9 +333,8 @@ func handleSayCommand(input string) {
 }
 
 // handleTTSCommand toggles automatic spoken responses (Phase 2 gate).
-func handleTTSCommand(input string) {
-	arg := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(input, "/tts")))
-	switch arg {
+func handleTTSCommand(c cmdArgs) {
+	switch c.Lower() {
 	case "on":
 		speech.SetTTSEnabled(true)
 		color.Green("Automatic spoken responses enabled.")
@@ -353,10 +352,15 @@ func handleTTSCommand(input string) {
 
 // handleListenCommand records one clip and prints the transcription
 // (push-to-talk dev utility; the interactive voice loop arrives in Phase 2).
-func handleListenCommand(input string) {
+func handleListenCommand(c cmdArgs) {
 	seconds := 8
-	if fields := strings.Fields(input); len(fields) > 1 {
-		if n, err := strconv.Atoi(fields[1]); err == nil && n > 0 && n <= 60 {
+	if !c.Empty() {
+		n, err := strconv.Atoi(c.Arg(0))
+		// A bad duration used to be silently ignored and replaced with 8s.
+		// Say so: the user asked for a specific window.
+		if err != nil || n <= 0 || n > 60 {
+			color.Yellow("Duration must be a whole number of seconds between 1 and 60; using %ds.", seconds)
+		} else {
 			seconds = n
 		}
 	}
@@ -395,6 +399,12 @@ func handleListenCommand(input string) {
 func handleVoiceStatus() {
 	color.Cyan("⚡ HELIX VOICE STATUS")
 
+	// A local sidecar sharing its port with the LLM runtime is the most common
+	// reason local STT/TTS "does not work", and it is invisible in the health
+	// rows below — whichever service owns the port answers, so the probe sees a
+	// live socket either way.
+	reportEndpointConflicts()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	report := speech.Status(ctx)
@@ -422,6 +432,24 @@ func handleVoiceStatus() {
 
 	printStatusRows("STT PROVIDERS", report.STTStatus)
 	printStatusRows("TTS PROVIDERS", report.TTSStatus)
+	printVoiceVocabulary()
+}
+
+// printVoiceVocabulary lists what can be reached by speaking.
+//
+// Without this the spoken command surface is undiscoverable: there is no menu to
+// read when your hands are busy, and guessing at phrasing is a bad experience.
+func printVoiceVocabulary() {
+	fmt.Println()
+	color.Cyan("SPOKEN COMMANDS")
+	for _, line := range voiceCommandVocabulary() {
+		fmt.Println("  " + line)
+	}
+	fmt.Println()
+	color.Cyan("  Also: \"slash <command name>\" reaches any voice-enabled command directly,")
+	color.Cyan("  e.g. \"slash provider status\" or \"slash knowledge status\".")
+	color.Yellow("  Destructive commands are unreachable by voice by design — /purge, /commit,")
+	color.Yellow("  /permissions, /config, /hooks and the RAG resets must be typed.")
 }
 
 func chainOrNone(chain []string) string {
@@ -535,10 +563,29 @@ func providerKeyState(r speech.ProviderStatusRow) string {
 // active chain depends on is down.
 func providerDetailLines(r speech.ProviderStatusRow) []string {
 	if r.Healthy {
-		return nil
+		// A HEALTHY local sidecar still gets its address and route printed:
+		// "healthy" on the wrong port is the confusing case, and knowing which
+		// route answered is how the user confirms it is the service they meant.
+		if r.Endpoint == "" {
+			return nil
+		}
+		where := "endpoint: " + r.Endpoint
+		if r.Route != "" {
+			where += "  route: " + r.Route
+		}
+		return []string{where}
 	}
 
 	var lines []string
+	if r.Endpoint != "" {
+		// Which address, and which route answered. Both are the first questions
+		// when a local sidecar misbehaves, and both used to be invisible.
+		where := "endpoint: " + r.Endpoint
+		if r.Route != "" {
+			where += "  route: " + r.Route
+		}
+		lines = append(lines, where)
+	}
 	if detail := strings.TrimSpace(r.HealthDetail); detail != "" && detail != "standby" {
 		lines = append(lines, wrapText(detail, statusDetailWidth)...)
 	}
@@ -562,11 +609,16 @@ func providerDetailLines(r speech.ProviderStatusRow) []string {
 var localSidecarHints = map[string][]string{
 	"whisper-local": {
 		"start it (whisper.cpp — docs/edge_deployment.md §5.1):",
-		"  ./build/bin/whisper-server -m models/ggml-base.en.bin --port 8080",
+		"  ./build/bin/whisper-server -m models/ggml-base.en.bin --port 8081",
+		"then point Helix at it (8080 is llama-server's default port too):",
+		"  /config stt-url http://127.0.0.1:8081",
+		"Helix speaks whisper.cpp's native /inference route directly.",
 	},
 	"piper-local": {
 		"start it (Piper — docs/edge_deployment.md §5.1):",
-		"  releases: https://github.com/rhasspy/piper/releases",
+		"  python3 -m piper.http_server -m en_US-lessac-medium.onnx --port 5001",
+		"then point Helix at it (macOS AirPlay Receiver owns port 5000):",
+		"  /config tts-url http://127.0.0.1:5001",
 	},
 	"kokoro-local": {
 		"start it (Kokoro-FastAPI — docs/edge_deployment.md §5.1):",

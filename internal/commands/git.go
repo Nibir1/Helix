@@ -58,6 +58,13 @@ type GitOperation struct {
 	Risks        []string
 }
 
+// SetDryRun toggles execution preview for git operations. The manager receives
+// its ExecuteConfig by value at construction, so a later change to the caller's
+// copy is invisible to it without this.
+func (gm *GitManager) SetDryRun(on bool) {
+	gm.execConfig.DryRun = on
+}
+
 // HandleGitRequest processes natural language git requests from /git
 func (gm *GitManager) HandleGitRequest(request string) error {
 	request = strings.ToLower(strings.TrimSpace(request))

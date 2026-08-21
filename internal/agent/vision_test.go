@@ -129,3 +129,75 @@ func TestVisionOnMetricFiresAfterInsight(t *testing.T) {
 		t.Fatalf("metric fired on capture failure: %q", metric)
 	}
 }
+
+// TestDescribeFrameIsTheKeyboardPath covers the explicit entry point that closes
+// the keyboard gap without making typed deixis fire the camera.
+//
+// The two halves belong together: visionRequested deliberately ignores typed
+// input (a typed "what does this do?" means the screen, not the room), so the
+// only way a typed session reaches the camera is by asking for it outright.
+func TestDescribeFrameIsTheKeyboardPath(t *testing.T) {
+	ag, spoken := newTestAgent(t)
+
+	var gotPrompt string
+	ag.VisionEnabled = func() bool { return true }
+	ag.VisionCapture = func(context.Context) ([]byte, error) { return []byte{0xFF, 0xD8}, nil }
+	ag.VisionCall = func(prompt string, frame []byte) (string, error) {
+		gotPrompt = prompt
+		return "a terminal window", nil
+	}
+
+	if err := ag.DescribeFrame("what is on the screen"); err != nil {
+		t.Fatalf("DescribeFrame: %v", err)
+	}
+	if gotPrompt != "what is on the screen" {
+		t.Errorf("prompt = %q, want the caller's question", gotPrompt)
+	}
+	if len(*spoken) == 0 {
+		t.Error("the answer should be spoken as well as printed")
+	}
+
+	// No question supplied → a sensible default rather than an empty prompt,
+	// which some vision models answer with nothing at all.
+	if err := ag.DescribeFrame("   "); err != nil {
+		t.Fatalf("DescribeFrame with no question: %v", err)
+	}
+	if gotPrompt == "" {
+		t.Error("an empty question must be replaced with a default prompt")
+	}
+}
+
+func TestDescribeFrameRefusesWhenUnavailable(t *testing.T) {
+	ag, _ := newTestAgent(t)
+
+	// Eyes off.
+	ag.VisionEnabled = func() bool { return false }
+	ag.VisionCapture = func(context.Context) ([]byte, error) { t.Fatal("must not capture"); return nil, nil }
+	ag.VisionCall = func(string, []byte) (string, error) { t.Fatal("must not call"); return "", nil }
+	if err := ag.DescribeFrame("look"); err == nil {
+		t.Error("DescribeFrame must refuse while eyes are off")
+	}
+
+	// Seams not wired (headless build, no camera support compiled in).
+	ag.VisionEnabled = func() bool { return true }
+	ag.VisionCapture = nil
+	if ag.VisionAvailable() {
+		t.Error("VisionAvailable must be false without a capture seam")
+	}
+	if err := ag.DescribeFrame("look"); err == nil {
+		t.Error("DescribeFrame must refuse without a capture seam")
+	}
+}
+
+// TestVisionTurnReportsEmptyAnswers: a vision model that returns nothing is a
+// failure to surface, not a blank reply to print.
+func TestVisionTurnReportsEmptyAnswers(t *testing.T) {
+	ag, _ := newTestAgent(t)
+	ag.VisionEnabled = func() bool { return true }
+	ag.VisionCapture = func(context.Context) ([]byte, error) { return []byte{0xFF}, nil }
+	ag.VisionCall = func(string, []byte) (string, error) { return "   ", nil }
+
+	if err := ag.DescribeFrame("what is this"); err == nil {
+		t.Error("an empty vision answer must be reported as an error")
+	}
+}

@@ -100,6 +100,11 @@ func voiceModeWakeNotes(wakeEnabled bool, engine string) []string {
 }
 
 func exitVoiceMode(persist bool) {
+	// Leaving voice mode while Helix is mid-sentence should stop the sentence.
+	// Without this, /manual returned the prompt to the keyboard while the
+	// previous reply kept talking over it.
+	speech.StopSpeaking()
+
 	voiceModeActive = false
 	if ttyPrompter != nil {
 		commands.SetPrompter(ttyPrompter)
@@ -111,11 +116,25 @@ func exitVoiceMode(persist bool) {
 	color.Cyan("TEXT MODE — keyboard input restored.")
 }
 
-// handleVoiceCommand: /voice [off]
-func handleVoiceCommand(raw string) {
-	arg := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(raw, "/voice")))
-	if arg == "off" {
+// handleVoiceCommand: /voice [on|off|status]
+func handleVoiceCommand(c cmdArgs) {
+	switch c.Lower() {
+	case "off", "stop", "exit":
 		exitVoiceMode(true)
+		return
+	case "status":
+		// A status query must never be the thing that turns the microphone on.
+		if voiceModeActive {
+			color.Green("Voice mode: ON — say \"manual mode\" or type /manual to leave.")
+		} else {
+			color.Yellow("Voice mode: OFF — /voice enters it.")
+		}
+		color.Cyan("Run /voice-status for the full speech chain health report.")
+		return
+	case "", "on", "start":
+		// fall through to the entry path below
+	default:
+		color.Yellow("Usage: /voice [on|off|status]")
 		return
 	}
 	if voiceModeActive {
@@ -131,6 +150,26 @@ func handleVoiceCommand(raw string) {
 		return
 	}
 	enterVoiceMode(true)
+}
+
+// speakDirect speaks text through the TTS chain irrespective of the /tts
+// toggle.
+//
+// /tts governs whether ordinary REPLIES are spoken. Voice-channel bookkeeping —
+// a command acknowledgement, a refusal, a clarification — is not a reply: the
+// user just spoke to a terminal they may not be looking at, so silence there is
+// the actual failure. agentCore.OnSpeak deliberately honors /tts, which is why
+// this exists separately rather than reusing it.
+func speakDirect(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := speech.SpeakStream(ctx, text); err != nil && utils.IsDebugMode() {
+		fmt.Fprintf(os.Stderr, "[voice] notice: %v\n", err)
+	}
 }
 
 // handleManualCommand: /manual — instant fallback to typing (safety valve).
@@ -151,6 +190,12 @@ func handleManualCommand() {
 // partials live and finalizes on the utterance-final result; a failed stream
 // dial degrades to the proven batch path.
 func voiceTurn() (input.InputEvent, error) {
+	// A new turn supersedes the previous reply. Capture is half-duplex (the
+	// recorder cannot run while the speaker does), so anything still playing
+	// here is a reply the user has stopped waiting for — most often an ambient
+	// notice that landed as they were about to speak.
+	speech.StopSpeaking()
+
 	// Ready cue, then get out of the microphone's way. PlayAlertSync (not
 	// PlayAlert) waits for the tone to finish and micSettleDelay covers the
 	// ring-down after it: arming the recorder inside the chime made sox's
@@ -194,6 +239,12 @@ func voiceTurnWithRetry() (input.InputEvent, error) {
 		ev, err := voiceTurn()
 		if err == nil {
 			return ev, nil
+		}
+		if errors.Is(err, errVoiceHandled) || errors.Is(err, errVoiceStopped) {
+			// The utterance was served (a command ran, or a kill phrase fired).
+			// Re-recording here would ask the user to repeat something that
+			// already worked.
+			return ev, err
 		}
 		if errors.Is(err, speech.ErrNoSpeech) || errors.Is(err, speech.ErrEmptyTranscript) {
 			if attempt >= maxVoiceRetries {
@@ -416,6 +467,18 @@ func finishVoiceTranscript(text string, transcript speech.Transcript) (input.Inp
 		return input.InputEvent{}, errVoiceStopped
 	}
 
+	// Spoken command routing (voice_commands.go). A transcript never contains a
+	// "/", so without this the whole slash-command surface is unreachable by
+	// voice — /status, /plan, /todo, /diff, /web and the rest. Only commands
+	// marked VoiceOK are reachable, and a refusal is spoken.
+	//
+	// This runs after the kill switches (which must never be overridden) and
+	// before the planner (so "what's on my list" reads the list instead of
+	// becoming a shell plan).
+	if dispatchVoiceCommand(text) {
+		return input.InputEvent{}, errVoiceHandled
+	}
+
 	return input.InputEvent{
 		Text:    text,
 		Channel: input.ChannelVoice,
@@ -426,6 +489,12 @@ func finishVoiceTranscript(text string, transcript speech.Transcript) (input.Inp
 		},
 	}, nil
 }
+
+// errVoiceHandled signals the utterance was served as a spoken COMMAND, so the
+// turn is complete and the planner must not also see it. Distinct from
+// errVoiceStopped: voice mode is still active and the loop simply takes the next
+// turn.
+var errVoiceHandled = errors.New("voice command handled")
 
 // errVoiceStopped signals a kill phrase ended voice mode (the mode line
 // already announced it; the main loop treats this as a quiet continue).
