@@ -96,7 +96,25 @@ Cache locations, checked in this order: `$LLAMA_CACHE`, `$HF_HUB_CACHE`,
 moved from llama.cpp's own cache to the shared Hugging Face hub cache, so both
 generations are searched.
 
-### And it can serve the models Ollama already pulled
+### And it can usually serve the models Ollama already pulled
+
+**Usually, not always.** The blobs are plain, complete GGUF files and llama.cpp
+identifies them by magic bytes rather than filename, so pointing at one directly
+works for most models. But Ollama converts some models with tensor layouts a
+given llama.cpp build does not implement yet, and those fail at load:
+
+```
+error loading model: done_getting_tensors: wrong number of tensors; expected 2012, got 601
+llama_model_load_from_file_impl: failed to load model
+```
+
+That is not corruption — the file is byte-complete and unsplit. It means this
+llama.cpp build maps only part of what that architecture's GGUF contains.
+Newly-released model families are the usual case, since Ollama ships support for
+them before an upstream llama.cpp release does.
+
+When it happens, Helix prints the error and the log tail, and `-hf` is the way
+past it: download a GGUF built for llama.cpp instead of reusing Ollama's.
 
 Same files, no copy and no conversion. Ollama stores weights as plain GGUF,
 content-addressed:
@@ -271,7 +289,31 @@ Then in Helix:
 
 ---
 
-## 5. Diagnosing "the local thing doesn't work"
+## 5. When Ollama cannot see its own models
+
+`ollama list` empty while gigabytes sit in `~/.ollama/models` means the running
+server is reading a **different store** — it was started with another `HOME` or
+`OLLAMA_MODELS`. Every request for those models then answers 404, including
+Helix's own cloud-to-local fallback, which reports itself as "armed" because the
+server IS reachable.
+
+Helix compares the filesystem against the API and says so outright. To confirm by
+hand:
+
+```bash
+lsof -nP -iTCP:11434 -sTCP:LISTEN
+ps eww -p <pid> | tr ' ' '\n' | grep -E 'HOME=|OLLAMA_MODELS='
+```
+
+Kill that server and start one from your own shell to serve `~/.ollama` again.
+
+A note on how this can happen: any process that calls Ollama's start path
+inherits its own environment into the spawned `ollama serve`, and that server
+outlives it. Helix now starts Ollama only when `llm.fallback.ensure_ready` is
+explicitly true — the same consent gate that governs pulling a model — so a
+readiness check never leaves a daemon behind.
+
+## 6. Diagnosing "the local thing doesn't work"
 
 Run `/voice-status` (speech) or `/doctor` (everything) first. In order of how
 often each is the cause:

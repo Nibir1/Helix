@@ -780,6 +780,7 @@ func guideLlamaCppModel(endpoint string) {
 
 	cached := llamacpp.CachedModels()
 	ollamaModels, _ := ollama.LocalGGUFs()
+	warnIfOllamaCannotSeeItsModels(ollamaModels)
 
 	if len(cached) == 0 && len(ollamaModels) == 0 {
 		fmt.Println()
@@ -815,7 +816,10 @@ func guideLlamaCppModel(endpoint string) {
 	}
 
 	if len(ollamaModels) > 0 {
-		color.Yellow("Ollama's GGUFs load directly — same files, no copy or conversion.")
+		color.Yellow("Ollama's GGUFs are plain files llama.cpp can open directly — but not")
+		color.Yellow("every one will LOAD: Ollama converts some models with tensor layouts a")
+		color.Yellow("given llama.cpp build does not implement yet. If a load fails, the error")
+		color.Yellow("and the log tail are shown, and a -hf download below is the way past it.")
 	}
 
 	// Offer to run it. The wizard has already installed the binary and found the
@@ -994,4 +998,56 @@ func printLlamaCppPullOptions(port string) {
 		return
 	}
 	color.Yellow("  The download is cached, so later launches reuse it.")
+}
+
+// warnIfOllamaCannotSeeItsmodels reports models present on disk that the RUNNING
+// Ollama server does not list.
+//
+// The two can disagree, and when they do nothing else explains it. A server
+// started with a different HOME (or OLLAMA_MODELS) reads a different store, so
+// `ollama list` comes back empty while several gigabytes sit in ~/.ollama —
+// and every request for those models answers 404, including Helix's own
+// cloud-to-local fallback. Comparing the filesystem against the API turns that
+// into one line instead of an afternoon.
+func warnIfOllamaCannotSeeItsModels(onDisk []ollama.LocalModel) {
+	if len(onDisk) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	client := ollama.NewClient()
+	if err := client.Health(ctx); err != nil {
+		return // not running: a different situation, already reported elsewhere
+	}
+	served, err := client.ListModels(ctx)
+	if err != nil {
+		return
+	}
+
+	known := make(map[string]bool, len(served))
+	for _, m := range served {
+		known[m.ID] = true
+	}
+	var invisible []string
+	for _, m := range onDisk {
+		if !known[m.Name] {
+			invisible = append(invisible, m.Name)
+		}
+	}
+	if len(invisible) == 0 {
+		return
+	}
+
+	fmt.Println()
+	color.Red("The running Ollama server does not list %d model(s) that are on disk:", len(invisible))
+	color.Red("  %s", strings.Join(invisible, ", "))
+	color.Yellow("That means the server is reading a DIFFERENT model store than ~/.ollama —")
+	color.Yellow("usually because it was started with another HOME or OLLAMA_MODELS.")
+	color.Yellow("Those models will 404, including for Helix's own local fallback.")
+	color.Cyan("Find the server and what it inherited:")
+	color.Cyan("  lsof -nP -iTCP:11434 -sTCP:LISTEN")
+	color.Cyan("  ps eww -p <pid> | tr ' ' '\\n' | grep -E 'HOME=|OLLAMA_MODELS='")
+	color.Cyan("Restart it from your own shell to serve ~/.ollama again.")
 }

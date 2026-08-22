@@ -154,6 +154,18 @@ func Install(ctx context.Context) error {
 //
 // Returns: error when Ollama cannot be made healthy.
 // Complexity: O(service startup + health polling time).
+// Health reports whether an Ollama server is already answering, WITHOUT
+// starting one.
+//
+// The distinction from EnsureRunning is the whole point: EnsureRunning spawns a
+// detached, system-wide `ollama serve` that binds port 11434 and outlives the
+// caller. That is correct when the user asked for it and wrong as the side
+// effect of a readiness check — see the consent gate in the daemon's
+// ensureLocalBrainReady.
+func Health(ctx context.Context) error {
+	return NewClient().Health(ctx)
+}
+
 func EnsureRunning(ctx context.Context) error {
 	return EnsureRunningWithProgress(ctx, nil)
 }

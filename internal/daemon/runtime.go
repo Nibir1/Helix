@@ -490,10 +490,33 @@ func (d *Daemon) ensureLocalBrainReady(ctx context.Context) {
 	readyCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	if err := ollama.EnsureRunning(readyCtx); err != nil {
-		d.journal.Record("llm_ready", "", "",
-			"local fallback unavailable — Ollama is not running: "+err.Error())
-		return
+	// STARTING Ollama is gated on the same consent as pulling a model.
+	//
+	// `ollama serve` is a system-wide daemon that binds port 11434 and outlives
+	// the process that spawned it. Starting one as a silent side effect of a
+	// readiness PROBE is the wrong shape twice over: in production it means
+	// booting Helix quietly leaves a server running that the user did not ask
+	// for, and in the test suite it meant every daemon test spawned an
+	// `ollama serve` inheriting the test's temporary HOME — which then squatted
+	// 11434 serving an EMPTY model store, so the developer's own `ollama list`
+	// came back blank and every fallback answered 404. That happened.
+	//
+	// ensure_ready already means "you may do heavyweight things to make this
+	// fallback work". Without it: verify and journal, the diagnosis without the
+	// surprise.
+	if err := ollama.Health(readyCtx); err != nil {
+		if !d.llmFallback.EnsureReady {
+			d.journal.Record("llm_ready", "", "",
+				"local fallback unavailable — Ollama is not running. Start it with "+
+					"`ollama serve`, or set llm.fallback.ensure_ready=true to let the "+
+					"daemon start it: "+err.Error())
+			return
+		}
+		if err := ollama.EnsureRunning(readyCtx); err != nil {
+			d.journal.Record("llm_ready", "", "",
+				"local fallback unavailable — Ollama could not be started: "+err.Error())
+			return
+		}
 	}
 	if model == "" {
 		d.journal.Record("llm_ready", "", "",
