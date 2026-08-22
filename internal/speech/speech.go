@@ -18,6 +18,11 @@ import (
 // sharedClient is the process-wide HTTP client for all speech adapters.
 var sharedClient = providers.NewHTTPClient(60 * time.Second)
 
+// probeClient is sharedClient without retries, for local health probes. See
+// HTTPClient.WithoutRetries for why retrying a loopback probe destroys the
+// diagnosis it was meant to produce.
+var probeClient = sharedClient.WithoutRetries()
+
 var (
 	mu         sync.RWMutex
 	registry   *Registry

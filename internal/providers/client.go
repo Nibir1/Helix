@@ -71,6 +71,23 @@ func NewHTTPClient(timeout time.Duration) *HTTPClient {
 	}
 }
 
+// WithoutRetries returns a shallow copy that attempts each request exactly once.
+//
+// For a LOCAL health probe, retrying is actively harmful. A refused connection
+// on 127.0.0.1 is instant and definitive — nothing is listening — but three
+// attempts with backoff turn that into a context deadline, and a deadline says
+// nothing about the cause. The reported symptom becomes "context deadline
+// exceeded" where it should have been "nothing is listening on 127.0.0.1:8080",
+// which is the difference between a diagnosis and a shrug.
+//
+// Retries stay the default everywhere else: a flaky cloud provider is exactly
+// what they are for.
+func (c *HTTPClient) WithoutRetries() *HTTPClient {
+	clone := *c
+	clone.retries = 0
+	return &clone
+}
+
 // RawClient exposes the underlying *http.Client for plain GET probes (health
 // checks) that do not fit the JSON/raw-body helpers. Shares the JSON timeout.
 func (c *HTTPClient) RawClient() *http.Client {

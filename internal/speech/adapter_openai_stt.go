@@ -62,6 +62,12 @@ type openaiSTT struct {
 	// exactly one; whisper-local has two (see the package note).
 	routes []string
 
+	// modelsRoute is the health-probe path. It carries the SAME base-URL prefix
+	// as routes: Groq serves its API under /openai/v1, so probing a bare
+	// /v1/models on the origin returned 404 and reported a perfectly good
+	// provider as down.
+	modelsRoute string
+
 	// route caches the path that last answered, so route discovery costs at
 	// most one extra request per process rather than one per utterance.
 	routeMu sync.Mutex
@@ -77,12 +83,13 @@ func NewOpenAISTT(model, baseURL string) STTProvider {
 		baseURL = openaiDefaultSTTBaseURL
 	}
 	return &openaiSTT{
-		name:    "openai",
-		display: "OpenAI Whisper",
-		origin:  serverOrigin(baseURL),
-		routes:  []string{routeSuffix(baseURL, openaiTranscribeRoute)},
-		model:   model,
-		local:   false,
+		name:        "openai",
+		display:     "OpenAI Whisper",
+		origin:      serverOrigin(baseURL),
+		routes:      []string{routeSuffix(baseURL, openaiTranscribeRoute)},
+		modelsRoute: routeSuffix(baseURL, "/v1/models"),
+		model:       model,
+		local:       false,
 	}
 }
 
@@ -102,12 +109,13 @@ func NewGroqSTT(model, baseURL string) STTProvider {
 		baseURL = groqDefaultSTTBaseURL
 	}
 	return &openaiSTT{
-		name:    "groq",
-		display: "Groq Whisper Turbo",
-		origin:  serverOrigin(baseURL),
-		routes:  []string{routeSuffix(baseURL, openaiTranscribeRoute)},
-		model:   model,
-		local:   false,
+		name:        "groq",
+		display:     "Groq Whisper Turbo",
+		origin:      serverOrigin(baseURL),
+		routes:      []string{routeSuffix(baseURL, openaiTranscribeRoute)},
+		modelsRoute: routeSuffix(baseURL, "/v1/models"),
+		model:       model,
+		local:       false,
 	}
 }
 
@@ -372,7 +380,7 @@ func (p *openaiSTT) Endpoint() string { return p.origin }
 // what is being tested is the route, not the words.
 func (p *openaiSTT) HealthCheck(ctx context.Context) error {
 	if !p.local {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.origin+"/v1/models", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.origin+p.modelsProbe(), nil)
 		if err != nil {
 			return err
 		}
@@ -399,7 +407,7 @@ func (p *openaiSTT) HealthCheck(ctx context.Context) error {
 
 	var lastErr error
 	for _, route := range p.candidateRoutes() {
-		data, derr := sharedClient.DoRaw(ctx, http.MethodPost,
+		data, derr := probeClient.DoRaw(ctx, http.MethodPost,
 			p.origin+route, nil, contentType, body)
 		if derr != nil {
 			lastErr = derr
@@ -422,4 +430,12 @@ func (p *openaiSTT) HealthCheck(ctx context.Context) error {
 		lastErr = errors.New("no transcription route responded")
 	}
 	return p.wrapErr(lastErr)
+}
+
+// modelsProbe returns the health-probe path, defaulting when unset.
+func (p *openaiSTT) modelsProbe() string {
+	if p.modelsRoute != "" {
+		return p.modelsRoute
+	}
+	return "/v1/models"
 }

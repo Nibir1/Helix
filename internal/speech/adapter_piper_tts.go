@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+
+	"helix/internal/providers"
 )
 
 // piperDefaultBaseURL is piper.http_server's default bind address.
@@ -126,9 +128,17 @@ func (p *piperTTS) Synthesize(ctx context.Context, text string, _ SynthesisOptio
 		return AudioFormat{}, fmt.Errorf("%s: empty text", p.name)
 	}
 
+	return p.synthesizeWith(ctx, sharedClient, text)
+}
+
+// synthesizeWith is Synthesize against an explicit client, so a health probe can
+// run without retries while real synthesis keeps them.
+func (p *piperTTS) synthesizeWith(
+	ctx context.Context, client *providers.HTTPClient, text string,
+) (AudioFormat, error) {
 	var lastErr error
 	for _, route := range p.candidateRoutes() {
-		data, err := sharedClient.DoRaw(ctx, http.MethodGet, p.synthURL(route, text), nil, "", nil)
+		data, err := client.DoRaw(ctx, http.MethodGet, p.synthURL(route, text), nil, "", nil)
 		if err != nil {
 			lastErr = err
 			// Any 4xx means "not here" on THIS route: 404 for a missing path,
@@ -310,7 +320,7 @@ func readWAVStreamHeader(r io.Reader) (sampleRate int, channels int, err error) 
 // probe that tells those two situations apart, and it doubles as route
 // discovery.
 func (p *piperTTS) HealthCheck(ctx context.Context) error {
-	if _, err := p.Synthesize(ctx, "ok", SynthesisOptions{}); err != nil {
+	if _, err := p.synthesizeWith(ctx, probeClient, "ok"); err != nil {
 		return err
 	}
 	return nil

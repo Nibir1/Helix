@@ -13,6 +13,7 @@ package speech
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -373,5 +374,88 @@ func TestGroqRouteUnchanged(t *testing.T) {
 	}
 	if path != "/openai/v1/audio/transcriptions" {
 		t.Errorf("groq posted to %q, want /openai/v1/audio/transcriptions", path)
+	}
+}
+
+// TestCloudHealthProbeKeepsBaseURLPrefix is a regression guard.
+//
+// The origin/route refactor kept the base URL's path prefix for TRANSCRIPTION
+// but dropped it for the health probe, so Groq — whose API lives under
+// /openai/v1 — was probed at a bare /v1/models and reported HTTP 404. A
+// perfectly good provider showed as down in /voice-status.
+func TestCloudHealthProbeKeepsBaseURLPrefix(t *testing.T) {
+	var probed string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probed = r.URL.Path
+		if r.URL.Path != "/openai/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	p := NewGroqSTT("", srv.URL+"/openai/v1")
+	p.SetAPIKey("test")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.HealthCheck(ctx); err != nil {
+		t.Fatalf("groq health should succeed: %v (probed %q)", err, probed)
+	}
+	if probed != "/openai/v1/models" {
+		t.Errorf("probed %q, want /openai/v1/models", probed)
+	}
+}
+
+func TestOpenAIHealthProbeUnchanged(t *testing.T) {
+	var probed string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probed = r.URL.Path
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAISTT("", srv.URL+"/v1")
+	p.SetAPIKey("test")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.HealthCheck(ctx); err != nil {
+		t.Fatalf("openai health: %v", err)
+	}
+	if probed != "/v1/models" {
+		t.Errorf("probed %q, want /v1/models", probed)
+	}
+}
+
+// TestLocalProbeFailsFastWithACause: retrying a loopback probe turns an instant,
+// definitive "connection refused" into a context deadline, and a deadline says
+// nothing about the cause. The reported symptom was "context deadline exceeded"
+// where it should have been "nothing is listening".
+func TestLocalProbeFailsFastWithACause(t *testing.T) {
+	// Bind and release to obtain a port nothing is on.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	p := NewWhisperLocalSTT("", "http://"+addr)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	err = p.HealthCheck(ctx)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("a probe against nothing must fail")
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("local probe took %v; retries are turning a refusal into a timeout", elapsed)
+	}
+	if !strings.Contains(err.Error(), "nothing is listening") {
+		t.Errorf("the failure must name the cause, got: %v", err)
 	}
 }

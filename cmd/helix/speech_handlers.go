@@ -16,7 +16,12 @@ import (
 	"helix/internal/config"
 	"helix/internal/speech"
 
+	"helix/internal/providers"
+	"net/http"
+
 	"github.com/fatih/color"
+	"helix/internal/edge"
+	"net/url"
 )
 
 // speechConfigFrom maps the persisted config section onto the speech package
@@ -140,20 +145,14 @@ func handleVoiceSetup() {
 		entry := sttRows[choice-1]
 		sttCfg.Provider = entry.Provider
 		sttCfg.Model = entry.APIModel()
-		if entry.RequiresKey {
-			key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", entry.Provider)))
-			switch {
-			case key == "":
-				color.Yellow("No key entered — %s will fail until a key is set.", entry.Provider)
-			case !confirmKeyForProvider("stt."+entry.Provider, key):
-				color.Yellow("Key not stored — %s will fail until a key is set.", entry.Provider)
-			default:
-				if err := speech.SaveSTTKey(entry.Provider, key); err != nil {
-					color.Red("Key storage failed: %v", err)
-				}
-			}
-		}
+		prepareSpeechProvider("stt", entry.Provider)
 		sttCfg.Fallbacks = askFallback("STT", sttNames, entry.Provider)
+		// A fallback with no key is not a fallback. Each one gets the same
+		// treatment as the primary — previously they were selected by name and
+		// never asked about, so the chain looked deeper than it was.
+		for _, name := range sttCfg.Fallbacks {
+			prepareSpeechProvider("stt", name)
+		}
 		color.Green("STT: %s", sttCfg.Provider)
 	}
 
@@ -168,21 +167,12 @@ func handleVoiceSetup() {
 		entry := ttsRows[choice-1]
 		ttsCfg.Provider = entry.Provider
 		ttsCfg.Model = entry.APIModel()
-		if entry.RequiresKey {
-			key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", entry.Provider)))
-			switch {
-			case key == "":
-				color.Yellow("No key entered — %s will fail until a key is set.", entry.Provider)
-			case !confirmKeyForProvider("tts."+entry.Provider, key):
-				color.Yellow("Key not stored — %s will fail until a key is set.", entry.Provider)
-			default:
-				if err := speech.SaveTTSKey(entry.Provider, key); err != nil {
-					color.Red("Key storage failed: %v", err)
-				}
-			}
-		}
+		prepareSpeechProvider("tts", entry.Provider)
 		ttsCfg.Voice = askVoiceID(entry.Provider)
 		ttsCfg.Fallbacks = askFallback("TTS", ttsNames, entry.Provider)
+		for _, name := range ttsCfg.Fallbacks {
+			prepareSpeechProvider("tts", name)
+		}
 		color.Green("TTS: %s", ttsCfg.Provider)
 	}
 
@@ -255,6 +245,7 @@ func verifySpeechSelection() {
 		color.Green("Chain verified: every selected provider answered.")
 		return
 	}
+	suggestFreeSidecarPorts()
 	color.Yellow("%d selected provider(s) cannot serve a request yet.", problems)
 	color.Yellow("Fix the above, then re-check with /voice-status — no need to re-run the wizard.")
 }
@@ -625,12 +616,25 @@ func providerDetailLines(r speech.ProviderStatusRow) []string {
 		}
 		lines = append(lines, where)
 	}
-	if detail := strings.TrimSpace(r.HealthDetail); detail != "" && detail != "standby" {
-		lines = append(lines, wrapText(detail, statusDetailWidth)...)
+
+	detail := strings.TrimSpace(r.HealthDetail)
+	carriesGuidance := false
+	if detail != "" && detail != "standby" {
+		// PRESERVE existing line structure. A local sidecar's diagnosis is
+		// already formatted — statement, cause, indented commands — and running
+		// it through the word wrapper collapsed all of that into a paragraph
+		// with shell commands buried mid-sentence: "free port: (it currently
+		// holds port 5000) Then start the sidecar on a free port: python3 -m
+		// piper.http_server ... And point Helix at it: /config tts-url <url>".
+		// Only genuinely single-line details get wrapped.
+		lines = append(lines, reflowDetail(detail, statusDetailWidth)...)
+		carriesGuidance = strings.Contains(detail, "\n")
 	}
-	// Only for a sidecar the chain actually needs: a hint about a standby
-	// provider nobody selected is noise.
-	if r.InChain && r.Local {
+
+	// The start-it hint is a FALLBACK, not an addition. When the diagnosis
+	// already carries a launch command, appending the static hint printed the
+	// same advice twice in slightly different words.
+	if r.InChain && r.Local && !carriesGuidance {
 		lines = append(lines, localSidecarHints[r.Name]...)
 	}
 	return lines
@@ -704,4 +708,259 @@ func locality(local bool) string {
 		return "local"
 	}
 	return "cloud"
+}
+
+// reflowDetail renders a health detail for the status block.
+//
+// Multi-line details come from the local-sidecar diagnosis, which is already
+// laid out deliberately: a statement, then the cause, then indented commands to
+// copy. Those must survive verbatim — a command that has been word-wrapped into
+// a sentence cannot be pasted. Single-line details are prose and do get wrapped.
+func reflowDetail(detail string, width int) []string {
+	if !strings.Contains(detail, "\n") {
+		return wrapText(detail, width)
+	}
+
+	var out []string
+	for _, line := range strings.Split(detail, "\n") {
+		trimmedRight := strings.TrimRight(line, " \t")
+		if strings.TrimSpace(trimmedRight) == "" {
+			continue
+		}
+		// Long prose lines still wrap, but only when they carry no command:
+		// indentation is the marker the diagnosis uses for "this is a command".
+		if len(trimmedRight) > width && !strings.HasPrefix(line, " ") {
+			out = append(out, wrapText(trimmedRight, width)...)
+			continue
+		}
+		out = append(out, trimmedRight)
+	}
+	return out
+}
+
+// -------------------------------------------------------
+// PROVIDER READINESS
+// -------------------------------------------------------
+
+// prepareSpeechProvider makes one selected provider actually usable: it settles
+// the credential, then proves the choice with a live probe.
+//
+// Both halves were missing. The wizard prompted for a key unconditionally —
+// re-typing one already stored — and never checked whether what you typed
+// worked, so an expired or mistyped key was accepted silently and surfaced later
+// as a failed /say. Fallbacks were not asked about at all, which made a chain
+// look deeper than it was: a fallback with no key is not a fallback.
+func prepareSpeechProvider(kind, provider string) {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return
+	}
+	reg := speech.Default()
+	if reg == nil {
+		return
+	}
+
+	requiresKey, hasKey, ok := speechCredentialState(reg, kind, provider)
+	if !ok {
+		return
+	}
+
+	if requiresKey {
+		if !settleSpeechKey(kind, provider, hasKey) {
+			return
+		}
+	}
+	verifySpeechProvider(kind, provider, requiresKey)
+}
+
+// speechCredentialState reports whether a provider needs a key and whether one
+// is stored.
+func speechCredentialState(reg *speech.Registry, kind, provider string) (requiresKey, hasKey, ok bool) {
+	switch kind {
+	case "stt":
+		p, found := reg.STTProvider(provider)
+		if !found {
+			return false, false, false
+		}
+		return p.RequiresAPIKey(), reg.Keys().Has(speech.STTKeyPrefix + provider), true
+	case "tts":
+		p, found := reg.TTSProvider(provider)
+		if !found {
+			return false, false, false
+		}
+		return p.RequiresAPIKey(), reg.Keys().Has(speech.TTSKeyPrefix + provider), true
+	}
+	return false, false, false
+}
+
+// settleSpeechKey reuses a stored key or takes a new one, reporting whether the
+// provider now has a credential to try.
+func settleSpeechKey(kind, provider string, hasKey bool) bool {
+	if hasKey {
+		if commands.AskForConfirmation(fmt.Sprintf("%s: use the saved API key?", provider)) {
+			return true
+		}
+	}
+
+	key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", provider)))
+	if key == "" {
+		if hasKey {
+			color.Yellow("Nothing entered — keeping the saved key for %s.", provider)
+			return true
+		}
+		color.Yellow("No key entered — %s will fail until a key is set.", provider)
+		return false
+	}
+	if !confirmKeyForProvider(kind+"."+provider, key) {
+		color.Yellow("Key not stored — %s will fail until a key is set.", provider)
+		return hasKey
+	}
+
+	var err error
+	if kind == "stt" {
+		err = speech.SaveSTTKey(provider, key)
+	} else {
+		err = speech.SaveTTSKey(provider, key)
+	}
+	if err != nil {
+		color.Red("Key storage failed: %v", err)
+		return false
+	}
+	return true
+}
+
+// verifySpeechProvider probes the provider and says whether it can serve a
+// request, so a bad credential or an absent sidecar is caught here rather than
+// at the first spoken word.
+func verifySpeechProvider(kind, provider string, requiresKey bool) {
+	err := runCancellableProgressWithTimeout(
+		"VERIFYING "+strings.ToUpper(provider),
+		45*time.Second,
+		func(ctx context.Context, progress func(string, int64, int64)) error {
+			progress("VERIFYING "+strings.ToUpper(provider), 0, 0)
+			reg := speech.Default()
+			if reg == nil {
+				return fmt.Errorf("speech engine not initialized")
+			}
+			if kind == "stt" {
+				p, found := reg.STTProvider(provider)
+				if !found {
+					return fmt.Errorf("provider not registered")
+				}
+				return p.HealthCheck(ctx)
+			}
+			p, found := reg.TTSProvider(provider)
+			if !found {
+				return fmt.Errorf("provider not registered")
+			}
+			return p.HealthCheck(ctx)
+		},
+	)
+	if err == nil {
+		color.Green("  %s verified.", provider)
+		return
+	}
+
+	// Name the likely cause rather than echoing a status code: a credential
+	// problem and an absent sidecar need completely different actions.
+	if requiresKey && isAuthFailure(err) {
+		color.Red("  %s rejected the API key.", provider)
+		color.Yellow("  Check it at the provider's dashboard and re-run /voice-setup.")
+		return
+	}
+	color.Yellow("  %s could not be verified yet:", provider)
+	for _, line := range strings.Split(strings.TrimSpace(err.Error()), "\n") {
+		color.Yellow("    %s", strings.TrimRight(line, " \t"))
+	}
+}
+
+// isAuthFailure reports whether an error is a rejected credential.
+func isAuthFailure(err error) bool {
+	if code, ok := providers.StatusCode(err); ok {
+		return code == http.StatusUnauthorized || code == http.StatusForbidden ||
+			code == http.StatusPaymentRequired
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "unauthorized") ||
+		strings.Contains(lower, "invalid api key") ||
+		strings.Contains(lower, "missing api key")
+}
+
+// suggestFreeSidecarPorts offers a port that is actually free when a local
+// sidecar's configured one is taken.
+//
+// The stock defaults collide by construction: llama.cpp and whisper.cpp both
+// claim 8080, and on macOS AirPlay Receiver holds 5000 before anything else
+// starts. Rather than telling the user to "pick a free port", Helix binds to
+// find one and hands over the exact launch command and the /config line to
+// match. The choice is deterministic per service, so re-running setup suggests
+// the same number instead of asking for a relaunch on a new one each time.
+func suggestFreeSidecarPorts() {
+	type sidecar struct {
+		service   string
+		configKey string
+		endpoint  string
+		launch    func(port int) string
+	}
+
+	sidecars := []sidecar{
+		{
+			service: "whisper-local", configKey: "stt-url", endpoint: localSTTURL(),
+			launch: func(port int) string {
+				return fmt.Sprintf(
+					"whisper-server -m models/ggml-base.en.bin --port %d", port)
+			},
+		},
+		{
+			service: "piper-local", configKey: "tts-url",
+			endpoint: localTTSURL("piper-local", piperDefaultEndpoint),
+			launch: func(port int) string {
+				return fmt.Sprintf(
+					"python3 -m piper.http_server -m en_US-lessac-medium.onnx --port %d", port)
+			},
+		},
+	}
+
+	var printed bool
+	for _, sc := range sidecars {
+		if !sidecarSelected(sc.service) {
+			continue
+		}
+		current := portOfEndpoint(sc.endpoint)
+		if current <= 0 || edge.PortAvailable(current) {
+			continue // free: nothing to move, the sidecar simply is not running
+		}
+
+		port, isPreferred := edge.FreePortFor(sc.service, current)
+		if isPreferred || port == current {
+			continue
+		}
+		if !printed {
+			fmt.Println()
+			color.Cyan("Port %d is occupied, so that sidecar cannot bind it.", current)
+			printed = true
+		}
+		color.Cyan("  %s — use port %d instead (checked free just now):", sc.service, port)
+		color.Cyan("    %s", sc.launch(port))
+		color.Cyan("    /config %s %s", sc.configKey, edge.ReplacePort(sc.endpoint, port))
+	}
+}
+
+// sidecarSelected reports whether a local provider is in the configured chain.
+func sidecarSelected(name string) bool {
+	return cfg.Speech.STT.Provider == name || containsFold(cfg.Speech.STT.Fallbacks, name) ||
+		cfg.Speech.TTS.Provider == name || containsFold(cfg.Speech.TTS.Fallbacks, name)
+}
+
+// portOfEndpoint extracts the port from an endpoint URL (0 when absent).
+func portOfEndpoint(endpoint string) int {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || u.Port() == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(u.Port())
+	if err != nil {
+		return 0
+	}
+	return n
 }

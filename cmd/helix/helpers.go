@@ -193,6 +193,10 @@ func reportResolvedLocalModel() {
 func ensureRemoteAPIKey(provider string) error {
 	if ai.ProviderHasSavedKey(provider) {
 		if commands.AskForConfirmation(fmt.Sprintf("Use saved API key for %s?", provider)) {
+			// A stored key is not a working key: it can be expired, revoked, or
+			// from a different account. Verifying now costs one request and
+			// saves discovering it at the first prompt.
+			verifyProviderKey(provider)
 			return nil
 		}
 	}
@@ -205,7 +209,46 @@ func ensureRemoteAPIKey(provider string) error {
 		return fmt.Errorf("API key entry cancelled")
 	}
 
-	return ai.SaveProviderKey(provider, key)
+	if err := ai.SaveProviderKey(provider, key); err != nil {
+		return err
+	}
+	verifyProviderKey(provider)
+	return nil
+}
+
+// verifyProviderKey probes a provider and reports whether its credential works.
+//
+// Deliberately not fatal. A network blip, a proxy, or a provider outage would
+// otherwise block setup over something that may be fine in a minute — and the
+// user has already made their choice. Saying clearly what failed, and letting
+// them proceed, beats refusing to continue.
+func verifyProviderKey(provider string) {
+	err := runCancellableProgressWithTimeout(
+		"VERIFYING "+strings.ToUpper(provider),
+		30*time.Second,
+		func(ctx context.Context, progress func(string, int64, int64)) error {
+			progress("VERIFYING "+strings.ToUpper(provider), 0, 0)
+			p, gerr := ai.GetProviderByName(provider)
+			if gerr != nil {
+				return gerr
+			}
+			return p.HealthCheck(ctx)
+		},
+	)
+	if err == nil {
+		color.Green("%s key verified.", provider)
+		ai.NoteProviderReachable(provider)
+		return
+	}
+
+	ai.NoteProviderUnreachable(provider, err.Error())
+	if isAuthFailure(err) {
+		color.Red("%s rejected the API key.", provider)
+		color.Yellow("  Check it on the provider's dashboard, then re-run /setup.")
+		return
+	}
+	color.Yellow("%s could not be verified right now: %v", provider, err)
+	color.Yellow("  The key is saved; /provider-status re-checks it.")
 }
 
 // setupOllamaProvider ensures Ollama is usable.
