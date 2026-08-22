@@ -28,6 +28,7 @@ type Config struct {
 	Daemon                DaemonConfig           `json:"daemon"`
 	Vision                VisionConfig           `json:"vision"`
 	Ambient               AmbientConfig          `json:"ambient"`
+	Companion             CompanionConfig        `json:"companion"`
 	ModelConfig           ai.ModelConfig         `json:"model_config"`
 	ExecuteConfig         commands.ExecuteConfig `json:"execute_config"`
 }
@@ -61,6 +62,14 @@ type SpeechSTTConfig struct {
 	Model     string   `json:"model"`
 	BaseURL   string   `json:"base_url"`
 	Fallbacks []string `json:"fallbacks"`
+	// Endpoints holds per-provider endpoint overrides, keyed by provider name.
+	//
+	// BaseURL applies only to the PRIMARY provider, which quietly made local
+	// sidecars unusable as fallbacks: whisper-local picked as a fallback got its
+	// reassigned port written into BaseURL — a field that belongs to whoever is
+	// primary — so the probe still dialled the stale default and reported a
+	// server that had actually started fine as "did not come up".
+	Endpoints map[string]string `json:"endpoints,omitempty"`
 	// StreamChunkMs is the streaming-STT capture chunk length (0 → 300ms).
 	StreamChunkMs int `json:"stream_chunk_ms"`
 }
@@ -72,6 +81,8 @@ type SpeechTTSConfig struct {
 	Voice     string   `json:"voice"`
 	BaseURL   string   `json:"base_url"`
 	Fallbacks []string `json:"fallbacks"`
+	// Endpoints holds per-provider endpoint overrides. See SpeechSTTConfig.
+	Endpoints map[string]string `json:"endpoints,omitempty"`
 	// FirstByteMs is the TTS first-byte latency budget (0 → 800ms).
 	FirstByteMs int `json:"first_byte_ms"`
 }
@@ -221,6 +232,7 @@ type DaemonConfig struct {
 type VisionConfig struct {
 	Enabled          bool   `json:"enabled"`             // master opt-in switch
 	Provider         string `json:"provider"`            // dedicated vision LLM ("" → active chat provider)
+	Model            string `json:"model"`               // dedicated vision MODEL ("" → the provider's usual choice)
 	MaxFramesPerTurn int    `json:"max_frames_per_turn"` // default 1
 }
 
@@ -231,6 +243,58 @@ type AmbientConfig struct {
 	Sensitivity  float64         `json:"sensitivity"` // 0..1; 0 → package default (0.5)
 	ResponseMode string          `json:"response_mode"`
 	Categories   map[string]bool `json:"categories"` // e.g. {"loud_noise": true}
+}
+
+// CompanionConfig controls Helix's initiative in live mode (/blackbox on):
+// the periodic look at the scene, and whether Helix may speak about it without
+// being asked.
+//
+// Every field is a cost or a courtesy control. IntervalS bounds how often a
+// vision model runs at all; ChangeThreshold decides whether a captured frame is
+// different enough to be worth a model call (an unchanged room costs nothing);
+// CooldownS bounds how often Helix may volunteer a remark once it has one.
+type CompanionConfig struct {
+	Enabled         bool    `json:"enabled"`          // speak up unprompted in live mode
+	IntervalS       int     `json:"interval_s"`       // seconds between scene looks; 0 → default
+	CooldownS       int     `json:"cooldown_s"`       // minimum gap between spoken remarks; 0 → default
+	ChangeThreshold float64 `json:"change_threshold"` // 0..1 frame difference needed to spend a model call
+}
+
+// CompanionDefaults are tuned for a present-but-not-exhausting companion on a
+// LOCAL vision model, where each look costs seconds of compute rather than
+// money. Both numbers are deliberately conservative relative to how fast a
+// camera could be sampled: the limit that matters is not the camera, it is how
+// often a person wants to be spoken to.
+func CompanionDefaults() CompanionConfig {
+	return CompanionConfig{
+		Enabled:         true,
+		IntervalS:       20,
+		CooldownS:       45,
+		ChangeThreshold: 0.08,
+	}
+}
+
+// Interval, Cooldown, and Threshold resolve a possibly-zero field to its
+// default, so callers never have to repeat the fallback.
+func (c CompanionConfig) Interval() time.Duration {
+	if c.IntervalS <= 0 {
+		return time.Duration(CompanionDefaults().IntervalS) * time.Second
+	}
+	return time.Duration(c.IntervalS) * time.Second
+}
+
+func (c CompanionConfig) Cooldown() time.Duration {
+	if c.CooldownS <= 0 {
+		return time.Duration(CompanionDefaults().CooldownS) * time.Second
+	}
+	return time.Duration(c.CooldownS) * time.Second
+}
+
+func (c CompanionConfig) Threshold() float64 {
+	if c.ChangeThreshold <= 0 || c.ChangeThreshold > 1 {
+		return CompanionDefaults().ChangeThreshold
+	}
+	return c.ChangeThreshold
 }
 
 // DefaultConfig returns sane default paths for Helix.
@@ -268,6 +332,7 @@ func DefaultConfig() (*Config, error) {
 		LLM:           LLMDefaults(),
 		ModelConfig:   ai.DefaultModelConfig(),
 		ExecuteConfig: commands.DefaultExecuteConfig(),
+		Companion:     CompanionDefaults(),
 	}
 	_ = cfg.LoadPreferences()
 	return cfg, nil
@@ -330,11 +395,22 @@ func (cfg *Config) LoadPreferences() error {
 	if prefs.Vision.Provider != "" {
 		cfg.Vision.Provider = prefs.Vision.Provider
 	}
+	if prefs.Vision.Model != "" {
+		cfg.Vision.Model = prefs.Vision.Model
+	}
 	if prefs.Vision.MaxFramesPerTurn > 0 {
 		cfg.Vision.MaxFramesPerTurn = prefs.Vision.MaxFramesPerTurn
 	}
 	// Ambient's zero value is the correct default (disabled); copy wholesale.
 	cfg.Ambient = prefs.Ambient
+	// Companion's zero value is NOT its default (Enabled defaults to true), so a
+	// config file written before this section existed must not silently mean
+	// "off". Absence is detected on the whole struct, not per field.
+	if prefs.Companion == (CompanionConfig{}) {
+		cfg.Companion = CompanionDefaults()
+	} else {
+		cfg.Companion = prefs.Companion
+	}
 	return nil
 }
 

@@ -22,6 +22,10 @@ type STTConfig struct {
 	Model     string   `json:"model"`
 	BaseURL   string   `json:"base_url"` // overrides the provider default (tests, proxies)
 	Fallbacks []string `json:"fallbacks"`
+	// Endpoints are per-provider endpoint overrides, keyed by provider name.
+	// BaseURL only ever reached the PRIMARY provider, so a local sidecar picked
+	// as a FALLBACK could not be moved off its default port.
+	Endpoints map[string]string `json:"endpoints,omitempty"`
 	// StreamChunkMs is the streaming capture chunk length (0 → 300ms).
 	StreamChunkMs int `json:"stream_chunk_ms"`
 }
@@ -33,6 +37,8 @@ type TTSConfig struct {
 	Voice     string   `json:"voice"`
 	BaseURL   string   `json:"base_url"`
 	Fallbacks []string `json:"fallbacks"`
+	// Endpoints are per-provider endpoint overrides. See STTConfig.
+	Endpoints map[string]string `json:"endpoints,omitempty"`
 	// FirstByteMs is the TTS first-byte latency budget (0 → 800ms).
 	FirstByteMs int `json:"first_byte_ms"`
 }
@@ -362,7 +368,7 @@ func (r *Registry) Transcribe(ctx context.Context, audio AudioFormat) (Transcrip
 	chain := r.STTChain()
 	if len(chain) == 0 {
 		r.recordSTTHealth(ChainHealth{Attempted: true})
-		return Transcript{}, errors.New("no STT provider configured — run /voice-setup")
+		return Transcript{}, errors.New("no STT provider configured — run /blackbox setup")
 	}
 
 	var errs []error
@@ -401,7 +407,7 @@ func (r *Registry) Synthesize(ctx context.Context, text string, opts SynthesisOp
 	chain := r.TTSChain()
 	if len(chain) == 0 {
 		r.recordTTSHealth(ChainHealth{Attempted: true})
-		return AudioFormat{}, errors.New("no TTS provider configured — run /voice-setup")
+		return AudioFormat{}, errors.New("no TTS provider configured — run /blackbox setup")
 	}
 
 	var errs []error
@@ -452,7 +458,7 @@ func (r *Registry) SynthesizeStream(
 ) (StreamedAudio, string, error) {
 	chain := r.TTSChain()
 	if len(chain) == 0 {
-		return StreamedAudio{}, "", errors.New("no TTS provider configured — run /voice-setup")
+		return StreamedAudio{}, "", errors.New("no TTS provider configured — run /blackbox setup")
 	}
 
 	var errs []error

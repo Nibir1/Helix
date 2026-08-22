@@ -17,9 +17,9 @@ func FuzzTranscriptPolicyParsers(f *testing.F) {
 	f.Add("")
 
 	f.Fuzz(func(t *testing.T, text string) {
-		// Both are deterministic boolean classifiers; exercising them with
-		// arbitrary transcript text must never panic.
-		_ = isDeictic(text)
+		// A deterministic boolean classifier; exercising it with arbitrary
+		// transcript text must never panic. (isDeictic was fuzzed here too
+		// until the deictic vision pre-empt was removed — see vision.go.)
 		_ = isUndoIntent(text)
 	})
 }

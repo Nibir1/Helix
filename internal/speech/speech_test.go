@@ -108,7 +108,7 @@ func TestRegistrySTTAllFail(t *testing.T) {
 func TestRegistryNoProviderConfigured(t *testing.T) {
 	reg := newTestRegistry(t)
 	if _, err := reg.Transcribe(context.Background(), AudioFormat{}); err == nil ||
-		!strings.Contains(err.Error(), "/voice-setup") {
+		!strings.Contains(err.Error(), "/blackbox setup") {
 		t.Fatalf("expected guidance error, got: %v", err)
 	}
 }

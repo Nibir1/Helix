@@ -179,7 +179,7 @@ the placeholder was active:
 
 - the context window fell back to the 8k default, and retrieved context was
   clamped to a fraction of what a 128k-context model could accept;
-- `SupportsVision` was false, so `/eyes on` refused even with a multimodal GGUF
+- `SupportsVision` was false, so `/blackbox eyes on` refused even with a multimodal GGUF
   loaded;
 - `/status` and `/provider-status` printed `local-gguf`, which tells you nothing.
 
@@ -198,7 +198,7 @@ defaults, not Helix's choices, and they cannot both be honored.
 
 Helix keeps both upstream defaults — changing either would break that project's
 documented launch command — and instead *reports the clash*. `/doctor` and
-`/voice-status` name it directly:
+`/blackbox status` name it directly:
 
 ```
 Endpoint conflict: 127.0.0.1:8080 is configured for llama.cpp (LLM) and whisper-local (STT)
@@ -240,7 +240,7 @@ unusable as shipped:
 | Piper | `/api/tts` | **`/`** — `GET /?text=...` or `POST /` (that's the old Rhasspy path) |
 
 Both adapters now try the known routes in order, remember which one answered,
-and report it in `/voice-status`:
+and report it in `/blackbox status`:
 
 ```
 whisper-local  Whisper (local sidecar)  healthy  free  local
@@ -259,7 +259,7 @@ of life. That produced actively false diagnostics:
 - whisper.cpp has no `/models` route at all, so the probe could only ever find a
   404, and reported it as healthy;
 - on macOS, **AirPlay Receiver owns port 5000** and answers HTTP, so
-  `/voice-status` showed Piper "reachable" on a machine where Piper was not
+  `/blackbox status` showed Piper "reachable" on a machine where Piper was not
   running and every spoken reply failed.
 
 Now each local probe does the real thing: whisper-local transcribes 200 ms of
@@ -272,9 +272,9 @@ Route walking treats **any 4xx** as "not on this route" — 404 for a missing pa
 the search before the other is tried. A **5xx** does stop it: that is the right
 endpoint failing, and looking elsewhere would report the wrong cause.
 
-`/voice-setup` now verifies the chain before declaring success. It used to print
+`/blackbox setup` now verifies the chain before declaring success. It used to print
 "Voice link configured" and stop, so a selection that could never work only
-surfaced later as a failed `/say` — by which point the wizard appeared to have
+surfaced later as a failed `/blackbox say` — by which point the wizard appeared to have
 succeeded.
 
 ---
@@ -295,18 +295,25 @@ export HELIX_LLAMACPP_URL=http://127.0.0.1:8080   # only if not the default
 # TTS — Piper
 python3 -m piper.http_server -m en_US-lessac-medium.onnx --port 5001
 
-# TTS — Kokoro (better quality, heavier)
+# TTS — Kokoro (better quality, heavier, OPTIONAL — the only piece needing Docker)
 docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu
 ```
+
+**Helix never requires Docker.** whisper.cpp and Piper cover the whole local
+voice chain with nothing but a binary and Python, and they are what setup
+offers. Kokoro is the one component that ships as a container: Helix will not
+install a container runtime, will not pull the image when no daemon is
+answering, and marks Kokoro `needs docker` in the provider table so the
+constraint is visible before you pick it rather than after.
 
 Then in Helix:
 
 ```text
 /provider use llamacpp      · select the local brain (resolves the real model name)
-/voice-setup                · pick STT/TTS providers and their endpoints
+/blackbox setup             · pick STT/TTS providers and their endpoints
 /config stt-url <url>       · point local STT somewhere else
 /config tts-url <url>       · point local TTS somewhere else
-/voice-status               · chains, health, endpoints, and resolved routes
+/blackbox status               · chains, health, endpoints, and resolved routes
 /doctor                     · everything above plus conflicts, thermals, confinement
 ```
 
@@ -338,7 +345,7 @@ readiness check never leaves a daemon behind.
 
 ## 6. Diagnosing "the local thing doesn't work"
 
-Run `/voice-status` (speech) or `/doctor` (everything) first. In order of how
+Run `/blackbox status` (speech) or `/doctor` (everything) first. In order of how
 often each is the cause:
 
 1. **Endpoint conflict** — two services on one port. Reported explicitly; move

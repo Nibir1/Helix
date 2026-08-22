@@ -21,7 +21,7 @@ func TestE2E_SayHitsMockTTS(t *testing.T) {
 		t.Fatalf("precondition: mock TTS already hit %d times", got)
 	}
 
-	h.WriteLine("/say voice link online")
+	h.WriteLine("/blackbox say voice link online")
 	if err := h.Expect("[voice] voice link online", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestE2E_SayHitsMockTTS(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("/say never reached the mock TTS endpoint (hits=%d)\n----- captured output -----\n%s",
+	t.Fatalf("/blackbox say never reached the mock TTS endpoint (hits=%d)\n----- captured output -----\n%s",
 		h.TTSHits(), h.stripped())
 }
 
@@ -41,12 +41,12 @@ func TestE2E_TTSToggle(t *testing.T) {
 	h := newHarness(t, unusedPlan)
 	defer h.Close()
 
-	h.WriteLine("/tts off")
+	h.WriteLine("/blackbox tts off")
 	if err := h.Expect("Automatic spoken responses disabled", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	h.WriteLine("/tts on")
-	if err := h.SendExpect("/tts on", "Automatic spoken responses enabled", 10*time.Second); err != nil {
+	h.WriteLine("/blackbox tts on")
+	if err := h.SendExpect("/blackbox tts on", "Automatic spoken responses enabled", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

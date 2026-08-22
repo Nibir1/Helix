@@ -82,7 +82,13 @@ func TestObservationBlockIncludesOutputTail(t *testing.T) {
 	if !strings.Contains(block, "output tail") {
 		t.Fatal("captured output must be labelled as an output tail")
 	}
-	if !strings.Contains(block, "read its output tail") {
+	// The instruction to diagnose from it lives in the DIRECTIVE, not in the
+	// block: the block is introduced as data the model must never obey, so an
+	// instruction placed there is one the model is being told to ignore.
+	if strings.Contains(block, "read its output tail") {
+		t.Fatal("the data-only block must not carry instructions")
+	}
+	if !strings.Contains(observationDirective(obs), "read its output tail") {
 		t.Fatal("the planner must be told to diagnose from the output")
 	}
 }

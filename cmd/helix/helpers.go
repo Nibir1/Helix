@@ -18,6 +18,7 @@ import (
 	"helix/internal/providers"
 	"helix/internal/providers/llamacpp"
 	"helix/internal/rag"
+	"helix/internal/shell"
 	"helix/internal/utils"
 
 	"github.com/fatih/color"
@@ -162,7 +163,7 @@ func setupLlamaCppProvider() error {
 // This is not cosmetic. "local-gguf" is a display placeholder that was also
 // being used as the capability key, so while it was active Helix assumed an 8k
 // context window and no vision support regardless of what was really loaded.
-// Resolving it is what makes /eyes work against a multimodal GGUF and stops RAG
+// Resolving it is what makes vision work against a multimodal GGUF and stops RAG
 // context from being clamped on a 128k model.
 func reportResolvedLocalModel() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -182,22 +183,31 @@ func reportResolvedLocalModel() {
 	color.Green("Loaded model: %s", resolved)
 	color.Cyan("  Context window: %d tokens", providers.GetContextLimit(resolved))
 	if providers.SupportsVision(llamacpp.Name, resolved) {
-		color.Cyan("  Vision: supported — /eyes on will work with this model")
+		color.Cyan("  Vision: supported — /blackbox on will see with this model")
 	} else {
-		color.Cyan("  Vision: not detected in the model name — /eyes on will refuse")
+		color.Cyan("  Vision: not detected in the model name — the camera will stay off")
 	}
 	cfg.ProviderModel = resolved
 	_ = cfg.SavePreferences()
 }
 
 func ensureRemoteAPIKey(provider string) error {
+	// Do not ask a question the machine can answer for itself. A saved key is
+	// verified first, and only a key the provider actually REJECTS sends the
+	// user back to their dashboard — "use the saved key?" was a prompt whose
+	// right answer Helix already knew.
 	if ai.ProviderHasSavedKey(provider) {
-		if commands.AskForConfirmation(fmt.Sprintf("Use saved API key for %s?", provider)) {
-			// A stored key is not a working key: it can be expired, revoked, or
-			// from a different account. Verifying now costs one request and
-			// saves discovering it at the first prompt.
-			verifyProviderKey(provider)
+		switch verifyProviderKey(provider) {
+		case keyWorks:
 			return nil
+		case keyUnverifiable:
+			// A network blip or a provider outage is not a bad key. Making
+			// someone re-paste a working credential because their wifi dropped
+			// would be the worse failure.
+			color.Yellow("Keeping the saved key for %s — it could not be checked just now.", provider)
+			return nil
+		case keyRejected:
+			color.Yellow("The saved key for %s no longer works. Enter a new one.", provider)
 		}
 	}
 
@@ -216,13 +226,26 @@ func ensureRemoteAPIKey(provider string) error {
 	return nil
 }
 
+// keyVerdict is what a credential probe actually established.
+//
+// Three outcomes, not two: "did not work" and "could not be checked" call for
+// opposite responses, and collapsing them is how a dropped wifi connection ends
+// up demanding a new API key.
+type keyVerdict int
+
+const (
+	keyWorks keyVerdict = iota
+	keyRejected
+	keyUnverifiable
+)
+
 // verifyProviderKey probes a provider and reports whether its credential works.
 //
 // Deliberately not fatal. A network blip, a proxy, or a provider outage would
 // otherwise block setup over something that may be fine in a minute — and the
 // user has already made their choice. Saying clearly what failed, and letting
 // them proceed, beats refusing to continue.
-func verifyProviderKey(provider string) {
+func verifyProviderKey(provider string) keyVerdict {
 	err := runCancellableProgressWithTimeout(
 		"VERIFYING "+strings.ToUpper(provider),
 		30*time.Second,
@@ -238,17 +261,18 @@ func verifyProviderKey(provider string) {
 	if err == nil {
 		color.Green("%s key verified.", provider)
 		ai.NoteProviderReachable(provider)
-		return
+		return keyWorks
 	}
 
 	ai.NoteProviderUnreachable(provider, err.Error())
 	if isAuthFailure(err) {
 		color.Red("%s rejected the API key.", provider)
 		color.Yellow("  Check it on the provider's dashboard, then re-run /setup.")
-		return
+		return keyRejected
 	}
 	color.Yellow("%s could not be verified right now: %v", provider, err)
 	color.Yellow("  The key is saved; /provider-status re-checks it.")
+	return keyUnverifiable
 }
 
 // setupOllamaProvider ensures Ollama is usable.
@@ -341,22 +365,57 @@ func selectRemoteModel(provider string) error {
 		defaultModel = models[0].ID
 	}
 
-	color.Cyan("Available models:")
-	for i, model := range models {
-		if i >= 25 {
-			color.Cyan("  ... and %d more", len(models)-25)
-			break
-		}
-		color.Cyan("  %s", model.ID)
-	}
-
-	choice := strings.TrimSpace(commands.AskLine(fmt.Sprintf("Model ID (default: %s)", defaultModel)))
+	printModelChoices(models, defaultModel)
+	choice := strings.TrimSpace(commands.AskLine(shell.Prompt("model id", defaultModel)))
 	if choice == "" {
 		choice = defaultModel
 	}
 
 	ai.UseModel(choice)
 	return nil
+}
+
+// printModelChoices renders the provider's catalogue.
+//
+// The old version printed 25 bare IDs and "... and 101 more", which is the
+// worst of both: too long to scan and too short to be complete. Models are
+// grouped by family and capability-tagged instead, so the list answers the
+// question actually being asked — which of these can see, which is the default,
+// and is the one I want even here.
+func printModelChoices(models []providers.ModelInfo, defaultModel string) {
+	const shown = 24
+	fmt.Println(shell.PanelTitle("models"))
+
+	rows := make([][]string, 0, shown)
+	for i, m := range models {
+		if i >= shown {
+			break
+		}
+		mark := ""
+		if m.ID == defaultModel {
+			mark = shell.Badge(shell.StateGood, "default")
+		}
+		caps := []string{}
+		if providers.SupportsVision("", m.ID) {
+			caps = append(caps, "sees")
+		}
+		if providers.SupportsToolUse("", m.ID) {
+			caps = append(caps, "tools")
+		}
+		rows = append(rows, []string{
+			shell.Value(m.ID), shell.Muted(strings.Join(caps, " · ")), mark,
+		})
+	}
+	for _, l := range shell.Table([]string{"model", "can", ""}, rows) {
+		fmt.Println(l)
+	}
+	if len(models) > shown {
+		fmt.Println(shell.PanelGap())
+		fmt.Println(shell.PanelLine(shell.Muted(fmt.Sprintf(
+			"%d more not shown — any id the provider accepts works here",
+			len(models)-shown))))
+	}
+	fmt.Println(shell.PanelEnd())
 }
 
 // selectOllamaModel lets the user choose any installed or pullable Ollama model.
@@ -385,27 +444,44 @@ func selectOllamaModel() error {
 		}
 	}
 
+	fmt.Println(shell.PanelTitle("local models"))
 	if len(models) > 0 {
-		color.Cyan("Installed Ollama models:")
+		rows := make([][]string, 0, len(models))
 		for _, model := range models {
-			color.Cyan("  %s", model.ID)
+			mark := ""
+			if model.ID == defaultTag {
+				mark = shell.Badge(shell.StateGood, "recommended here")
+			}
+			caps := []string{}
+			if providers.SupportsVision("ollama", model.ID) {
+				caps = append(caps, "sees")
+			}
+			if providers.SupportsToolUse("ollama", model.ID) {
+				caps = append(caps, "tools")
+			}
+			rows = append(rows, []string{
+				shell.Value(model.ID), shell.Muted(strings.Join(caps, " · ")), mark,
+			})
 		}
-
+		for _, l := range shell.Table([]string{"installed", "can", ""}, rows) {
+			fmt.Println(l)
+		}
 		if defaultTag == "" {
 			defaultTag = models[0].ID
 		}
 	} else {
-		color.Yellow("No Ollama models are installed.")
+		fmt.Println(shell.PanelLine(shell.Badge(shell.StateWarn, "nothing installed yet")))
 		if defaultTag != "" {
-			color.Cyan("Recommended model: %s", defaultTag)
+			fmt.Println(shell.PanelLine(shell.Muted("best fit for this hardware: ") +
+				shell.Value(defaultTag)))
 		}
 	}
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelLine(shell.Muted(
+		"any tag works — gemma4:e2b · phi4-mini · llama3.1:8b · qwen3:4b")))
+	fmt.Println(shell.PanelEnd())
 
-	color.Cyan("Enter any Ollama model tag (for example: gemma4:e2b, phi4-mini, llama3.1:8b, qwen3:4b).")
-
-	choice := strings.TrimSpace(
-		commands.AskLine(fmt.Sprintf("Ollama model (default: %s)", defaultTag)),
-	)
+	choice := strings.TrimSpace(commands.AskLine(shell.Prompt("ollama model", defaultTag)))
 
 	if choice == "" {
 		if defaultTag == "" {

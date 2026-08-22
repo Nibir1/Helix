@@ -121,7 +121,11 @@ func main() {
 		CustomBaseURL:   cfg.CustomProviderBaseURL,
 		LlamaCppBaseURL: cfg.LLM.LlamaCppURL,
 	})
+	// A first run is not finished when the provider is chosen — the packages
+	// and the speech chain still have to happen, and they sit on the far side
+	// of speech.Init. Remember it here, act on it there.
 	needsSetup := cfg.Provider == "" || !ai.ModelIsLoaded()
+	firstRun := needsSetup
 	if !needsSetup {
 		_ = ai.UseProvider(cfg.Provider)
 		ai.UseModel(cfg.ProviderModel)
@@ -160,10 +164,16 @@ func main() {
 	}()
 
 	// BlackBox Phase 1: speech engine (STT/TTS registry with failover). A
-	// startup failure is non-fatal — text Helix keeps working; /voice-setup
-	// or /voice-status diagnose.
+	// startup failure is non-fatal — text Helix keeps working; /blackbox setup
+	// or /blackbox status diagnose.
 	if err := speech.Init(speechConfigFrom(cfg.Speech)); err != nil {
 		color.Yellow("Speech engine unavailable: %v", err)
+	}
+	if firstRun {
+		// The rest of first run: system packages, then the speech chain. A
+		// precompiled binary's user has no other way to learn that speaking
+		// needs sox and seeing needs ffmpeg.
+		runFirstRunStages()
 	}
 	gui := ux.NewUX()
 	// Sync the global typewriter preference with the UX layer
@@ -244,7 +254,7 @@ func main() {
 	})
 
 	// BlackBox Phase 5: opt-in camera vision seams (memory-only frames).
-	visionSvc := vision.NewCaptureService()
+	visionSvc = vision.NewCaptureService()
 	agentCore.VisionEnabled = func() bool {
 		if !cfg.Vision.Enabled {
 			return false
@@ -266,12 +276,14 @@ func main() {
 		var resp string
 		var err error
 		providerName := cfg.Vision.Provider
-		if providerName != "" {
-			resp, err = ai.RunVisionModelWithProvider(prompt, parts, providerName)
-		} else {
+		if providerName == "" {
 			providerName = ai.ActiveProviderName()
-			resp, err = ai.RunVisionModel(prompt, parts)
 		}
+		// vision.model lets frames go to a small fast VLM while chat keeps the
+		// big model: the companion loop runs on a timer and shares the runtime
+		// with the conversation, so the model that answers questions is usually
+		// the wrong one to describe a frame every 20 seconds.
+		resp, err = ai.RunVisionModelOn(prompt, parts, cfg.Vision.Provider, cfg.Vision.Model)
 		journalVisionEvent("frame", providerName, 1)
 		return resp, err
 	}
@@ -350,7 +362,15 @@ func main() {
 				}
 				// Graceful degradation: mic/STT trouble must never brick the
 				// shell — offer one typed turn while staying in voice mode.
-				color.Yellow("voice: %v — type /manual to leave voice mode", verr)
+				// The error is often multi-line (a provider chain failure
+				// carries the address it dialled and the command that starts
+				// it). Appending an instruction to the end of that glued
+				// "— type /blackbox off" onto the tail of a shell command.
+				fmt.Println(shell.PanelLine(shell.Badge(shell.StateBad, "voice unavailable")))
+				for _, line := range strings.Split(strings.TrimSpace(verr.Error()), "\n") {
+					fmt.Println(shell.PanelLine(shell.Muted(strings.TrimRight(line, " "))))
+				}
+				fmt.Println(shell.Hint("/blackbox off returns to the keyboard  ·  /blackbox status diagnoses"))
 				line, rerr := shell.ReadLine(shell.GetContext(), highlighter, history)
 				if rerr != nil {
 					if rerr.Error() == "EOF" {
@@ -407,26 +427,54 @@ func main() {
 		// the idle window expires; then the next loop iteration runs another
 		// voice turn. Disabled wake config = classic push-to-talk per turn.
 		if voiceModeActive {
-			wakeEv, outcome := wakeListenUntilArmed()
-			if outcome == wakeFired {
-				lastWakeAt = wakeEv.DetectedAt
-				continue
+			// The microphone is provably closed here — the turn finished and the
+			// next capture has not started — so this is one of the two points
+			// where Helix may say something it was not asked for.
+			drainCompanion()
+
+			for {
+				wakeEv, outcome := wakeListenUntilArmed()
+				if outcome == wakeCompanionSpoke {
+					// The scanner stopped on the way out of the listen, so the
+					// remark is spoken into a closed microphone; then listening
+					// resumes rather than falling through to open capture.
+					drainCompanion()
+					continue
+				}
+				if outcome == wakeFired {
+					lastWakeAt = wakeEv.DetectedAt
+				} else {
+					// Wake gating lapsing back to open capture is a change the
+					// user asked for wake for — say so once instead of silently
+					// listening.
+					noteWakeLapse(outcome)
+				}
+				break
 			}
-			// Wake gating lapsing back to open capture is a change the user
-			// announced /wake on for — say so once instead of silently listening.
-			noteWakeLapse(outcome)
 		}
 	}
 }
 
 func runNativeSetup() error {
-	color.Cyan("⚡ HELIX NEURAL LINK CONFIGURATION")
-	color.Cyan("Select AI Provider:")
-	for i, p := range providerOptions {
-		fmt.Printf("%d) %s\n", i+1, p.Label)
+	fmt.Println(shell.PanelTitle("neural link"))
+	fmt.Println(shell.PanelLine(shell.Muted("choose the model that will think for Helix")))
+	fmt.Println(shell.PanelGap())
+
+	items := make([]shell.MenuItem, 0, len(providerOptions))
+	for _, p := range providerOptions {
+		items = append(items, shell.MenuItem{
+			Label: p.Label,
+			Note:  providerNote(p.ID),
+			Tag:   providerTag(p.ID),
+			Good:  ai.ProviderHasSavedKey(p.ID) || p.ID == "ollama",
+		})
+	}
+	for _, l := range shell.Menu(items) {
+		fmt.Println(l)
 	}
 	printAdvancedProviders()
-	choiceStr := commands.AskLine("Enter provider number")
+	fmt.Println(shell.PanelEnd())
+	choiceStr := commands.AskLine(shell.Prompt("provider number", ""))
 	var choice int
 	if _, err := fmt.Sscanf(choiceStr, "%d", &choice); err != nil {
 		return fmt.Errorf("invalid selection: %w", err)
@@ -452,8 +500,29 @@ func printAdvancedProviders() {
 	if len(extra) == 0 {
 		return
 	}
-	color.Cyan("Also available after setup: %s", strings.Join(extra, ", "))
-	color.Cyan("  Select with /provider use <name> — see docs/local_runtimes.md.")
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelLine(shell.Muted("also available after setup: " + strings.Join(extra, ", "))))
+	fmt.Println(shell.Hint("/provider use <name>  ·  see docs/local_runtimes.md"))
+}
+
+// providerNote says what picking a provider commits you to, in the moment the
+// choice is made. A bare vendor list makes the reader supply that from memory.
+func providerNote(id string) string {
+	if id == "ollama" {
+		return "runs on this machine  ·  no key, no per-call cost"
+	}
+	return "cloud  ·  API key required"
+}
+
+// providerTag marks the ones the user can pick without further work.
+func providerTag(id string) string {
+	if ai.ProviderHasSavedKey(id) {
+		return "key saved"
+	}
+	if id == "ollama" {
+		return "local"
+	}
+	return ""
 }
 
 // advancedProviderNames returns registered providers absent from the first-run

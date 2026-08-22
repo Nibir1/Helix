@@ -1,6 +1,6 @@
 // cmd/helix/local_endpoints.go
 // Purpose: collect the local sidecar endpoints this session is configured to
-// use, so /doctor and /voice-status can name a port collision instead of
+// use, so /doctor and /blackbox status can name a port collision instead of
 // leaving it to be discovered as a 404.
 //
 // The stock ports genuinely overlap: llama-server defaults to 8080 and
@@ -10,13 +10,13 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"helix/internal/ai"
 	"helix/internal/edge"
 	"helix/internal/providers/llamacpp"
-
-	"github.com/fatih/color"
+	"helix/internal/shell"
 )
 
 // localSidecarEndpoints returns every local service this configuration points
@@ -110,22 +110,35 @@ func reportEndpointConflicts() int {
 		case c.Involves():
 			// Two SELECTED services on one address: this breaks as configured.
 			active++
-			color.Red("Endpoint conflict: %s", c.Describe())
-			color.Red("  → One process owns a port. Whichever service is running there will")
-			color.Red("    answer the other's requests with a 404, which reads as \"broken\".")
-			color.Yellow("    Run /voice-setup — Helix will move one of them to a free port.")
+			fmt.Println(shell.PanelLine(shell.Badge(shell.StateBad, "endpoint conflict")))
+			for _, l := range shell.PanelWrap(c.Describe(), shell.Value) {
+				fmt.Println(l)
+			}
+			for _, l := range shell.PanelWrap(
+				"one process owns a port; the other's requests get a 404, which reads as broken",
+				shell.Muted) {
+				fmt.Println(l)
+			}
+			fmt.Println(shell.Hint("/blackbox setup moves one of them to a free port"))
 
 		case c.Occupied:
 			// One selected, one not, but something IS on the port: worth saying,
 			// because the selected service cannot bind it.
-			color.Yellow("Endpoint overlap: %s", c.Describe())
-			color.Yellow("  → Something is already on %s. /voice-setup reassigns a free port.", c.Address)
+			fmt.Println(shell.PanelLine(shell.Badge(shell.StateWarn, "endpoint overlap")))
+			for _, l := range shell.PanelWrap(c.Describe(), shell.Value) {
+				fmt.Println(l)
+			}
+			fmt.Println(shell.Hint(fmt.Sprintf(
+				"something already holds %s — /blackbox setup reassigns a free port", c.Address)))
 
 		default:
 			// Purely theoretical: shared configuration, empty port, at most one
 			// selected. A red warning with a six-line remedy here was noise on a
 			// machine where the port was simply free.
-			color.Cyan("Note: %s — nothing is on that address right now.", c.Describe())
+			for _, l := range shell.PanelWrap(
+				c.Describe()+" — nothing is on that address right now", shell.Muted) {
+				fmt.Println(l)
+			}
 		}
 	}
 	return active

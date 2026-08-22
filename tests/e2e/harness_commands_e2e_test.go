@@ -159,7 +159,7 @@ func TestE2E_ToolsListsClosedVocabulary(t *testing.T) {
 	h := newHarness(t, commandsNoPlan)
 	defer h.Close()
 
-	if err := h.SendExpect("/tools", "HARNESS TOOL VOCABULARY", 15*time.Second); err != nil {
+	if err := h.SendExpect("/tools", "HARNESS TOOLS", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// The vocabulary is a security property, so every member must be visible.
@@ -168,7 +168,7 @@ func TestE2E_ToolsListsClosedVocabulary(t *testing.T) {
 			t.Fatalf("tool %q missing from /tools: %v", tool, err)
 		}
 	}
-	if err := h.Expect("dropped from the", 5*time.Second); err != nil {
+	if err := h.Expect("dropped from the plan", 5*time.Second); err != nil {
 		t.Fatal("the closed-vocabulary rule must be stated")
 	}
 }
@@ -448,20 +448,44 @@ func TestE2E_UppercaseCommandKeepsItsArgument(t *testing.T) {
 	}
 }
 
+// TestE2E_FoldedCommandsPointAtBlackBox: eight verbs were removed, so the
+// thing that matters is not that they are gone but that typing one still tells
+// you where it went. A did-you-mean list for a command that worked yesterday is
+// the failure mode this replaces.
+func TestE2E_FoldedCommandsPointAtBlackBox(t *testing.T) {
+	h := newHarness(t, commandsNoPlan)
+	defer h.Close()
+
+	for _, c := range []struct{ old, want string }{
+		{"/voice", "/blackbox on"},
+		{"/manual", "/blackbox off"},
+		{"/eyes", "/blackbox eyes"},
+	} {
+		if err := h.SendExpect(c.old, c.want, 15*time.Second); err != nil {
+			t.Errorf("%s does not point at %s: %v", c.old, c.want, err)
+		}
+	}
+
+	// A genuinely unknown command keeps the ordinary did-you-mean path.
+	if err := h.SendExpect("/nonsensecommand", "UNRECOGNIZED SIGNAL", 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestE2E_EyesLookIsReachableByKeyboard covers the explicit typed path to the
-// camera. Before it existed, `/eyes on` in a typed session had no way to use the
-// camera at all — the conversational vision path requires the voice channel.
+// camera. Before it existed, a typed session with the camera on had no way to
+// use it — the conversational vision path requires the voice channel.
 func TestE2E_EyesLookIsReachableByKeyboard(t *testing.T) {
 	h := newHarness(t, commandsNoPlan)
 	defer h.Close()
 
 	// Eyes are off by default, so the command must say so rather than silently
 	// doing nothing.
-	if err := h.SendExpect("/eyes look", "Eyes are off", 15*time.Second); err != nil {
+	if err := h.SendExpect("/blackbox look", "Eyes are off", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// And it must appear in the command's own help, or nobody will find it.
-	if err := h.SendExpect("/help eyes", "look [question]", 15*time.Second); err != nil {
+	if err := h.SendExpect("/help blackbox", "look [question]", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -472,7 +496,7 @@ func TestE2E_VoiceStatusShowsSidecarsAndSpokenCommands(t *testing.T) {
 	h := newHarness(t, commandsNoPlan)
 	defer h.Close()
 
-	if err := h.SendExpect("/voice-status", "HELIX VOICE STATUS", 40*time.Second); err != nil {
+	if err := h.SendExpect("/blackbox status", "BLACKBOX", 40*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// A local sidecar row must name the address it is talking to.

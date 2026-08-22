@@ -8,6 +8,7 @@ package speech
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,7 +47,7 @@ var (
 
 // Init builds the global registry: all builtin adapters registered, keys
 // hydrated from the keystore, and the active selection applied. Safe to call
-// again (e.g. after /voice-setup changes): it rebuilds from scratch.
+// again (e.g. after /blackbox setup changes): it rebuilds from scratch.
 func Init(cfg Config) error {
 	keys, err := providers.NewKeyStore()
 	if err != nil {
@@ -62,71 +63,69 @@ func Init(cfg Config) error {
 	return nil
 }
 
-// registerBuiltins instantiates every builtin adapter. The ACTIVE provider
-// receives the user's model/baseURL/voice overrides; fallbacks use defaults.
+// sttEndpointFor resolves a provider's endpoint override.
+//
+// Per-provider Endpoints win, then BaseURL for the primary. The order matters:
+// a sidecar moved to a free port must keep that port whether it is the primary
+// or a fallback, and before Endpoints existed a fallback simply could not be
+// moved — its reassigned URL landed in BaseURL, which belongs to whoever is
+// primary, so the sidecar stayed unreachable AND the primary's endpoint was
+// overwritten with a localhost address.
+func sttEndpointFor(cfg Config, provider string) string {
+	if url, ok := cfg.STT.Endpoints[provider]; ok && strings.TrimSpace(url) != "" {
+		return url
+	}
+	if cfg.STT.Provider == provider {
+		return cfg.STT.BaseURL
+	}
+	return ""
+}
+
+// ttsEndpointFor is the TTS counterpart of sttEndpointFor.
+func ttsEndpointFor(cfg Config, provider string) string {
+	if url, ok := cfg.TTS.Endpoints[provider]; ok && strings.TrimSpace(url) != "" {
+		return url
+	}
+	if cfg.TTS.Provider == provider {
+		return cfg.TTS.BaseURL
+	}
+	return ""
+}
+
+// registerBuiltins instantiates every builtin adapter. Model/voice overrides
+// belong to the ACTIVE provider; endpoints are resolved per provider so a local
+// sidecar keeps its port in either role.
 func registerBuiltins(reg *Registry, cfg Config) {
 	// --- STT ---
-	var sttModel, sttBase string
-	if cfg.STT.Provider == "openai" {
-		sttModel, sttBase = cfg.STT.Model, cfg.STT.BaseURL
+	sttModel := func(provider string) string {
+		if cfg.STT.Provider == provider {
+			return cfg.STT.Model
+		}
+		return ""
 	}
-	reg.RegisterSTT(NewOpenAISTT(sttModel, sttBase))
-
-	if cfg.STT.Provider == "groq" {
-		sttModel, sttBase = cfg.STT.Model, cfg.STT.BaseURL
-	} else {
-		sttModel, sttBase = "", ""
-	}
-	reg.RegisterSTT(NewGroqSTT(sttModel, sttBase))
-
-	if cfg.STT.Provider == "deepgram" {
-		sttModel, sttBase = cfg.STT.Model, cfg.STT.BaseURL
-	} else {
-		sttModel, sttBase = "", ""
-	}
-	reg.RegisterSTT(NewDeepgramStreamingSTT(sttModel, sttBase))
-
-	if cfg.STT.Provider == "whisper-local" {
-		sttModel, sttBase = cfg.STT.Model, cfg.STT.BaseURL
-	} else {
-		sttModel, sttBase = "", ""
-	}
-	reg.RegisterSTT(NewWhisperLocalSTT(sttModel, sttBase))
+	reg.RegisterSTT(NewOpenAISTT(sttModel("openai"), sttEndpointFor(cfg, "openai")))
+	reg.RegisterSTT(NewGroqSTT(sttModel("groq"), sttEndpointFor(cfg, "groq")))
+	reg.RegisterSTT(NewDeepgramStreamingSTT(sttModel("deepgram"), sttEndpointFor(cfg, "deepgram")))
+	reg.RegisterSTT(NewWhisperLocalSTT(sttModel("whisper-local"), sttEndpointFor(cfg, "whisper-local")))
 
 	// --- TTS ---
-	var ttsModel, ttsVoice, ttsBase string
-	if cfg.TTS.Provider == "openai" {
-		ttsModel, ttsVoice, ttsBase = cfg.TTS.Model, cfg.TTS.Voice, cfg.TTS.BaseURL
+	ttsModel := func(provider string) string {
+		if cfg.TTS.Provider == provider {
+			return cfg.TTS.Model
+		}
+		return ""
 	}
-	reg.RegisterTTS(NewOpenAITTS(ttsModel, ttsVoice, ttsBase))
-
-	if cfg.TTS.Provider == "deepgram" {
-		ttsModel, ttsBase = cfg.TTS.Model, cfg.TTS.BaseURL
-	} else {
-		ttsModel, ttsBase = "", ""
+	ttsVoice := func(provider string) string {
+		if cfg.TTS.Provider == provider {
+			return cfg.TTS.Voice
+		}
+		return ""
 	}
-	reg.RegisterTTS(NewDeepgramTTS(ttsModel, ttsBase))
-
-	if cfg.TTS.Provider == "elevenlabs" {
-		ttsModel, ttsVoice, ttsBase = cfg.TTS.Model, cfg.TTS.Voice, cfg.TTS.BaseURL
-	} else {
-		ttsModel, ttsVoice, ttsBase = "", "", ""
-	}
-	reg.RegisterTTS(NewElevenLabsTTS(ttsModel, ttsVoice, ttsBase))
-
-	if cfg.TTS.Provider == "kokoro-local" {
-		ttsModel, ttsVoice, ttsBase = cfg.TTS.Model, cfg.TTS.Voice, cfg.TTS.BaseURL
-	} else {
-		ttsModel, ttsVoice, ttsBase = "", "", ""
-	}
-	reg.RegisterTTS(NewKokoroLocalTTS(ttsModel, ttsVoice, ttsBase))
-
-	if cfg.TTS.Provider == "piper-local" {
-		ttsBase = cfg.TTS.BaseURL
-	} else {
-		ttsBase = ""
-	}
-	reg.RegisterTTS(NewPiperTTS(ttsBase))
+	reg.RegisterTTS(NewOpenAITTS(ttsModel("openai"), ttsVoice("openai"), ttsEndpointFor(cfg, "openai")))
+	reg.RegisterTTS(NewDeepgramTTS(ttsModel("deepgram"), ttsEndpointFor(cfg, "deepgram")))
+	reg.RegisterTTS(NewElevenLabsTTS(ttsModel("elevenlabs"), ttsVoice("elevenlabs"), ttsEndpointFor(cfg, "elevenlabs")))
+	reg.RegisterTTS(NewKokoroLocalTTS(ttsModel("kokoro-local"), ttsVoice("kokoro-local"), ttsEndpointFor(cfg, "kokoro-local")))
+	reg.RegisterTTS(NewPiperTTS(ttsEndpointFor(cfg, "piper-local")))
 
 	reg.SetConfig(cfg)
 }

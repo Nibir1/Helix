@@ -12,8 +12,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"helix/internal/ai"
 	"helix/internal/commands"
 	"helix/internal/config"
+	"helix/internal/shell"
 	"helix/internal/speech"
 
 	"helix/internal/providers"
@@ -33,6 +35,7 @@ func speechConfigFrom(sc config.SpeechConfig) speech.Config {
 			Provider:      sc.STT.Provider,
 			Model:         sc.STT.Model,
 			BaseURL:       sc.STT.BaseURL,
+			Endpoints:     sc.STT.Endpoints,
 			Fallbacks:     sc.STT.Fallbacks,
 			StreamChunkMs: sc.STT.StreamChunkMs,
 		},
@@ -41,6 +44,7 @@ func speechConfigFrom(sc config.SpeechConfig) speech.Config {
 			Model:       sc.TTS.Model,
 			Voice:       sc.TTS.Voice,
 			BaseURL:     sc.TTS.BaseURL,
+			Endpoints:   sc.TTS.Endpoints,
 			Fallbacks:   sc.TTS.Fallbacks,
 			FirstByteMs: sc.TTS.FirstByteMs,
 		},
@@ -72,16 +76,31 @@ var knownVoices = map[string][]string{
 // brackets told the user nothing except that Helix did not know either. Naming
 // what the value IS, and where the models come from, is the honest version.
 func askVoiceID(provider string) string {
+	def := "provider default"
 	if provider == "piper-local" {
-		color.Cyan("  Piper has no voice list: the voice IS the .onnx model you launch it with.")
-		color.Cyan("  Leave this blank — the server uses whatever model it was started with.")
-		color.Cyan("  Browse models: https://huggingface.co/rhasspy/piper-voices")
-		color.Cyan("  Example: en_US-lessac-medium.onnx  ·  en_GB-alba-medium.onnx")
+		fmt.Println(shell.PanelTitle("voice"))
+		for _, l := range shell.PanelWrap(
+			"Piper has no voice list — the voice IS the .onnx model the server was "+
+				"launched with, so leaving this blank is the right answer here.",
+			shell.Muted) {
+			fmt.Println(l)
+		}
+		fmt.Println(shell.PanelGap())
+		fmt.Println(shell.PanelLine(shell.Muted("browse  ") +
+			shell.Value("https://huggingface.co/rhasspy/piper-voices")))
+		fmt.Println(shell.PanelLine(shell.Muted("examples ") +
+			shell.Value("en_US-lessac-medium.onnx  ·  en_GB-alba-medium.onnx")))
+		fmt.Println(shell.PanelEnd())
+		def = "leave blank"
 	} else if voices, ok := knownVoices[provider]; ok {
-		color.Cyan("  Voices for %s: %s", provider, strings.Join(voices, ", "))
+		fmt.Println(shell.PanelTitle("voice"))
+		for _, v := range voices {
+			fmt.Println(shell.PanelLine(shell.Value(v)))
+		}
+		fmt.Println(shell.PanelEnd())
 	}
 	voice := strings.TrimSpace(commands.AskLine(
-		"Voice id/name (blank for provider default — NOT the model name)"))
+		shell.Prompt("voice name — not the model name", def)))
 	if voice == "" {
 		return ""
 	}
@@ -127,17 +146,32 @@ func askFallback(kind string, names []string, primary string) []string {
 		return nil
 	}
 
-	fmt.Println()
-	color.Cyan("  FALLBACK %s PROVIDERS — used when %s fails", strings.ToUpper(kind), primary)
-	fmt.Printf("  %-3s %-14s %-16s %-20s %s\n", "#", "PROVIDER", "COST", "READY?", "NOTE")
+	fmt.Println(shell.PanelTitle("fallback " + strings.ToLower(kind)))
+	for _, l := range shell.PanelWrap(
+		"used only when "+primary+" fails — pick one that can already serve a request, "+
+			"or leave it blank", shell.Muted) {
+		fmt.Println(l)
+	}
+	fmt.Println(shell.PanelGap())
+
+	cells := make([][]string, 0, len(options))
 	for i, name := range options {
 		row := fallbackRow(key, name)
-		fmt.Printf("  %-3d %-14s %-16s %-20s %s\n",
-			i+1, truncStr(name, 14), truncStr(row.cost, 16), truncStr(row.ready, 20), row.note)
+		cells = append(cells, []string{
+			shell.Fg(shell.HexSubtle, fmt.Sprintf("%2d)", i+1)),
+			shell.Value(name),
+			shell.Muted(row.cost),
+			shell.Badge(row.state, row.ready),
+			shell.Muted(row.note),
+		})
 	}
+	for _, l := range shell.Table([]string{"", "provider", "cost", "ready", ""}, cells) {
+		fmt.Println(l)
+	}
+	fmt.Println(shell.PanelEnd())
 
 	answer := strings.TrimSpace(commands.AskLine(
-		fmt.Sprintf("Fallback %s provider (number or name, blank for none)", kind)))
+		shell.Prompt("fallback "+strings.ToLower(kind)+" — number, name, or blank", "none")))
 	if answer == "" {
 		return nil
 	}
@@ -167,12 +201,16 @@ type fallbackDescription struct {
 	cost  string
 	ready string
 	note  string
+	// state colours the readiness word. Readiness is the only column that
+	// decides the choice, and five look-alike phrases in one grey column made
+	// the reader compare them by hand.
+	state shell.State
 }
 
 // fallbackRow describes a candidate fallback: what it costs, and — the part that
 // actually decides the choice — whether it can serve a request today.
 func fallbackRow(kind, name string) fallbackDescription {
-	out := fallbackDescription{cost: "—", ready: "unknown", note: ""}
+	out := fallbackDescription{cost: "—", ready: "unknown", state: shell.StateIdle}
 
 	reg := speech.Default()
 	if reg == nil {
@@ -198,6 +236,17 @@ func fallbackRow(kind, name string) fallbackDescription {
 		// the port is the thing that usually is not.
 		out.cost = "free"
 		if spec, isSidecar := sidecarSpecs()[name]; isSidecar {
+			// A container-hosted sidecar on a host with no daemon is not
+			// "not running yet" — it is not available, and saying so here is
+			// the difference between an informed skip and the QA session that
+			// picked kokoro and hit a failed docker pull.
+			if vs, known := voiceSidecars()[name]; known && vs.Unmet != nil {
+				if _, unmet := vs.Unmet(); unmet {
+					out.ready, out.state = "needs docker", shell.StateBad
+					out.note = "piper-local is the docker-free voice"
+					return out
+				}
+			}
 			endpoint := sidecarEndpoint(kind, name, spec.Default)
 			// Ask the sidecar directly rather than inferring from the port.
 			// "port in use" was a guess that could mean the sidecar is running,
@@ -205,22 +254,23 @@ func fallbackRow(kind, name string) fallbackDescription {
 			// opposite actions, reported identically.
 			switch {
 			case sidecarAnswersAt(kind, name, endpoint):
-				out.ready = "yes — server running"
+				out.ready, out.state = "running", shell.StateGood
 				out.note = endpoint
 			case portOfEndpoint(endpoint) > 0 && !edge.PortAvailable(portOfEndpoint(endpoint)):
-				out.ready = "no — port taken"
+				out.ready, out.state = "port taken", shell.StateBad
 				out.note = "something else holds " + endpoint
 			default:
-				out.ready = "needs local server"
-				out.note = "not running yet: " + endpoint
+				out.ready, out.state = "not started", shell.StateWarn
+				out.note = "Helix can start it: " + endpoint
 			}
 		} else {
-			out.ready = "no key needed"
+			out.ready, out.state = "ready", shell.StateGood
 		}
 	case hasKey:
-		out.ready = "yes — key stored"
+		out.ready, out.state = "ready", shell.StateGood
+		out.note = "key already stored"
 	default:
-		out.ready = "NO — key required"
+		out.ready, out.state = "needs a key", shell.StateWarn
 		out.note = "you will be asked for one"
 	}
 	return out
@@ -231,10 +281,16 @@ func fallbackRow(kind, name string) fallbackDescription {
 func sidecarEndpoint(kind, name, fallback string) string {
 	switch kind {
 	case "stt":
+		if url, ok := cfg.Speech.STT.Endpoints[name]; ok && strings.TrimSpace(url) != "" {
+			return url
+		}
 		if cfg.Speech.STT.Provider == name && strings.TrimSpace(cfg.Speech.STT.BaseURL) != "" {
 			return cfg.Speech.STT.BaseURL
 		}
 	case "tts":
+		if url, ok := cfg.Speech.TTS.Endpoints[name]; ok && strings.TrimSpace(url) != "" {
+			return url
+		}
 		if cfg.Speech.TTS.Provider == name && strings.TrimSpace(cfg.Speech.TTS.BaseURL) != "" {
 			return cfg.Speech.TTS.BaseURL
 		}
@@ -244,7 +300,9 @@ func sidecarEndpoint(kind, name, fallback string) string {
 
 // handleVoiceSetup runs the STT/TTS selection wizard with live pricing.
 func handleVoiceSetup() {
-	color.Cyan("⚡ HELIX VOICE LINK CONFIGURATION")
+	fmt.Println(shell.PanelTitle("voice link"))
+	fmt.Println(shell.PanelLine(shell.Muted("pick what hears you and what answers — locally or in the cloud")))
+	fmt.Println(shell.PanelEnd())
 	verifiedThisRun = map[string]bool{}
 
 	catalog, err := speech.LoadMergedCatalog()
@@ -263,7 +321,7 @@ func handleVoiceSetup() {
 	sttRows := filterCatalog(catalog, "stt", sttNames)
 	printSpeechTable("SPEECH-TO-TEXT (STT) PROVIDERS", sttRows)
 
-	choice := askNumber("Select STT provider number (blank to skip)", len(sttRows))
+	choice := askNumber(shell.Prompt("which should hear you", "skip"), len(sttRows))
 	var sttCfg config.SpeechSTTConfig
 	if choice > 0 {
 		entry := sttRows[choice-1]
@@ -287,7 +345,7 @@ func handleVoiceSetup() {
 	ttsRows := filterCatalog(catalog, "tts", ttsNames)
 	printSpeechTable("TEXT-TO-SPEECH (TTS) PROVIDERS", ttsRows)
 
-	choice = askNumber("Select TTS provider number (blank to skip)", len(ttsRows))
+	choice = askNumber(shell.Prompt("which should answer you", "skip"), len(ttsRows))
 	var ttsCfg config.SpeechTTSConfig
 	if choice > 0 {
 		entry := ttsRows[choice-1]
@@ -305,7 +363,7 @@ func handleVoiceSetup() {
 	}
 
 	if sttCfg.Provider == "" && ttsCfg.Provider == "" {
-		color.Yellow("Voice setup skipped. Re-run /voice-setup anytime.")
+		fmt.Println(shell.Hint("voice setup skipped — /blackbox setup runs it again"))
 		return
 	}
 
@@ -313,12 +371,21 @@ func handleVoiceSetup() {
 	// selected. WakeWord config and per-section tuning (StreamChunkMs,
 	// FirstByteMs) must survive a re-run — a whole-struct replace here used
 	// to silently disable /wake and wipe custom phrases.
+	//
+	// Endpoints is the SAME bug, caught a second time. The wizard starts a
+	// sidecar, discovers its port is taken, moves it to a free one and records
+	// that in Endpoints — and then this assignment threw the record away, so
+	// whisper-local ran happily on 28861 while the chain kept dialling 8080 and
+	// reported "still not answering" about a server it had just started itself.
+	// Anything the wizard does not collect has to be carried across explicitly.
 	if sttCfg.Provider != "" {
 		sttCfg.StreamChunkMs = cfg.Speech.STT.StreamChunkMs
+		sttCfg.Endpoints = cfg.Speech.STT.Endpoints
 		cfg.Speech.STT = sttCfg
 	}
 	if ttsCfg.Provider != "" {
 		ttsCfg.FirstByteMs = cfg.Speech.TTS.FirstByteMs
+		ttsCfg.Endpoints = cfg.Speech.TTS.Endpoints
 		cfg.Speech.TTS = ttsCfg
 	}
 	if err := cfg.SavePreferences(); err != nil {
@@ -342,7 +409,7 @@ func handleVoiceSetup() {
 	} else {
 		fmt.Printf("Recorder detected: %s\n", rec)
 	}
-	fmt.Println("Try: /say Voice link online    |    /listen 5")
+	fmt.Println(shell.Hint("/blackbox say voice link online   ·   /blackbox on   ·   /mictest"))
 }
 
 // verifySpeechSelection probes the newly selected chain and reports what it found.
@@ -405,22 +472,67 @@ func filterCatalog(entries []speech.PricingEntry, kind string, names []string) [
 // plan's Layer 1 UX: price, estimated monthly cost, latency, key requirement,
 // locality, and the recommended badge.
 func printSpeechTable(title string, rows []speech.PricingEntry) {
-	fmt.Println()
-	color.Cyan("%s", title)
-	fmt.Printf("  %-3s %-14s %-24s %-16s %-12s %-10s %-6s %-6s\n",
-		"#", "Provider", "Model", "Price", "Est $/mo@2h/d", "Latency", "Key", "Local")
-	for i, e := range rows {
-		badge := ""
-		if e.Recommended {
-			badge = "  ★ recommended"
-		}
-		fmt.Printf("  %-3d %-14s %-24s %-16s %-12.2f %-10s %-6t %-6t%s\n",
-			i+1, e.Provider, truncStr(e.Model, 24), speech.FormatUnit(e),
-			speech.EstimateMonthlyCost(e, 2), e.Latency, e.RequiresKey, e.Local, badge)
-	}
+	fmt.Println(shell.PanelTitle(title))
 	if len(rows) == 0 {
-		fmt.Println("  (no registered providers)")
+		fmt.Println(shell.PanelLine(shell.Muted("(no registered providers)")))
+		fmt.Println(shell.PanelEnd())
+		return
 	}
+
+	// Seven columns, not nine. The first version carried the unit price AND the
+	// monthly estimate AND separate "needs"/"where" columns, which ran past the
+	// panel and wrapped — "★ best value" landed on its own line at column zero,
+	// which is worse than any information it carried. The monthly figure is
+	// derived from the unit price and is the number people actually decide on,
+	// so the unit price goes and the rest fits.
+	cells := make([][]string, 0, len(rows))
+	for i, e := range rows {
+		cost := shell.Value(fmt.Sprintf("$%.2f", speech.EstimateMonthlyCost(e, 2)))
+		if e.Local {
+			// "0.00" in a column of dollars reads as a rounding error rather
+			// than as the entire point of running local.
+			cost = shell.Fg(shell.HexPrimary, "free")
+		}
+
+		// Short enough that the fitter never has to cut it. "api key · cl…"
+		// loses the cloud/local distinction, which is the half of this column
+		// that actually decides anything.
+		requires := shell.Muted("key · cloud")
+		if !e.RequiresKey {
+			requires = shell.Fg(shell.HexPrimary, "free · local")
+		}
+		// Say it in the table, not after the choice. QA picked kokoro, was
+		// walked through a pull, and hit "Cannot connect to the Docker daemon"
+		// as the last line of setup.
+		if e.Provider == "kokoro-local" {
+			if dockerAvailable() {
+				requires = shell.Muted("docker")
+			} else {
+				requires = shell.Fg(shell.HexRectifier, "no docker")
+			}
+		}
+		mark := ""
+		if e.Recommended {
+			mark = shell.Fg(shell.HexSecondary, "★")
+		}
+		cells = append(cells, []string{
+			shell.Fg(shell.HexSubtle, fmt.Sprintf("%2d)", i+1)),
+			shell.Value(e.Provider),
+			shell.Fg(shell.HexText, truncStr(e.Model, 22)),
+			cost,
+			shell.Muted(e.Latency),
+			requires,
+			mark,
+		})
+	}
+	for _, l := range shell.Table(
+		[]string{"", "provider", "model", "$/month", "latency", "requires", ""},
+		cells) {
+		fmt.Println(l)
+	}
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelLine(shell.Muted("★ best value  ·  cost estimated at 2 hours a day")))
+	fmt.Println(shell.PanelEnd())
 }
 
 // truncStr shortens s to at most n display columns, ending in an ellipsis.
@@ -556,12 +668,13 @@ func handleListenCommand(c cmdArgs) {
 	if transcript.Confidence > 0 {
 		conf = fmt.Sprintf(", confidence %.2f", transcript.Confidence)
 	}
-	fmt.Printf("[heard] %q (via %s%s)\n", transcript.Text, transcript.Provider, conf)
+	fmt.Println("  " + shell.Fg(shell.HexSecondary, "❯ ") +
+		shell.Fg(shell.HexText, transcript.Text) + shell.Muted("   "+transcript.Provider+conf))
 }
 
 // handleVoiceStatus prints chains, provider health, and recorder state.
 func handleVoiceStatus() {
-	color.Cyan("⚡ HELIX VOICE STATUS")
+	fmt.Println(shell.PanelTitle("voice chain"))
 
 	// A local sidecar sharing its port with the LLM runtime is the most common
 	// reason local STT/TTS "does not work", and it is invisible in the health
@@ -573,30 +686,38 @@ func handleVoiceStatus() {
 	defer cancel()
 	report := speech.Status(ctx)
 
-	fmt.Printf("STT chain: %s\n", chainOrNone(report.STTChain))
-	fmt.Printf("TTS chain: %s\n", chainOrNone(report.TTSChain))
+	w := shell.KVWidth("HEAR", "SPEAK", "REPLIES", "MIC")
+	fmt.Println(shell.KV("HEAR", chainOrNone(report.STTChain), w))
+	fmt.Println(shell.KV("SPEAK", chainOrNone(report.TTSChain), w))
 	if speech.TTSEnabled() {
-		fmt.Println("Automatic spoken responses: on")
+		fmt.Println(shell.KV("REPLIES", shell.Badge(shell.StateGood, "spoken aloud"), w))
 	} else {
-		fmt.Println("Automatic spoken responses: off")
+		fmt.Println(shell.KV("REPLIES", shell.Badge(shell.StateIdle, "silent")+
+			shell.Muted("  /blackbox tts on"), w))
 	}
 	if report.Recorder != "" {
-		fmt.Printf("Recorder: %s\n", report.Recorder)
+		fmt.Println(shell.KV("MIC", shell.Badge(shell.StateGood, report.Recorder), w))
 	} else {
-		color.Yellow("Recorder: %s", report.RecorderErr)
+		fmt.Println(shell.KV("MIC", shell.Badge(shell.StateBad, report.RecorderErr), w))
 	}
 	if report.TTSLastLatencyMs > 0 {
-		path := "buffered — full synthesis before playback"
+		path := "buffered"
 		if report.TTSLastStreamed {
 			path = "streamed"
 		}
-		fmt.Printf("Last TTS time-to-first-audio: %dms (budget %dms) [%s]\n",
-			report.TTSLastLatencyMs, report.TTSFirstByteBudgetMs, path)
+		state := shell.StateGood
+		if report.TTSFirstByteBudgetMs > 0 && report.TTSLastLatencyMs > int64(report.TTSFirstByteBudgetMs) {
+			state = shell.StateWarn
+		}
+		fmt.Println(shell.KV("LATENCY",
+			shell.Badge(state, fmt.Sprintf("%dms to first audio", report.TTSLastLatencyMs))+
+				shell.Muted(fmt.Sprintf("  budget %dms  ·  %s", report.TTSFirstByteBudgetMs, path)), w))
 	}
 
-	printStatusRows("STT PROVIDERS", report.STTStatus)
-	printStatusRows("TTS PROVIDERS", report.TTSStatus)
+	printStatusRows("hearing", report.STTStatus)
+	printStatusRows("speech", report.TTSStatus)
 	printVoiceVocabulary()
+	fmt.Println(shell.PanelEnd())
 }
 
 // printVoiceVocabulary lists what can be reached by speaking.
@@ -612,20 +733,32 @@ func printVoiceVocabulary() {
 	fmt.Println()
 	color.Cyan("  Also: \"slash <command name>\" reaches any voice-enabled command directly,")
 	color.Cyan("  e.g. \"slash provider status\" or \"slash knowledge status\".")
-	color.Yellow("  Destructive commands are unreachable by voice by design — /purge, /commit,")
-	color.Yellow("  /permissions, /config, /hooks and the RAG resets must be typed.")
+	// Read from the registry rather than restated here: the denied set shrank
+	// when live mode arrived, and a hand-kept copy of a security policy is a
+	// copy that goes stale silently.
+	if denied := voiceDeniedCommandNames(); len(denied) > 0 {
+		color.Yellow("  Unreachable by voice by design (these must be typed):")
+		color.Yellow("  %s", strings.Join(denied, "  "))
+	}
 }
 
 func chainOrNone(chain []string) string {
 	if len(chain) == 0 {
-		return "(none — run /voice-setup)"
+		return shell.Badge(shell.StateWarn, "not configured") +
+			shell.Muted("  /blackbox setup")
 	}
-	return strings.Join(chain, " → ")
+	// The primary is the one that will actually answer; the rest are insurance.
+	// Colouring them the same made a three-deep chain read as three equals.
+	out := shell.Value(chain[0])
+	for _, next := range chain[1:] {
+		out += shell.Arrow() + shell.Muted(next)
+	}
+	return out
 }
 
 func printStatusRows(title string, rows []speech.ProviderStatusRow) {
-	fmt.Println()
-	color.Cyan("%s", title)
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelSection(title))
 	for _, line := range statusRowLines(rows) {
 		fmt.Println(line)
 	}
@@ -649,9 +782,17 @@ const (
 	statusKeyWidth     = 7
 )
 
-// statusDetailWidth is the wrap width for the indented detail lines — narrow
-// enough to survive an 80-column terminal with the indent.
-const statusDetailWidth = 72
+// statusDetailWidth is the wrap width for the indented detail lines.
+//
+// It is the RENDERED budget minus what the frame costs: the panel gutter
+// ("  │ ", 4 cells) plus statusDetailIndent (6). Wrapping at the budget itself
+// and then adding the frame is how an 80-column terminal ended up with an
+// 80-column detail line inside a 72-column allowance.
+const (
+	statusDetailBudget = 72
+	statusDetailFrame  = 4 + len(statusDetailIndent)
+	statusDetailWidth  = statusDetailBudget - statusDetailFrame
+)
 
 // statusDetailIndent hangs the detail lines under their row.
 const statusDetailIndent = "      "
@@ -668,40 +809,51 @@ const statusDetailIndent = "      "
 // Complexity: O(rows × detail length).
 func statusRowLines(rows []speech.ProviderStatusRow) []string {
 	if len(rows) == 0 {
-		return []string{"  (no registered providers)"}
+		return []string{shell.PanelLine(shell.Muted("(no registered providers)"))}
 	}
 
-	out := []string{fmt.Sprintf("  %-*s %-*s %-*s %-*s %s",
-		statusNameWidth, "PROVIDER", statusDisplayWidth, "NAME",
-		statusStateWidth, "STATE", statusKeyWidth, "KEY", "WHERE")}
-
+	cells := make([][]string, 0, len(rows))
+	details := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, fmt.Sprintf("  %-*s %-*s %-*s %-*s %s",
-			statusNameWidth, truncStr(r.Name, statusNameWidth),
-			statusDisplayWidth, truncStr(r.Display, statusDisplayWidth),
-			statusStateWidth, providerState(r),
-			statusKeyWidth, providerKeyState(r),
-			locality(r.Local)))
-		for _, detail := range providerDetailLines(r) {
-			out = append(out, statusDetailIndent+detail)
+		cells = append(cells, []string{
+			shell.Value(truncStr(r.Name, statusNameWidth)),
+			shell.Muted(truncStr(r.Display, statusDisplayWidth)),
+			providerStateBadge(r),
+			providerKeyState(r),
+			locality(r.Local),
+		})
+		details = append(details, providerDetailLines(r))
+	}
+
+	// Interleave each row's detail lines under it. shell.Table renders the grid;
+	// the details are prose and deliberately are NOT columns (see the comment on
+	// the width constants).
+	table := shell.Table([]string{"provider", "name", "state", "key", "where"}, cells)
+	out := []string{table[0]}
+	for i, line := range table[1:] {
+		out = append(out, line)
+		for _, detail := range details[i] {
+			out = append(out, shell.PanelLine(statusDetailIndent+shell.Muted(detail)))
 		}
 	}
 	return out
 }
 
-// providerState reduces a row to one state word.
+// providerStateBadge reduces a row to one coloured state word.
 //
-// "standby" and "down" are genuinely different and were previously conflated:
-// an out-of-chain provider is never probed, so its Healthy=false means "not
-// being used", not "broken".
-func providerState(r speech.ProviderStatusRow) string {
+// "standby" and "down" are genuinely different and were once conflated: an
+// out-of-chain provider is never probed, so its Healthy=false means "not being
+// used", not "broken". The colours now carry that distinction too, so a broken
+// chain is visible while skimming instead of requiring five words to be
+// compared.
+func providerStateBadge(r speech.ProviderStatusRow) string {
 	switch {
 	case r.Healthy:
-		return "healthy"
+		return shell.Badge(shell.StateGood, "healthy")
 	case !r.InChain:
-		return "standby"
+		return shell.Badge(shell.StateIdle, "standby")
 	default:
-		return "down"
+		return shell.Badge(shell.StateBad, "down")
 	}
 }
 
@@ -943,9 +1095,20 @@ func speechCredentialState(reg *speech.Registry, kind, provider string) (require
 // provider now has a credential to try.
 func settleSpeechKey(kind, provider string, hasKey bool) bool {
 	if hasKey {
-		if commands.AskForConfirmation(fmt.Sprintf("%s: use the saved API key?", provider)) {
-			return true
-		}
+		// A saved key is used, not negotiated over. It was already accepted
+		// once, and re-asking on every wizard run is how a setup flow starts
+		// feeling like an interrogation.
+		color.Green("  Using the saved API key for %s.", provider)
+		return true
+	}
+	// Before asking, look at what the user has already typed elsewhere. The AI
+	// providers and the speech providers keep separate keystores on purpose
+	// (speech works with no LLM configured), but they are not separate
+	// ACCOUNTS: someone who pasted an OpenAI key on the provider screen was
+	// being asked for the same key again three screens later, in the same
+	// wizard, on the same run.
+	if adoptAIKeyForSpeech(kind, provider) {
+		return true
 	}
 
 	key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", provider)))
@@ -978,6 +1141,41 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 // verifySpeechProvider probes the provider and says whether it can serve a
 // request, so a bad credential or an absent sidecar is caught here rather than
 // at the first spoken word.
+// adoptAIKeyForSpeech copies a key the user already gave the AI side.
+//
+// Only for the same vendor name — this is credential REUSE, never credential
+// guessing, so nothing is copied across providers. The key is stored in the
+// speech keystore so later runs need no adoption, and the user is told it
+// happened: silently spending a credential somewhere new is not something to
+// do quietly.
+//
+// Args: kind ("stt"|"tts"), provider: the speech provider needing a key.
+// Returns: whether a key was adopted.
+// Complexity: O(1).
+func adoptAIKeyForSpeech(kind, provider string) bool {
+	if !ai.ProviderHasSavedKey(provider) {
+		return false
+	}
+	key := strings.TrimSpace(ai.ProviderKey(provider))
+	if key == "" {
+		return false
+	}
+
+	var err error
+	if kind == "stt" {
+		err = speech.SaveSTTKey(provider, key)
+	} else {
+		err = speech.SaveTTSKey(provider, key)
+	}
+	if err != nil {
+		// Not fatal: fall through and ask, rather than fail the wizard over a
+		// convenience that did not work out.
+		return false
+	}
+	color.Green("  Reusing the %s API key you already configured for the AI provider.", provider)
+	return true
+}
+
 // verifiedThisRun records providers whose diagnosis was already printed during
 // selection, so the closing summary can reference it instead of repeating it.
 var verifiedThisRun = map[string]bool{}
@@ -1016,7 +1214,7 @@ func verifySpeechProvider(kind, provider string, requiresKey bool) bool {
 	// problem and an absent sidecar need completely different actions.
 	if requiresKey && isAuthFailure(err) {
 		color.Red("  %s rejected the API key.", provider)
-		color.Yellow("  Check it at the provider's dashboard and re-run /voice-setup.")
+		color.Yellow("  Check it at the provider's dashboard and re-run /blackbox setup.")
 		return false
 	}
 	color.Yellow("  %s could not be verified yet:", provider)

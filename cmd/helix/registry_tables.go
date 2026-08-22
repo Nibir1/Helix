@@ -43,7 +43,7 @@ func coreCommands() []command {
 		},
 		{
 			Name: "/setup", Category: catCore,
-			Summary: "Unified setup wizard (identity, AI provider)",
+			Summary: "Setup wizard: identity, AI provider, system packages, voice",
 			Handler: func(cmdArgs) { handleSetup() },
 		},
 		{
@@ -90,7 +90,7 @@ func coreCommands() []command {
 			Handler: func(cmdArgs) { checkOnlineStatus() },
 		},
 		{
-			Name: "/debug", Usage: "/debug <on|off>", Category: catCore,
+			Name: "/debug", VoiceOK: true, Usage: "/debug <on|off>", Category: catCore,
 			Summary: "Toggle verbose debug logging",
 			Handler: handleDebugCommand,
 		},
@@ -165,7 +165,7 @@ func sessionCommands() []command {
 			Handler: handleCompactCommand,
 		},
 		{
-			Name: "/resume", Usage: "/resume [id]", Category: catSession,
+			Name: "/resume", VoiceOK: true, Usage: "/resume [id]", Category: catSession,
 			Summary: "List archived conversations, or reload one",
 			Detail: []string{
 				"With no argument, lists archived conversations newest first. With an ID",
@@ -428,7 +428,7 @@ func legacyCommands() []command {
 func providerCommands() []command {
 	return []command{
 		{
-			Name: "/provider", Usage: "/provider [status|list|use <name>|<name>]", Category: catAI,
+			Name: "/provider", VoiceOK: true, Usage: "/provider [status|list|use <name>|<name>]", Category: catAI,
 			Summary: "Switch or inspect the AI provider",
 			Detail: []string{
 				"A bare provider name is the same as \"use <name>\".",
@@ -443,7 +443,7 @@ func providerCommands() []command {
 			Handler: func(cmdArgs) { handleProviderStatus() },
 		},
 		{
-			Name: "/model", Usage: "/model [list|use <id>|<id>]", Category: catAI,
+			Name: "/model", VoiceOK: true, Usage: "/model [list|use <id>|<id>]", Category: catAI,
 			Summary: "Switch or list models on the active provider",
 			Handler: handleModelCommand,
 		},
@@ -453,7 +453,7 @@ func providerCommands() []command {
 			Handler: func(cmdArgs) { listAvailableModels() },
 		},
 		{
-			Name: "/test-basic-ai", Category: catAI,
+			Name: "/test-basic-ai", VoiceOK: true, Category: catAI,
 			Summary: "Smoke test the active AI model",
 			Handler: func(cmdArgs) { testBasicAI() },
 		},
@@ -468,12 +468,12 @@ func knowledgeCommands() []command {
 			Handler: func(cmdArgs) { handleRAGStatus() },
 		},
 		{
-			Name: "/rag-reindex", Category: catKnowledge,
+			Name: "/rag-reindex", VoiceOK: true, Category: catKnowledge,
 			Summary: "Trigger a background RAG reindex",
 			Handler: func(cmdArgs) { handleRAGReindex() },
 		},
 		{
-			Name: "/rag-rebuild", Category: catKnowledge,
+			Name: "/rag-rebuild", VoiceOK: true, Category: catKnowledge,
 			Summary: "Force a full RAG knowledge base rebuild",
 			Handler: func(cmdArgs) { handleRAGRebuild() },
 		},
@@ -483,7 +483,7 @@ func knowledgeCommands() []command {
 			Handler: func(cmdArgs) { handleRAGReset() },
 		},
 		{
-			Name: "/knowledge-update", Category: catKnowledge,
+			Name: "/knowledge-update", VoiceOK: true, Category: catKnowledge,
 			Summary: "Fetch latest CVEs, CISA KEV, exploits, MITRE ATT&CK",
 			Detail: []string{
 				"Cancellable with Ctrl+C. Set NVD_API_KEY to cut the initial sync from",
@@ -497,7 +497,7 @@ func knowledgeCommands() []command {
 			Handler: func(cmdArgs) { handleKnowledgeStats() },
 		},
 		{
-			Name: "/knowledge-reindex", Category: catKnowledge,
+			Name: "/knowledge-reindex", VoiceOK: true, Category: catKnowledge,
 			Summary: "Rebuild the FTS5 search index",
 			Handler: func(cmdArgs) { handleKnowledgeReindex() },
 		},
@@ -565,42 +565,14 @@ func securityCommands() []command {
 func voiceCommands() []command {
 	return []command{
 		{
-			Name: "/voice", VoiceOK: true, Usage: "/voice [on|off|status]", Category: catVoice,
-			Summary: "Enter or leave voice mode (speak instead of type)",
-			Handler: handleVoiceCommand,
+			Name: "/blackbox", VoiceOK: true, Aliases: []string{"/bb"},
+			Usage: "/blackbox [on|off|status|setup|look|eyes|wake|tts|say]", Category: catVoice,
+			Summary: "Live mode — Helix listens, watches, answers, and speaks up",
+			Detail:  blackBoxDetail(),
+			Handler: handleBlackBoxCommand,
 		},
 		{
-			Name: "/manual", VoiceOK: true, Category: catVoice,
-			Summary: "Return to keyboard input (voice safety valve)",
-			Handler: func(cmdArgs) { handleManualCommand() },
-		},
-		{
-			Name: "/voice-setup", Category: catVoice,
-			Summary: "Configure STT/TTS providers with live pricing",
-			Handler: func(cmdArgs) { handleVoiceSetup() },
-		},
-		{
-			Name: "/voice-status", VoiceOK: true, Category: catVoice,
-			Summary: "Speech chain health, keys, and recorder state",
-			Handler: func(cmdArgs) { handleVoiceStatus() },
-		},
-		{
-			Name: "/wake", VoiceOK: true, Usage: "/wake [on|off|status]", Category: catVoice,
-			Summary: "Hands-free listening for the wake phrase",
-			Handler: handleWakeCommand,
-		},
-		{
-			Name: "/say", VoiceOK: true, Usage: "/say <text>", Category: catVoice,
-			Summary: "Speak text through the TTS chain",
-			Handler: handleSayCommand,
-		},
-		{
-			Name: "/tts", VoiceOK: true, Usage: "/tts <on|off>", Category: catVoice,
-			Summary: "Toggle automatic spoken responses",
-			Handler: handleTTSCommand,
-		},
-		{
-			Name: "/listen", Usage: "/listen [seconds]", Category: catVoice,
+			Name: "/listen", VoiceOK: true, Usage: "/listen [seconds]", Category: catVoice,
 			Summary: "Record and transcribe one clip (max 60s)",
 			Handler: handleListenCommand,
 		},
@@ -608,25 +580,6 @@ func voiceCommands() []command {
 			Name: "/mictest", VoiceOK: true, Category: catVoice,
 			Summary: "3s self-test: is the mic actually being heard?",
 			Handler: func(cmdArgs) { handleMicTest() },
-		},
-		{
-			Name: "/eyes", VoiceOK: true, Usage: "/eyes [on|off|status|look]", Category: catVoice,
-			Summary: "Opt-in camera vision (memory-only frames)",
-			Detail: []string{
-				"on | off | status   turn the camera opt-in on or off, or report it",
-				"look [question]     capture one frame now and answer a question about it",
-				"",
-				"Frames are captured to memory and sent to a vision-capable model for",
-				"one turn. Nothing is written to disk.",
-				"",
-				"In conversation, a question that points at something (\"what is wrong with",
-				"THIS?\") also captures a frame while eyes are on — typed or spoken.",
-				"",
-				"Vision requires a multimodal model. With a local runtime that reports a",
-				"placeholder model name, Helix cannot tell, and /eyes on refuses; run",
-				"/provider use llamacpp to resolve the real model name first.",
-			},
-			Handler: handleEyesCommand,
 		},
 	}
 }
@@ -639,7 +592,7 @@ func utilCommands() []command {
 			Handler: handleAudioCommand,
 		},
 		{
-			Name: "/typewrite-all", Usage: "/typewrite-all <on|off>", Category: catUtil,
+			Name: "/typewrite-all", VoiceOK: true, Usage: "/typewrite-all <on|off>", Category: catUtil,
 			Summary: "Typewriter effect for ALL output, not just AI replies",
 			Handler: handleTypewriteAllCommand,
 		},

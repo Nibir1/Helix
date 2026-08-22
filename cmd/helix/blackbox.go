@@ -1,0 +1,291 @@
+// cmd/helix/blackbox.go
+//
+// Purpose: /blackbox — the single entry point to Helix's living mode.
+//
+// Eight commands (/voice, /manual, /voice-setup, /voice-status, /wake, /say,
+// /tts, /eyes) were one capability split across eight names. That split was
+// visible in the worst possible place: turning Helix on meant remembering
+// which subsystem lived behind which verb, and the two halves of perception —
+// ears and eyes — could be in contradictory states with nothing reporting it.
+// /blackbox on turns the whole thing on: microphone, camera, speech, and the
+// companion loop that lets Helix speak without being asked.
+//
+// Three properties are load-bearing and must survive any edit here:
+//
+//  1. Degrade, never refuse the whole mode. A missing camera or a text-only
+//     model costs the camera, not the conversation. The only hard precondition
+//     is a working recorder + STT chain, because without those "voice mode" is
+//     a lie.
+//  2. The way out is always available. /blackbox off returns to the keyboard,
+//     and the spoken phrases ("manual mode", "switch to manual mode") still do
+//     the same from the microphone — that is the safety valve /manual used to
+//     be, and removing the command must not remove the valve.
+//  3. Status may not overstate. Reporting readiness the machine cannot deliver
+//     is the specific bug this file's readiness helpers exist to prevent: the
+//     camera gate used to check only whether a MODEL could see, never whether a
+//     frame could be captured, so /eyes status printed "ready" on a host with
+//     no ffmpeg and the first capture failed.
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"helix/internal/shell"
+	"helix/internal/speech"
+
+	"github.com/fatih/color"
+)
+
+// blackBoxUsage is the one place the subcommand vocabulary is written down.
+var blackBoxUsage = []string{
+	"/blackbox on               live mode — microphone, camera, speech, companion",
+	"/blackbox off              back to the keyboard (also: say \"manual mode\")",
+	"/blackbox status           one report: hearing, sight, speech, wake, companion",
+	"/blackbox setup            configure the STT/TTS providers with live pricing",
+	"",
+	"/blackbox look [question]   capture one frame now and answer a question about it",
+	"/blackbox eyes on|off      camera only, without leaving or entering live mode",
+	"/blackbox wake on|off      hands-free wake phrase between turns",
+	"/blackbox tts on|off       whether ordinary replies are spoken aloud",
+	"/blackbox say <text>       speak text through the TTS chain",
+}
+
+// handleBlackBoxCommand implements /blackbox and its subcommands.
+func handleBlackBoxCommand(c cmdArgs) {
+	switch c.Sub() {
+	case "", "on", "start", "live":
+		blackBoxOn()
+	case "off", "stop", "manual", "exit":
+		blackBoxOff()
+	case "status":
+		blackBoxStatus()
+	case "setup":
+		handleVoiceSetup()
+
+	// --- perception ---
+	case "look", "see", "describe":
+		describeWhatIsSeen(c.From(1))
+	case "eyes":
+		blackBoxEyes(c.Shift())
+
+	// --- the folded toggles, unchanged in behavior ---
+	case "wake":
+		handleWakeCommand(c.Shift())
+	case "tts":
+		handleTTSCommand(c.Shift())
+	case "say":
+		handleSayCommand(c.Shift())
+	case "mictest":
+		handleMicTest()
+
+	default:
+		color.Yellow("Unknown: /blackbox %s", c.Sub())
+		for _, line := range blackBoxUsage {
+			color.Cyan("%s", line)
+		}
+	}
+}
+
+// blackBoxOn enters live mode: ears, eyes, voice, and initiative together.
+//
+// The ordering matters. The microphone is the hard requirement and is checked
+// first, so a host that cannot listen is told that before anything else has
+// been switched on. The camera is best-effort and reports its own reason for
+// staying dark — a live mode that silently has no eyes is worse than one that
+// says why.
+func blackBoxOn() {
+	if voiceModeActive {
+		fmt.Println("Already live. /blackbox status shows what is on.")
+		return
+	}
+	if err := voiceEntryPreflight(); err != nil {
+		color.Red("Cannot go live: %v", err)
+		return
+	}
+
+	// Eyes follow the mode. This inverts the old opt-in on purpose — live mode
+	// is a camera consent moment by definition — and the frame invariants are
+	// unchanged: one frame at a time, held in memory, never written to disk.
+	//
+	// Decided BEFORE the banner, because the banner reports it. Enabling the
+	// camera afterwards printed "SIGHT • off" and then "Eyes ENABLED" two lines
+	// later, which is the banner lying about the state it exists to show.
+	eyesWhy := ""
+	if ready, why := visionReady(); ready {
+		cfg.Vision.Enabled = true
+		_ = cfg.SavePreferences()
+		journalVisionEvent("enabled", "", 0)
+	} else {
+		eyesWhy = why
+	}
+
+	enterVoiceMode(true)
+	if eyesWhy != "" {
+		fmt.Println(shell.Hint("camera stays off: " + eyesWhy))
+	}
+
+	startCompanion()
+}
+
+// blackBoxOff returns to the keyboard and closes both sensors.
+//
+// Leaving the camera on after leaving the mode would be exactly the kind of
+// privacy surprise the opt-in exists to prevent, so one command closes what one
+// command opened.
+func blackBoxOff() {
+	if !voiceModeActive && !cfg.Vision.Enabled {
+		fmt.Println("Already in keyboard mode.")
+		return
+	}
+	stopCompanion()
+	if cfg.Vision.Enabled {
+		setVisionEnabled(false)
+	}
+	if voiceModeActive {
+		exitVoiceMode(true)
+	}
+}
+
+// blackBoxEyes toggles the camera WITHOUT touching the conversation mode, so
+// the privacy kill switch stays a single, fast action while Helix keeps
+// listening. This is what "turn off your eyes" routes to.
+func blackBoxEyes(c cmdArgs) {
+	switch c.Sub() {
+	case "on", "enable":
+		if ready, why := visionReady(); !ready {
+			color.Yellow("Cannot open the camera: %s", why)
+			for _, line := range visionUnavailableHelp() {
+				color.Yellow("%s", line)
+			}
+			return
+		}
+		setVisionEnabled(true)
+	case "off", "disable":
+		setVisionEnabled(false)
+	case "", "status":
+		fmt.Println(blackBoxEyesLine())
+	default:
+		color.Yellow("Usage: /blackbox eyes <on|off|status>")
+	}
+}
+
+// blackBoxStatus prints the merged report: one place that answers "what can
+// Helix do right now", followed by the full speech-chain detail.
+func blackBoxStatus() {
+	mode := shell.Badge(shell.StateIdle, "standby") + shell.Muted("  keyboard input")
+	if voiceModeActive {
+		mode = shell.Badge(shell.StateGood, "LIVE") + shell.Muted("  listening")
+	}
+
+	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "INITIATIVE")
+	fmt.Println(shell.PanelTitle("blackbox"))
+	fmt.Println(shell.KV("MODE", mode, w))
+	fmt.Println(shell.KV("HEARING", blackBoxHearingLine(), w))
+	fmt.Println(shell.KV("SIGHT", blackBoxEyesLine(), w))
+	fmt.Println(shell.KV("INITIATIVE", companionStatusLine(), w))
+	fmt.Println(shell.PanelEnd())
+
+	// The deep chain report (STT/TTS providers, recorder, latencies) is the
+	// same one /voice-status printed; it is detail under the summary now rather
+	// than a second command nobody remembered to run.
+	handleVoiceStatus()
+}
+
+// blackBoxHearingLine summarises the ear in one line: can Helix record, and
+// what will transcribe it. The summary answers "will this work" so the chain
+// tables below can answer "and how".
+func blackBoxHearingLine() string {
+	if _, err := speech.DetectRecorder(); err != nil {
+		return shell.Badge(shell.StateBad, "no recorder") +
+			shell.Muted("  /setup installs sox")
+	}
+	reg := speech.Default()
+	if reg == nil || len(reg.STTChain()) == 0 {
+		return shell.Badge(shell.StateWarn, "no transcription") +
+			shell.Muted("  /blackbox setup picks one")
+	}
+	return shell.Badge(shell.StateGood, "ready") +
+		shell.Muted("  ") + shell.Value(strings.Join(reg.STTChain(), " → "))
+}
+
+// blackBoxEyesLine is the camera's honest one-liner, used by both the merged
+// status and the eyes subcommand.
+func blackBoxEyesLine() string {
+	ready, why := visionReady()
+	switch {
+	case cfg.Vision.Enabled && ready:
+		return shell.Badge(shell.StateGood, "watching") + shell.Muted("  ") +
+			shell.Value(visionRouteDescription()) +
+			shell.Muted(fmt.Sprintf("  ·  %d frame/turn", visionMaxFrames()))
+	case cfg.Vision.Enabled && !ready:
+		// Enabled but unusable is the state the old status report could not
+		// express, and the one most worth saying out loud.
+		return shell.Badge(shell.StateBad, "on but blind") + shell.Muted("  "+why)
+	case ready:
+		return shell.Badge(shell.StateIdle, "off") +
+			shell.Muted("  ready when you are  ·  ") + shell.Value(visionRouteDescription())
+	default:
+		return shell.Badge(shell.StateIdle, "off") + shell.Muted("  "+why)
+	}
+}
+
+// visionReady reports whether a frame could actually be captured AND
+// understood right now, and why not when it cannot.
+//
+// Both halves are required and they fail for unrelated reasons: the model half
+// is a capability question (is the selected model multimodal?), the capture
+// half is a host question (is there an ffmpeg to shell out to?). Checking only
+// the first is what let /eyes on succeed on a machine that could never produce
+// a frame.
+func visionReady() (bool, string) {
+	if !captureAvailable() {
+		return false, "no ffmpeg on PATH — run /setup to install it"
+	}
+	if !visionAvailable() {
+		return false, fmt.Sprintf("%s cannot process images", visionRouteDescription())
+	}
+	return true, ""
+}
+
+// blackBoxDetail is the /help expansion. It names the safety valve first
+// because that is the thing a user in live mode most urgently needs to know.
+func blackBoxDetail() []string {
+	out := []string{
+		"Live mode: Helix listens, watches, answers, and speaks up on its own.",
+		"",
+		"Say \"manual mode\" at any time to return to the keyboard. Ctrl+C stops a",
+		"reply mid-sentence. \"Turn off your eyes\" closes the camera without",
+		"leaving the conversation.",
+		"",
+	}
+	out = append(out, blackBoxUsage...)
+	return append(out,
+		"",
+		"Camera frames are captured one at a time, held in memory, and never",
+		"written to disk. Only metadata reaches the journal.",
+		"",
+		"The microphone is muted while Helix is speaking — it cannot hear itself,",
+		"which also means it cannot be interrupted by voice mid-sentence.")
+}
+
+// blackBoxMigrationNote answers the user who types a command that no longer
+// exists. Eight verbs became one, and a bare "unknown command" for a verb that
+// worked yesterday is a bad way to learn that.
+func blackBoxMigrationNote(verb string) (string, bool) {
+	moved := map[string]string{
+		"/voice":        "/blackbox on",
+		"/manual":       "/blackbox off",
+		"/voice-setup":  "/blackbox setup",
+		"/voice-status": "/blackbox status",
+		"/eyes":         "/blackbox eyes on|off  (or /blackbox look)",
+		"/wake":         "/blackbox wake on|off",
+		"/tts":          "/blackbox tts on|off",
+		"/say":          "/blackbox say <text>",
+	}
+	to, ok := moved[strings.ToLower(strings.TrimSpace(verb))]
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%s folded into /blackbox — use %s", verb, to), true
+}

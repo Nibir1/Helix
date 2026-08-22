@@ -159,7 +159,7 @@ func TestEdgeSetupRefusesOllamaOnJetsonNano(t *testing.T) {
 	if !strings.Contains(script, "Ollama is NOT supported here") {
 		t.Error("the refusal must be explicit")
 	}
-	if !strings.Contains(script, "/voice-setup") || !strings.Contains(script, "Groq") {
+	if !strings.Contains(script, "/blackbox setup") || !strings.Contains(script, "Groq") {
 		t.Error("the refusal must point at the cloud voice path, not just refuse")
 	}
 	// Same Orin carve-out as internal/edge.IsJetsonNanoFirstGen.

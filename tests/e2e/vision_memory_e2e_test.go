@@ -18,13 +18,14 @@ func TestE2E_EyesRefusedWithoutVisionModel(t *testing.T) {
 	// The refusal must name the model it rejected and stay actionable — the old
 	// "No vision-capable model is configured — set one first." said neither which
 	// model failed nor which provider would work.
-	h.WriteLine("/eyes on")
+	h.WriteLine("/blackbox eyes on")
 	if err := h.Expect("cannot process images", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
-	h.WriteLine("/eyes status")
-	if err := h.SendExpect("/eyes status", "Eyes: off", 10*time.Second); err != nil {
+	// The merged report replaced the per-subsystem one, and it must say what the
+	// camera can do rather than only whether the toggle is flipped.
+	if err := h.SendExpect("/blackbox eyes status", "off", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -46,7 +47,9 @@ func TestE2E_HelpRendersBlackBoxCommands(t *testing.T) {
 	h.WriteLine("/help")
 	// Usage strings come from the command registry, so assert on the usage
 	// lines the registry actually publishes rather than a second hand-kept copy.
-	for _, cmd := range []string{"/eyes [on|off|status|look]", "/memory [show|clear]"} {
+	for _, cmd := range []string{
+		"/blackbox [on|off|status|setup|look|eyes|wake|tts|say]",
+		"/memory [show|clear]"} {
 		if err := h.Expect(cmd, 10*time.Second); err != nil {
 			t.Fatal(err)
 		}

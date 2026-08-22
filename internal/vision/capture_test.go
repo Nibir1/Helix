@@ -15,7 +15,7 @@ import (
 
 func TestCaptureArgsTargetStdout(t *testing.T) {
 	svc := newCaptureServiceWithBin("ffmpeg", "")
-	args := svc.captureArgs()
+	args := svc.captureArgs("")
 
 	if len(args) == 0 || args[len(args)-1] != "-" {
 		t.Fatalf("capture must pipe to stdout ('-' last), got %v", args)
@@ -75,5 +75,58 @@ func TestCaptureUnavailableFailsCleanly(t *testing.T) {
 	}
 	if _, err := svc.CaptureFrame(context.Background()); err == nil {
 		t.Fatal("expected a clear error when ffmpeg is absent")
+	}
+}
+
+// TestNegotiateFramerateReadsTheDeviceOwnAnswer covers the bug that made camera
+// capture impossible on a MacBook Air: a hardcoded "-framerate 1" that no
+// webcam accepts. ffmpeg names the rates it will take, so the retry reads them
+// instead of guessing again.
+func TestNegotiateFramerateReadsTheDeviceOwnAnswer(t *testing.T) {
+	const rejection = `[in#0 @ 0x88d024000] Selected framerate (1.000000) is not supported by the device.
+[in#0 @ 0x88d024000] Supported modes:
+[in#0 @ 0x88d024000]   640x480@[15.000000 30.000000]fps
+[in#0 @ 0x88d024000]   1920x1080@[15.000000 30.000000]fps
+[in#0 @ 0x88cc10000] Error opening input: Input/output error`
+
+	rate, ok := negotiateFramerate(rejection)
+	if !ok {
+		t.Fatal("a rejection that lists supported modes must yield a rate")
+	}
+	// Highest advertised: one frame is taken either way, and a faster mode
+	// reaches it sooner.
+	if rate != "30.000000" {
+		t.Errorf("rate = %q, want the highest advertised (30)", rate)
+	}
+
+	// An unrelated failure must NOT be retried as if it were a rate problem.
+	for _, other := range []string{
+		"", "Error opening input file default.",
+		"[in#0] Selected pixel format (yuv420p) is not supported by the input device.",
+	} {
+		if _, ok := negotiateFramerate(other); ok {
+			t.Errorf("negotiated a framerate from an unrelated error: %q", other)
+		}
+	}
+}
+
+// A silent, output-less failure is the signature of an unauthorized camera on
+// macOS, and saying so is the difference between a fixable problem and a
+// mystery.
+func TestCaptureFailureNamesTheLikelyCause(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // stands in for a deadline that expired with no ffmpeg output
+
+	msg := describeCaptureFailure(ctx, "")
+	if msg == "" {
+		t.Fatal("a silent failure still needs an explanation")
+	}
+	if runtime.GOOS == "darwin" && !strings.Contains(msg, "Privacy & Security") {
+		t.Errorf("on macOS the message should name the permission screen: %q", msg)
+	}
+
+	// Real ffmpeg output is always preferred over the guess.
+	if got := describeCaptureFailure(ctx, "boom"); got != "boom" {
+		t.Errorf("stderr must win when present, got %q", got)
 	}
 }

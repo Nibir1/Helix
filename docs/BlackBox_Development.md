@@ -24,6 +24,9 @@ exact sequence:
    git status                              # note any uncommitted work
    ```
 3. **Check §13 Progress Tracker** → find the first phase that is not `DONE`. That is your phase.
+   Note that "core DONE" is not "done": phases 7, 9, 10, 11 and 12 all carry unfinished tasks,
+   and §13 now lists every open checkbox in one place so the remaining work is visible without
+   reading all of §6.
 4. **Read that phase's section in §6** and every file it lists under "Files touched".
 5. **Verify the baseline is green before changing anything:**
    ```bash
@@ -39,6 +42,28 @@ exact sequence:
 
 > **Note on line numbers:** file:line references in this document are accurate for commit `fd34503`.
 > They will drift as code changes — use them as guides (symbol names are the stable anchor).
+
+> **Note on command names (2026-08-22):** the voice/perception surface was
+> **unified into one command**. `/voice`, `/manual`, `/voice-setup`,
+> `/voice-status`, `/wake`, `/say`, `/tts` and `/eyes` are gone; every one of
+> them is now a `/blackbox` subcommand, and typing an old name prints where it
+> went. Phase sections below were written before that change and still name the
+> original commands **where they record what was built at the time** — that is
+> history and is left intact on purpose. Anything describing the CURRENT surface
+> (§2.2, §2.3, §7, §13, the ADR amendments) has been corrected. When the two
+> disagree, the current-surface sections win.
+>
+> | Was | Now |
+> |-----|-----|
+> | `/voice`, `/voice on` | `/blackbox on` |
+> | `/manual`, `/voice off` | `/blackbox off` (or say "manual mode") |
+> | `/voice-setup` | `/blackbox setup` |
+> | `/voice-status` | `/blackbox status` |
+> | `/eyes on\|off\|status` | `/blackbox eyes on\|off`, `/blackbox status` |
+> | `/eyes look` | `/blackbox look` |
+> | `/wake on\|off\|status` | `/blackbox wake on\|off`, `/blackbox status` |
+> | `/say <text>` | `/blackbox say <text>` |
+> | `/tts on\|off` | `/blackbox tts on\|off` |
 
 ---
 
@@ -94,7 +119,11 @@ Local-first AI direction (recently standardized on Ollama — commit `ca9560b`).
 
 ```
 cmd/helix/main.go            REPL entrypoint; THE injection point for voice input
-cmd/helix/handlers.go        Slash-command dispatch (giant switch); /voice, /eyes go here
+cmd/helix/handlers.go        Slash-command handlers (/about, /setup, /debug, …)
+cmd/helix/registry.go        Command REGISTRY — one table drives dispatch, /help, completion, voice
+cmd/helix/blackbox.go        /blackbox: live mode + every folded voice/vision subcommand
+cmd/helix/companion.go       The initiative loop — samples the camera, speaks unprompted
+cmd/helix/first_run.go       First-boot stages: provider → system packages → speech chain
 cmd/helix/helpers.go         Provider/model setup wizards (copy this pattern for speech setup)
 cmd/helix/noninteractive.go  `helix -c "..."`, pipes, scripts (shell-only, no AI)
 internal/shell/reader.go     Raw-mode TTY line editor (stdin-only; no alternate input source)
@@ -119,6 +148,10 @@ internal/recon/              Authorized recon engine (nmap/masscan orchestrator)
 internal/stealth/            Memory-only private execution
 internal/diagnostics/        Telemetry-free local crash reports (0600, redacted)
 internal/ux/                 Terminal UX: typewriter, PrintAIMessage ← TTS tap-in point
+internal/shell/panel.go      Report rendering: panels, badges, self-fitting tables (one visual language)
+internal/agent/persona.go    Who Helix IS — tone for planner/chat/vision replies, never authority
+internal/agent/vision.go     Camera turns; two explicit doors only (/blackbox look, vision tool)
+internal/deps/               Host packages Helix needs + per-OS install commands (never Docker)
 internal/utils/              Interrupt manager (RegisterOperation idiom), syntax highlight
 tests/e2e/                   PTY harness: real binary + in-process mock provider (httptest)
 ```
@@ -132,8 +165,11 @@ tests/e2e/                   PTY harness: real binary + in-process mock provider
 | Provider contract | `internal/providers/types.go:51` `AIProvider` interface | Template for `STTProvider`/`TTSProvider` interfaces. |
 | Provider registry | `internal/providers/registry.go` | Mutex-protected map + keystore hydration — copy for speech. |
 | Key storage | `internal/providers/keystore.go` — `~/.helix/secrets.json` (0600) + env-var overrides | Reuse directly; namespace keys as `stt.<name>` / `tts.<name>`. |
-| Setup wizard pattern | `cmd/helix/helpers.go:277` `useProviderInteractive` → `setupProvider` → `selectModelForProvider` | Copy for `/voice-setup` (STT/TTS selection + pricing display). |
-| Slash dispatch | `cmd/helix/handlers.go:43` `handleSlashCommand` | Add `/voice`, `/manual`, `/eyes`, `/voice-setup`, `/tts`. |
+| Setup wizard pattern | `cmd/helix/helpers.go:277` `useProviderInteractive` → `setupProvider` → `selectModelForProvider` | Copied for `/blackbox setup` (STT/TTS selection + pricing display). First run chains provider → packages → speech (`first_run.go`). |
+| Slash dispatch | `cmd/helix/registry.go` — one table; `registry_tables.go` holds the entries | The whole voice/vision surface is ONE entry (`/blackbox`) with subcommands. `VoiceOK`/`VoiceReadOnly` on the same entry decide what speech can reach. |
+| Report rendering | `internal/shell/panel.go` — `PanelTitle`/`KV`/`Table`/`Badge` | Every report uses one visual language. Widths measure VISIBLE text (ANSI is not content) and `Table` fits itself to the panel. |
+| Persona | `internal/agent/persona.go` `PersonaPrompt` | Prepended to planner, chat fallback and vision calls. Shapes tone only; grants nothing. |
+| Host dependencies | `internal/deps/` `Catalog`/`Missing`/`InstallCommand` | Detects by capability, installs per OS, and never requires Docker. |
 | Classifier | `internal/shell/classify.go:124` `Classify()` (HighConfidence 0.65 at :57) | Voice transcripts (no shell metachars) naturally route to the AI planner. Optionally bias per mode. |
 | Prompter seam | `internal/commands/prompt.go:13` `Prompter` interface; `commands.SetPrompter` | Swap in a `VoicePrompter` that speaks questions and listens for yes/no. **Fail-closed on timeout.** |
 | Audio output stack | `internal/audio/` — beep/oto, 44.1kHz PCM, `Init()` at audio.go:72; Linux needs `audio_cgo` tag else noop backend | TTS playback rides this. Add a `PlaySpeech`-style API. |
@@ -181,6 +217,17 @@ guarantee), reuses a proven in-repo pattern, keeps memory/CPU isolation between 
 models.
 **Consequences:** One more local process to supervise; the daemon (Phase 4) owns lifecycle checks.
 
+**Amendment (2026-08-22) — sidecars may not require a container runtime.** The
+sidecar pattern says "external local HTTP service"; it does not say "container".
+whisper.cpp and Piper are plain binaries (plus Python for Piper's server) and
+are the documented local chain. Kokoro is the one component distributed only as
+an image, and it is therefore OPTIONAL: Helix will not install Docker, will not
+attempt a pull when no daemon answers, and marks it unavailable in the provider
+table so the constraint is visible before the choice rather than after a failed
+`docker pull`. Sidecar specs express this with an `Unmet` precondition — a
+dependency Helix declines to resolve, distinct from a missing binary it offers
+to install.
+
 ### ADR-003 — Microphone capture via external recorder binaries (CGO-free default).
 **Decision:** Default audio capture shells out to universally available recorders
 (`sox`/`rec`, `ffmpeg`), writing WAV/PCM to a temp file or pipe. A CGO-tagged native backend
@@ -213,11 +260,32 @@ once transcribed — this bypasses the existing Instruction Firewall, which only
 RAG data. Helix's reputation is hardened execution; voice must not become the weak door.
 **Consequences:** Some commands are slower/more annoying by voice — that is intentional.
 
+**Amendment (2026-08-22) — the denied set narrowed from 20 commands to 9.** Live
+mode is meant to reach the whole shell by speaking, so the question each command
+answers changed from "is this important enough to allow" to "would a misheard
+phrase, or a voice on the radio, do damage that cannot be undone". Rules 1–5
+above are UNCHANGED and still govern; only the allowlist widened. Nine commands
+still answer yes, each argued on its own merits rather than as a batch:
+
+| Command | Why voice can never reach it |
+|---------|------------------------------|
+| `/purge`, `/rag-reset` | destroy data outright |
+| `/scan` | fires traffic at a third party |
+| `/commit` | writes history (git is never voice-reachable, rule 2) |
+| `/config`, `/stealth` | move the approval or privacy posture |
+| `/hooks` | installs policy that later runs unattended |
+| `/setup` | would have you dictate API keys aloud |
+| `/init` | writes HELIX.md, which is planner context from then on |
+
+The list is no longer restated in prose anywhere: `/blackbox status` reads it
+from the registry, because a hand-kept copy of a security policy had already
+gone stale once.
+
 ### ADR-006 — Pricing data is data, not code.
 **Decision:** The provider pricing catalog lives in an embedded JSON file
 (`internal/speech/pricing.json`), user-overridable at `~/.helix/pricing.json`. The plan's tables
 were partly speculative/stale; hardcoding them in Go source guarantees rot.
-**Consequences:** The `/voice-setup` wizard reads merged (embedded + user) pricing at runtime.
+**Consequences:** The `/blackbox setup` wizard reads merged (embedded + user) pricing at runtime.
 
 ### ADR-007 — TTS rides the existing beep/oto output stack.
 **Decision:** TTS audio decodes (MP3/WAV/PCM) and plays through `internal/audio`'s speaker
@@ -230,6 +298,16 @@ non-cgo keeps the noop fallback with a clear warning.
 not Phase 6 of the original plan.
 **Rationale:** Safety valve (instant fallback to typing when voice misbehaves) and testability
 (synthetic transcript injection needs a mode boundary).
+
+**Amendment (2026-08-22) — one command, not two.** `/voice` ↔ `/manual` became
+`/blackbox on` ↔ `/blackbox off`, and the spoken safety valve ("manual mode")
+is now matched at the END of a sentence rather than as the whole transcript —
+QA said "Excellent. Now switch to manual mode." and the exact-match check sent
+it to the planner, which asked what to switch to manual mode FOR. Suffix, not
+substring, because "how do I switch to manual mode?" is a question about the
+feature. The valve itself is unchanged in kind: still instant, still reachable
+without the keyboard, and now it also closes the camera and the companion loop,
+because live mode opened them.
 
 ### ADR-009 — `main` remains shippable; blackBox is a long-lived integration branch.
 **Decision:** All BlackBox work commits to `blackBox`. Merges to `main` only by explicit owner
@@ -410,7 +488,9 @@ new implementation), `tests/e2e/` (mock speech/vision endpoints).
 | V1 | **Voice-channel injection**: ambient audio (TV, podcast, nearby person) transcribed into text with full user authority; bypasses Instruction Firewall (which guards RAG text only) | ADR-005 Voice Risk Policy: Medium-risk cap, fail-closed confirmations, wake lockout, provenance escalation on transcripts |
 | V2 | **Wake-word false positive** → unintended listening/execution | Sensitivity config + cooldown/debounce; any execution still passes full safety pipeline; metrics logged (FP/hour) |
 | V3 | **Voice mimicry / playback attack** confirming dangerous actions | Dangerous actions are typed-confirmation-only — voice confirmation is structurally impossible (ADR-005 §2) |
-| V4 | **Camera privacy**: frames leaked, stored, or sent to unintended provider | Strict opt-in (`/eyes on`), no disk persistence (fs-snapshot test enforced), single configured vision provider, journal entry per frame batch, `/eyes off` immediate |
+| V4 | **Camera privacy**: frames leaked, stored, or sent to unintended provider | Off by default; opens only on an explicit act — `/blackbox eyes on`, or `/blackbox on`, which enables it as part of going live. **That second path is a deliberate widening (2026-08-22)**: live mode is a camera consent moment by definition, so it is announced (TTS + banner) and `/blackbox off` closes the camera with the mode. No disk persistence (fs-snapshot test enforced), one configured vision provider (`vision.provider`/`vision.model`), journal entry per frame batch, `/blackbox eyes off` and "turn off your eyes" immediate. The phrase is matched loosely on purpose: a privacy control should fail toward closing the camera. |
+| V4b | **Unattended capture** (2026-08-22): the companion loop samples the camera on a timer, with no per-frame user action | Runs only inside live mode, which the user entered explicitly and which announced the camera; stops with `/blackbox off` or "turn off your eyes"; `companion.enabled=false` disables initiative while keeping the camera available on request. Frames are diffed **in-process** and an unchanged scene never reaches a model, so a still room is not silently streamed to a provider. Same memory-only and journal guarantees as any other frame. |
+| V4c | **Camera intent guessing** (RESOLVED 2026-08-22): a heuristic fired the camera on any spoken sentence containing "this"/"that"/"here" | Removed. It captured frames on ordinary phrasing ("what do we have in *this* directory?") and answered from a vision model with no knowledge of the shell. The camera now has exactly two doors, both explicit: `/blackbox look`, and the planner choosing its `vision` tool. |
 | V5 | **Audio/ transcript persistence leakage** | Voice logs opt-in, 0600, redacted like diagnostics; `/purge` extended to wipe them; default = no persistence |
 | V6 | **Cloud provider data exposure** (audio/text/frames to STT/TTS/vision vendors) | Explicit per-provider opt-in with key entry; wizard shows exactly what is sent where; local sidecar path documented as the private default |
 | V7 | **Daemon IPC hijack** (local attacker sends commands to socket) | Socket 0600 in `~/.helix/` (0700 dir); optional shared-token file; daemon refuses requests when TTY session is "locked" |
@@ -508,8 +588,11 @@ setup wizard, and push-to-talk recording utility. No main-loop integration yet (
 `tests/e2e/*`; `.github/workflows/ci.yml` (audio-dependent tests skip gracefully when no device).
 
 **Acceptance criteria:**
-- [x] `/voice-setup` wizard with pricing table implemented (manual QA of audible `/say` pending
-      on a machine with speakers + real key — see dev log).
+- [x] Setup wizard with pricing table implemented (now `/blackbox setup`; manual QA of audible
+      speech pending on a machine with speakers + real key — see dev log).
+- [x] (2026-08-22) Wizard hardening from a real first-run: per-provider endpoint overrides so a
+      moved sidecar port survives the commit step, saved API keys verified-and-reused instead of
+      re-requested, and keys entered for an AI provider adopted for the same vendor's speech.
 - [x] Push-to-talk helper (`/listen`) records → transcribes → prints with provider (+confidence
       when the provider reports it).
 - [x] Failover proven by unit test (`TestRegistrySTTFailover`/`TestRegistryTTSFailover`).
@@ -727,6 +810,28 @@ multimodal planner request, get vision-grounded answers. Privacy controls are lo
   with **this** code?", "read this serial number") trigger frame capture → attach as image part →
   planner/vision LLM. Non-deictic queries unaffected. One frame per turn (interval polling for
   "activity awareness" is **deferred** — cost/privacy trade-off documented).
+  > **SUPERSEDED 2026-08-22 — shipped, then removed.** It worked as specified and
+  > the specification was wrong. Demonstratives are far too common to be an
+  > intent signal: with eyes on, "what do we have in **this** directory?" was
+  > answered by a vision model describing the room, and "show me the commands in
+  > **this** helix" got a tutorial for the Helix text editor. Because the
+  > heuristic ran BEFORE the planner, the shell was unreachable for any sentence
+  > containing "this". Replaced by P5.7 — the planner picking its own tool beats
+  > a substring match on English. `isDeictic` and its fuzz target are deleted.
+- [x] P5.7 (2026-08-22) `vision` joins the CLOSED planner tool vocabulary — `action="look"`,
+  optional `args.prompt`, routed to the same `visionTurn` as `/blackbox look`. This is what
+  makes the camera reachable from a sentence without guessing: before it, asked to "turn on the
+  camera", the planner's only expressible move was a shell step opening Photo Booth while the
+  model said it had no camera access.
+- [x] P5.8 (2026-08-22) **Interval capture is no longer deferred** — see Phase 13 (companion
+  loop). The cost/privacy trade-off named in P5.4 is answered by an in-process frame diff: an
+  unchanged scene never reaches a model at all.
+- [x] P5.9 (2026-08-22) Capture hardening found by running it on real hardware: the darwin path
+  hardcoded `-framerate 1`, which no webcam accepts (a MacBook Air advertises 15 and 30 only), so
+  **every capture on that machine had always failed**. Dropping the flag is not a fix either —
+  ffmpeg then defaults to 29.97, also refused. The rate is now NEGOTIATED from the modes ffmpeg
+  names in its own rejection. `vision.model` also lets frames go to a small fast VLM while chat
+  keeps the big model.
 - [x] P5.5 Vision LLM routing: `ai.RunVisionModel` uses the configured chat provider if
   vision-capable, else a dedicated vision provider entry in config (`vision.provider`) —
   health-gated like speech (`ProviderVisionCapable` + `RunVisionModelWithProvider`).
@@ -736,10 +841,20 @@ multimodal planner request, get vision-grounded answers. Privacy controls are lo
 
 **Acceptance criteria:**
 - [ ] "Hey Helix, what's wrong with this code?" (camera pointed at screen) → spoken, relevant
-      diagnosis (manual QA, ≥3 scenarios logged).
-- [ ] Frame-to-insight ≤5s (cloud provider, measured metric).
-- [ ] Filesystem snapshot test: no image bytes on disk during/after vision turns.
-- [ ] `/eyes off` + voice phrase both deactivate instantly; journal shows every frame event.
+      diagnosis (manual QA, ≥3 scenarios logged). *Partially met 2026-08-22: a real session got
+      correct spoken descriptions through the planner's vision tool. Not signed off — the same
+      session exposed P5.4's defect, and the run predates the negotiated-framerate fix.*
+- [ ] Frame-to-insight ≤5s (cloud provider, measured metric). *Measured LOCAL and missed:
+      `gemma4:e2b` took 31.6s cold, then 19.2s, then 8.8s warm on an M-series Air. Cloud
+      unmeasured. `moondream` was evaluated as the fast alternative and rejected — Ollama's build
+      returns an empty string for instruction-style prompts and coordinate arrays otherwise.*
+- [x] Filesystem snapshot test: no image bytes on disk during/after vision turns.
+- [x] `/blackbox eyes off` + voice phrase both deactivate instantly; journal shows every frame
+      event. (Phrase now suffix-matched, so a sentence works.)
+- [ ] **Blocked, not failed:** the companion loop has never seen a real frame here. macOS
+      withholds camera access from the host app, so ffmpeg opens the device and then receives
+      nothing. A capture that produces no frame before its deadline now says so explicitly
+      instead of looking like a hang.
 
 **Risks:** ffmpeg device-flag quirks per OS (spike on all 3 early); model availability locally
 (llava quality is modest — set expectations in docs).
@@ -1145,6 +1260,74 @@ synthesis; a quiet room never hangs or phantom-wakes (fixture + manual QA).
 
 ---
 
+### Phase 13 — Unified Surface, Persona & Initiative *(core DONE 2026-08-22)*
+
+**Goal:** Make the capabilities of Phases 1–12 usable by a person who has not read this document.
+Everything below came out of driving a real first-run session and reading the transcript; none of
+it was planned scope, and most of it is repair.
+
+**Why it needed a phase.** Phases 1–12 each shipped a capability behind its own verb, so the voice
+and perception surface was eight commands (`/voice`, `/manual`, `/voice-setup`, `/voice-status`,
+`/wake`, `/say`, `/tts`, `/eyes`) whose combined state nothing reported. Turning Helix on meant
+remembering which subsystem lived behind which name, and the two halves of perception could sit in
+contradictory states with no single place to see it.
+
+**Tasks:**
+- [x] P13.1 **One command.** All eight fold into `/blackbox` (`on|off|status|setup|look|eyes|wake|
+      tts|say`, alias `/bb`). An old name prints where it went rather than a did-you-mean list.
+      `/blackbox on` opens microphone, camera, speech and initiative together; `/blackbox off` and
+      the spoken "manual mode" close all of them. See the ADR-008 amendment.
+- [x] P13.2 **The companion loop** (`cmd/helix/companion.go`) — the first part of the voice stack
+      that is not turn-shaped. Answers P5.4's deferred "activity awareness" question. Two cost
+      controls are the entire design: a 16×16 luminance fingerprint diffed in-process decides
+      whether a frame is worth a model call, and the model is asked to return a sentinel when
+      nothing is worth saying. **Half duplex shaped the rest**: the companion never speaks, it
+      QUEUES, and the main loop drains the queue only where the microphone is provably closed —
+      otherwise Helix transcribes and answers itself. Pacing backs OFF on a slow host
+      (`max(interval, smoothed last look)`) and deliberately does not speed up on a fast one.
+- [x] P13.3 **Persona** (`internal/agent/persona.go`). Every prompt in the tree constrained FORMAT
+      and none said who was speaking, so replies arrived in the provider's default assistant
+      register. Prepended to the planner (where most spoken replies are born as response steps),
+      the chat fallback and the camera path. `VoicePersona` applies only to spoken turns. Shapes
+      tone, never authority — pinned by test.
+- [x] P13.4 **First-run completeness** (`internal/deps/`, `cmd/helix/first_run.go`). A precompiled
+      binary had no way to learn that speaking needs sox and seeing needs ffmpeg; both were
+      discovered by failing, later. First boot now chains provider → system packages → speech
+      chain, detects the host package manager across eight of them, detects by CAPABILITY (`rec`
+      satisfies sox), and never emits an install command for a package name it cannot verify.
+- [x] P13.5 **No Docker, anywhere** (ADR-002 amendment). QA was walked to `Cannot connect to the
+      Docker daemon` as the final line of voice setup. Sidecar specs gained an `Unmet`
+      precondition and Kokoro now refuses early, pointing at Piper.
+- [x] P13.6 **One visual language** (`internal/shell/panel.go`). `/help` had a good one and
+      nothing else used it. Panels, badges, self-fitting tables, gutter-aware wrapping. Applied to
+      `/blackbox status`, the voice chain, `/tools`, `/about`, and every setup and wizard screen.
+      Verified by screenshotting real PTY output — which is how two defects that survived code
+      review were found.
+- [x] P13.7 **Voice reaches the shell** (ADR-005 amendment): denied set 20 → 9, each argued
+      individually, and the report reads it from the registry instead of a stale prose copy.
+- [x] P13.8 **Repairs found by running it.** Web-search grounding (the answer directive sat inside
+      a fence the prompt tells the model to distrust, so the harness re-searched forever); the
+      camera framerate that no webcam accepts (P5.9); reasoning models spending their whole token
+      budget thinking and returning empty; sidecar ports lost between assignment and commit; keys
+      requested twice; multi-line errors mangled; a live banner that reported the camera state it
+      had not set yet.
+
+**Acceptance criteria:**
+- [x] One command reaches every voice and perception capability; old names are discoverable.
+- [x] A fresh install reaches a working voice chain without reading documentation.
+- [x] Nothing in the product requires a container runtime.
+- [x] Replies do not read as generic-assistant output (persona present on all three paths).
+- [ ] **The companion loop driven by a real camera.** Blocked on macOS camera authorisation for
+      the host app, not on code. Measure a true frame-to-remark cycle and tune `interval_s` /
+      `change_threshold` against it — the current defaults are reasoned, not measured.
+- [ ] A real end-to-end voice session after the endpoint fix: speak, be heard, be answered aloud.
+      The fix is proven by test, not by ear.
+
+**Risks:** the persona is prompt-shaped and therefore provider-sensitive — a weaker model may
+ignore it; the companion's defaults are guesses until a real camera measures them.
+
+---
+
 ### Post-BlackBox roadmap (parked, from original plan — do NOT scope into phases above)
 
 Multi-user voice profiles · smart-home integration (Home Assistant) · proactive AI (calendar/email
@@ -1162,9 +1345,14 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
   // ...existing Config/UserPrefs fields unchanged...
   "user_prefs": { "voice_mode": false, "typing_effect": true /* etc, unchanged */ },
   "speech": {
-    "stt":    { "provider": "openai", "model": "whisper-1", "fallbacks": ["whisper-local"] },
+    // "endpoints" is PER PROVIDER (added Phase 13). "base_url" only ever reached the
+    // PRIMARY, so a local sidecar moved to a free port could not be used as a fallback —
+    // its new address landed in a field belonging to whoever was primary.
+    "stt":    { "provider": "openai", "model": "whisper-1", "fallbacks": ["whisper-local"],
+                "endpoints": { "whisper-local": "http://127.0.0.1:28859" } },
     "tts":    { "provider": "elevenlabs", "model": "eleven_turbo_v2_5", "voice_id": "",
-                "fallbacks": ["piper-local"] },
+                "fallbacks": ["piper-local"],
+                "endpoints": { "piper-local": "http://127.0.0.1:28183" } },
     "wake_word": { "enabled": false, "engine": "openwakeword-sidecar", "phrase": "hey helix",
                 "sensitivity_preset": "balanced", "cooldown_s": 2 },
     "capture": { "backend": "auto", "device": "default", "sample_rate": 16000,
@@ -1181,7 +1369,13 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
   },
   "voice_policy": { "max_risk": "medium", "confirm_timeout_s": 8,
                 "dangerous_needs_typed": true, "min_transcript_confidence": 0.6 },
-  "vision": { "enabled": false, "provider": null, "max_frames_per_turn": 1 },
+  // "model" (Phase 13) routes FRAMES to a different model than chat: the companion runs on a
+  // timer and shares the runtime with the conversation, so the model that answers questions is
+  // usually the wrong one to describe a frame every 20 seconds.
+  "vision": { "enabled": false, "provider": null, "model": "", "max_frames_per_turn": 1 },
+  // Phase 13 — initiative. interval_s is a FLOOR; the real gap is max(interval, last look),
+  // so a slow host backs off instead of queueing. An unchanged frame costs no model call at all.
+  "companion": { "enabled": true, "interval_s": 20, "cooldown_s": 45, "change_threshold": 0.08 },
   "ambient": { "enabled": false, "sensitivity": 0.5, "response_mode": "log",
                 "categories": { "loud_noise": true, "alarm_like": true, "music_like": false } },
   "daemon":  { "autostart": false, "journal": true, "session_turns": 20 }
@@ -1257,10 +1451,26 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
 | Mode switch latency | ≤1s | same | e2e |
 | Frame-to-insight (vision) | ≤5s | best-effort (llava) | metrics log |
 | Noise classification (enabled categories) | ≥90% | same | Phase 6 fixtures |
+| Companion look → spoken remark | n/a | bounded by the interval floor, not the model | Phase 13 |
 
 Rationale: the original plan's single ≤3s target assumed cloud providers end-to-end; the repo's
 local-first direction (Ollama standardization, commit `ca9560b`) makes honest dual targets
 necessary.
+
+**First real measurements (2026-08-22, M-series MacBook Air, through Helix's own wire path):**
+
+| Metric | Target | Measured | Verdict |
+|--------|--------|----------|---------|
+| Frame-to-insight, local `gemma4:e2b` (5.1B) | best-effort | 31.6s cold → 19.2s → **8.8s** warm | misses the ≤5s cloud target; cloud path still unmeasured |
+| Frame-to-insight, `moondream:1.8b-v2-q4_K_M` | — | ~0.3s | **rejected** — Ollama's build returns an empty string for instruction-style prompts and coordinate arrays (`ids: [0.39, …]`) otherwise. Speed is irrelevant if the output cannot be used. |
+
+Two things this exposed that the table could not. A **reasoning** model spends its budget before
+it answers: `gemma4:e2b` at the 512-token chat default produced ~770 characters of private
+reasoning and emitted no answer at all, which reached the user as "the vision model returned
+nothing" — vision calls now get 1024 tokens and budget exhaustion is reported rather than
+swallowed. And the ≤5s target is written against a **cloud** vision provider; on a local VLM the
+honest number today is ~9s warm, so the companion's interval is a floor rather than a schedule
+(see Phase 13) precisely because the model cannot be assumed fast.
 
 ---
 
@@ -1312,11 +1522,11 @@ necessary.
 | Phase | Status | Started | Completed | Notes |
 |-------|--------|---------|-----------|-------|
 | 0 — Decisions & Threat Model | `DONE` | 2026-08-16 | 2026-08-16 | Baseline green; ADRs ratified; `docs/threat_model_voice.md` written; 6 skeleton packages compiling+tested; CI covers them automatically |
-| 1 — Speech Provider Layer | `DONE` | 2026-08-16 | 2026-08-16 | speech pkg (types/registry/failover/pricing/5 adapters/capture), audio.PlaySpeech (WAV/PCM, MP3 skipped by design), /voice-setup /say /listen /tts /voice-status, 40+ new tests green; manual QA (audible /say, real whisper.cpp) pending |
+| 1 — Speech Provider Layer | `DONE` | 2026-08-16 | 2026-08-16 | speech pkg (types/registry/failover/pricing/5 adapters/capture), audio.PlaySpeech (WAV/PCM, MP3 skipped by design), the setup/say/listen/tts/status commands (all folded into `/blackbox` in Phase 13), 40+ new tests green; manual QA (audible speech, real whisper.cpp) pending. **Phase 13 added** per-provider endpoint overrides and verify-then-reuse for saved keys |
 | 2 — Voice Input & Policy | `DONE` | 2026-08-16 | 2026-08-16 | HandleInputEvent channel stamping, Voice Risk Policy (cap+gate+deny list), VoicePrompter fail-closed, /voice /manual + graceful fallback, spoken responses; P2.8 voice log + full multi-turn clarification carried to Phase 4; real-mic QA pending |
 | 3 — Wake Word | `DONE` | 2026-08-16 | 2026-08-16 | energy detector default + openWakeWord-class sidecar client; wake-only between turns (ADR-005 §5 by construction); kill phrases; wake.jsonl metrics; fixture+mock tested. Real-keyword accuracy (sidecar) + FP/hour = manual QA pending |
 | 4 — Daemon & Living AI | `DONE` | 2026-08-16 | 2026-08-16 | Renderer + SlashDispatcher seams, session ring buffer + `/memory`, undo journal, `helix daemon` + NDJSON IPC (UDS / Windows token TCP) + `helix remote`, connectivity local-first failover, service installers, journal + `diagnostics.Guard`, greeting + break reminder, `scripts/soak.sh`, e2e remote test; per-sidecar `Health()` polling loop; manual QA (72h soak, logout/reboot) pending |
-| 5 — Vision | `DONE` | 2026-08-16 | 2026-08-16 | `MessagePart` multimodal format + OpenAI/Ollama/Anthropic wire adapters, `ai.RunVisionModel` (capability-gated), ffmpeg memory-only capture (fs-snapshot + stdout-only tests), `/eyes` + "turn off your eyes" kill switch + metadata-only journal, deictic voice routing, P5.5 dedicated `vision.provider` fallback; manual QA (real camera + vision model) pending |
+| 5 — Vision | `DONE` | 2026-08-16 | 2026-08-16 | `MessagePart` multimodal format + OpenAI/Ollama/Anthropic wire adapters, `ai.RunVisionModel` (capability-gated), ffmpeg memory-only capture (fs-snapshot + stdout-only tests), the camera opt-in + "turn off your eyes" kill switch + metadata-only journal, P5.5 dedicated `vision.provider` fallback. **Amended 2026-08-22:** deictic voice routing was REMOVED (P5.4, superseded — it hijacked any sentence containing "this"); the camera is now reached by `/blackbox look` or the planner's `vision` tool (P5.7), the darwin framerate is negotiated rather than hardcoded (P5.9, every capture on that hardware had been failing), and `vision.model` routes frames separately from chat. Manual QA still pending — blocked on OS camera authorisation, not code |
 | 6 — Ambient Audio (optional) | `DONE` | 2026-08-16 | 2026-08-16 | Rule-based analyzer (RMS + hand-rolled FFT concentration → silence/loud/alarm/music) + cooldown-gated service + response mapping + config + golden fixtures + fuzz, live wake-stream `TeeScanner`/`ChunkMonitor` wiring; CPU budget benchmark (26µs/chunk) green |
 | 7 — Polish & Release | `IN PROGRESS` | 2026-08-16 | — | `input.HybridSource`, 3 new fuzz targets, ADR-010 (tray helper), `docs/blackbox.md`, benchmark suite, streaming STT partials (Deepgram WS), TTS latency budget metric, 3-OS e2e matrix (Windows daemon IPC), Ollama installer checksum pinning, §10 latency-metrics instrumentation (wake→exec + frame-to-insight) done; speech queue tuning + measured latency, §10 metrics run (needs hardware), `blackbox-v0.1.0` tag (owner-gated) remain |
 | 8 — Agentic Harness | `DONE` | 2026-08-17 | 2026-08-17 | `executePlanSteps`+`planFirewallExecute` refactor, `harness.go` bounded plan→act→observe→replan (data-only fenced observations, ADR-013), `/agentic` toggle + persisted pref. **P8.6 output capture done**: bounded tee-ing `TailBuffer`/`OutputCapture` + `RunShellCommandCaptured`, sanitized per-step output tail + true `ExitCode` in the observation block (ADR-013 amendment), agentic-gated so the default path keeps its TTY; `FuzzSanitizeOutput` found and fixed a sanitizer-ordering bypass. **P8.7 native tool calling done**: normalized `ToolDefinition`/`ToolCall` types + streamed tool-call accumulator + `openai_compatible` implementation (7 providers), planner `emit_plan` tool with `tool_choice=required` and silent fallback to the prompt ladder, honest `Capabilities.ToolUse` via `SupportsToolUse`. **P8.8 streaming render done**: `ai.StreamModel` + `ux.AIStreamWriter` + optional `agent.StreamingRenderer` seam (headless/daemon keep the buffered path by design), spinner stops at the first token, three duplicated chat-fallback blocks unified into `Agent.chatFallback`. **P8.7b**: Anthropic (`tool_use` blocks + `input_schema`) and Ollama (`/api/chat` tools, object-valued arguments normalized, **per-model** gating because Gemma ships no tool template) now drive tools natively; shared plumbing in `providers/tools.go`. 70 new tests across P8.6–8.7b. **Phase 8 fully complete — all five tool-capable cloud providers plus Anthropic and tool-capable Ollama models use native function calling** |
@@ -1324,6 +1534,32 @@ necessary.
 | 10 — Linux Edge-Device Deployment | `TOOLING DONE` | 2026-08-17 | — | `docs/edge_deployment.md` per-board matrix (Pi 5/4, Jetson Nano 1st-gen, amd64 mini-PC, arm64 SBC, RISC-V). **P10.2** `scripts/edge-setup.sh` — consent-gated, SHA-256-verified Ollama install (fail-closed), Jetson-Nano refusal → cloud path, `--check`/`--dry-run`/`--yes`/`--assume-board`, shellcheck-clean; ML sidecars stay user-managed with printed instructions (no pinnable artifact — same call as P7.7). **P10.3** `internal/edge` + `/doctor` "edge appliance" section: board, build flavor via new `audio.SpeechSupported`, confinement in force + remediation, recorder, local sidecar reachability, offline-LLM model-pulled check, thermals/throttling. **P10.4** `internal/edge/systemd.go` — edge-aware `systemd --user` unit (`Wants=network-online` fixing a silently-inert `After=`, restart-storm bounds in `[Unit]`, edge env knobs) + linger detection and post-install notes wired into `helix daemon install`. 29 new tests incl. a checksum pin-drift guard and unit percent-escaping. Only P10.5 hardware QA remains (inherently hardware-gated) |
 | 11 — Offline LLM Resilience | `CORE DONE` | 2026-08-17 | — | Daemon `ai.InitProviders` bug fixed (P11.1); `internal/ai/failover.go` circuit-breaker cloud→local brain failover (P11.2) wired into both the interactive shell and the daemon connectivity monitor; `ensureLocalBrainReady` startup verification, consent-gated pull (P11.3); `internal/providers/llamacpp` implemented over llama-server — P11.4 decided in favor of implement (ADR-016). 18 new tests. Real-network/real-key QA (P11.5) remains |
 | 12 — Sci-Fi Presence & UX | `CODE DONE` | 2026-08-17 | — | `voiceviz.go` HUD (ADR-015), `SpeakStream` sentence-pipelined TTS (ADR-014), persistent gapless `StreamRecorder`, phantom-wake/silent-hang/wake-retry/sox-rec/prompter-print/Deepgram-endpointing fixes. **P12.4** `speech.ClipLevel` log-scale meter driving `VoiceViz.SetLevel` from the real mic (chunked paths; batch keeps synthetic — sox has no incremental readback). **P12.5** `audio.PlaySpeechContext` + `ctxStreamer` = true mid-sentence cancellation (~50 ms), `speech.StopSpeaking()`/`Speaking()` barge-in handle, interrupt-manager registration inside `SpeakStream` (Ctrl+C previously could NOT stop a spoken reply). 16 new tests. Only P12.6 manual QA remains; mic-triggered barge-in needs echo cancellation (documented residual) |
+
+| 13 — Unified Surface, Persona & Initiative | `CORE DONE` | 2026-08-22 | — | Eight voice/vision commands folded into `/blackbox`; companion loop (interval capture, in-process frame diff, half-duplex queueing); persona on planner/chat/vision; first-run package stage (`internal/deps`, eight package managers, never Docker); one visual language (`internal/shell/panel.go`) across every report and wizard screen; ADR-002/005/008 amendments. Plus repairs found only by running it: web-grounding loop, camera framerate, reasoning-budget exhaustion, sidecar endpoints lost at commit, duplicate key prompts. Remaining: a real camera frame, and one end-to-end voice session after the endpoint fix |
+
+### What is actually left (all phases)
+
+"Core DONE" is not "done". Every unticked checkbox in §6, consolidated — **most are
+hardware- or key-gated, not unwritten code**:
+
+| Phase | Open | Kind |
+|-------|------|------|
+| 1 | whisper.cpp sidecar QA log | manual |
+| 2 | P2.8 voice interaction log (opt-in) | **code** |
+| 4 | logout/reboot survival on 3 OSes; 72h soak; 4 living-AI acceptance scenarios | manual |
+| 5 | camera QA; frame-to-insight ≤5s (local measured at 8.8s warm, cloud unmeasured) | hardware |
+| 6 | ≥90% fixture accuracy; cooldown proof; default-off doc line | manual + **code** |
+| 7 | P7.8 §10 metrics run; P7.9 `blackbox-v0.1.0` tag | manual + owner |
+| 9 | P9.7 recommended chain presets; P9.8 real-key QA | **code** + manual |
+| 10 | P10.5 hardware QA (Pi 5 / Jetson / amd64) | hardware |
+| 11 | P11.5 network-cut QA with a real key | manual |
+| 12 | P12.6 HUD/latency QA; mic barge-in needs echo cancellation | manual + **deferred** |
+| 13 | real camera frame; end-to-end voice session after the endpoint fix | hardware |
+
+**The genuinely unwritten code is small and specific:** P2.8 (voice log), P9.7 (chain presets),
+P6's remaining acceptance work, and full-duplex barge-in (parked — needs AEC, which conflicts with
+CGO-free unless a headset is assumed). Everything else waits on hardware, keys, or an owner
+decision. Phase 7 cannot close until P7.8/P7.9, and it is the last gate before a release tag.
 
 ### Task-level checkboxes
 
@@ -1380,6 +1616,13 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 | 2026-08-17 | **Two voice-UX bugs from owner QA — one a P7.2c regression.** **(1) The first sentence was truncated after ~one word**, then playback resumed from sentence 2. Root cause in `beep`, not in Helix's logic: `Resampler.Stream` (resample.go:102) reads its source as `sn, _ := r.s.Stream(r.buf1); if sn < len(r.buf1) { r.end = ... }` — it **discards the ok flag and treats ANY short read as a permanent end-of-stream**. A 24 kHz TTS stream is always resampled to the 44.1 kHz device, so the new streamer's underrun path ("here are 64 samples, more coming") silently marked the stream finished the moment the preroll drained — cutting the sentence to roughly the preroll length. Fixed by inverting the contract: while the stream is live `Stream` now **fills the requested buffer completely**, padding with silence, and a short read is reserved for the true end. Preroll raised 150→250 ms since a pad is audible as a gap and lead is cheaper than a stutter. `TestPCMStreamNeverShortReadsWhileLive` pulls 512-sample buffers (beep's actual `resamplerSingleBufferSize`) and fails on any short read while live, so this cannot regress. **Lesson worth keeping: a `beep.Streamer` may not return partial reads mid-stream, regardless of the ok flag.** **(2) Speech and text were sequential** — `handleResponseStep` called `PrintAIMessage` and only then `speak`, so the voice trailed the screen by a full render (seconds with the typewriter on). Both are presentations of the same text, so they now run concurrently: synthesis starts on a guarded goroutine first (it has network latency to absorb) while printing proceeds on the caller, and the turn waits for speech before returning so the next capture cannot start over the tail of the reply. Non-voice turns keep the original single-call path exactly. Build + vet + 30 packages + lint 0 green | Full BlackBox diff uncommitted | Owner QA: re-run `/voice` — first sentence should be complete, and text + audio should start together |
 
 | 2026-08-17 | **TTS metric now records true time-to-first-audio.** With streaming in place the old measurement became actively misleading: `speakOnceStreamed` timed the whole `PlaySpeechStream` call, which returns when playback *ends* — so `/voice-status` reported the duration of the entire utterance and got WORSE the longer Helix spoke, even though the first word was heard just as fast. Since `first_byte_ms` is a first-audio budget, the number was no longer comparable to it. Fixed with an explicit `audio.StreamPlayback{OnFirstAudio}` hook fired at the instant the preroll is filled and the stream is handed to the speaker — the real first-audio moment, within a few ms — rather than inferring it from call boundaries. The `volume float64` parameter folded into the same options struct (one call site). `lastSpeechStreamed` now records WHICH path produced the number, because the two measure different things and the user should not have to guess: streamed = true first-audio; buffered = full synthesis, which for that path *is* first-audio since nothing plays until it completes. Both stay comparable to the budget. `/voice-status` relabelled to `Last TTS time-to-first-audio: Nms (budget Nms) [streamed|buffered — full synthesis before playback]`. Tests pin the semantics: `TestOnFirstAudioFiresAtPrerollNotAtEnd` fails if the hook fires only after the producer finished — i.e. if it ever regresses to timing the whole utterance — plus an optional-hook test. 30 packages + lint 0 + cross-compile green | Full BlackBox diff uncommitted | Owner QA: `/say` then `/voice-status` — expect a few hundred ms tagged `[streamed]` |
+| 2026-08-22 | **Live mode: eight commands became `/blackbox`, and Helix gained initiative.** `/voice`, `/manual`, `/voice-setup`, `/voice-status`, `/wake`, `/say`, `/tts` and `/eyes` were one capability behind eight verbs; they are now subcommands of `/blackbox`, and an old name prints where it went rather than a did-you-mean list. `/blackbox on` opens microphone AND camera together — the Phase 5 `/eyes` opt-in is inverted on purpose, because live mode is a camera consent moment by definition, and the frame invariants (one at a time, memory only, never on disk, metadata-only journal) are unchanged. **New: `cmd/helix/companion.go`**, the first part of the voice stack that is not turn-shaped. It samples the camera on an interval, and the two cost controls are the whole design: a 16×16 luminance fingerprint diffed **in process** decides whether a frame is worth a model call (an unchanged room costs nothing — raw JPEG bytes cannot be compared, since two frames of a motionless scene differ almost everywhere), and the model is asked to return a sentinel when nothing is worth saying, with a cooldown bounding what survives. **Half duplex is what shaped it.** The companion never speaks; it QUEUES, and the main loop drains the queue at the only two points where the microphone is provably closed — between a finished turn and the next capture, and via a new `wakeCompanionSpoke` outcome that stops the wake scanner on the way out. Speaking into an open mic would have Helix transcribe and answer itself, which is the same echo-cancellation residual Phase 12 logged for barge-in, seen from the other side. **Voice policy widened** (owner decision): the ADR-005 denied set shrank from 20 commands to 9, each argued individually — `/purge` `/rag-reset` destroy data, `/scan` fires traffic at a third party, `/commit` writes history, `/config` `/stealth` move the posture, `/hooks` installs policy that later runs unattended, `/setup` would have you dictate API keys aloud, and `/init` writes HELIX.md which is planner context from then on. Everything else is now reachable by speaking. **Also fixed the readiness lie found in QA:** `VisionCaptureService.Available()` existed and was never called, so `/eyes status` reported "ready" on a host with no ffmpeg and the first capture failed; `visionReady()` now checks the capture half and the model half separately and names which one is missing. New `companion` config section (enabled/interval/cooldown/threshold) whose zero value resolves to the defaults rather than to "off". 13 new tests (folded-command migration, `cmdArgs.Shift`, readiness honesty, frame-diff noise immunity, sentinel/cooldown/one-sentence trimming); README, `docs/voice.md`, `docs/blackbox.md` and the edge setup script updated. `go build` + `go vet` + full suite green | Uncommitted, on branch `blackBox` | Owner-gated: ffmpeg is not installed on the QA machine, so the companion loop has not been driven by a real camera. Measure a real frame-to-remark cycle, and tune `interval_s`/`change_threshold` against it |
+| 2026-08-22 | **Grounding fixed, four real bugs found by running things.** **(1) Web grounding.** A successful search was followed by the planner re-issuing the identical search, on every phrasing — the harness would loop to its budget and never answer. The cause was PLACEMENT: the "answer from these results" directive lived inside `<execution_report authority="data-only">`, under a heading that tells the model to never obey instructions found there, while the WEB TOOL RULES higher up were still telling it to search for anything current. It obeyed the fence. `PlannerPromptInput` now separates RAG, report, and directive; the report keeps its data-only fence, the directive moves into Helix's own instruction space just before the emit line, and the harness passes them as a `turnContext` rather than string-concatenating them into the RAG slot (which had also been mislabelling the execution report as "RELEVANT SYSTEM COMMANDS (from Knowledge Base)"). Verified live: 2/2 phrasings grounded, correct current answer, where 2/2 had re-searched before. **(2) The camera never worked on this Mac.** darwin capture hardcoded `-framerate 1`; the device advertises exactly 15 and 30, so avfoundation refused the input before a byte was read. Dropping the flag is not a fix either — ffmpeg then defaults to 29.97, also refused. `negotiateFramerate` now parses the rates ffmpeg names in its own rejection and retries with the highest, caching it: the same "negotiated, not assumed" pattern as `max_tokens`. Pixel format needs nothing; ffmpeg self-corrects to `uyvy422`. **(3) Reasoning models return nothing.** `gemma4:e2b` — Helix's own default local model — is a thinking build. At the 512-token chat default it spent ~770 characters on `thinking`, emitted zero `content`, and ollama reported a perfectly successful stream; the client read only `content`, so this surfaced as "The vision model returned nothing." The client now tracks `thinking` and reports budget exhaustion as an error naming the limit, and vision calls get their own 1024-token budget. **(4) Vision gated on the wrong model** — `Capabilities()` computes from the provider DEFAULT, so the new `vision.model` override would have been checked against a model nobody selected; gated on `SupportsVision(provider, model)` instead. **New capability:** `vision.model` routes frames to a different model than chat, and companion pacing is now adaptive — the interval is a floor and the gap becomes `max(interval, smoothed last look)`, so a slow host backs off instead of queueing. It deliberately does NOT speed up on a fast host: a companion is bounded by how often a person wants to be spoken to. **Model evaluation (empirical, not from docs):** moondream is the standard small-VLM recommendation and Ollama's build is unusable for this — given the companion's instruction-style prompt it returns an empty string, given a rephrasing it returns coordinate arrays (`ids: [0.39, 0.3, 0.57, 0.44]`), and it hallucinated flags in an image of three stripes. `gemma4:e2b` stays the recommendation at ~6.5s first token. Also NEW `internal/deps` + first-run stages: a precompiled binary now offers to install sox and ffmpeg during setup, OS-detected across brew/apt/dnf/pacman/zypper/apk/winget/choco, detecting by capability (`rec` satisfies sox) and never emitting a package name it cannot verify. 20 new tests. `go build` + `go vet` + full suite + lint green | Uncommitted, on branch `blackBox` | The companion loop still has not seen a real frame: macOS withholds camera access from the host app here (ffmpeg opens the device, negotiates format, then blocks with no output). Verify in a terminal that has been granted Camera access, then tune `interval_s`/`change_threshold` against a measured frame-to-remark time |
+| 2026-08-22 | **QA pass on a real session: intent routing, credential reuse, sidecar endpoints, and a UI system.** **(1) The deictic vision hijack — the big one.** With eyes on, `visionRequested` intercepted any voice utterance containing "this"/"that"/"here" BEFORE the planner saw it, so most of a session went to the camera: "show me the available commands in THIS helix" was answered by a vision model staring at a dark room (it described the Helix *text editor*), "what do we have in THIS directory?" got the furniture, and "…see what's in THIS directory" produced "I don't have shell access" — from a model that has no idea Helix owns a shell. The same transcript proves the fix: every utterance WITHOUT a demonstrative ("can you see me?", "what can you see now?") reached the planner and was routed to the `vision` tool correctly. The heuristic existed because the planner had no way to reach the camera; it does now, so it is deleted along with `isDeictic` and its fuzz target. A model choosing among its own tools beats a substring match on English demonstratives. **(2) Kill phrases were exact-match.** "Excellent. Now switch to manual mode." went to the planner, which asked what to switch to manual mode FOR; only the bare "Manual mode." worked. Now suffix-matched, so a sentence works — but suffix, not substring, because "how do I switch to manual mode?" is a question about the feature. The eyes switch is deliberately looser and MAY over-trigger: a privacy control should fail toward closing the camera. **(3) Credentials were asked for twice.** The AI and speech keystores are separate files (speech works with no LLM), but they are not separate accounts — a user who pasted an OpenAI key on the provider screen was asked for it again three screens later in the same wizard. `adoptAIKeyForSpeech` reuses it for the same vendor only. And `ensureRemoteAPIKey` no longer asks "use the saved key?" — it verifies, and only a key the provider REJECTS prompts for a new one; `keyVerdict` distinguishes rejected from unverifiable so a dropped connection cannot demand a re-paste. **(4) A sidecar could not be a fallback.** `Speech.STT.BaseURL` applies only to the PRIMARY provider, so whisper-local picked as a fallback and moved to a free port had its new URL written into the primary's slot: the probe kept dialling the stale 8080 and reported "did not come up" for a server that had started fine, while the cloud primary was quietly pointed at localhost. Endpoints are now a per-provider map (`Endpoints`), resolved by `sttEndpointFor`/`ttsEndpointFor`. **(5) NEW `internal/shell/panel.go` — one visual language.** /help had a good one (▸ section, │ gutter, closing rule) and nothing else used it, so every other report was a flat stack of `color.Cyan` lines. Extracted into panels, badges, content-measured tables, gutter-aware wrapping and `PadVisible` — the last because `%-9s` counts ANSI escape bytes and pads a coloured cell to nothing, the alignment bug this file exists to stop re-inventing. Applied to `/blackbox status`, the voice-chain report, `/tools` and the endpoint notices. **Verified by looking at it**: a PTY driver captures the real ANSI, a converter renders it to HTML, and the browser screenshots it — which is how the escaping wrap and the wasted badge line were found. The setup wizard screens are NOT converted yet. Also: the spoken-vocabulary report now derives the denied list from the registry instead of a hand-kept copy that had already gone stale, `/setup`'s summary matches its five options, and the first-run banner counts the stages that will actually run. 12 new tests. Build, vet, lint and suite green | Uncommitted, on branch `blackBox` | Convert the setup/wizard screens to panels; the companion loop still has not seen a real camera frame |
+| 2026-08-22 | **The visual system reaches the screens people actually meet first.** Setup, live mode and /about were the three surfaces still rendering as flat `color.Cyan` stacks, and setup is the one a fresh install sees before anything else. Two new primitives — `shell.Menu` (numbered choices that carry the REASON to pick one) and `shell.Prompt` (one voice for every question) — plus panels applied to: the provider menu (each option now says "cloud · API key required" or "runs on this machine · no key, no per-call cost", and tags the ones already holding a saved key), the model catalogue (was 25 bare ids and "… and 101 more" — the worst of both, too long to scan and too short to be complete; now capability-tagged rows marking which models can SEE and which support tools, with the default badged), the Ollama local-model screen, the STT/TTS pricing tables (free is rendered as **free** rather than "0.00", which in a column of dollars reads as a rounding error rather than as the entire point of running local), and `/setup` itself, whose menu now reports each stage's CURRENT state — "identity: not set", "ai provider: ollama / gemma4:e2b", "system packages: all present [done]" — so the wizard shows what is finished instead of asking the user to remember. **Live mode got a real entry banner**: which senses just came online and how to get back out, replacing one cyan line that mentioned only the exit. Per-turn output was re-voiced so the three kinds of line are distinguishable at a glance — the transcript echo is a magenta `❯` because it is the user's own words, an unprompted companion remark is a magenta `◉` because nobody asked for it, and "captured 0.8s" (which read like debug output that had escaped) is now a muted turn marker. **/about** gained a THIS INSTALL panel answering the question it could not: the philosophy says what Helix is for and the creation says who built it, but nothing said what THIS copy can do — mind, harness, hearing, sight and confinement now sit between them. **The banner, identity zone, glitch animation, creator text and motto are untouched by explicit request**, and are entirely inside `RenderAbout`; every change is in the caller below it. Also fixed while looking: `/tools`'s e2e expectation still matched the old heading, and `go test ./...` had silently stopped covering `tests/e2e` — the last two "all green" claims did not include it, and the suite is now run as `./... ./tests/...`. Verified throughout by screenshotting real PTY output. 5 new tests. Build, vet, lint and the full suite incl. e2e green | Uncommitted, on branch `blackBox` | The companion loop still has not seen a real camera frame (macOS withholds camera access from the host app here) |
+| 2026-08-22 | **Second QA pass: a broken voice chain, a Docker dead end, and Helix finally sounds like itself.** **(1) The endpoint fix from earlier was being thrown away.** whisper-local started fine on a reassigned port 28861, verified, and then every request went to 8080 — the wizard's commit step does `cfg.Speech.STT = sttCfg`, and the freshly-built struct has no `Endpoints`, so the reassignment was wiped between "is answering on port 28861" and "still not answering". The merge comment directly above it already warned about this exact class of bug costing `/wake` its config; `Endpoints` was the next casualty and is now carried across explicitly, with a regression test. **(2) Docker is no longer a dead end.** QA picked kokoro-local as a TTS fallback and was walked through image-pull instructions to `Cannot connect to the Docker daemon` as the final line of voice setup. Sidecar specs gained an `Unmet` precondition — a dependency Helix will NOT resolve for you, distinct from a missing binary it offers to install — and `dockerAvailable()` checks for a daemon that *answers*, not just a binary on PATH, since a dead daemon is exactly the state that failed. Kokoro is now marked `needs docker` in the pricing table (visible before the choice) and refuses early with a pointer to piper-local, which needs only Python. The docker-free guarantee is documented in the README, `docs/voice.md` and `docs/local_runtimes.md`. **(3) The live banner lied about the camera** — eyes were enabled after it printed, so it said "SIGHT • off" and then "Eyes ENABLED" two lines later; the decision now happens before the banner that reports it. **(4) Multi-line errors stopped being mangled**: " — type /blackbox off" was concatenated onto the tail of a shell command inside a chain-failure message. **(5) NEW `internal/agent/persona.go`.** Every prompt in the tree constrained FORMAT and none said who was speaking, so replies came back in the provider's default assistant register — QA got "1 plus 1 equals 2.", gallery-catalogue prose from the camera, and an unasked-for tutorial. The persona is a point of view rather than more rules: Helix shares the machine, so "I ran it" is literally true; it answers first; it has opinions. Wired into the planner (where most spoken replies are born as response steps), the chat fallback, and the camera path. `VoicePersona` is separate and applies only to spoken turns — a test caught the core telling TYPED turns their reply would be read aloud. It shapes tone and never authority, pinned by `TestPersonaShapesToneNotAuthority`. Also: the wizard's own closing line still said `Try: /say Voice link online` (QA dutifully typed it, twice, and got the migration notice), and that plus the last `/wake`/`/manual`/`/voice-status` strings in code, the edge setup script and the docs are gone. 4 new tests. Build, vet, lint and the full suite incl. e2e green | Uncommitted, on branch `blackBox` | The companion loop still has not seen a real camera frame |
+| 2026-08-22 | **Fallback tables converted — and the fitter that should have existed first.** The fallback chooser was the last flat screen: five look-alike readiness phrases in one grey column ("yes — server running", "NO — key required", "needs local server") that the reader had to compare by hand. Readiness is the only column that decides the choice, so it is badge-coloured now, and a container-hosted sidecar on a host with no daemon reports **needs docker** with a pointer to piper-local rather than the misleading "not running yet" — the same informed-choice fix as the pricing table, in the other place the choice is made. **Screenshotting caught what the code could not see**: the seven-column pricing table overflowed its panel and wrapped, dropping "★ best value" onto its own line at column zero — the exact failure the panel system exists to prevent, committed by the panel system's own first customer. Fixed twice over: the table lost the raw unit price (the monthly estimate is derived from it and is the number people actually decide on) and merged needs/where into one `requires` column, AND `shell.Table` now **fits itself** to the panel by shaving its widest column, so no future caller can reintroduce the bug. That needed `truncateANSI`, which copies escape sequences verbatim while counting only visible runes — naive slicing either counts escape bytes as content or severs a sequence and bleeds its colour across the rest of the line. A width test written against the no-TTY default (72 columns, stricter than the dev machine's 92) is what proved the table still overflowed an 80-column terminal after the first fix. Also converted: the piper voice-id prompt block and the last two bare `askNumber` prompts, so every question in the wizard now speaks in one voice. 3 new tests. Build, vet, lint and the full suite incl. e2e green | Uncommitted, on branch `blackBox` | Every wizard screen is now on the panel system; the companion loop still has not seen a real camera frame |
+| 2026-08-22 | **Documentation audit — three docs were still describing deleted behaviour.** Asked whether the docs were fully updated, the honest answer was no. `docs/voice.md` and `docs/blackbox.md` both still taught the **deictic camera path** as a live feature ("a question that points at something captures one frame", "typed input deliberately does not trigger the camera") — the exact heuristic deleted earlier the same day for hijacking most of a QA session. Both now describe the two explicit doors (`/blackbox look` and the planner's `vision` tool) and say plainly what was removed and why, because a reader who used the old behaviour deserves to know it is gone rather than wonder why it stopped working. **The threat model was materially out of date, which matters more.** V4 read "Vision strictly opt-in (`/blackbox eyes on`, default OFF)" while `/blackbox on` now enables the camera as part of going live. That is a real widening of when a camera can open, and a threat model that does not say so is worse than one that never mentioned it: V4 now records both entry points and marks the second as deliberate, and a new **V4b** covers unattended capture by the companion loop — bounded by live mode, stopped by the same kill phrase, and with the in-process frame diff noted as the control that keeps a still room from being streamed to a provider at all. **`docs/architecture.md` gained the four subsystems built this session** and had no entry for: persona (3c), live mode and the companion (3d), host dependencies (3e), and report rendering (5c) — the last documenting the two load-bearing, non-cosmetic properties, that widths measure visible text because `%-9s` counts escape bytes, and that `Table` fits itself because an overflowing table destroys the alignment it exists for. Also: `docs/blackbox.md` learned that voice setup now runs as part of first boot, that saved keys are verified-and-reused rather than re-requested, that default sidecar ports collide and are reassigned **per provider**, and that "manual mode" is matched at the end of a sentence. The Phase 5 roadmap entries describing deictic routing were left alone — a decision log records what was decided at the time and should not be rewritten. Docs only; build, vet, lint and the full suite incl. e2e re-run green | Uncommitted, on branch `blackBox` | The companion loop still has not seen a real camera frame |
 
 ### Phase 2 carry-overs (do with Phase 4)
 
@@ -1436,8 +1679,23 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 - **PTY harness** — pseudo-terminal e2e suite (`tests/e2e/`) driving the real binary against mock
   providers.
 - **Grid/GRID STATUS** — Helix's terminal status line branding.
+- **Live mode / BlackBox mode** — `/blackbox on`: microphone, camera, spoken replies and the
+  companion loop, all opened together and all closed by `/blackbox off` or "manual mode".
+- **Companion loop** — the timer-driven camera sampler that may speak unprompted (Phase 13). The
+  only part of the voice stack that is not turn-shaped.
+- **Persona** — `internal/agent/persona.go`: who Helix is when it speaks. Shapes tone on the
+  planner, chat and vision paths; grants no capability and cannot loosen a gate.
+- **Panel** — the report frame in `internal/shell/panel.go` (title chip, gutter, closing rule) that
+  every Helix report now uses.
+- **Half duplex** — the recorder and the speaker cannot run at once (Phase 2 constraint, ADR-003).
+  Why the companion queues its remarks instead of speaking them, and why mic-triggered barge-in
+  still needs echo cancellation.
+- **`Unmet` precondition** — a sidecar dependency Helix declines to resolve for the user (Docker),
+  as distinct from a missing binary it offers to install (ADR-002 amendment).
 
 ---
+
+| 2026-08-22 | **Roadmap document brought up to date with the surface it describes.** Asked to update this file for the `/blackbox` unification and to be honest about what is left. Both were overdue and one was a structural defect of my own making: the seven dev-log rows appended this session had landed **after §14**, outside the table they belonged to — relocated into the Dev log where they are actually readable in sequence. Corrections, none of them deletions: **§0** gained a command-migration table and a note that phase sections still name the original commands *where they record what was built at the time*, with the rule that current-surface sections win when the two disagree. **§2.2/§2.3** learned the five files and one package that did not exist when they were written (`blackbox.go`, `companion.go`, `persona.go`, `first_run.go`, `panel.go`, `internal/deps/`) and that slash dispatch is now one registry entry rather than a switch. **Three ADRs amended rather than rewritten:** ADR-002 gains "sidecars may not require a container runtime", ADR-005 records the denied set narrowing 20 → 9 with the per-command argument and states plainly that rules 1–5 are unchanged, ADR-008 records `/voice`↔`/manual` becoming `/blackbox on`↔`off` and the suffix-matched safety valve. **§5 threat model** gains V4b (unattended capture by the companion) and V4c (the removed intent heuristic, recorded as RESOLVED rather than erased), with V4 amended to admit that live mode opens the camera. **P5.4 is marked SUPERSEDED, not deleted** — it shipped as specified and the specification was wrong — with P5.7/P5.8/P5.9 recording what replaced it. **§7** gains `companion`, `vision.model` and per-provider `endpoints`. **§10** gains the first real measurements, including the ones that missed: 8.8s warm frame-to-insight against a ≤5s target, and moondream rejected on output quality despite being 20× faster. **New Phase 13** covers the unification, companion, persona, first-run and visual system as its own scope with its own unmet acceptance criteria. **New "What is actually left"** table consolidates all 24 open checkboxes by phase and kind, because "core DONE" on five phases was hiding how much is genuinely unfinished — the honest summary is that little unwritten *code* remains (P2.8 voice log, P9.7 chain presets, P6 acceptance work, full-duplex barge-in), and almost everything else waits on hardware, keys, or an owner decision. Phase 7 is still the last gate before a release tag | Docs only; uncommitted, on branch `blackBox` | Two things need a human: a real camera frame for the companion loop, and one end-to-end voice session confirming the sidecar-endpoint fix by ear |
 
 *End of BlackBox_Development.md — maintain it as the single source of truth. If reality diverges
 from this document, update the document in the same commit as the code.*

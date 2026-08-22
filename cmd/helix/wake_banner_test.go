@@ -104,8 +104,8 @@ func TestWakeLapseNotice(t *testing.T) {
 			if !strings.Contains(got, tc.mentions) {
 				t.Errorf("notice %q should mention %q", got, tc.mentions)
 			}
-			if !strings.Contains(got, "/wake status") {
-				t.Errorf("notice %q should point at /wake status", got)
+			if !strings.Contains(got, "/blackbox status") {
+				t.Errorf("notice %q should point at /blackbox status", got)
 			}
 		} else if got != "" {
 			t.Errorf("outcome %v must stay silent, got %q", tc.outcome, got)

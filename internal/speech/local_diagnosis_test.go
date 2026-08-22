@@ -56,7 +56,7 @@ func TestPiper403IsDiagnosedNotJustReported(t *testing.T) {
 	// that step is the REASSIGNMENT, not a launch command — telling the user to
 	// start a server on a port something else already holds is advice that
 	// cannot work.
-	if !strings.Contains(msg, "/voice-setup") {
+	if !strings.Contains(msg, "/blackbox setup") {
 		t.Errorf("message should point at the fix for an occupied port:\n%s", msg)
 	}
 	if strings.Contains(msg, "--port 5000") {

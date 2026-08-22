@@ -103,13 +103,21 @@ func (a *Agent) HandleInputEvent(ev input.InputEvent) {
 		return
 	}
 
-	// BlackBox Phase 5: voice + eyes-on + deictic → capture one frame and
-	// answer through the vision model (memory-only).
-	if a.visionRequested(ev) {
-		a.handleVisionTurn(ev)
-		return
-	}
-
+	// NOTE: there is deliberately no deictic pre-empt here any more.
+	//
+	// Phase 5 routed any voice utterance containing "this"/"that"/"here" to the
+	// camera before the planner ever saw it. With eyes on, that swallowed most
+	// of the session: "show me the available commands in THIS helix" was
+	// answered by a vision model staring at a dark room, and "what do we have in
+	// THIS directory?" got a description of the furniture. Worse, the vision
+	// model has no idea Helix owns a shell, so it replied "I don't have shell
+	// access" — while the planner, one layer down, would have run `ls`.
+	//
+	// The heuristic existed because the planner had no way to reach the camera.
+	// It does now: `vision` is a tool in the closed vocabulary, and in the same
+	// QA session every utterance that reached the planner ("can you see me?",
+	// "what can you see now?") was routed to it correctly. A model choosing
+	// between its own tools beats a substring match on English demonstratives.
 	a.HandleInput(ev.Text)
 }
 

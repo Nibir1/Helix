@@ -64,6 +64,26 @@ func (c cmdArgs) From(i int) string {
 	return strings.Join(c.Fields[i:], " ")
 }
 
+// Shift returns the arguments with the first word removed, renamed to the
+// subcommand that consumed it.
+//
+// It exists for /blackbox, which folded eight top-level commands into one verb:
+// the subcommand handlers were written against a cmdArgs whose Fields START at
+// their own arguments, and re-deriving that by hand at each call site is how
+// the old TrimPrefix bugs got in.
+func (c cmdArgs) Shift() cmdArgs {
+	if len(c.Fields) == 0 {
+		return cmdArgs{Name: c.Name, Raw: c.Raw}
+	}
+	rest := strings.Join(c.Fields[1:], " ")
+	return cmdArgs{
+		Name:   c.Name + " " + strings.ToLower(c.Fields[0]),
+		Raw:    c.Raw,
+		Rest:   rest,
+		Fields: c.Fields[1:],
+	}
+}
+
 // Empty reports whether the command was given no arguments.
 func (c cmdArgs) Empty() bool { return c.Rest == "" }
 
@@ -120,12 +140,24 @@ type command struct {
 
 	// VoiceOK marks the command as reachable from the voice channel.
 	//
-	// Default-deny, and that is the point. Voice is an untrusted input channel
-	// (ADR-005): a transcript arrives with user authority but no proof of who
-	// spoke, and a passing radio or a misheard phrase must not be able to wipe
-	// a knowledge base or loosen the approval posture. So a command is voice-
-	// reachable only when someone decided it should be, and /voice explains the
-	// refusal rather than silently ignoring it.
+	// Still default-deny in the type — a new command is silent until someone
+	// decides otherwise — but the LINE has moved. Live mode (/blackbox on) is
+	// meant to reach the whole shell by speaking, so the question each command
+	// now answers is not "is this important enough to allow" but "would a
+	// misheard phrase or a voice on the radio do damage that cannot be undone".
+	//
+	// Eight commands still answer yes, and they are the whole denied set:
+	//
+	//	/purge /rag-reset   destroy data outright
+	//	/scan               fires traffic at a third party
+	//	/commit             writes history (git is never voice-reachable)
+	//	/config /stealth    move the approval or privacy posture
+	//	/hooks              installs policy that later runs on its own
+	//	/setup              would have you dictate API keys aloud
+	//	/init               writes HELIX.md, which is planner context from then on
+	//
+	// Everything else is reachable, and a refusal is SPOKEN, so a misheard
+	// phrase never silently does something else (ADR-005).
 	VoiceOK bool
 
 	// VoiceReadOnly restricts voice to the command's ARGUMENT-FREE form.
@@ -174,6 +206,21 @@ func init() {
 	// The line editor completes on the same names the dispatcher accepts, so a
 	// new command is completable the moment it is registered.
 	shell.SetSlashCommands(commandNames())
+}
+
+// voiceDeniedCommandNames lists the commands voice cannot reach, read from the
+// registry itself so the spoken-vocabulary report can never drift from the
+// policy it describes.
+func voiceDeniedCommandNames() []string {
+	var out []string
+	for _, cmd := range registry {
+		if cmd.Hidden || cmd.VoiceOK {
+			continue
+		}
+		out = append(out, cmd.Name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // commandNames returns every dispatchable name (canonical + aliases), sorted.
@@ -380,6 +427,15 @@ func handleUnknownSlashCommand(cmd string) {
 	fmt.Println("  " + shell.Fg(shell.HexRectifier, "⚠ UNRECOGNIZED SIGNAL") +
 		" " + shell.Fg(shell.HexSubtle, "::") +
 		" " + shell.Fg(shell.HexText, cmd))
+	// A verb that worked yesterday deserves better than "did you mean". The
+	// eight voice/vision commands folded into /blackbox, and this is where a
+	// user's muscle memory lands.
+	if note, moved := blackBoxMigrationNote(cmd); moved {
+		fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
+			" " + shell.Fg(shell.HexTertiary, note))
+		fmt.Println()
+		return
+	}
 	if suggestions := suggestCommands(cmd, 3); len(suggestions) > 0 {
 		fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
 			" " + shell.Fg(shell.HexText, "Did you mean ") +

@@ -397,43 +397,52 @@ func handleToolsCommand() {
 		},
 		{
 			name: "vision", purpose: "Look through the camera and describe one frame",
-			gate:      "/eyes opt-in; one in-memory frame per turn, never written to disk",
+			gate:      "/blackbox eyes opt-in; one in-memory frame per turn, never on disk",
 			available: agentCore != nil && agentCore.VisionAvailable(),
 			detail:    visionRouteDescription(),
 		},
 	}
 
-	fmt.Println()
-	color.Cyan("⚡ HARNESS TOOL VOCABULARY")
-	color.Yellow("The vocabulary is CLOSED: a tool name outside this list is dropped from the")
-	color.Yellow("plan, never dispatched. That is the security property, not a limitation.")
-	fmt.Println()
+	fmt.Println(shell.PanelTitle("harness tools"))
+	fmt.Println(shell.PanelLine(shell.Muted(
+		"the vocabulary is CLOSED — a tool outside this list is dropped from the plan,")))
+	fmt.Println(shell.PanelLine(shell.Muted(
+		"never dispatched. That is the security property, not a limitation.")))
+	fmt.Println(shell.PanelGap())
+
 	for _, r := range rows {
-		state := shell.Fg(shell.HexSecondary, "ready")
+		state := shell.Badge(shell.StateGood, "ready")
 		if !r.available {
-			state = shell.Fg(shell.HexSubtle, "idle ")
+			state = shell.Badge(shell.StateIdle, "idle")
 		}
 		// Padding goes INSIDE the color call: a %-9s applied to an already
 		// colored string counts the escape bytes and pads to nothing visible.
-		fmt.Printf("  %s %s %s\n", state,
-			shell.Fg(shell.HexTertiary, fmt.Sprintf("%-9s", r.name)),
-			shell.Fg(shell.HexText, r.purpose))
-		fmt.Printf("            %s\n", shell.Fg(shell.HexSubtle, "gate: "+r.gate))
+		// Name, state and purpose on ONE line: the state is the thing being
+		// scanned for, and putting it on its own row made the reader's eye
+		// travel down instead of across.
+		fmt.Println(shell.PanelLine(
+			shell.Fg(shell.HexTertiary, fmt.Sprintf("%-9s", r.name)) + " " +
+				shell.PadVisible(state, 9) + " " + shell.Fg(shell.HexText, r.purpose)))
+		fmt.Println(shell.PanelLine("                    " + shell.Muted("gate: "+r.gate)))
 		if r.detail != "" {
-			fmt.Printf("            %s\n", shell.Fg(shell.HexSubtle, r.detail))
+			fmt.Println(shell.PanelLine("                    " + shell.Muted(r.detail)))
 		}
+		fmt.Println(shell.PanelGap())
 	}
-	fmt.Println()
-	color.Cyan("Planner transport: %s", ai.PlannerTransport())
+
+	fmt.Println(shell.PanelSection("planner"))
+	w := shell.KVWidth("TRANSPORT", "HARNESS", "HOOKS")
+	fmt.Println(shell.KV("TRANSPORT", shell.Value(ai.PlannerTransport()), w))
 	if agentCore != nil {
-		agentic := "off (single-shot planning)"
+		agentic := shell.Badge(shell.StateIdle, "off") + shell.Muted("  single-shot planning")
 		if agentCore.Agentic {
-			agentic = fmt.Sprintf("on (step budget %d)", agenticStepBudget())
+			agentic = shell.Badge(shell.StateGood, "on") +
+				shell.Muted(fmt.Sprintf("  step budget %d", agenticStepBudget()))
 		}
-		color.Cyan("Agentic harness: %s", agentic)
-		color.Cyan("Local policy hooks: %d loaded", agentCore.HookCount())
+		fmt.Println(shell.KV("HARNESS", agentic, w))
+		fmt.Println(shell.KV("HOOKS", shell.Value(fmt.Sprintf("%d loaded", agentCore.HookCount())), w))
 	}
-	fmt.Println()
+	fmt.Println(shell.PanelEnd())
 }
 
 func sandboxMode() string {

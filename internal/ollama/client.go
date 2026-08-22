@@ -238,6 +238,10 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 		// see complete calls exactly once.
 		var pending []providers.ToolCall
 
+		// Tracked to tell "the model said nothing" apart from "the model spent
+		// its whole budget thinking and never got to an answer".
+		var sawContent, sawThinking bool
+
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -247,6 +251,11 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 			var event struct {
 				Message struct {
 					Content string `json:"content"`
+					// Reasoning models stream their scratchpad here, NOT in
+					// content. Reading only content made a thinking model that
+					// exhausted its budget indistinguishable from a model that
+					// answered with nothing — see the exhaustion check below.
+					Thinking string `json:"thinking"`
 					// Ollama delivers COMPLETE tool calls in one message —
 					// no cross-frame accumulation — and its arguments are a
 					// JSON object, not the string every other provider sends.
@@ -282,11 +291,33 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 				})
 			}
 
+			if event.Message.Thinking != "" {
+				sawThinking = true
+			}
 			if event.Message.Content != "" {
+				sawContent = true
 				ch <- providers.StreamChunk{Content: event.Message.Content}
 			}
 
 			if event.Done {
+				// A reasoning model can burn every token of num_predict on its
+				// scratchpad and emit no answer at all. Ollama reports that as
+				// a perfectly successful stream of empty content, so without
+				// this the caller sees "" and no error — which surfaced as
+				// "The vision model returned nothing" against Helix's own
+				// default local model (gemma4:e2b is a thinking build, and the
+				// default 512-token budget is not enough for it to think AND
+				// answer about an image).
+				//
+				// Reported as an error rather than swallowed: the planner
+				// already retries on "empty output", and the vision path can
+				// say something true instead of shrugging.
+				if !sawContent && sawThinking && len(pending) == 0 {
+					ch <- providers.StreamChunk{Error: fmt.Errorf(
+						"model spent its entire token budget reasoning and produced no answer "+
+							"(raise max_tokens above %d, or use a non-reasoning model)", req.MaxTokens)}
+					return
+				}
 				ch <- providers.StreamChunk{Done: true, ToolCalls: pending}
 				return
 			}

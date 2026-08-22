@@ -396,6 +396,27 @@ func ProviderVisionCapable(name string) bool {
 	return providers.SupportsVision(p.Name(), p.DefaultModel())
 }
 
+// visionMaxTokens is the answer budget for a vision call, deliberately larger
+// than the 512-token chat default.
+//
+// Reasoning models spend the budget BEFORE they answer, and they spend more of
+// it on an image than on text. Measured against Helix's own default local model
+// (gemma4:e2b, a thinking build): at 512 tokens it produced ~770 characters of
+// private reasoning and then stopped, emitting no answer at all — which reached
+// the user as "The vision model returned nothing." At 1024 the same prompt and
+// image answered correctly and repeatably.
+//
+// This is a floor on capability, not a target: a model that answers in one
+// sentence still costs one sentence.
+const visionMaxTokens = 1024
+
+// ModelVisionCapable reports whether a specific provider/model pair can see.
+// Used by the vision.model override, where neither the active chat model nor
+// the provider default is the model that will actually run.
+func ModelVisionCapable(provider, model string) bool {
+	return providers.SupportsVision(provider, model)
+}
+
 // VisionCapableProviders returns the registered providers that could serve as
 // vision.provider, using each one's default model.
 //
@@ -446,20 +467,56 @@ func RunVisionModelWithProvider(prompt string, parts []providers.MessagePart, pr
 }
 
 func runVisionModel(prompt string, parts []providers.MessagePart, providerName string) (string, error) {
+	return runVisionModelOn(prompt, parts, providerName, "")
+}
+
+// RunVisionModelOn sends a multimodal prompt to a specific provider AND model.
+//
+// The model override exists because vision and chat want different things from
+// the same session. Chat wants the biggest model the machine can hold; the
+// companion loop wants the fastest one that can describe a frame, because it
+// runs on a timer and competes with the conversation for the same runtime. A
+// 5B general model measured 9-20s per frame here where a purpose-built ~2B VLM
+// is the entire reason the loop is affordable.
+//
+// Args: providerName ("" = active), model ("" = the provider's usual choice).
+func RunVisionModelOn(prompt string, parts []providers.MessagePart, providerName, model string) (string, error) {
+	return runVisionModelOn(prompt, parts, providerName, model)
+}
+
+func runVisionModelOn(prompt string, parts []providers.MessagePart, providerName, model string) (string, error) {
 	p := activeProvider
-	model := activeModel
+	if model == "" {
+		model = activeModel
+	}
 	if providerName != "" {
 		var err error
 		p, err = GetProviderByName(providerName)
 		if err != nil {
 			return "", fmt.Errorf("vision provider %q: %w", providerName, err)
 		}
-		model = p.DefaultModel()
+		if model == "" || providerName != ActiveProviderName() {
+			// A named provider's active-chat model is meaningless to it.
+			model = p.DefaultModel()
+		}
 	}
 	if p == nil {
 		return "", fmt.Errorf("no AI provider configured")
 	}
-	if !p.Capabilities().Vision {
+	// Two independent ways to qualify, and either is enough.
+	//
+	// SupportsVision asks about the model ACTUALLY being sent, which is what
+	// Capabilities() cannot do — it computes its flags from the provider's
+	// DEFAULT model, so with a selected model or a vision.model override in
+	// play it answers a question nobody asked. But name matching only knows
+	// the families in the catalog, and a custom endpoint's bespoke model name
+	// matches nothing while the provider itself may know perfectly well that it
+	// can see.
+	//
+	// So this fails OPEN, deliberately. A false accept costs one call to a
+	// model that ignores the image; a false reject makes a working camera
+	// unreachable — which is the failure this codebase has now hit twice.
+	if !providers.SupportsVision(p.Name(), model) && !p.Capabilities().Vision {
 		return "", fmt.Errorf(
 			"the model %q (%s) does not support vision", model, p.Name())
 	}
@@ -484,7 +541,7 @@ func runVisionModel(prompt string, parts []providers.MessagePart, providerName s
 			Parts:   parts,
 		}},
 		Temperature: &temp,
-		MaxTokens:   DefaultModelConfig().MaxTokens,
+		MaxTokens:   visionMaxTokens,
 	}
 
 	started := time.Now()

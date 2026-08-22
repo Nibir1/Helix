@@ -60,7 +60,7 @@ Notes:
 - This is the **only** part of Helix that needs CGO, and only for local speaker output.
 - **Microphone input needs no CGO** — capture shells out to `sox`/`ffmpeg`.
 - If audio output is a no-op (you shipped the CGO-free binary), STT still works and text still
-  prints; you just won't hear TTS. `/voice-status` and `/mictest` report the recorder/output state.
+  prints; you just won't hear TTS. `/blackbox status` and `/mictest` report the recorder/output state.
 - Headless daemon on a board with no speaker: keep the CGO-free binary; drive it over
   `helix remote` and read replies as text, or attach a speaker and rebuild with `audio_cgo`.
 
@@ -91,7 +91,7 @@ The right inference path depends on the board's horsepower and your privacy/cost
 | **Fully local** (private/offline) | whisper.cpp / sherpa-onnx | Ollama 3B (Q4) | Kokoro-82M / Piper | Ollama + whisper.cpp + Piper/Kokoro + openWakeWord | amd64 mini-PC, Pi 5 (tight) |
 
 The heavy compute in the **cloud path is remote**, so a slow board runs it smoothly as long as it
-has a network connection. Configure any path with `/voice-setup`; set a local fallback so a dropped
+has a network connection. Configure any path with `/blackbox setup`; set a local fallback so a dropped
 network keeps voice alive (the failover chain flips local-first automatically — ADR-011/012).
 
 ### 4.1 Keeping the *brain* alive too (Phase 11)
@@ -233,7 +233,7 @@ Run these inside Helix after install:
   in force plus how to fix it if it degraded, recorder presence, each local
   sidecar's reachability, whether the offline-LLM fallback model is pulled, and
   temperature with a throttling verdict.
-- `/voice-status` — STT/TTS chain health, which keys are set, recorder detection.
+- `/blackbox status` — STT/TTS chain health, which keys are set, recorder detection.
 - `/mictest` — 3-second capture self-test: proves the mic is actually being heard (level + dBFS +
   speech-gate verdict). The fastest way to catch a wrong input device on a headless board.
 

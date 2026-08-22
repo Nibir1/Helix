@@ -1,5 +1,5 @@
 // cmd/helix/voice_mode.go
-// Purpose: Voice/manual mode switching (BlackBox Phase 2, ADR-008) and the
+// Purpose: live-mode switching (BlackBox Phase 2, ADR-008) and the
 // per-turn voice capture loop. Voice mode replaces the typed line with a
 // record→transcribe cycle; every transcript flows through the SAME pipeline
 // as typed input, stamped Channel=voice so the Voice Risk Policy applies.
@@ -22,9 +22,11 @@ import (
 	"helix/internal/audio"
 	"helix/internal/commands"
 	"helix/internal/input"
+	"helix/internal/shell"
 	"helix/internal/speech"
 	"helix/internal/utils"
 	"helix/internal/ux"
+	"helix/internal/vision"
 	"helix/internal/wakeword"
 
 	"github.com/fatih/color"
@@ -46,6 +48,10 @@ func initVoiceMode() {
 		// Refuse to strand the user in voice mode without a recorder.
 		if _, err := speech.DetectRecorder(); err == nil {
 			enterVoiceMode(false)
+			// A restored session is live mode too. Without this, restarting
+			// with voice persisted gave you the microphone but no companion —
+			// the same mode reached by a different door, behaving differently.
+			startCompanion()
 		} else {
 			color.Yellow("Voice mode skipped at startup: %v", err)
 			cfg.UserPrefs.VoiceMode = false
@@ -62,16 +68,40 @@ func enterVoiceMode(persist bool) {
 		_ = cfg.SavePreferences()
 	}
 	audio.PlayAlert()
-	color.Cyan("VOICE MODE — speak after the chime; say %q or type /manual to switch back.", "manual mode")
-	for _, line := range voiceModeWakeNotes(cfg.Speech.WakeWord.Enabled, cfg.Speech.WakeWord.Engine) {
-		color.Cyan("%s", line)
+	printLiveBanner()
+}
+
+// printLiveBanner is the moment Helix wakes up, and it should look like it.
+//
+// It is also the only place some of this is ever said: which senses just came
+// online, and how to get back out. The old single cyan line carried the exit
+// instruction and nothing else, so a user could not tell from the screen
+// whether the camera had opened.
+func printLiveBanner() {
+	fmt.Println(shell.PanelTitle("live"))
+
+	w := shell.KVWidth("HEARING", "SIGHT", "VOICE", "EXIT")
+	fmt.Println(shell.KV("HEARING", blackBoxHearingLine(), w))
+	fmt.Println(shell.KV("SIGHT", blackBoxEyesLine(), w))
+	if speech.TTSEnabled() {
+		fmt.Println(shell.KV("VOICE", shell.Badge(shell.StateGood, "replies spoken aloud"), w))
+	} else {
+		fmt.Println(shell.KV("VOICE", shell.Badge(shell.StateIdle, "silent")+
+			shell.Muted("  /blackbox tts on"), w))
 	}
+	fmt.Println(shell.KV("EXIT", shell.Muted("say ")+shell.Value("\"manual mode\"")+
+		shell.Muted("  ·  or type /blackbox off"), w))
+
+	for _, line := range voiceModeWakeNotes(cfg.Speech.WakeWord.Enabled, cfg.Speech.WakeWord.Engine) {
+		fmt.Println(shell.PanelLine(shell.Muted(line)))
+	}
+	fmt.Println(shell.PanelEnd())
 }
 
 // voiceModeWakeNotes explains how wake word and voice mode interact, which is
 // the part the two banners together used to get wrong.
 //
-// /wake on promised listening "for the wake word" and /voice on said nothing
+// /blackbox wake on promised listening "for the wake word" and going live said nothing
 // about it, so the reasonable reading — every turn needs the phrase — was doubly
 // false: the FIRST turn after /voice on is open capture, and continuous turns
 // only pass through wake gating between them (see wakeListenUntilArmed and the
@@ -93,7 +123,7 @@ func voiceModeWakeNotes(wakeEnabled bool, engine string) []string {
 	}
 	if engine != "sidecar" {
 		lines = append(lines,
-			fmt.Sprintf("Engine %q wakes on any speech, not on a phrase (/wake status).",
+			fmt.Sprintf("Engine %q wakes on any speech, not on a phrase (/blackbox status).",
 				engineOrDefault(engine)))
 	}
 	return lines
@@ -101,7 +131,7 @@ func voiceModeWakeNotes(wakeEnabled bool, engine string) []string {
 
 func exitVoiceMode(persist bool) {
 	// Leaving voice mode while Helix is mid-sentence should stop the sentence.
-	// Without this, /manual returned the prompt to the keyboard while the
+	// Without this, leaving live mode returned the prompt to the keyboard while the
 	// previous reply kept talking over it.
 	speech.StopSpeaking()
 
@@ -113,43 +143,37 @@ func exitVoiceMode(persist bool) {
 		cfg.UserPrefs.VoiceMode = false
 		_ = cfg.SavePreferences()
 	}
-	color.Cyan("TEXT MODE — keyboard input restored.")
+	fmt.Println("  " + shell.Fg(shell.HexSubtle, "○ ") +
+		shell.Fg(shell.HexText, "keyboard") +
+		shell.Muted("  ·  /blackbox on goes live again"))
 }
 
 // handleVoiceCommand: /voice [on|off|status]
-func handleVoiceCommand(c cmdArgs) {
-	switch c.Lower() {
-	case "off", "stop", "exit":
-		exitVoiceMode(true)
-		return
-	case "status":
-		// A status query must never be the thing that turns the microphone on.
-		if voiceModeActive {
-			color.Green("Voice mode: ON — say \"manual mode\" or type /manual to leave.")
-		} else {
-			color.Yellow("Voice mode: OFF — /voice enters it.")
-		}
-		color.Cyan("Run /voice-status for the full speech chain health report.")
-		return
-	case "", "on", "start":
-		// fall through to the entry path below
-	default:
-		color.Yellow("Usage: /voice [on|off|status]")
-		return
-	}
-	if voiceModeActive {
-		fmt.Println("Already in voice mode.")
-		return
-	}
+// visionSvc is the camera capture service, package-level so readiness can be
+// REPORTED rather than assumed. It was a local in main(), which is why nothing
+// outside the capture closure could ask whether a frame was possible.
+var visionSvc *vision.VisionCaptureService
+
+// captureAvailable reports whether a frame could actually be grabbed on this
+// host (ffmpeg discoverable). Distinct from whether a model could understand
+// one — see visionReady.
+func captureAvailable() bool {
+	return visionSvc != nil && visionSvc.Available()
+}
+
+// voiceEntryPreflight checks the two conditions without which "voice mode"
+// would be a lie: something to record with, and something to transcribe with.
+//
+// Extracted from the old /voice handler so /blackbox on and any future entry
+// point cannot drift apart on what counts as ready.
+func voiceEntryPreflight() error {
 	if _, err := speech.DetectRecorder(); err != nil {
-		color.Red("Cannot enter voice mode: %v", err)
-		return
+		return err
 	}
 	if reg := speech.Default(); reg == nil || len(reg.STTChain()) == 0 {
-		color.Yellow("No STT provider configured — run /voice-setup first. Entering voice mode anyway is refused.")
-		return
+		return fmt.Errorf("no STT provider configured — run /blackbox setup first")
 	}
-	enterVoiceMode(true)
+	return nil
 }
 
 // speakDirect speaks text through the TTS chain irrespective of the /tts
@@ -170,15 +194,6 @@ func speakDirect(text string) {
 	if err := speech.SpeakStream(ctx, text); err != nil && utils.IsDebugMode() {
 		fmt.Fprintf(os.Stderr, "[voice] notice: %v\n", err)
 	}
-}
-
-// handleManualCommand: /manual — instant fallback to typing (safety valve).
-func handleManualCommand() {
-	if !voiceModeActive {
-		fmt.Println("Already in text mode.")
-		return
-	}
-	exitVoiceMode(true)
 }
 
 // voiceTurn performs one capture→transcribe cycle and returns the stamped
@@ -299,7 +314,9 @@ func batchVoiceTurn() (input.InputEvent, error) {
 	transcript, err := speech.Transcribe(tctx, clip)
 	viz.Stop()
 	if d := speech.ClipDuration(clip); d > 0 && err == nil {
-		fmt.Printf("captured %.1fs\n", d)
+		// A turn marker, not a stat line. "captured 0.8s" floating at column
+		// zero between replies read like debug output that had escaped.
+		fmt.Println(shell.Muted(fmt.Sprintf("  ◟ heard %.1fs", d)))
 	}
 	if err != nil {
 		return input.InputEvent{}, fmt.Errorf("transcribe: %w", err)
@@ -451,17 +468,21 @@ func finishVoiceTranscript(text string, transcript speech.Transcript) (input.Inp
 	if transcript.Confidence <= 0 {
 		conf = ""
 	}
-	fmt.Printf("[heard] %q (via %s%s)\n", text, transcript.Provider, conf)
+	fmt.Println("  " + shell.Fg(shell.HexSecondary, "❯ ") +
+		shell.Fg(shell.HexText, text) + shell.Muted("   "+transcript.Provider+conf))
 
 	// Hands-free kill switches (ADR-005 wake controls): recognized before
-	// dispatch. The /manual slash form also works when spoken as "/manual".
+	// dispatch.
 	if isVoiceKillPhrase(text) {
-		exitVoiceMode(true)
+		// blackBoxOff, not exitVoiceMode: live mode opened the camera and the
+		// companion loop too, and a safety valve that leaves either running has
+		// not actually let go.
+		blackBoxOff()
 		return input.InputEvent{}, errVoiceStopped
 	}
 
 	// Vision privacy kill switch (threat V4): "turn off your eyes" deactivates
-	// /eyes immediately WITHOUT leaving voice mode.
+	// the camera immediately WITHOUT leaving live mode.
 	if isEyesOffPhrase(text) {
 		setVisionEnabled(false)
 		return input.InputEvent{}, errVoiceStopped
@@ -500,14 +521,38 @@ var errVoiceHandled = errors.New("voice command handled")
 // already announced it; the main loop treats this as a quiet continue).
 var errVoiceStopped = fmt.Errorf("voice stopped by kill phrase")
 
-// isVoiceKillPhrase matches the documented sleep/stop phrases plus the
-// natural "manual mode" utterance.
+// killPhrases end live mode. Matched as a SUFFIX of the utterance, not as the
+// whole of it — see isVoiceKillPhrase.
+var killPhrases = []string{
+	"switch to manual mode", "switch to manual", "go to manual mode",
+	"manual mode", "stop listening", "go to sleep", "stop voice",
+	"i want to type", "blackbox off", "black box off",
+}
+
+// isVoiceKillPhrase reports whether the user asked to go back to the keyboard.
+//
+// Suffix matching, because people do not speak in bare commands. QA said
+// "Excellent. Now switch to manual mode." and Helix — which required the whole
+// transcript to equal one of the phrases exactly — sent it to the planner,
+// which replied by asking what to switch to manual mode FOR. The literal
+// "Manual mode." on the next turn worked, which is the whole complaint: the
+// safety valve only opened for someone who already knew its exact wording.
+//
+// A suffix rather than a substring, deliberately. "How do I switch to manual
+// mode?" is a question about the feature, not a request to use it, and the
+// phrase lands mid-sentence there. Ending on it is what makes it an
+// instruction.
+//
+// Args: text: the raw transcript.
+// Returns: whether live mode should end.
+// Complexity: O(len(text) × len(killPhrases)).
 func isVoiceKillPhrase(text string) bool {
-	t := strings.ToLower(strings.TrimRight(strings.TrimSpace(text), ".!?"))
-	switch t {
-	case "stop listening", "go to sleep", "sleep", "manual mode",
-		"switch to manual mode", "i want to type", "stop voice":
-		return true
+	t := strings.ToLower(strings.TrimSpace(text))
+	t = strings.TrimRight(t, " .!?,")
+	for _, p := range killPhrases {
+		if t == p || strings.HasSuffix(t, " "+p) {
+			return true
+		}
 	}
 	return false
 }
@@ -542,6 +587,12 @@ const (
 	// start). Gating is gone for the same reason expiry loses it, so it is
 	// announced too — with its own cause.
 	wakeScannerFailed
+
+	// wakeCompanionSpoke ends the listen because Helix has something to say.
+	// It is not a failure and must never be announced as a lapse: the scanner
+	// is stopped deliberately so the remark is spoken with the microphone
+	// closed (half-duplex), and the caller re-enters listening straight after.
+	wakeCompanionSpoke
 )
 
 // wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns the wake
@@ -616,6 +667,11 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 		// the second one is the only one whose timing is actually coupled to the
 		// recorder arming (PlayAlertSync + micSettleDelay).
 		return ev, wakeFired
+	case <-companionInterrupt:
+		// The deferred svc.Stop() and viz.Stop() run before the caller speaks,
+		// which is exactly the point: the recorder must be closed before the
+		// speaker opens or Helix transcribes its own remark.
+		return wakeword.WakeEvent{}, wakeCompanionSpoke
 	case <-ctx.Done():
 		return wakeword.WakeEvent{}, wakeWindowExpired
 	}
@@ -626,10 +682,10 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 func wakeLapseNotice(o wakeOutcome) string {
 	switch o {
 	case wakeWindowExpired:
-		return "wake window expired — listening without the wake word; /wake status for info"
+		return "wake window expired — listening without the wake word; /blackbox status for info"
 	case wakeScannerFailed:
 		return "wake listening stopped (recorder unavailable) — listening without the wake word; " +
-			"/wake status for info"
+			"/blackbox status for info"
 	default:
 		return ""
 	}
@@ -704,7 +760,7 @@ func handleMicTest() {
 	}
 	fmt.Printf("Captured %.1fs — level %.3f (%.0f dBFS) — %s\n",
 		speech.ClipDuration(clip), rms, dB, status)
-	color.Cyan("If this reads QUIET, run /voice-status to confirm the STT chain, then check macOS")
+	color.Cyan("If this reads QUIET, run /blackbox status to confirm the STT chain, then check macOS")
 	color.Cyan("System Settings ▸ Sound ▸ Input (or the OS equivalent) for the active microphone.")
 }
 

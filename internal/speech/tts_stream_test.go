@@ -199,7 +199,7 @@ func TestRegistryStreamRequiresConfiguredChain(t *testing.T) {
 	reg := newTestRegistry(t)
 	if _, _, err := reg.SynthesizeStream(context.Background(), "hi", SynthesisOptions{}); err == nil {
 		t.Fatal("an empty chain must be reported")
-	} else if !strings.Contains(err.Error(), "voice-setup") {
+	} else if !strings.Contains(err.Error(), "blackbox setup") {
 		t.Fatalf("the error should point at the fix, got %v", err)
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"helix/internal/commands"
 	"helix/internal/config"
 	"helix/internal/confinement"
+	"helix/internal/deps"
 	"helix/internal/diagnostics"
 	"helix/internal/edge"
 	"helix/internal/hooks"
@@ -48,6 +49,9 @@ import (
 // -------------------------------------------------------
 
 func handleAbout() {
+	// The banner, the identity zone and its glitch are RenderAbout's, and stay
+	// exactly as they are. Everything below is the part that was a flat wall of
+	// text.
 	shell.RenderAbout(config.HelixVersion)
 	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ THE PHILOSOPHY"))
 	philosophy := []string{
@@ -64,8 +68,16 @@ func handleAbout() {
 		"red team so it can fight for the blue.",
 	}
 	for _, l := range philosophy {
-		fmt.Printf("  %s %s\n", shell.Fg(shell.HexSubtle, "│"), shell.Fg(shell.HexText, l))
+		if l == "" {
+			fmt.Println(shell.PanelGap())
+			continue
+		}
+		fmt.Println(shell.PanelLine(shell.Fg(shell.HexText, l)))
 	}
+	fmt.Println(shell.PanelEnd())
+
+	printAboutInstall()
+
 	fmt.Println()
 	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ THE CREATION"))
 	creation := []string{
@@ -82,9 +94,54 @@ func handleAbout() {
 		if strings.Contains(l, "http") {
 			body = shell.Fg(shell.HexTertiary, l)
 		}
-		fmt.Printf("  %s %s\n", shell.Fg(shell.HexSubtle, "│"), body)
+		fmt.Println(shell.PanelLine(body))
 	}
+	fmt.Println(shell.PanelEnd())
 	fmt.Println()
+}
+
+// printAboutInstall answers the question /about could not: what is THIS copy of
+// Helix actually able to do right now.
+//
+// The philosophy says what Helix is for and the creation says who made it;
+// between them there was nothing about the machine in front of you. A reader
+// who has just been told Helix speaks, sees and reasons should be able to see,
+// in the same breath, which of those are switched on here.
+func printAboutInstall() {
+	fmt.Println()
+	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ THIS INSTALL"))
+
+	w := shell.KVWidth("MIND", "HARNESS", "HEARING", "SIGHT", "CONFINEMENT")
+
+	mind := shell.Badge(shell.StateWarn, "no provider") + shell.Muted("  /setup")
+	if cfg.Provider != "" {
+		model := cfg.ProviderModel
+		if model == "" {
+			model = "default model"
+		}
+		mind = shell.Badge(shell.StateGood, cfg.Provider) + shell.Muted("  ") + shell.Value(model)
+	}
+	fmt.Println(shell.KV("MIND", mind, w))
+
+	harness := shell.Badge(shell.StateIdle, "single-shot")
+	if agentCore != nil && agentCore.Agentic {
+		harness = shell.Badge(shell.StateGood, "agentic") +
+			shell.Muted(fmt.Sprintf("  observes and self-corrects, %d steps", agenticStepBudget()))
+	}
+	fmt.Println(shell.KV("HARNESS", harness, w))
+	fmt.Println(shell.KV("HEARING", blackBoxHearingLine(), w))
+	fmt.Println(shell.KV("SIGHT", blackBoxEyesLine(), w))
+	fmt.Println(shell.KV("CONFINEMENT",
+		shell.Value(sandboxMode())+shell.Muted("  ·  approval: "+agentPermission()), w))
+	fmt.Println(shell.PanelEnd())
+}
+
+// agentPermission reports the approval posture without assuming an agent.
+func agentPermission() string {
+	if agentCore == nil {
+		return "unknown"
+	}
+	return string(agentCore.Permission())
 }
 
 // -------------------------------------------------------
@@ -93,14 +150,12 @@ func handleAbout() {
 
 func handleSetup() {
 	for {
-		fmt.Println()
-		fmt.Println("  " + shell.Fg(shell.HexPrimary, "⚡ HELIX SETUP WIZARD"))
-		fmt.Println("  " + shell.Fg(shell.HexSubtle, strings.Repeat("─", 40)))
-		fmt.Printf("  %s %s\n", shell.Fg(shell.HexTertiary, "1)"), shell.Fg(shell.HexText, "Set Identity (Name)"))
-		fmt.Printf("  %s %s\n", shell.Fg(shell.HexTertiary, "2)"), shell.Fg(shell.HexText, "Configure AI Provider"))
-		fmt.Printf("  %s %s\n", shell.Fg(shell.HexTertiary, "3)"), shell.Fg(shell.HexText, "Exit Setup"))
-		fmt.Println()
-		choice := strings.TrimSpace(commands.AskLine("  Select option (1-3)"))
+		fmt.Println(shell.PanelTitle("setup"))
+		for _, l := range shell.Menu(setupMenuItems()) {
+			fmt.Println(l)
+		}
+		fmt.Println(shell.PanelEnd())
+		choice := strings.TrimSpace(commands.AskLine(shell.Prompt("option", "1-5")))
 		switch choice {
 		case "1":
 			currentName := cfg.UserPrefs.UserName
@@ -127,11 +182,53 @@ func handleSetup() {
 				_ = cfg.SavePreferences()
 				fmt.Println("  " + shell.Fg(shell.HexSecondary, "✔ AI Provider configured: ") + shell.Fg(shell.HexPrimary, cfg.Provider+" ("+cfg.ProviderModel+")"))
 			}
-		case "3", "q", "exit", "":
+		case "3":
+			runDependencySetup(false)
+		case "4":
+			handleVoiceSetup()
+		case "5", "q", "exit", "":
 			return
 		default:
 			fmt.Println("  " + shell.Fg(shell.HexRectifier, "Invalid selection."))
 		}
+	}
+}
+
+// setupMenuItems describes each stage by its CURRENT state, so the wizard
+// shows what is already done instead of asking the user to remember.
+func setupMenuItems() []shell.MenuItem {
+	name := cfg.UserPrefs.UserName
+	if name == "" {
+		name = "not set"
+	}
+	provider := "none selected"
+	if cfg.Provider != "" {
+		provider = cfg.Provider
+		if cfg.ProviderModel != "" {
+			provider += " / " + cfg.ProviderModel
+		}
+	}
+	var pkgs, pkgTag string
+	if missing := deps.Missing(); len(missing) == 0 {
+		pkgs, pkgTag = "all present", "done"
+	} else {
+		names := make([]string, 0, len(missing))
+		for _, d := range missing {
+			names = append(names, d.Name)
+		}
+		pkgs, pkgTag = "missing: "+strings.Join(names, ", "), "action needed"
+	}
+	voice, voiceTag := "not configured", ""
+	if reg := speech.Default(); reg != nil && len(reg.STTChain()) > 0 {
+		voice, voiceTag = strings.Join(reg.STTChain(), " → "), "done"
+	}
+
+	return []shell.MenuItem{
+		{Label: "identity", Note: name, Good: cfg.UserPrefs.UserName != ""},
+		{Label: "ai provider", Note: provider, Good: cfg.Provider != ""},
+		{Label: "system packages", Note: pkgs, Tag: pkgTag, Good: pkgTag == "done"},
+		{Label: "voice", Note: voice, Tag: voiceTag, Good: voiceTag == "done"},
+		{Label: "exit", Note: "back to the shell"},
 	}
 }
 
@@ -1443,9 +1540,9 @@ func handleProviderStatus() {
 // about a local provider: an llama.cpp with nothing listening on its port showed
 // up as "local/no key (active)" while the startup banner had just said "every
 // planner and chat request will fail". A status command that cannot tell those
-// two situations apart is the same defect /voice-status had.
+// two situations apart is the same defect the old /voice-status had.
 //
-// Probing here is deliberate and matches /voice-status: this is an explicit
+// Probing here is deliberate and matches /blackbox status: this is an explicit
 // diagnostic the user asked for, not the turn loop (which reads the recorded
 // state instead). The result is recorded, so the next GRID STATUS line agrees
 // with what this printed.

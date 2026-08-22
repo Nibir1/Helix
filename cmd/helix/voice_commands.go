@@ -222,23 +222,23 @@ func voiceRoutes() []voiceRoute {
 		// --- perception and speech ---
 		{
 			Phrases: []string{"open your eyes", "eyes on", "turn on your eyes", "start watching"},
-			Command: "/eyes", FixedArgs: "on",
+			Command: "/blackbox", FixedArgs: "eyes on",
 		},
 		{
 			Phrases: []string{"what do you see", "look at this", "look at the screen",
 				"describe what you see", "take a look"},
-			Command: "/eyes", FixedArgs: "look",
+			Command: "/blackbox", FixedArgs: "look",
 			// The remainder becomes the question, so "look at this error message"
 			// asks about the error rather than describing the room.
 		},
 		{
 			Phrases: []string{"stop talking", "be quiet", "mute yourself", "stop speaking"},
-			Command: "/tts", FixedArgs: "off",
+			Command: "/blackbox", FixedArgs: "tts off",
 			Speak: func() string { return "" }, // silence is the acknowledgement
 		},
 		{
 			Phrases: []string{"start talking", "speak to me", "unmute"},
-			Command: "/tts", FixedArgs: "on",
+			Command: "/blackbox", FixedArgs: "tts on",
 			Speak: func() string { return "Spoken replies back on." },
 		},
 		{
@@ -248,15 +248,15 @@ func voiceRoutes() []voiceRoute {
 		},
 		{
 			Phrases: []string{"voice status", "speech status", "how's your voice", "how is your voice"},
-			Command: "/voice-status",
+			Command: "/blackbox", FixedArgs: "status",
 		},
 		{
 			Phrases: []string{"stop listening for the wake word", "wake word off", "disable wake word"},
-			Command: "/wake", FixedArgs: "off",
+			Command: "/blackbox", FixedArgs: "wake off",
 		},
 		{
 			Phrases: []string{"listen for the wake word", "wake word on", "enable wake word", "hands free"},
-			Command: "/wake", FixedArgs: "on",
+			Command: "/blackbox", FixedArgs: "wake on",
 		},
 	}
 }
@@ -654,11 +654,9 @@ func commandSpeaksForItself(line string) bool {
 	case strings.HasPrefix(line, "/review"),
 		strings.HasPrefix(line, "/explain"),
 		strings.HasPrefix(line, "/web"),
-		strings.HasPrefix(line, "/say"),
-		strings.HasPrefix(line, "/tts"),
-		strings.HasPrefix(line, "/mictest"),
-		strings.HasPrefix(line, "/voice"),
-		strings.HasPrefix(line, "/manual"):
+		strings.HasPrefix(line, "/blackbox"),
+		strings.HasPrefix(line, "/bb"),
+		strings.HasPrefix(line, "/mictest"):
 		return true
 	}
 	return false
@@ -687,7 +685,7 @@ func printVoiceNotice(text string) {
 	fmt.Printf("[voice] %s\n", text)
 }
 
-// voiceCommandVocabulary lists the spoken phrases, for /voice-status and docs.
+// voiceCommandVocabulary lists the spoken phrases, for /blackbox status and docs.
 func voiceCommandVocabulary() []string {
 	routes := voiceRoutes()
 	out := make([]string, 0, len(routes))

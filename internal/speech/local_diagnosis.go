@@ -82,7 +82,7 @@ func LocalDiagnosis(provider, origin, startCmd, configKey string, err error) err
 		// offering the manual alternative alongside an assignment it has already
 		// made produced two contradictory port numbers in one message.
 		appendLines(&b, configKey != "",
-			"Run /voice-setup to have Helix pick a free port for it.")
+			"Run /blackbox setup to have Helix pick a free port for it.")
 
 	case providers.IsNotFound(err):
 		b.WriteString("a server answered, but none of the routes Helix knows exist on it.")

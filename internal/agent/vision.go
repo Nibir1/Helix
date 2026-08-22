@@ -1,8 +1,12 @@
 // internal/agent/vision.go
-// Purpose: BlackBox Phase 5 conversational wiring — in voice mode with /eyes
-// on, a deictic utterance ("what's wrong with THIS code?") captures one frame
-// and routes prompt+frame through the vision seam instead of the text
-// planner. Non-deictic queries are unaffected; one frame per turn.
+// Purpose: camera perception — capture one frame and answer about it.
+//
+// There are exactly two ways in, and both are explicit: /blackbox look from the
+// keyboard, and the planner's `vision` tool. A third used to exist — any spoken
+// sentence containing "this"/"that"/"here" was routed here before the planner
+// saw it — and it was removed after QA showed it swallowing most of a session
+// (see the note in policy_voice.go). Guessing at intent from demonstratives is
+// strictly worse than letting a model pick from its own tools.
 package agent
 
 import (
@@ -13,49 +17,7 @@ import (
 	"time"
 
 	"helix/internal/ai"
-	"helix/internal/input"
 )
-
-// deicticMarkers are words that indicate the utterance refers to something the
-// user can see. Deliberately conservative: a false positive costs one captured
-// frame (memory-only), a false negative just falls through to the text path.
-var deicticMarkers = []string{
-	"this", "that", "here", "these", "those", "screen", "look at", "looking at",
-	"read this", "what do you see", "what's on screen", "what is on screen",
-}
-
-// isDeictic reports whether the utterance likely references visible content.
-func isDeictic(text string) bool {
-	lower := strings.ToLower(text)
-	for _, m := range deicticMarkers {
-		if strings.Contains(lower, m) {
-			return true
-		}
-	}
-	return false
-}
-
-// visionRequested reports whether this turn should route to the vision path:
-// voice channel + eyes enabled + seams wired + deictic utterance.
-//
-// The voice-channel condition stays, deliberately. It looks like an arbitrary
-// restriction — and it did make the camera unreachable from the keyboard, which
-// was a real gap — but it is doing necessary work: deictic words are ambiguous
-// in TYPED input in a way they are not when spoken. "what does this do?" typed
-// at a terminal almost always means the text on screen, and firing the camera on
-// it would be a privacy surprise on the most ordinary phrasing there is. Spoken
-// at a machine with the camera opted in, the same words usually do mean
-// something visible.
-//
-// The keyboard gap is closed by an EXPLICIT entry point instead — /eyes look,
-// which routes through DescribeFrame. Explicit beats guessing when a camera is
-// the thing being guessed about.
-func (a *Agent) visionRequested(ev input.InputEvent) bool {
-	return a.channel == input.ChannelVoice &&
-		a.VisionEnabled != nil && a.VisionEnabled() &&
-		a.VisionCapture != nil && a.VisionCall != nil &&
-		isDeictic(ev.Text)
-}
 
 // VisionAvailable reports whether a frame could be captured and understood right
 // now: opted in, seams wired, and a vision-capable model selected.
@@ -73,7 +35,7 @@ func (a *Agent) VisionAvailable() bool {
 // never written to disk).
 func (a *Agent) DescribeFrame(prompt string) error {
 	if !a.VisionAvailable() {
-		return fmt.Errorf("vision is not available (enable it with /eyes on)")
+		return fmt.Errorf("vision is not available (enable it with /blackbox eyes on)")
 	}
 	_, err := a.visionTurn(prompt)
 	return err
@@ -85,11 +47,6 @@ func (a *Agent) DescribeFrame(prompt string) error {
 // could only be expressed as a shell step — the model would open a camera app
 // while simultaneously saying it had no camera access, and both halves were
 // accurate about the vocabulary it had been given.
-//
-// Note that visionRequested still ignores TYPED deictic input on purpose (see
-// its comment): guessing at "what does this do?" from a keyboard would fire the
-// camera on the most ordinary phrasing there is. This step is the typed path,
-// and it is not a guess — the planner asked for the camera by name.
 //
 // The description is returned so an agentic replan can see what Helix saw, but
 // the step deliberately does NOT set NeedsAnswer: visionTurn has already
@@ -103,29 +60,28 @@ func (a *Agent) handleVisionStep(step ai.PlanStep) (string, error) {
 		// Two causes, one message: the agent cannot tell "eyes off" from "the
 		// selected model cannot see" — VisionEnabled folds both in — so it
 		// names the check that distinguishes them rather than guessing.
-		return "", errors.New("camera vision is unavailable — turn it on with /eyes on, " +
-			"and see /eyes status for whether the selected model can see")
+		return "", errors.New("camera vision is unavailable — turn it on with /blackbox eyes on, " +
+			"and see /blackbox status for whether the selected model can see")
 	}
 	return a.visionTurn(step.Args["prompt"])
 }
 
-// handleVisionTurn captures one frame and answers the utterance through the
-// vision model. Failures degrade to a spoken notice — never a panic or a
-// silent frame.
-func (a *Agent) handleVisionTurn(ev input.InputEvent) {
-	_, _ = a.visionTurn(ev.Text)
-}
-
 // visionTurn is the single implementation behind both the conversational vision
-// path and /eyes look. Failures degrade to a spoken notice — never a panic and
+// path and /blackbox look. Failures degrade to a spoken notice — never a panic and
 // never a silent frame.
 func (a *Agent) visionTurn(prompt string) (string, error) {
 	// Defaulted here rather than in each caller so the typed, spoken, and
 	// planned routes cannot diverge on what a bare "look" asks the model.
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
-		prompt = "Describe what you see, briefly and concretely."
+		prompt = "What do you see?"
 	}
+	// The persona matters more here than anywhere. Handed a frame and no voice,
+	// a vision model writes gallery-catalogue prose — "the person is visible
+	// mainly as a dark silhouette from the shoulders up" — which is accurate,
+	// unspeakable, and not how someone in the room would answer.
+	prompt = PersonaPrompt(true, "you are looking through this machine's camera right now") +
+		"Answer about what the camera sees.\n\n" + prompt
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

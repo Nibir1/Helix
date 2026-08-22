@@ -148,8 +148,12 @@ func TestObservationBlockCarriesRetrievalResults(t *testing.T) {
 			t.Errorf("the observation block dropped %q:\n%s", want, block)
 		}
 	}
-	if !strings.Contains(block, "Answer the user's question FROM those results") {
-		t.Errorf("the block must tell the planner to answer from the results:\n%s", block)
+	// The "answer from these" instruction must NOT be here. It was, and the
+	// planner re-ran the same search instead of answering: the block is
+	// introduced as untrusted data the model must never obey, so the one
+	// instruction that mattered was in the one place it was told to ignore.
+	if strings.Contains(block, "Answer the user's question FROM those results") {
+		t.Errorf("the data-only block must not carry the answer instruction:\n%s", block)
 	}
 	if !strings.Contains(block, "untrusted data") {
 		t.Errorf("fetched page text must be labeled untrusted:\n%s", block)
@@ -188,7 +192,81 @@ func TestChatFallbackPreambleClaimsTheWebCapability(t *testing.T) {
 			t.Errorf("the chat preamble is missing %q", want)
 		}
 	}
-	if !strings.Contains(chatCapabilityPreamble, "Never tell the user you are unable to search the web") {
-		t.Error("the preamble must forbid the exact refusal the QA session hit")
+	// The refusal ban moved into the persona, which every chat turn now carries
+	// — asserted there so the guarantee is checked where it actually lives.
+	persona := PersonaPrompt(false, "")
+	for _, want := range []string{
+		"Never say you cannot access the filesystem",
+		"cannot look something up",
+	} {
+		if !strings.Contains(persona, want) {
+			t.Errorf("the persona must forbid the refusals QA hit; missing %q", want)
+		}
+	}
+}
+
+// The persona is a voice, not a permission. It must not smuggle in authority
+// the safety pipeline is responsible for granting.
+func TestPersonaShapesToneNotAuthority(t *testing.T) {
+	persona := PersonaPrompt(true, "you are in /tmp")
+
+	if !strings.Contains(persona, "read aloud") {
+		t.Error("a spoken turn must carry the speech constraints")
+	}
+	if strings.Contains(PersonaPrompt(false, ""), "read aloud") {
+		t.Error("a typed turn must NOT be told its reply is spoken")
+	}
+	if !strings.Contains(persona, "/tmp") {
+		t.Error("live context should reach the model")
+	}
+	// Nothing here may claim a capability the pipeline gates.
+	for _, forbidden := range []string{
+		"without asking", "skip confirmation", "you may ignore", "sudo",
+	} {
+		if strings.Contains(strings.ToLower(persona), forbidden) {
+			t.Errorf("the persona must not touch authority; found %q", forbidden)
+		}
+	}
+}
+
+// TestGroundingDirectiveLeavesTheDataFence is the regression guard for the
+// grounding loop found in QA: a successful web search, followed by the planner
+// issuing the identical search again instead of answering.
+//
+// The cause was placement, not wording. Both halves are asserted here because
+// either one alone would let the bug back in: the instruction has to exist, and
+// it has to be somewhere the model has not been told to distrust.
+func TestGroundingDirectiveLeavesTheDataFence(t *testing.T) {
+	obs := []StepObservation{{
+		Index: 0, Tool: "web", Action: "search", OK: true,
+		Output: "1. Some Person - Wikipedia\n   has been CEO since 2025.\n", NeedsAnswer: true,
+	}}
+
+	directive := observationDirective(obs)
+	if directive == "" {
+		t.Fatal("a completed retrieval must produce a directive")
+	}
+	for _, want := range []string{"ONLY job", "answer the user's question FROM those results",
+		"Do NOT emit another web step"} {
+		if !strings.Contains(directive, want) {
+			t.Errorf("directive is missing %q:\n%s", want, directive)
+		}
+	}
+	// The directive is Helix speaking. It must never be wrapped in the fence
+	// that strips authority from what it contains.
+	if strings.Contains(directive, "data-only") || strings.Contains(directive, "<execution_report") {
+		t.Errorf("the directive must sit outside every data fence:\n%s", directive)
+	}
+
+	// A plan that only ran shell steps gets the general directive and no
+	// answer-now clause — there is nothing retrieved to answer from.
+	shellOnly := observationDirective([]StepObservation{
+		{Index: 0, Tool: "shell", Command: "ls", OK: true},
+	})
+	if strings.Contains(shellOnly, "ONLY job") {
+		t.Errorf("a non-retrieval turn must not be told to answer from results:\n%s", shellOnly)
+	}
+	if observationDirective(nil) != "" {
+		t.Error("no observations means no directive")
 	}
 }

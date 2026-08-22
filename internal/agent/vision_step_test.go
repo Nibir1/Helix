@@ -44,8 +44,12 @@ func TestVisionStepCapturesOneFrameAndAnswers(t *testing.T) {
 	if *frames != 1 {
 		t.Errorf("captured %d frames, want exactly one per turn", *frames)
 	}
-	if *prompt != "what is on the desk" {
-		t.Errorf("prompt = %q, want the step's own question", *prompt)
+	// The persona wraps it, but the step's own question must survive intact.
+	if !strings.Contains(*prompt, "what is on the desk") {
+		t.Errorf("the step's question did not reach the model:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "You are Helix") {
+		t.Error("the camera path must carry the persona, or it answers in catalogue prose")
 	}
 	// The description is available to a replan…
 	if obs[0].Output != "a mug and a keyboard" {
@@ -70,8 +74,8 @@ func TestVisionStepWithoutPromptUsesTheSharedDefault(t *testing.T) {
 	if _, err := ag.handleVisionStep(ai.PlanStep{Tool: "vision", Action: "look"}); err != nil {
 		t.Fatalf("a bare look must run: %v", err)
 	}
-	if !strings.Contains(strings.ToLower(*prompt), "describe what you see") {
-		t.Errorf("prompt = %q, want the shared default description request", *prompt)
+	if !strings.Contains(strings.ToLower(*prompt), "what do you see") {
+		t.Errorf("the shared default question did not reach the model:\n%s", *prompt)
 	}
 }
 
@@ -92,7 +96,7 @@ func TestVisionStepFailsLoudlyWhenEyesAreOff(t *testing.T) {
 	if len(obs) != 1 || obs[0].OK {
 		t.Fatalf("observations = %+v, want one failed step", obs)
 	}
-	if !strings.Contains(obs[0].Err, "/eyes on") {
+	if !strings.Contains(obs[0].Err, "/blackbox eyes on") {
 		t.Errorf("error = %q, want it to name the command that fixes it", obs[0].Err)
 	}
 }

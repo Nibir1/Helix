@@ -211,6 +211,15 @@ func ProviderHasSavedKey(provider string) bool {
 	return registry.HasAPIKey(provider)
 }
 
+// ProviderKey returns the stored key for a provider, or "". See
+// Registry.APIKey for why this is reachable at all.
+func ProviderKey(provider string) string {
+	if registry == nil {
+		return ""
+	}
+	return registry.APIKey(provider)
+}
+
 // ProviderStatus returns human-readable provider status lines.
 func ProviderStatus() []string {
 	if registry == nil {

@@ -47,7 +47,7 @@ Four user-managed local services (ADR-002: Helix never launches them).
 - **Route discovery.** whisper.cpp serves transcription at `/inference`, not the
   OpenAI path; Piper's own server serves synthesis at `/`, not `/api/tts`. Both
   adapters try the known routes, cache the winner, and report it in
-  `/voice-status`. Pointing at one hardcoded route made both providers 404 on
+  `/blackbox status`. Pointing at one hardcoded route made both providers 404 on
   every request.
 - **Health checks prove the service, not the socket.** A local probe performs the
   real operation (transcribe 200 ms of silence; synthesize one word and require
@@ -55,7 +55,7 @@ Four user-managed local services (ADR-002: Helix never launches them).
   visibly on macOS, where AirPlay Receiver owns port 5000.
 - **Endpoint conflicts.** llama-server and whisper-server both default to 8080.
   `edge.FindConflicts` groups configured endpoints by host:port and `/doctor` and
-  `/voice-status` name the clash, since whichever process owns the port answers
+  `/blackbox status` name the clash, since whichever process owns the port answers
   and makes a naive probe look healthy.
 - **Placeholder model resolution** (`internal/ai/local_model.go`). `local-gguf`
   is a display label, but the model name is also the capability key — so while it
@@ -69,6 +69,46 @@ Four user-managed local services (ADR-002: Helix never launches them).
 
 See `docs/local_runtimes.md`.
 
+### 3c. Persona (`internal/agent/persona.go`)
+Who is speaking, as opposed to what may be executed. Every other prompt in the
+tree constrains format — emit this JSON, use that tool — so replies came back in
+whatever register the selected provider defaults to. The persona is prepended to
+the planner (where most spoken replies are born as `response` steps), the chat
+fallback, and the camera path.
+
+`VoicePersona` applies only to turns that will be read aloud, because the
+constraints genuinely differ: a screen tolerates a table, a speaker does not.
+The persona shapes tone and never authority — it grants no capability, cannot
+loosen a gate, and every safety control runs downstream of the text it produces.
+
+### 3d. Live Mode & the Companion (`cmd/helix/blackbox.go`, `companion.go`)
+`/blackbox on` opens microphone, camera, speech and initiative together. The
+companion is the only part of the voice stack that is not turn-shaped: it
+samples the camera on an interval and may speak without being asked.
+
+Three constraints shape it. Frames are diffed in-process (a 16×16 luminance
+fingerprint) so an unchanged scene never costs a model call — raw JPEG bytes
+cannot be compared, since two frames of a motionless room differ almost
+everywhere. The model is asked to return a sentinel when nothing is worth
+saying. And because capture is half-duplex, the companion never speaks: it
+QUEUES, and the main loop drains the queue only where the microphone is provably
+closed, or Helix would transcribe and answer itself.
+
+Pacing adapts by backing OFF — the gap is `max(interval, smoothed last look)` —
+so a slow host never queues behind itself. It deliberately does not speed up on
+a fast one: a companion is bounded by how often a person wants to be spoken to.
+
+### 3e. Host Dependencies (`internal/deps/`)
+What Helix needs from the machine, how to detect it, and how to install it on
+this particular host (brew/apt/dnf/pacman/zypper/apk/winget/choco). Detection is
+by CAPABILITY, not package — `rec` satisfies sox — and no install command is
+emitted for a package name that has not been verified for that manager.
+
+Helix never requires Docker. The whole local voice chain (whisper.cpp, Piper)
+needs a binary and Python; Kokoro is the one optional container-hosted component
+and declares an `Unmet` precondition rather than walking the user toward a pull
+that cannot succeed.
+
 ### 4. RAG & Threat Intelligence (`internal/rag/`)
 - **Vector Store**: TF-IDF and keyword-based search over 900+ indexed MAN pages.
 - **Knowledge Base**: SQLite + FTS5 database hydrated with live feeds from NVD, CISA KEV, Exploit-DB, and MITRE ATT&CK.
@@ -81,6 +121,19 @@ See `docs/local_runtimes.md`.
   longest common prefix and listing the alternatives. The command names come
   from the registry via `shell.SetSlashCommands`, so completion cannot become a
   stale second copy of the command list.
+
+### 5c. Report Rendering (`internal/shell/panel.go`)
+One visual language for everything Helix reports: a titled panel, a gutter, a
+closing rule, content-measured tables, and state badges. It exists because
+`/help` had that language and nothing else used it, so each report grew its own
+flat stack of coloured lines.
+
+Two properties are load-bearing rather than cosmetic. Widths are measured on
+VISIBLE text, because `%-9s` counts ANSI escape bytes and pads a coloured cell
+to nothing. And `Table` fits itself to the panel by shaving its widest column
+(`truncateANSI` preserves escape sequences while counting only runes), because a
+table wider than its frame wraps at the terminal edge and restarts at column
+zero — destroying the alignment it exists for.
 
 ### 5a. Command Registry (`cmd/helix/registry.go`, `registry_tables.go`)
 One table per command holding its name, aliases, usage line, help text,

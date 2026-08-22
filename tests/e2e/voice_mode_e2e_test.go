@@ -20,15 +20,15 @@ func TestE2E_ManualModeSafetyValve(t *testing.T) {
 	h := newHarness(t, unusedPlan)
 	defer h.Close()
 
-	// /manual in text mode is an informative no-op...
-	h.WriteLine("/manual")
-	if err := h.Expect("Already in text mode", 10*time.Second); err != nil {
+	// /blackbox off in keyboard mode is an informative no-op...
+	h.WriteLine("/blackbox off")
+	if err := h.Expect("Already in keyboard mode", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
-	// ...and /voice off always restores a working typed loop.
-	h.WriteLine("/voice off")
-	if err := h.Expect("TEXT MODE", 10*time.Second); err != nil {
+	// ...and it always restores a working typed loop.
+	h.WriteLine("/blackbox off")
+	if err := h.Expect("Already in keyboard mode", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -37,10 +37,12 @@ func TestE2E_ManualModeSafetyValve(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.WriteLine("ls voice_mode_probe.txt")
-	if err := h.Expect("GRID STATUS", 15*time.Second); err != nil {
+	// Command output first, THEN the grid line — the order they are actually
+	// printed in. Expecting the grid first consumed past the filename.
+	if err := h.Expect("voice_mode_probe.txt", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("voice_mode_probe.txt", 5*time.Second); err != nil {
+	if err := h.Expect("GRID STATUS", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -49,21 +51,21 @@ func TestE2E_VoiceRefusedWithoutSTT(t *testing.T) {
 	h := newHarness(t, unusedPlan)
 	defer h.Close()
 
-	// No STT provider is configured in the default harness, so /voice must
+	// No STT provider is configured in the default harness, so /blackbox on must
 	// refuse entry and keep the shell in text mode — the mic-less-machine
 	// guarantee (roadmap P2.2). With a recorder present the refusal names
-	// /voice-setup; without one it names the recorder install hint.
-	h.WriteLine("/voice")
-	if err := h.Expect("voice mode", 10*time.Second); err != nil {
+	// /blackbox setup; without one it names the recorder install hint.
+	h.WriteLine("/blackbox on")
+	if err := h.Expect("Cannot go live", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	out := h.stripped()
-	if !strings.Contains(out, "voice-setup") && !strings.Contains(out, "recorder") {
+	if !strings.Contains(out, "blackbox setup") && !strings.Contains(out, "recorder") {
 		t.Fatalf("refusal must explain why voice mode was refused; got: %s", out)
 	}
 
 	h.WriteLine("echo mode_refused_check")
 	if err := h.Expect("GRID STATUS", 15*time.Second); err != nil {
-		t.Fatalf("text loop must remain fully functional after refused /voice: %v", err)
+		t.Fatalf("text loop must remain fully functional after a refused /blackbox on: %v", err)
 	}
 }

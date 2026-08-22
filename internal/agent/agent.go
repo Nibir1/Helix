@@ -328,7 +328,7 @@ func (a *Agent) HandleInput(userInput string) {
 		cwd,
 	)
 
-	obs, planned := a.planFirewallExecute(userInput, envDesc, ragContext, canary)
+	obs, planned := a.planFirewallExecute(userInput, envDesc, ragContext, canary, turnContext{})
 
 	// Agentic harness: when a plan executed and a step failed, feed the failure
 	// back to the planner and let it self-correct, bounded by a step budget.
@@ -357,8 +357,15 @@ const retrievalFollowUpBudget = 1
 // planning failed, the critic quarantined, a canary fired, or a chat fallback
 // answered instead). Extracted from HandleInput so the agentic harness can
 // re-run the full pipeline per iteration without duplicating any safety layer.
-func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary string) ([]StepObservation, bool) {
-	plannerPrompt := ai.BuildPlannerPrompt(userInput, envDesc, ragContext)
+func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary string, turn turnContext) ([]StepObservation, bool) {
+	plannerPrompt := ai.BuildPlannerPromptFor(ai.PlannerPromptInput{
+		UserInput: userInput,
+		Env:       envDesc,
+		RAG:       ragContext,
+		Report:    turn.Report,
+		Directive: turn.Directive,
+		Persona:   a.personaPreamble(),
+	})
 
 	// HELIX THINKER: animate the neural link while the planner reasons.
 	think := newThinkerFor(a.render, "HELIX :: REASONING")
@@ -482,6 +489,18 @@ type StepObservation struct {
 	NeedsAnswer bool
 }
 
+// turnContext carries what a REPLANNING turn knows that a first turn does not:
+// what already happened, and what Helix requires as a result.
+//
+// The two are separate fields rather than one string because they travel to
+// opposite halves of the prompt — the report into a data-only fence, the
+// directive into Helix's own instruction space. Merging them is the bug this
+// type exists to make impossible.
+type turnContext struct {
+	Report    string
+	Directive string
+}
+
 // executePlanSteps runs a validated plan's steps through the safety pipeline
 // and returns a per-step observation trace. It aborts on the first failing
 // step (unchanged single-shot behavior); the returned trace lets the agentic
@@ -599,20 +618,15 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 // provider's real latency instead of the whole generation. Non-streaming
 // renderers (daemon, headless) keep the buffered path byte-for-byte.
 //
-// chatCapabilityPreamble tells the fallback model what Helix can actually do.
+// chatCapabilityPreamble is the one thing the persona cannot say for itself.
 //
-// This path used to send the bare user line, so the model answered as a generic
-// assistant reasoning from its training cutoff — which is how "I can't perform a
-// web search" reached the user of a shell that now can. It cannot emit a plan
-// from here (this path exists precisely because planning failed), so the honest
-// move is to stop denying the capability and name the phrasing that reaches it.
-const chatCapabilityPreamble = `You are Helix, a local AI shell. Helix can run shell commands, git and package
-operations, recon tools, and — through its "web" tool — search the web and fetch pages.
-With /eyes on it can also look through the camera and describe what it sees.
-Never tell the user you are unable to search the web or look something up: Helix can.
-If answering needs current information you do not have, say that in one line and
+// Who Helix is, and what it can do, now live in persona.go and are prepended to
+// every chat turn. What remains here is specific to THIS path: planning already
+// failed, so no tool can run on this turn, and the model needs to know the
+// phrasing that reaches the web tool next time rather than silently answering
+// from its training cutoff.
+const chatCapabilityPreamble = `If answering needs current information you do not have, say so in one line and
 suggest re-asking as "search the web for <topic>", which routes to the web tool.
-Answer the user's message below.
 
 `
 
@@ -635,7 +649,7 @@ func (a *Agent) chatFallback(userInput string, think thinkerShim) {
 	}
 
 	think.Start()
-	resp, chatErr := ai.StreamModel(chatCapabilityPreamble+userInput,
+	resp, chatErr := ai.StreamModel(a.personaPreamble()+chatCapabilityPreamble+userInput,
 		ai.DefaultModelConfig(), ai.DefaultChatTimeout, onChunk)
 	if out != nil {
 		out.Close()

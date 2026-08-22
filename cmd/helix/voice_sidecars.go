@@ -26,6 +26,7 @@ import (
 	"helix/internal/commands"
 	"helix/internal/edge"
 	"helix/internal/providers/llamacpp"
+	"helix/internal/shell"
 	"helix/internal/sidecar"
 	"helix/internal/speech"
 	"helix/internal/utils"
@@ -51,6 +52,30 @@ type voiceSidecar struct {
 
 	// Args renders the launch arguments for a port.
 	Args func(port int) []string
+
+	// Unmet reports a precondition Helix will NOT resolve for the user, and
+	// why. Distinct from a missing binary, which Helix offers to install: this
+	// is for a dependency the project has decided not to require at all.
+	//
+	// Docker is the only one today. Helix must stay installable and usable with
+	// no container runtime — QA hit "Cannot connect to the Docker daemon" as
+	// the last line of voice setup, having been walked all the way to a pull it
+	// could never complete. A capability that needs docker is fine; being
+	// marched into docker is not.
+	Unmet func() (reason string, unmet bool)
+}
+
+// dockerAvailable reports whether a container runtime is usable — the binary
+// AND a daemon that answers. `docker` on PATH with a dead daemon is the exact
+// state that produced the QA failure, so presence alone is not enough.
+func dockerAvailable() bool {
+	bin, err := exec.LookPath("docker")
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, bin, "info", "--format", "{{.ServerVersion}}").Run() == nil
 }
 
 // voiceSidecars is the table of local speech servers Helix can set up.
@@ -87,9 +112,18 @@ func voiceSidecars() map[string]voiceSidecar {
 		},
 		"kokoro-local": {
 			// Docker-hosted, so the "binary" is docker and the image is the
-			// argument. Helix does not install Docker.
+			// argument. Helix does not install Docker, and does not ask the
+			// user to either — see Unmet.
 			Binaries:   []string{"docker"},
 			InstallCmd: func() (string, bool) { return "", false },
+			Unmet: func() (string, bool) {
+				if dockerAvailable() {
+					return "", false
+				}
+				return "kokoro runs in a container and no Docker daemon is " +
+					"answering. Helix will not install one — piper-local is the " +
+					"docker-free local voice and needs only Python", true
+			},
 			ModelHint: func() (string, string, bool) {
 				if dockerImagePresent(kokoroImage) {
 					return "", "", false
@@ -171,6 +205,19 @@ func offerSidecarSetup(kind, provider string) bool {
 		return false
 	}
 
+	// Preconditions first: refusing early beats walking someone through an
+	// install, a pull and a start that cannot succeed.
+	if spec.Unmet != nil {
+		if reason, unmet := spec.Unmet(); unmet {
+			fmt.Println()
+			fmt.Println(shell.PanelLine(shell.Badge(shell.StateWarn, provider+" is unavailable here")))
+			for _, l := range shell.PanelWrap(reason, shell.Muted) {
+				fmt.Println(l)
+			}
+			return false
+		}
+	}
+
 	binary, installed := findFirstBinary(spec.Binaries)
 	if !installed {
 		binary, installed = offerSidecarInstall(provider, spec)
@@ -181,9 +228,12 @@ func offerSidecarSetup(kind, provider string) bool {
 
 	if cmd, why, ok := spec.ModelHint(); ok {
 		fmt.Println()
-		color.Cyan("%s also needs a model.", provider)
-		color.Cyan("  %s", why)
-		color.Cyan("  %s", cmd)
+		fmt.Println(shell.PanelLine(shell.Fg(shell.HexText, provider) +
+			shell.Muted(" needs one more thing before it can start")))
+		for _, l := range shell.PanelWrap(why, shell.Muted) {
+			fmt.Println(l)
+		}
+		fmt.Println(shell.Hint(cmd))
 		if !commands.AskForConfirmation("Fetch it now?") {
 			color.Yellow("Skipped — %s cannot start without one.", provider)
 			return false
@@ -224,7 +274,7 @@ func offerSidecarInstall(provider string, spec voiceSidecar) (string, bool) {
 	binary, found := findFirstBinary(spec.Binaries)
 	if !found {
 		color.Yellow("Install finished but %s is still not on PATH.", provider)
-		color.Yellow("Open a new shell and re-run /voice-setup.")
+		color.Yellow("Open a new shell and re-run /blackbox setup.")
 		return "", false
 	}
 	color.Green("Installed: %s", binary)
@@ -242,7 +292,7 @@ func startVoiceSidecar(kind, provider, binary string, spec voiceSidecar) bool {
 	if assigned, ok := edge.FreePortAvoiding(provider, port, reserved); !ok || assigned != port {
 		color.Yellow("Port %d is unavailable or claimed by another service; using %d.", port, assigned)
 		port = assigned
-		applySidecarEndpoint(kind, edge.ReplacePort(endpoint, port))
+		applySidecarEndpoint(kind, provider, edge.ReplacePort(endpoint, port))
 	}
 
 	logPath, err := sidecar.LogPathFor(provider)
@@ -299,12 +349,30 @@ func voiceSidecarDefault(provider string) string {
 }
 
 // applySidecarEndpoint stores a reassigned endpoint and rebuilds the engine.
-func applySidecarEndpoint(kind, endpoint string) {
+//
+// Keyed by PROVIDER, not by kind. Writing it to BaseURL — a field that belongs
+// to whichever provider is primary — is why whisper-local, chosen as a fallback
+// and moved to a free port, was still probed on its stale default and reported
+// as "did not come up" while running fine. It also silently pointed the primary
+// (a cloud STT) at a localhost address.
+func applySidecarEndpoint(kind, provider, endpoint string) {
 	switch kind {
 	case "stt":
-		cfg.Speech.STT.BaseURL = endpoint
+		if cfg.Speech.STT.Endpoints == nil {
+			cfg.Speech.STT.Endpoints = map[string]string{}
+		}
+		cfg.Speech.STT.Endpoints[provider] = endpoint
+		if cfg.Speech.STT.Provider == provider {
+			cfg.Speech.STT.BaseURL = endpoint
+		}
 	case "tts":
-		cfg.Speech.TTS.BaseURL = endpoint
+		if cfg.Speech.TTS.Endpoints == nil {
+			cfg.Speech.TTS.Endpoints = map[string]string{}
+		}
+		cfg.Speech.TTS.Endpoints[provider] = endpoint
+		if cfg.Speech.TTS.Provider == provider {
+			cfg.Speech.TTS.BaseURL = endpoint
+		}
 	}
 	_ = cfg.SavePreferences()
 	_ = speech.Init(speechConfigFrom(cfg.Speech))

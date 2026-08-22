@@ -259,21 +259,38 @@ Local runtimes — Ollama, llama.cpp, whisper.cpp, Piper — have their own guid
 | `/stealth <on\|off>` | Private history mode (suppresses shell history) |
 | `/crash [list\|view <n>\|clear]` | Inspect and manage local crash diagnostics |
 
-### Voice & Perception
-See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits (capture is half-duplex — Ctrl+C interrupts a reply; talking over one needs echo cancellation that is not implemented).
+### First run
+The first boot walks three stages, each skippable: **AI provider**, **system packages**, then the **speech chain**. The package stage detects the host's package manager (brew, apt, dnf, pacman, zypper, apk, winget, choco) and offers to install what Helix needs — `sox` for the microphone, `ffmpeg` for the camera. Nothing installs without a separate yes, and the exact command is shown before it runs. Re-run any stage later with `/setup`.
+
+Where Helix does not know a verified package name for your platform, it says so and points at the docs rather than running a guess.
+
+### Live mode — `/blackbox`
+`/blackbox on` is Helix awake: microphone open, camera on, replies spoken, and a companion loop that looks at the scene on its own and speaks up when something is worth saying. Say **"manual mode"** at any time to return to the keyboard, or **"turn off your eyes"** to close the camera without ending the conversation.
+
+Eight commands (`/voice`, `/manual`, `/voice-setup`, `/voice-status`, `/wake`, `/say`, `/tts`, `/eyes`) folded into this one; typing an old name prints where it went.
+
+Helix has a **persona**, not a default assistant register: it answers first, keeps replies short because most of them are read aloud, says "I ran it" about things it ran, and will tell you when it thinks you are about to do something unwise. The persona shapes tone only — every safety gate sits downstream of it.
+
+**No Docker required, anywhere.** The local voice chain is whisper.cpp plus Piper, which need a binary and Python. Kokoro is the one optional component that ships as a container; Helix will not install a runtime for it, and marks it `needs docker` in the table rather than walking you into a failed pull.
+
+See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits (capture is half-duplex — the mic is muted while Helix speaks, so a reply is interrupted with Ctrl+C rather than by talking over it).
 
 | Command | Description |
 | :--- | :--- |
-| `/voice [on\|off\|status]` | Enter or leave voice mode (speak instead of type) |
-| `/manual` | Return to keyboard input (voice safety valve) |
-| `/voice-setup` | Configure STT/TTS providers with live pricing |
-| `/voice-status` | Speech chain health, keys, and recorder state |
-| `/wake [on\|off\|status]` | Hands-free listening for the wake phrase |
-| `/say <text>` | Speak text through the TTS chain |
-| `/tts <on\|off>` | Toggle automatic spoken responses |
+| `/blackbox [on\|off\|status\|setup\|look\|eyes\|wake\|tts\|say]` | Live mode — Helix listens, watches, answers, and speaks up |
 | `/listen [seconds]` | Record and transcribe one clip (max 60s) |
 | `/mictest` | 3s self-test: is the mic actually being heard? |
-| `/eyes [on\|off\|status\|look]` | Opt-in camera vision (memory-only frames) |
+
+Subcommands:
+
+- **on** / **off** — go live, or return to the keyboard
+- **status** — one report: hearing, sight, speech, wake, companion
+- **setup** — configure the STT/TTS providers with live pricing
+- **look** *[question]* — capture one frame now and answer a question about it
+- **eyes** `on|off` — camera only, without entering or leaving live mode
+- **wake** `on|off` — hands-free wake phrase between turns
+- **tts** `on|off` — whether ordinary replies are spoken aloud
+- **say** *text* — speak text through the TTS chain
 
 ### Utilities
 | Command | Description |

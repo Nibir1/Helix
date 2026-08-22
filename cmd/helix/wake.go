@@ -55,7 +55,7 @@ func enableWakeWord() {
 
 	color.Green("Wake word ENABLED (\"%s\", engine: %s, preset: %s).", ww.Phrase, ww.Engine, ww.SensitivityPreset)
 	if _, err := speech.DetectRecorder(); err != nil {
-		color.Red("No audio recorder found — install sox (`brew install sox`) before hands-free will work.")
+		color.Red("No audio recorder found — run /setup to install sox before hands-free will work.")
 		return
 	}
 	for _, line := range wakeBannerLines(ww.Engine, ww.Phrase) {
@@ -129,7 +129,7 @@ func printWakeStatus() {
 
 	if ww.Enabled {
 		if _, err := speech.DetectRecorder(); err != nil {
-			color.Red("Recorder: missing — install sox (`brew install sox`).")
+			color.Red("Recorder: missing — run /setup to install sox.")
 			return
 		}
 		color.Green("Recorder: ok — hands-free is ready.")

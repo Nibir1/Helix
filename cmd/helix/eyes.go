@@ -1,8 +1,11 @@
 // cmd/helix/eyes.go
-// Purpose: BlackBox Phase 5 opt-in camera perception UX — /eyes on|off|status,
-// the "turn off your eyes" spoken privacy kill switch, and the metadata-only
-// frame journal. Threat V4 is load-bearing: pixel bytes never reach disk, so
-// the journal records only kind/provider/count/timestamp.
+// Purpose: camera perception UX — the capability probes behind /blackbox eyes
+// and /blackbox look, the "turn off your eyes" spoken privacy kill switch, and
+// the metadata-only frame journal. Threat V4 is load-bearing: pixel bytes never
+// reach disk, so the journal records only kind/provider/count/timestamp.
+//
+// The command surface moved to /blackbox (see blackbox.go); what stays here is
+// the vision-specific knowledge that surface asks about.
 package main
 
 import (
@@ -18,45 +21,6 @@ import (
 	"github.com/fatih/color"
 )
 
-// handleEyesCommand implements /eyes <on|off|status>.
-func handleEyesCommand(c cmdArgs) {
-	switch c.Lower() {
-	case "on", "enable":
-		if !visionAvailable() {
-			for _, line := range visionUnavailableHelp() {
-				color.Yellow("%s", line)
-			}
-			return
-		}
-		setVisionEnabled(true)
-	case "off", "disable":
-		setVisionEnabled(false)
-	case "look", "describe", "see", "what do you see":
-		describeWhatIsSeen("")
-	case "", "status":
-		state := "off"
-		if cfg.Vision.Enabled {
-			state = "on"
-		}
-		fmt.Printf("Eyes: %s (frames per turn: %d)\n", state, visionMaxFrames())
-		// Say whether it CAN be turned on. Reporting only the toggle meant
-		// /eyes status looked fine on a setup where /eyes on could never succeed
-		// — the same gap /wake status had against its own banner.
-		if visionAvailable() {
-			color.Green("Vision model: %s — ready", visionRouteDescription())
-		} else {
-			color.Yellow("Vision model: %s — cannot see; /eyes on will refuse", visionRouteDescription())
-		}
-	default:
-		// "/eyes look <question>" — anything after the verb is the question.
-		if sub := c.Sub(); sub == "look" || sub == "describe" || sub == "see" {
-			describeWhatIsSeen(c.From(1))
-			return
-		}
-		color.Yellow("Usage: /eyes <on|off|status|look [question]>")
-	}
-}
-
 // describeWhatIsSeen captures one frame and answers a question about it.
 //
 // This is what makes the camera reachable by keyboard. The conversational vision
@@ -69,12 +33,17 @@ func describeWhatIsSeen(question string) {
 		return
 	}
 	if !cfg.Vision.Enabled {
-		color.Yellow("Eyes are off. Run /eyes on first.")
+		color.Yellow("Eyes are off. Run /blackbox eyes on first.")
 		return
 	}
-	if !visionAvailable() {
-		for _, line := range visionUnavailableHelp() {
-			color.Yellow("%s", line)
+	if ready, why := visionReady(); !ready {
+		// Both halves, not just the model: a host with no ffmpeg used to be told
+		// the camera was fine right up until the shutter.
+		color.Yellow("Cannot capture: %s", why)
+		if !visionAvailable() {
+			for _, line := range visionUnavailableHelp() {
+				color.Yellow("%s", line)
+			}
 		}
 		return
 	}
@@ -96,6 +65,15 @@ func visionMaxFrames() int {
 // visionAvailable reports whether a vision path exists: the dedicated
 // vision.provider if configured, else the active chat provider.
 func visionAvailable() bool {
+	// An explicit vision.model is the one that will run, so it is the one whose
+	// capability decides — not the chat model, and not the provider default.
+	if cfg.Vision.Model != "" {
+		where := cfg.Vision.Provider
+		if where == "" {
+			where = ai.ActiveProviderName()
+		}
+		return ai.ModelVisionCapable(where, cfg.Vision.Model)
+	}
 	if cfg.Vision.Provider != "" {
 		return ai.ProviderVisionCapable(cfg.Vision.Provider)
 	}
@@ -106,6 +84,13 @@ func visionAvailable() bool {
 // use, so the user can tell the dedicated-provider route from the active-chat
 // route at a glance.
 func visionRouteDescription() string {
+	if cfg.Vision.Model != "" {
+		where := cfg.Vision.Provider
+		if where == "" {
+			where = ai.ActiveProviderName()
+		}
+		return fmt.Sprintf("%s / %s (vision.model)", where, cfg.Vision.Model)
+	}
 	if cfg.Vision.Provider != "" {
 		return fmt.Sprintf("%s (vision.provider)", cfg.Vision.Provider)
 	}
@@ -173,10 +158,17 @@ func setVisionEnabled(on bool) {
 // isEyesOffPhrase matches the spoken privacy kill switch ("turn off your eyes"
 // = /eyes off, without leaving voice mode).
 func isEyesOffPhrase(text string) bool {
-	t := strings.ToLower(strings.TrimRight(strings.TrimSpace(text), ".!?"))
-	switch t {
-	case "turn off your eyes", "eyes off", "turn your eyes off", "disable your eyes":
-		return true
+	t := strings.ToLower(strings.TrimSpace(text))
+	t = strings.TrimRight(t, " .!?,")
+	// Suffix-matched for the same reason as the mode kill phrase: a privacy
+	// switch that only responds to one exact wording is not a switch.
+	for _, p := range []string{
+		"turn off your eyes", "turn your eyes off", "disable your eyes",
+		"close your eyes", "eyes off",
+	} {
+		if t == p || strings.HasSuffix(t, " "+p) {
+			return true
+		}
 	}
 	return false
 }

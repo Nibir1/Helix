@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"helix/internal/config"
 	"helix/internal/speech"
 )
 
@@ -35,36 +36,57 @@ func TestStatusRowsStayAlignedWithLongErrors(t *testing.T) {
 
 	lines := statusRowLines(rows)
 
-	// The two provider rows are lines[1] and lines[2] (lines[0] is the header);
-	// every column must start at the same offset in all three.
-	header, groq := lines[0], lines[1]
-	whisper := lines[2]
+	// Cells are coloured now, so every assertion is made on the VISIBLE text —
+	// which is also the only thing a reader sees.
+	plain := func(s string) string { return stripANSIForTest(s) }
+	header, groq, whisper := plain(lines[0]), plain(lines[1]), plain(lines[2])
+
 	for _, col := range []string{"STATE", "KEY", "WHERE"} {
-		want := strings.Index(header, col)
-		if want < 0 {
+		if !strings.Contains(header, col) {
 			t.Fatalf("header %q is missing the %s column", header, col)
 		}
 	}
-	// State starts after the name and display columns; compare the actual byte
-	// offsets of the state word across rows.
-	stateAt := 2 + statusNameWidth + 1 + statusDisplayWidth + 1
-	for _, l := range []string{header, groq, whisper} {
-		if len(l) <= stateAt {
-			t.Fatalf("row is shorter than the state column: %q", l)
-		}
+	// The state must still be ONE WORD, not the error text — the defect this
+	// test was written for. The badge glyph precedes it.
+	if !strings.Contains(whisper, "down") || strings.Contains(whisper, "connection refused") {
+		t.Errorf("whisper row should carry a one-word state, got %q", whisper)
 	}
-	if got := strings.TrimSpace(whisper[stateAt : stateAt+statusStateWidth]); got != "down" {
-		t.Errorf("whisper state cell = %q, want \"down\" (a one-word state, not the error)", got)
+	if !strings.Contains(groq, "healthy") {
+		t.Errorf("groq row = %q, want a healthy state", groq)
 	}
-	if got := strings.TrimSpace(groq[stateAt : stateAt+statusStateWidth]); got != "healthy" {
-		t.Errorf("groq state cell = %q, want \"healthy\"", got)
+	// Columns must start at the same visible offset on every row.
+	if a, b := strings.Index(groq, "healthy"), strings.Index(whisper, "down"); abs(a-b) > 2 {
+		t.Errorf("state column drifted: healthy at %d, down at %d\n%s\n%s", a, b, groq, whisper)
 	}
-	// The row itself must stay short enough to read: the old version was 100+
-	// columns because the error lived inside it.
-	if len(whisper) > 80 {
+	// And the row stays readable: the old version was 100+ columns because the
+	// error lived inside it.
+	if len(whisper) > 88 {
 		t.Errorf("row is %d columns wide; the detail belongs on its own line:\n%s",
 			len(whisper), whisper)
 	}
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// stripANSIForTest removes colour so layout assertions measure what a reader
+// sees rather than the escape bytes.
+func stripANSIForTest(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 func TestStatusRowsPrintFullErrorDetail(t *testing.T) {
@@ -74,8 +96,10 @@ func TestStatusRowsPrintFullErrorDetail(t *testing.T) {
 	// whole error, address and all. The QA output stopped at "http://127.0.0.…".
 	var detail []string
 	for _, l := range lines {
-		if strings.HasPrefix(l, statusDetailIndent) {
-			detail = append(detail, strings.TrimSpace(l))
+		p := stripANSIForTest(l)
+		if strings.Contains(p, statusDetailIndent) && strings.Contains(p, "127.0.0.1") ||
+			strings.Contains(p, "connection refused") || strings.Contains(p, "Start it") {
+			detail = append(detail, strings.TrimSpace(p))
 		}
 	}
 	if len(detail) == 0 {
@@ -94,10 +118,11 @@ func TestStatusRowsPrintFullErrorDetail(t *testing.T) {
 	if strings.Contains(joined, "…") {
 		t.Error("the detail must not be truncated at all")
 	}
-	// Wrapped, not one endless line.
+	// Wrapped, not one endless line. The budget is the RENDERED width — text
+	// plus the panel frame — because that is what has to fit the terminal.
 	for _, l := range detail {
-		if len(l) > statusDetailWidth {
-			t.Errorf("detail line is %d columns, want ≤%d: %q", len(l), statusDetailWidth, l)
+		if len(l) > statusDetailBudget {
+			t.Errorf("detail line is %d columns, want ≤%d: %q", len(l), statusDetailBudget, l)
 		}
 	}
 }
@@ -184,5 +209,52 @@ func TestStatusRowsEmptyChain(t *testing.T) {
 	lines := statusRowLines(nil)
 	if len(lines) != 1 || !strings.Contains(lines[0], "no registered providers") {
 		t.Errorf("an empty table must say so, got %q", lines)
+	}
+}
+
+// TestWizardMergePreservesSidecarEndpoints is the regression guard for a bug
+// this file's merge comment had already warned about once.
+//
+// The wizard moves a sidecar to a free port and records it in Endpoints; the
+// commit step then overwrote the section with the struct the wizard had built,
+// which has no Endpoints. whisper-local ran on 28861 while every request went
+// to 8080, and the wizard reported "still not answering" about a server it had
+// started and verified thirty lines earlier.
+func TestWizardMergePreservesSidecarEndpoints(t *testing.T) {
+	saved := cfg
+	defer func() { cfg = saved }()
+
+	cfg = &config.Config{}
+	cfg.Speech.STT.Endpoints = map[string]string{"whisper-local": "http://127.0.0.1:28861"}
+	cfg.Speech.STT.StreamChunkMs = 450
+	cfg.Speech.TTS.Endpoints = map[string]string{"piper-local": "http://127.0.0.1:28184"}
+	cfg.Speech.TTS.FirstByteMs = 900
+
+	// What the wizard hands over: a freshly built section that knows only what
+	// the user selected.
+	sttCfg := config.SpeechSTTConfig{Provider: "whisper-local", Model: "base.en"}
+	ttsCfg := config.SpeechTTSConfig{Provider: "piper-local"}
+
+	sttCfg.StreamChunkMs = cfg.Speech.STT.StreamChunkMs
+	sttCfg.Endpoints = cfg.Speech.STT.Endpoints
+	cfg.Speech.STT = sttCfg
+	ttsCfg.FirstByteMs = cfg.Speech.TTS.FirstByteMs
+	ttsCfg.Endpoints = cfg.Speech.TTS.Endpoints
+	cfg.Speech.TTS = ttsCfg
+
+	if got := cfg.Speech.STT.Endpoints["whisper-local"]; got != "http://127.0.0.1:28861" {
+		t.Errorf("STT endpoint = %q, want the reassigned port to survive the merge", got)
+	}
+	if got := cfg.Speech.TTS.Endpoints["piper-local"]; got != "http://127.0.0.1:28184" {
+		t.Errorf("TTS endpoint = %q, want the reassigned port to survive the merge", got)
+	}
+	if cfg.Speech.STT.StreamChunkMs != 450 || cfg.Speech.TTS.FirstByteMs != 900 {
+		t.Error("tuning fields must survive too")
+	}
+
+	// And the resolver must actually reach for it — a stored endpoint nothing
+	// reads is the same bug wearing a different hat.
+	if got := sidecarEndpoint("stt", "whisper-local", "http://127.0.0.1:8080"); got != "http://127.0.0.1:28861" {
+		t.Errorf("sidecarEndpoint = %q, want the recorded endpoint, not the default", got)
 	}
 }

@@ -55,9 +55,9 @@ func TestMatchVoiceCommand(t *testing.T) {
 		{"what changed", "/diff"},
 		{"review my changes", "/review"},
 		{"undo that", "/undo"},
-		{"what do you see", "/eyes look"},
-		{"look at this stack trace", "/eyes look stack trace"},
-		{"stop talking", "/tts off"},
+		{"what do you see", "/blackbox look"},
+		{"look at this stack trace", "/blackbox look stack trace"},
+		{"stop talking", "/blackbox tts off"},
 		{"run diagnostics", "/doctor"},
 		{"what tools do you have", "/tools"},
 	}
@@ -124,7 +124,7 @@ func TestSpokenSlashForm(t *testing.T) {
 		"slash status":            "/status",
 		"command tools":           "/tools",
 		"run command doctor":      "/doctor",
-		"slash voice status":      "/voice-status",
+		"slash blackbox status":   "/blackbox status",
 		"slash provider status":   "/provider-status",
 		"slash knowledge status":  "/knowledge-status",
 		"slash dry run":           "/dry-run",
@@ -152,13 +152,16 @@ func TestSpokenSlashForm(t *testing.T) {
 // TestVoiceCommandAllowedDefaultDeny is the security property: voice reaches
 // only what was explicitly marked reachable.
 func TestVoiceCommandAllowedDefaultDeny(t *testing.T) {
-	// These must NEVER be reachable by voice: irreversible, or they change what
-	// runs without asking.
+	// These must NEVER be reachable by voice: they destroy data, fire traffic at
+	// someone else, move the approval posture, or change what runs unattended.
+	//
+	// The list shrank when live mode arrived (/blackbox on is meant to reach the
+	// whole shell by speaking), and each removal was argued on its own merits
+	// rather than as a batch — see the VoiceOK doc comment in registry.go.
 	denied := []string{
 		"/purge", "/config provider openai",
-		"/hooks add", "/rag-reset", "/rag-rebuild", "/commit", "/init",
-		"/setup", "/resume", "/knowledge-update", "/stealth on", "/typewrite-all on",
-		"/model use x", "/provider use x", "/scan authorize 10.0.0.1", "/test-basic-ai",
+		"/hooks add", "/rag-reset", "/commit", "/init",
+		"/setup", "/stealth on", "/scan authorize 10.0.0.1",
 	}
 	for _, line := range denied {
 		ok, reason := voiceCommandAllowed(line)
@@ -171,8 +174,11 @@ func TestVoiceCommandAllowedDefaultDeny(t *testing.T) {
 		}
 	}
 
-	// And a representative sample that must be reachable.
-	allowed := []string{"/status", "/todo add x", "/plan do a thing", "/diff", "/web query", "/undo"}
+	// And a representative sample that must be reachable — including the ones
+	// live mode opened up, which are reversible and change nothing unattended.
+	allowed := []string{"/status", "/todo add x", "/plan do a thing", "/diff", "/web query", "/undo",
+		"/resume", "/model use x", "/provider use x", "/typewrite-all on", "/knowledge-update",
+		"/rag-rebuild", "/test-basic-ai", "/blackbox on"}
 	for _, line := range allowed {
 		if ok, reason := voiceCommandAllowed(line); !ok {
 			t.Errorf("%q should be voice-reachable: %s", line, reason)
@@ -198,7 +204,8 @@ func TestEveryVoiceOKCommandExists(t *testing.T) {
 
 	// The destructive set must be flagged off, checked against the registry
 	// directly so adding VoiceOK to one of these fails here.
-	for _, name := range []string{"/purge", "/config", "/hooks", "/rag-reset", "/commit", "/init"} {
+	for _, name := range []string{"/purge", "/config", "/hooks", "/rag-reset", "/commit", "/init",
+		"/setup", "/stealth", "/scan"} {
 		cmd, ok := lookupCommand(name)
 		if !ok {
 			t.Fatalf("%s is missing from the registry", name)

@@ -12,30 +12,41 @@ daemon, camera vision, and the privacy controls behind each.
 ## 1. First-time voice setup
 
 ```text
-/voice-setup
+/blackbox setup
 ```
 
-The wizard prints a pricing table (provider, model, price, estimated $/month at
-2h/day, latency, key requirement, locality, ★ recommended) for both
-speech-to-text (STT) and text-to-speech (TTS), then collects API keys and
-optional fallback providers. Fallbacks form a **failover chain**: the first
-provider that succeeds wins, and failures are aggregated if the whole chain
-collapses.
+On a fresh install this runs automatically as part of first boot, after the AI
+provider and the system-package stage (`/setup` re-runs any stage later).
+
+The wizard prints a pricing table (provider, model, estimated $/month at 2h/day,
+latency, what it requires, ★ best value) for both speech-to-text (STT) and
+text-to-speech (TTS), then collects API keys and optional fallback providers.
+Fallbacks form a **failover chain**: the first provider that succeeds wins, and
+failures are aggregated if the whole chain collapses.
+
+A key you have already given Helix is reused rather than requested again: a
+saved key is verified, and only one the provider actually *rejects* prompts for
+a replacement. A key entered for an AI provider is adopted for the same vendor's
+speech services.
 
 - **Private-by-default:** configure the local sidecars (`whisper-local` STT,
   `piper-local` TTS) to keep audio on your machine. See §5.
-- `/voice-status` shows chain health, key state, and recorder availability.
-- `/say <text>` speaks text immediately; `/tts on|off` gates automatic spoken
+- `/blackbox status` shows chain health, key state, and recorder availability.
+- `/blackbox say <text>` speaks text immediately; `/blackbox tts on|off` gates automatic spoken
   responses; `/listen [sec]` records and transcribes one clip (push-to-talk).
 
 ## 2. Voice mode and the safety valve
 
 ```text
-/voice     # enter voice mode (speak instead of type)
-/manual    # instant fallback to typing
+/blackbox on   # go live: microphone, camera, speech, and initiative
+/blackbox off  # instant fallback to typing
 ```
 
-Voice mode replaces the typed line with a record→transcribe cycle. Transcripts
+Say **"manual mode"** to leave without touching the keyboard — matched at the
+end of a sentence, so "okay, now switch to manual mode" works and is not
+confused with a question about the feature.
+
+Live mode replaces the typed line with a record→transcribe cycle. Transcripts
 are stamped `Channel=voice` and pass through the **Voice Risk Policy** (ADR-005):
 
 - Voice plans are capped at **Medium risk** — High-risk is unreachable by voice.
@@ -45,7 +56,7 @@ are stamped `Channel=voice` and pass through the **Voice Risk Policy** (ADR-005)
 - Voice confirmations **fail closed**: silence, timeout, or an unintelligible
   answer = decline.
 
-Mic-less machines are never stranded: `/voice` refuses entry without a
+Mic-less machines are never stranded: `/blackbox on` refuses entry without a
 recorder, and a failed capture offers one typed turn while staying in voice
 mode.
 
@@ -65,9 +76,9 @@ be before sox treats it as silence.
 ## 3. Hands-free wake word
 
 ```text
-/wake on       # enable hands-free (applies safe defaults the first time)
-/wake off      # disable
-/wake status   # phrase, engine, recorder readiness
+/blackbox wake on       # enable hands-free (applies safe defaults the first time)
+/blackbox wake off      # disable
+/blackbox status   # phrase, engine, recorder readiness
 ```
 
 The command does the config edit for you (no manual JSON): enabling applies the
@@ -89,7 +100,7 @@ executed (ADR-005 §5).
   dependencies; `engine: "sidecar"` points at an openWakeWord-class HTTP
   service for true keyword spotting.
 - Kill switches, spoken or typed: `"stop listening"`, `"go to sleep"`,
-  `"manual mode"`, `/voice off`, `/manual`.
+  `"manual mode"`, `/blackbox off`, `/blackbox off`.
 - Wake events append to `~/.helix/metrics/wake.jsonl` (local only).
 
 ## 4. The Living AI daemon
@@ -130,29 +141,49 @@ external HTTP services — the same pattern Helix already uses for Ollama:
 | Wake word | openWakeWord-class (`/predict`) | configured in `speech.wake_word.sidecar_url` |
 
 Set `stt.provider = "whisper-local"` / `tts.provider = "piper-local"` in the
-speech config section (or pick them in `/voice-setup`).
+speech config section (or pick them in `/blackbox setup`).
 
-## 6. Camera vision (`/eyes`)
+**Neither needs Docker**, and neither does Helix. Kokoro is the one optional
+container-hosted voice: Helix will not install a container runtime, refuses
+early when no daemon answers, and marks it `no docker` in the provider table so
+the constraint is visible before the choice.
+
+Those default ports are frequently taken — whisper.cpp collides with llama.cpp
+on 8080, and macOS AirPlay Receiver owns 5000. Helix moves a sidecar to a free
+port and records it **per provider**, so a local service works as a fallback and
+not only as the primary.
+
+## 6. Camera vision (`/blackbox eyes`)
 
 ```text
-/eyes on       # opt-in; announced vocally
-/eyes off      # instant deactivation
-/eyes status
+/blackbox eyes on       # opt-in; announced vocally
+/blackbox eyes off      # instant deactivation
+/blackbox status
 ```
 
-Vision is **off by default**. When on, a *deictic* voice utterance ("what's
-wrong with **this** code?", "read this serial number") captures a single frame
-per turn via `ffmpeg`, downscales it to ≤1024px JPEG in memory, and sends it to
-the configured vision-capable model. Privacy is enforced, not promised:
+Vision is **off by default** and opens with `/blackbox on`, as part of one
+announced consent moment rather than a separate switch. Once on, `/blackbox
+look` and the planner's `vision` tool each capture a single frame via `ffmpeg`,
+downscale it to ≤1024px JPEG in memory, and send it to the configured
+vision-capable model. Both entry points are explicit: Helix no longer guesses at
+the camera from words like "this" (see docs/voice.md for why that was removed).
+Privacy is enforced, not promised:
 
 - Frames are **memory-only** — never written to disk (filesystem-snapshot test).
 - Every frame batch is journaled as *metadata only* (provider + count +
   timestamp) to `~/.helix/journal/vision.jsonl`.
-- `"turn off your eyes"` spoken phrase = `/eyes off`.
-- If the active model cannot see, `/eyes on` refuses with guidance.
+- `"turn off your eyes"` spoken phrase = `/blackbox eyes off`.
+- If the active model cannot see, `/blackbox eyes on` refuses with guidance.
 
-Requires `ffmpeg` on PATH (device flags are avfoundation on macOS, dshow on
-Windows, v4l2 on Linux; override via `vision.provider`/device config).
+Requires `ffmpeg` on PATH — `/setup` offers to install it. Device flags are
+avfoundation on macOS, dshow on Windows, v4l2 on Linux; the capture rate is
+negotiated from what the device reports rather than assumed. Route frames to a
+different model than chat with `vision.model`.
+
+On macOS the OS must also grant camera access to the terminal running Helix. An
+unauthorised camera does not error — it opens and then delivers nothing — so a
+capture that produces no frame before its deadline says so explicitly instead of
+looking like a hang.
 
 ## 7. Ambient awareness (optional, opt-in)
 
