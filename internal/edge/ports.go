@@ -31,16 +31,32 @@ const (
 	candidateSpan = 1000
 )
 
-// PortAvailable reports whether a TCP port on loopback can be bound right now.
+// PortAvailable reports whether a TCP port on loopback is genuinely free.
 //
-// Binding is the only honest test: a connect-probe cannot distinguish "free"
-// from "listening but refusing", and checking a list of known services cannot
-// see whatever the user happens to be running.
+// It CONNECTS first, then tries to bind, because neither check alone is correct:
+//
+//   - Bind alone gives false "free" results. Go sets SO_REUSEADDR on listeners,
+//     and on BSD/macOS that permits binding 127.0.0.1:5000 while another process
+//     holds the wildcard *:5000. macOS AirPlay Receiver binds exactly that way,
+//     so a bind-only check called port 5000 free on a machine where AirPlay was
+//     answering HTTP 403 on it — the precise case this function exists for.
+//   - Connect alone gives false "occupied" results for a port that is bound but
+//     not accepting, and cannot see a socket in a lingering state.
+//
+// A successful connect is conclusive: something is serving there. Only when
+// nothing answers does the bind decide.
 func PortAvailable(port int) bool {
 	if port <= 0 || port > 65535 {
 		return false
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+
+	if conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond); err == nil {
+		_ = conn.Close()
+		return false // something accepted a connection: not free
+	}
+
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return false
 	}
@@ -66,7 +82,7 @@ func PortOccupant(port int) string {
 		return "in use"
 	}
 	_ = conn.Close()
-	return "in use (accepting connections)"
+	return "in use by a running service"
 }
 
 // FreePortFor returns a usable loopback port for a service, preferring the

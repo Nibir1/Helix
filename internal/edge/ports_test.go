@@ -142,3 +142,94 @@ func TestReplacePort(t *testing.T) {
 		}
 	}
 }
+
+// TestPortAvailableDetectsWildcardBind is the bug this check shipped with.
+//
+// Go sets SO_REUSEADDR on listeners, and on BSD/macOS that permits binding
+// 127.0.0.1:P while another process holds the wildcard *:P. macOS AirPlay
+// Receiver binds exactly that way, so a bind-only check reported port 5000 as
+// free on a machine where AirPlay was answering HTTP 403 on it.
+func TestPortAvailableDetectsWildcardBind(t *testing.T) {
+	// Bind the wildcard, as a system service would.
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Skipf("cannot bind wildcard here: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	// Accept connections, so a connect probe finds a live service.
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+
+	_, portStr, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if PortAvailable(port) {
+		t.Errorf("port %d is served by a wildcard listener and must not read as free "+
+			"— a bind-only check says free here because Go sets SO_REUSEADDR", port)
+	}
+	if got := PortOccupant(port); got == "" {
+		t.Errorf("port %d must be reported as occupied", port)
+	}
+}
+
+// TestPortAvailableDetectsBoundButSilent covers the other half: a socket that is
+// bound and never accepts. Connect alone would call that free.
+func TestPortAvailableDetectsBoundButSilent(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	// Deliberately never Accept.
+
+	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+
+	if PortAvailable(port) {
+		t.Errorf("port %d is bound and must not read as free", port)
+	}
+}
+
+// TestFreePortForAvoidsAWildcardHolder ties it together: the assigned port must
+// be free by the corrected definition, not merely bindable.
+func TestFreePortForAvoidsAWildcardHolder(t *testing.T) {
+	ln, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Skipf("cannot bind wildcard here: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+
+	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	busy, _ := strconv.Atoi(portStr)
+
+	got, isPreferred := FreePortFor("piper-local", busy)
+	if isPreferred || got == busy {
+		t.Fatalf("must not hand back the occupied port %d", busy)
+	}
+	if !PortAvailable(got) {
+		t.Errorf("assigned port %d is not actually free", got)
+	}
+}
