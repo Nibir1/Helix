@@ -28,6 +28,18 @@ type providerOption struct {
 	Label string
 }
 
+// providerOptions is the FIRST-RUN menu, not the list of what Helix supports.
+//
+// llama.cpp is deliberately absent. It is still registered, still a valid
+// failover target, and still selectable with `/provider use llamacpp` — but it
+// does not belong in the choice a new user makes before anything works, because
+// picking it there is a commitment to installing a runtime, obtaining a GGUF
+// that a given build can load, and launching a server by hand. Ollama does the
+// same job with none of that, and Ollama is itself built on llama.cpp, so the
+// engine is present either way.
+//
+// The menu is for getting to a working shell. Everything registered stays
+// reachable afterwards; `/provider list` shows the full set.
 var providerOptions = []providerOption{
 	{ID: "openai", Label: "OpenAI"},
 	{ID: "anthropic", Label: "Anthropic"},
@@ -37,7 +49,6 @@ var providerOptions = []providerOption{
 	{ID: "glm", Label: "GLM"},
 	{ID: "xai", Label: "xAI (Grok)"},
 	{ID: "ollama", Label: "Ollama (local)"},
-	{ID: "llamacpp", Label: "llama.cpp (local, user-managed llama-server)"},
 }
 
 func normalizeProviderName(name string) string {

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -424,6 +425,7 @@ func runNativeSetup() error {
 	for i, p := range providerOptions {
 		fmt.Printf("%d) %s\n", i+1, p.Label)
 	}
+	printAdvancedProviders()
 	choiceStr := commands.AskLine("Enter provider number")
 	var choice int
 	if _, err := fmt.Sscanf(choiceStr, "%d", &choice); err != nil {
@@ -437,6 +439,38 @@ func runNativeSetup() error {
 		return err
 	}
 	return nil
+}
+
+// printAdvancedProviders names what the first-run menu leaves out.
+//
+// The menu is the shortest path to a working shell, so it lists the providers
+// that need only a key or a running Ollama. Anything requiring a hand-managed
+// runtime is reachable afterwards instead — but only if the user is told it
+// exists, which is the difference between a curated menu and a hidden feature.
+func printAdvancedProviders() {
+	extra := advancedProviderNames()
+	if len(extra) == 0 {
+		return
+	}
+	color.Cyan("Also available after setup: %s", strings.Join(extra, ", "))
+	color.Cyan("  Select with /provider use <name> — see docs/local_runtimes.md.")
+}
+
+// advancedProviderNames returns registered providers absent from the first-run
+// menu, so the two can never silently drift apart.
+func advancedProviderNames() []string {
+	inMenu := make(map[string]bool, len(providerOptions))
+	for _, p := range providerOptions {
+		inMenu[p.ID] = true
+	}
+	var out []string
+	for _, name := range ai.ListProviders() {
+		if !inMenu[name] && name != "custom" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // runKnowledgeUpdate implements the `helix update` subcommand.

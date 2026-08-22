@@ -229,7 +229,7 @@ High-risk commands stay blocked in **every** mode, typed confirmations stay type
 `/commit` never stages anything for you — what you staged is what gets committed.
 
 ### AI & Providers
-Local runtimes — llama.cpp, Ollama, whisper.cpp, Piper — have their own guide: [docs/local_runtimes.md](docs/local_runtimes.md). It covers which to use, how llama.cpp serves models Ollama already pulled, the llama.cpp/whisper.cpp port collision on 8080, and what the `local-gguf` placeholder was doing wrong.
+Local runtimes — Ollama, llama.cpp, whisper.cpp, Piper — have their own guide: [docs/local_runtimes.md](docs/local_runtimes.md). **Ollama is the local default**; llama.cpp is registered and selectable with `/provider use llamacpp` but is not offered in the first-run menu, since it needs a hand-managed server. It covers which to use, how llama.cpp serves models Ollama already pulled, the llama.cpp/whisper.cpp port collision on 8080, and what the `local-gguf` placeholder was doing wrong.
 
 | Command | Description |
 | :--- | :--- |

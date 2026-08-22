@@ -21,6 +21,23 @@ doesn't work."
 | **Piper** (`piper.http_server`) | text → speech | `piper-local` | 5000 |
 | **Kokoro-FastAPI** | text → speech, higher quality | `kokoro-local` | 8880 |
 
+### Which one the setup wizard offers
+
+**Ollama.** llama.cpp is deliberately absent from the first-run provider menu:
+choosing it there commits you to installing a runtime, obtaining a GGUF the
+installed build can actually load, and launching a server by hand — before
+anything works at all.
+
+It is **demoted, not removed**. It stays registered, stays a valid offline
+failover target, and is selected with:
+
+```text
+/provider use llamacpp
+```
+
+The wizard names it as available rather than hiding it, and `/provider list`
+shows the full registered set.
+
 ### Ollama vs llama.cpp — why both?
 
 They do the same job. Ollama is the better experience: it pulls models, manages
@@ -33,6 +50,12 @@ provider and is a valid target for the offline failover chain.
 
 **If Ollama runs on your machine, use Ollama.** Reach for llama.cpp when it does
 not, or when you want a specific quantization Ollama does not package.
+
+Worth knowing when weighing the two: **Ollama is built on llama.cpp**, vendoring
+a pinned build for many architectures alongside its own Go/GGML engine and MLX on
+Apple Silicon. Choosing Ollama does not avoid llama.cpp; it means using the build
+Ollama pinned rather than one you control. And llama.cpp is not the less
+maintained of the pair — it is the upstream Ollama tracks.
 
 ### Installing llama.cpp
 
