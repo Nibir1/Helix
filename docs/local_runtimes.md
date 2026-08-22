@@ -54,6 +54,24 @@ Helix checks whether the binary exists before suggesting any launch command. If
 you have a healthy Ollama and no llama.cpp, it says so — llama.cpp is not the
 easier option unless Ollama cannot serve your hardware.
 
+### Starting it
+
+Having installed the binary and found your models, the wizard offers to start
+llama-server too, waits for the model to load, and only then reports success.
+Nothing starts implicitly and nothing is restarted for you — ADR-002 still holds
+— but making you copy a command back into the shell you are already in was the
+step that left the flow feeling unfinished.
+
+The started process is **detached on purpose**: tying it to Helix's lifetime
+would reload several gigabytes of weights on every restart, which defeats the
+point of a local runtime. So it keeps running after Helix exits, and Helix tells
+you its PID and how to stop it. Output goes to `~/.helix/llama-server.log`; when
+a load fails, the last lines of that log are printed with the error.
+
+The readiness wait scales its budget with the model size, and distinguishes
+"still loading" from "died trying" — a server that exits mid-load is reported
+immediately instead of waiting out the whole timeout.
+
 ### Yes — llama.cpp downloads models too
 
 It is not "Ollama pulls, llama.cpp doesn't". `llama-server -hf <org>/<repo>`

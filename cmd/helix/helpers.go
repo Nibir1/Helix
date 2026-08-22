@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -712,19 +713,29 @@ func offerLlamaCppInstall() bool {
 		return false
 	}
 
-	err := runCancellableProgressWithTimeout(
-		"INSTALLING LLAMA.CPP",
-		30*time.Minute,
-		func(ctx context.Context, progress func(string, int64, int64)) error {
-			progress("INSTALLING LLAMA.CPP", 0, 0)
-			return runShellInstall(ctx, cmdLine)
-		},
-	)
-	if err != nil {
-		color.Red("Install failed: %v", err)
+	// No spinner here, deliberately. The package manager writes its own progress
+	// to this terminal, and animating over it produced interleaved garbage —
+	// "Downloaded 12.4KB/ 12.4KBe llama.cpp (0.2.0)" — where the spinner
+	// overwrote brew's line. Two writers, one cursor. brew's output is better
+	// than anything Helix would draw, so let the child own the terminal.
+	fmt.Println()
+	color.Cyan("$ %s", cmdLine)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	unreg := utils.RegisterOperation(cancel)
+	defer unreg()
+
+	if err := runShellInstall(ctx, cmdLine); err != nil {
+		fmt.Println()
+		if ctx.Err() != nil {
+			color.Yellow("Install cancelled.")
+		} else {
+			color.Red("Install failed: %v", err)
+		}
 		color.Yellow("Run it manually: %s", cmdLine)
 		return false
 	}
+	fmt.Println()
 
 	// Trust the check, not the exit code: a package manager can succeed while
 	// putting the binary somewhere this process cannot see (a PATH that does not
@@ -806,10 +817,161 @@ func guideLlamaCppModel(endpoint string) {
 	if len(ollamaModels) > 0 {
 		color.Yellow("Ollama's GGUFs load directly — same files, no copy or conversion.")
 	}
+
+	// Offer to run it. The wizard has already installed the binary and found the
+	// model; stopping here to make the user copy a command back in is the step
+	// that made this flow feel unfinished — Ollama's path both installs and
+	// starts, and there is no reason this one should not.
+	candidates := append(append([]launchChoice(nil),
+		toLaunchChoices(cached, "llama.cpp cache")...),
+		ollamaLaunchChoices(ollamaModels)...)
+	if offerLlamaCppStart(candidates, endpoint, port) {
+		return
+	}
+
 	fmt.Println()
 	color.Cyan("Or download a different one:")
 	printLlamaCppPullOptions(port)
 }
+
+// launchChoice is one startable model.
+type launchChoice struct {
+	Label  string
+	Path   string
+	SizeGB float64
+	Origin string
+}
+
+func toLaunchChoices(models []llamacpp.CachedModel, origin string) []launchChoice {
+	out := make([]launchChoice, 0, len(models))
+	for _, m := range models {
+		out = append(out, launchChoice{Label: m.Name, Path: m.Path, SizeGB: m.SizeGB(), Origin: origin})
+	}
+	return out
+}
+
+func ollamaLaunchChoices(models []ollama.LocalModel) []launchChoice {
+	out := make([]launchChoice, 0, len(models))
+	for _, m := range models {
+		out = append(out, launchChoice{
+			Label: m.Name, Path: m.Path, SizeGB: m.SizeGB(), Origin: "pulled by Ollama",
+		})
+	}
+	return out
+}
+
+// offerLlamaCppStart offers to launch llama-server on one of the models found,
+// reporting whether a server is now answering.
+func offerLlamaCppStart(choices []launchChoice, endpoint, port string) bool {
+	if len(choices) == 0 {
+		return false
+	}
+
+	fmt.Println()
+	if !commands.AskForConfirmation("Start llama-server on one of these now?") {
+		return false
+	}
+
+	choice := choices[0]
+	if len(choices) > 1 {
+		fmt.Println()
+		for i, c := range choices {
+			fmt.Printf("  %d) %-34s %5.1f GB  (%s)\n", i+1, truncStr(c.Label, 34), c.SizeGB, c.Origin)
+		}
+		answer := strings.TrimSpace(commands.AskLine(
+			fmt.Sprintf("Which model? (1-%d, blank for 1)", len(choices))))
+		if answer != "" {
+			n, err := strconv.Atoi(answer)
+			if err != nil || n < 1 || n > len(choices) {
+				color.Yellow("Not a listed number; nothing started.")
+				return false
+			}
+			choice = choices[n-1]
+		}
+	}
+
+	logPath, err := llamacpp.DefaultLogPath()
+	if err != nil {
+		color.Red("Cannot prepare a log file: %v", err)
+		return false
+	}
+
+	srv, err := llamacpp.Start(llamacpp.StartOptions{
+		ModelPath: choice.Path, Port: port, LogPath: logPath,
+	})
+	if err != nil {
+		color.Red("Could not start llama-server: %v", err)
+		return false
+	}
+	color.Cyan("Started llama-server (pid %d), loading %s…", srv.PID, choice.Label)
+
+	if !waitForLlamaCpp(srv, endpoint, choice.SizeGB) {
+		return false
+	}
+
+	color.Green("llama-server is answering on %s.", port)
+	// The process is detached and outlives this session, which the user has to
+	// be told: they now own a process holding several gigabytes of RAM.
+	color.Yellow("It keeps running after Helix exits. Stop it with:  %s", srv.StopHint())
+	color.Cyan("Log: %s", srv.LogPath)
+
+	reportResolvedLocalModel()
+	return true
+}
+
+// waitForLlamaCpp waits for readiness, distinguishing a slow load from a failed
+// one.
+func waitForLlamaCpp(srv llamacpp.Server, endpoint string, sizeGB float64) bool {
+	// Weights are memory-mapped at roughly disk speed, so the budget scales with
+	// the model. A generous floor covers small models on slow disks.
+	budget := time.Duration(30+int(sizeGB*20)) * time.Second
+	if budget < 60*time.Second {
+		budget = 60 * time.Second
+	}
+
+	err := runCancellableProgressWithTimeout(
+		"LOADING MODEL",
+		budget,
+		func(ctx context.Context, progress func(string, int64, int64)) error {
+			progress("LOADING MODEL", 0, 0)
+			return llamacpp.WaitReady(ctx, endpoint, func(probeCtx context.Context) error {
+				// A process that exited during load will never answer, so stop
+				// waiting out the whole budget for it.
+				if !srv.Alive() {
+					return errServerExited
+				}
+				p, gerr := ai.GetProviderByName(llamacpp.Name)
+				if gerr != nil {
+					return gerr
+				}
+				return p.HealthCheck(probeCtx)
+			})
+		},
+	)
+	if err == nil {
+		return true
+	}
+
+	if errors.Is(err, errServerExited) || !srv.Alive() {
+		color.Red("llama-server exited while loading the model.")
+		if exitErr := srv.ExitError(); exitErr != nil {
+			color.Red("  %v", exitErr)
+		}
+	} else {
+		color.Red("llama-server did not become ready within %s.", budget)
+		color.Yellow("It may still be loading; check again with /provider-status.")
+	}
+	if tail := llamacpp.LogTail(srv.LogPath, 8); len(tail) > 0 {
+		color.Yellow("Last lines of %s:", srv.LogPath)
+		for _, line := range tail {
+			color.Yellow("  %s", truncStr(line, 160))
+		}
+	}
+	return false
+}
+
+// errServerExited stops the readiness wait early when the process is gone.
+var errServerExited = errors.New("llama-server exited")
 
 // printLlamaCppPullOptions lists -hf download commands suited to this hardware.
 func printLlamaCppPullOptions(port string) {
