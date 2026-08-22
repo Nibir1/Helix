@@ -1,6 +1,8 @@
 package edge
 
 import (
+	"net"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -20,6 +22,9 @@ func TestFindConflictsDetectsSharedPort(t *testing.T) {
 	}
 	if !got[0].Involves() {
 		t.Error("a conflict between two active services must report Involves()")
+	}
+	if got[0].ActiveCount() != 2 {
+		t.Errorf("ActiveCount = %d, want 2", got[0].ActiveCount())
 	}
 	desc := got[0].Describe()
 	if !strings.Contains(desc, "llama.cpp") || !strings.Contains(desc, "whisper-local") {
@@ -135,5 +140,63 @@ func TestFindConflictsIsDeterministic(t *testing.T) {
 	// Endpoints within a conflict are sorted by service name.
 	if first[1].Endpoints[0].Service != "alpha" {
 		t.Errorf("endpoints not sorted: %+v", first[1].Endpoints)
+	}
+}
+
+// TestInvolvesRequiresTwoActiveServices pins the severity rule.
+//
+// One selected service sharing an address with an unselected one is not a
+// conflict in any meaningful sense — nothing else will bind that port. Treating
+// it as one produced a red warning and a six-line remedy on a machine where the
+// port was simply free.
+func TestInvolvesRequiresTwoActiveServices(t *testing.T) {
+	got := FindConflicts([]Endpoint{
+		{Service: "llama.cpp", Role: "LLM", URL: "http://127.0.0.1:8080", Active: false},
+		{Service: "whisper-local", Role: "STT", URL: "http://127.0.0.1:8080", Active: true},
+	})
+	if len(got) != 1 {
+		t.Fatalf("the overlap should still be reported: %+v", got)
+	}
+	if got[0].Involves() {
+		t.Error("one active service is not a conflict that breaks anything")
+	}
+	if got[0].ActiveCount() != 1 {
+		t.Errorf("ActiveCount = %d, want 1", got[0].ActiveCount())
+	}
+}
+
+// TestConflictReportsWhetherThePortIsOccupied: a collision between two
+// configurations is theoretical until something is actually listening.
+func TestConflictReportsWhetherThePortIsOccupied(t *testing.T) {
+	// A port with a live listener.
+	busy := occupy(t)
+	got := FindConflicts([]Endpoint{
+		{Service: "a", URL: "http://127.0.0.1:" + strconv.Itoa(busy), Active: true},
+		{Service: "b", URL: "http://127.0.0.1:" + strconv.Itoa(busy), Active: true},
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected one conflict: %+v", got)
+	}
+	if !got[0].Occupied {
+		t.Error("a port with a listener must be reported as occupied")
+	}
+
+	// And a free one.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	_ = ln.Close()
+
+	got = FindConflicts([]Endpoint{
+		{Service: "a", URL: "http://127.0.0.1:" + portStr, Active: true},
+		{Service: "b", URL: "http://127.0.0.1:" + portStr, Active: true},
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected one conflict: %+v", got)
+	}
+	if got[0].Occupied {
+		t.Error("a free port must not be reported as occupied")
 	}
 }

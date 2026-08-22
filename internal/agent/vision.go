@@ -7,10 +7,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"helix/internal/ai"
 	"helix/internal/input"
 )
 
@@ -70,27 +72,61 @@ func (a *Agent) VisionAvailable() bool {
 // capture, how long they wait, or what they do with the frame (memory only,
 // never written to disk).
 func (a *Agent) DescribeFrame(prompt string) error {
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		prompt = "Describe what you see, briefly and concretely."
-	}
 	if !a.VisionAvailable() {
 		return fmt.Errorf("vision is not available (enable it with /eyes on)")
 	}
-	return a.visionTurn(prompt)
+	_, err := a.visionTurn(prompt)
+	return err
+}
+
+// handleVisionStep executes a planner "vision" step: one frame, one answer.
+//
+// This is the tool the planner was missing. Without it, "turn on the camera"
+// could only be expressed as a shell step — the model would open a camera app
+// while simultaneously saying it had no camera access, and both halves were
+// accurate about the vocabulary it had been given.
+//
+// Note that visionRequested still ignores TYPED deictic input on purpose (see
+// its comment): guessing at "what does this do?" from a keyboard would fire the
+// camera on the most ordinary phrasing there is. This step is the typed path,
+// and it is not a guess — the planner asked for the camera by name.
+//
+// The description is returned so an agentic replan can see what Helix saw, but
+// the step deliberately does NOT set NeedsAnswer: visionTurn has already
+// printed and spoken the answer, and a second pass would only repeat it.
+//
+// Args: step: a validated vision step; args.prompt is optional.
+// Returns: the model's description, or an error the turn reports.
+// Complexity: one capture + one vision round trip.
+func (a *Agent) handleVisionStep(step ai.PlanStep) (string, error) {
+	if !a.VisionAvailable() {
+		// Two causes, one message: the agent cannot tell "eyes off" from "the
+		// selected model cannot see" — VisionEnabled folds both in — so it
+		// names the check that distinguishes them rather than guessing.
+		return "", errors.New("camera vision is unavailable — turn it on with /eyes on, " +
+			"and see /eyes status for whether the selected model can see")
+	}
+	return a.visionTurn(step.Args["prompt"])
 }
 
 // handleVisionTurn captures one frame and answers the utterance through the
 // vision model. Failures degrade to a spoken notice — never a panic or a
 // silent frame.
 func (a *Agent) handleVisionTurn(ev input.InputEvent) {
-	_ = a.visionTurn(ev.Text)
+	_, _ = a.visionTurn(ev.Text)
 }
 
 // visionTurn is the single implementation behind both the conversational vision
 // path and /eyes look. Failures degrade to a spoken notice — never a panic and
 // never a silent frame.
-func (a *Agent) visionTurn(prompt string) error {
+func (a *Agent) visionTurn(prompt string) (string, error) {
+	// Defaulted here rather than in each caller so the typed, spoken, and
+	// planned routes cannot diverge on what a bare "look" asks the model.
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		prompt = "Describe what you see, briefly and concretely."
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -101,14 +137,14 @@ func (a *Agent) visionTurn(prompt string) error {
 	if err != nil {
 		a.render.PrintWarning(fmt.Sprintf("Vision capture failed: %v", err))
 		a.speak("I could not access the camera.")
-		return fmt.Errorf("capture: %w", err)
+		return "", fmt.Errorf("capture: %w", err)
 	}
 
 	resp, err := a.VisionCall(prompt, frame)
 	if err != nil {
 		a.render.PrintWarning(fmt.Sprintf("Vision failed: %v", err))
 		a.speak("I could not analyze what I saw.")
-		return fmt.Errorf("vision model: %w", err)
+		return "", fmt.Errorf("vision model: %w", err)
 	}
 
 	if a.OnVisionMetric != nil {
@@ -118,10 +154,10 @@ func (a *Agent) visionTurn(prompt string) error {
 	resp = strings.TrimSpace(resp)
 	if resp == "" {
 		a.render.PrintWarning("The vision model returned nothing.")
-		return fmt.Errorf("vision model returned an empty answer")
+		return "", fmt.Errorf("vision model returned an empty answer")
 	}
 	a.render.PrintAIMessage(resp, a.typingEffect)
 	a.lastResponse = resp
 	a.speak(resp)
-	return nil
+	return resp, nil
 }

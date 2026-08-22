@@ -106,47 +106,29 @@ func reportEndpointConflicts() int {
 	conflicts := edge.FindConflicts(localSidecarEndpoints())
 	active := 0
 	for _, c := range conflicts {
-		if c.Involves() {
+		switch {
+		case c.Involves():
+			// Two SELECTED services on one address: this breaks as configured.
 			active++
 			color.Red("Endpoint conflict: %s", c.Describe())
 			color.Red("  → One process owns a port. Whichever service is running there will")
 			color.Red("    answer the other's requests with a 404, which reads as \"broken\".")
-			for _, line := range conflictFix(c) {
-				color.Yellow("    %s", line)
-			}
-			continue
+			color.Yellow("    Run /voice-setup — Helix will move one of them to a free port.")
+
+		case c.Occupied:
+			// One selected, one not, but something IS on the port: worth saying,
+			// because the selected service cannot bind it.
+			color.Yellow("Endpoint overlap: %s", c.Describe())
+			color.Yellow("  → Something is already on %s. /voice-setup reassigns a free port.", c.Address)
+
+		default:
+			// Purely theoretical: shared configuration, empty port, at most one
+			// selected. A red warning with a six-line remedy here was noise on a
+			// machine where the port was simply free.
+			color.Cyan("Note: %s — nothing is on that address right now.", c.Describe())
 		}
-		color.Yellow("Endpoint overlap: %s", c.Describe())
-		color.Yellow("  → Harmless while neither is selected, but they cannot both run there.")
 	}
 	return active
-}
-
-// conflictFix suggests the concrete move for the services involved.
-func conflictFix(c Conflict) []string {
-	has := func(name string) bool {
-		for _, e := range c.Endpoints {
-			if e.Service == name {
-				return true
-			}
-		}
-		return false
-	}
-	switch {
-	case has("llama.cpp") && has("whisper-local"):
-		return []string{
-			"Move one of them. For example, keep llama.cpp on 8080 and run whisper on 8081:",
-			"  whisper-server -m model.bin --port 8081 --inference-path /v1/audio/transcriptions",
-			"  then set speech.stt.base_url to http://127.0.0.1:8081",
-			"Or move the brain instead:",
-			"  llama-server -m model.gguf --port 8081",
-			"  export HELIX_LLAMACPP_URL=http://127.0.0.1:8081",
-		}
-	default:
-		return []string{
-			"Give one of them a different --port and update its base_url in ~/.helix/config.json.",
-		}
-	}
 }
 
 // Conflict is aliased so this file reads without the package qualifier.

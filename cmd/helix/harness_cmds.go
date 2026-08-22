@@ -395,6 +395,12 @@ func handleToolsCommand() {
 			gate:      "public-address guard; retrieved text has zero authority",
 			available: true,
 		},
+		{
+			name: "vision", purpose: "Look through the camera and describe one frame",
+			gate:      "/eyes opt-in; one in-memory frame per turn, never written to disk",
+			available: agentCore != nil && agentCore.VisionAvailable(),
+			detail:    visionRouteDescription(),
+		},
 	}
 
 	fmt.Println()

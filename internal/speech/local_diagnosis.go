@@ -42,18 +42,6 @@ func knownPortSquatter(port string) string {
 	return ""
 }
 
-// squatterFix returns the remedies for a known port occupant.
-func squatterFix(service, port string) []string {
-	if service != "macOS AirPlay Receiver" {
-		return nil
-	}
-	return []string{
-		"Either turn it off — System Settings → General → AirDrop & Handoff →",
-		"AirPlay Receiver → Off — or move the sidecar to a free port:",
-		fmt.Sprintf("  (it currently holds port %s)", port),
-	}
-}
-
 // LocalDiagnosis explains why a request to a local sidecar failed.
 //
 // Args:
@@ -87,14 +75,14 @@ func LocalDiagnosis(provider, origin, startCmd, configKey string, err error) err
 		b.WriteString("\n  That is not this sidecar — a local one has no credentials to reject.")
 		if squatter := knownPortSquatter(port); squatter != "" {
 			fmt.Fprintf(&b, "\n  On this platform port %s is normally %s.", port, squatter)
-			for _, line := range squatterFix(squatter, port) {
-				b.WriteString("\n  " + line)
-			}
 		} else {
 			fmt.Fprintf(&b, "\n  Find the owner:  lsof -nP -iTCP:%s -sTCP:LISTEN", port)
 		}
-		appendLines(&b, startCmd != "", "Then start the sidecar on a free port:", "  "+startCmd)
-		appendLines(&b, configKey != "", "And point Helix at it:", "  /config "+configKey+" <url>")
+		// No "move it to a free port" here: Helix assigns ports itself now, and
+		// offering the manual alternative alongside an assignment it has already
+		// made produced two contradictory port numbers in one message.
+		appendLines(&b, configKey != "",
+			"Run /voice-setup to have Helix pick a free port for it.")
 
 	case providers.IsNotFound(err):
 		b.WriteString("a server answered, but none of the routes Helix knows exist on it.")
@@ -163,15 +151,34 @@ func isConnectionRefused(err error) bool {
 	return errors.Is(err, syscall.ECONNREFUSED)
 }
 
-// Launch commands and config keys for the local sidecars, kept next to the
-// diagnosis that prints them.
+// Config keys for the local sidecars, kept next to the diagnosis that prints
+// them.
 const (
-	whisperStartCmd = "whisper-server -m models/ggml-base.en.bin --port 8081"
-	whisperCfgKey   = "stt-url"
-
-	piperStartCmd = "python3 -m piper.http_server -m en_US-lessac-medium.onnx --port 5001"
+	whisperCfgKey = "stt-url"
 	piperCfgKey   = "tts-url"
-
-	kokoroStartCmd = "docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu"
-	kokoroCfgKey   = "tts-url"
+	kokoroCfgKey  = "tts-url"
 )
+
+// Launch commands are rendered against the endpoint ACTUALLY configured, not a
+// constant.
+//
+// They used to be fixed strings carrying a hardcoded port, which produced
+// self-contradicting advice the moment an endpoint moved: "piper-local at
+// http://127.0.0.1:28183: nothing is listening. Start it: ... --port 5001".
+// Following that command starts a server Helix will not talk to.
+
+func whisperStartCmd(origin string) string {
+	return fmt.Sprintf("whisper-server -m models/ggml-base.en.bin --port %s",
+		endpointPort(origin))
+}
+
+func piperStartCmd(origin string) string {
+	return fmt.Sprintf("python3 -m piper.http_server -m en_US-lessac-medium.onnx --port %s",
+		endpointPort(origin))
+}
+
+func kokoroStartCmd(origin string) string {
+	// Kokoro serves 8880 inside the container; only the published port moves.
+	return fmt.Sprintf("docker run -p %s:8880 ghcr.io/remsky/kokoro-fastapi-cpu",
+		endpointPort(origin))
+}

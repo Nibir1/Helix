@@ -52,9 +52,15 @@ func TestPiper403IsDiagnosedNotJustReported(t *testing.T) {
 	if !strings.Contains(msg, srv.URL) {
 		t.Errorf("message should name the endpoint:\n%s", msg)
 	}
-	// It must carry a next step, not just a status code.
-	if !strings.Contains(msg, "piper.http_server") {
-		t.Errorf("message should show how to start the sidecar:\n%s", msg)
+	// It must carry a next step, not just a status code. For an occupied port
+	// that step is the REASSIGNMENT, not a launch command — telling the user to
+	// start a server on a port something else already holds is advice that
+	// cannot work.
+	if !strings.Contains(msg, "/voice-setup") {
+		t.Errorf("message should point at the fix for an occupied port:\n%s", msg)
+	}
+	if strings.Contains(msg, "--port 5000") {
+		t.Errorf("must not suggest launching on the occupied port:\n%s", msg)
 	}
 	// And it must name the provider exactly once.
 	if n := strings.Count(msg, "piper-local"); n != 1 {
@@ -160,15 +166,15 @@ func TestLocalDiagnosisConnectionRefused(t *testing.T) {
 
 func TestLocalDiagnosisNamesAirPlayOnDarwin(t *testing.T) {
 	err := LocalDiagnosis("piper-local", "http://127.0.0.1:5000",
-		piperStartCmd, piperCfgKey, &providers.StatusError{Code: 403, Snippet: ""})
+		piperStartCmd("http://127.0.0.1:5000"), piperCfgKey, &providers.StatusError{Code: 403, Snippet: ""})
 
 	msg := err.Error()
 	if runtime.GOOS == "darwin" {
 		if !strings.Contains(msg, "AirPlay") {
 			t.Errorf("on macOS a 403 on port 5000 should name AirPlay Receiver:\n%s", msg)
 		}
-		if !strings.Contains(msg, "System Settings") {
-			t.Errorf("should say how to turn it off:\n%s", msg)
+		if !strings.Contains(msg, "AirPlay Receiver") {
+			t.Errorf("should name the occupant:\n%s", msg)
 		}
 	} else {
 		// Elsewhere there is no known culprit, so it must not invent one — it
@@ -184,7 +190,7 @@ func TestLocalDiagnosisNamesAirPlayOnDarwin(t *testing.T) {
 
 func TestLocalDiagnosisNotFound(t *testing.T) {
 	err := LocalDiagnosis("whisper-local", "http://127.0.0.1:8080",
-		whisperStartCmd, whisperCfgKey, &providers.StatusError{Code: 404, Snippet: ""})
+		whisperStartCmd("http://127.0.0.1:8080"), whisperCfgKey, &providers.StatusError{Code: 404, Snippet: ""})
 
 	msg := err.Error()
 	if !strings.Contains(msg, "none of the routes") {
@@ -246,7 +252,7 @@ func TestDiagnosisIsQuickEnoughToPrint(t *testing.T) {
 	// Guard against ever making this do I/O: it runs inside an error path.
 	start := time.Now()
 	for i := 0; i < 1000; i++ {
-		_ = LocalDiagnosis("piper-local", "http://127.0.0.1:5000", piperStartCmd, piperCfgKey,
+		_ = LocalDiagnosis("piper-local", "http://127.0.0.1:5000", piperStartCmd("http://127.0.0.1:5000"), piperCfgKey,
 			&providers.StatusError{Code: 403, Snippet: ""})
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {

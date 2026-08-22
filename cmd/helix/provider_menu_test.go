@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"helix/internal/ai"
+	"helix/internal/config"
 	"helix/internal/providers"
 	"helix/internal/providers/llamacpp"
+	"helix/internal/speech"
 )
 
 // TestFirstRunMenuExcludesHandManagedRuntimes pins the demotion.
@@ -94,5 +96,55 @@ func TestCapabilityLookupsUnaffectedByDemotion(t *testing.T) {
 	if got := providers.PreferredMaxTokensField(llamacpp.Name, "local-gguf"); got !=
 		providers.FieldMaxTokens {
 		t.Errorf("llama.cpp still speaks max_tokens, got %q", got)
+	}
+}
+
+// TestFallbackRowUsesTheRegistryKey is the case-sensitivity bug that made every
+// fallback row read "unknown".
+//
+// Callers pass the DISPLAY kind ("STT"), while every registry lookup keys on the
+// lowercase name. speechCredentialState matched no case, returned ok=false, and
+// the table fell through to its empty defaults — so a prompt built to help the
+// user choose told them nothing at all.
+func TestFallbackRowUsesTheRegistryKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	var err error
+	cfg, err = config.DefaultConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := speech.Init(speechConfigFrom(cfg.Speech)); err != nil {
+		t.Fatalf("speech init: %v", err)
+	}
+
+	// A keyed cloud provider must report its cost and its key state.
+	cloud := fallbackRow("tts", "openai")
+	if cloud.ready == "unknown" {
+		t.Error("a registered provider must not report readiness as unknown")
+	}
+	if cloud.cost == "—" {
+		t.Error("a catalogued provider must report a cost")
+	}
+
+	// A local sidecar is free and gated on a running server, not a key.
+	local := fallbackRow("tts", "kokoro-local")
+	if local.cost != "free" {
+		t.Errorf("a local sidecar costs nothing, got %q", local.cost)
+	}
+	// Environment-independent: whether kokoro happens to be running on this
+	// machine decides the wording, but never the SUBJECT — a local sidecar's
+	// readiness is about its server, never about a key.
+	if strings.Contains(strings.ToLower(local.ready), "key") {
+		t.Errorf("a local sidecar needs no key; readiness = %q", local.ready)
+	}
+	if local.ready == "" || local.ready == "unknown" {
+		t.Errorf("a registered local sidecar must report a definite readiness, got %q", local.ready)
+	}
+
+	// The uppercase display form must not be what callers key on; if it leaks
+	// through it produces exactly the "unknown" regression.
+	if got := fallbackRow("TTS", "openai"); got.ready != "unknown" {
+		t.Log("uppercase kind now resolves too — fine, but callers should still normalize")
 	}
 }

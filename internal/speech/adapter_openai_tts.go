@@ -74,7 +74,8 @@ func (p *openaiTTS) wrapErr(err error) error {
 	if !p.local {
 		return fmt.Errorf("%s: %w", p.name, err)
 	}
-	return LocalDiagnosis(p.name, serverOrigin(p.baseURL), kokoroStartCmd, kokoroCfgKey, err)
+	origin := serverOrigin(p.baseURL)
+	return LocalDiagnosis(p.name, origin, kokoroStartCmd(origin), kokoroCfgKey, err)
 }
 
 func (p *openaiTTS) Name() string         { return p.name }
@@ -136,6 +137,20 @@ func (p *openaiTTS) Synthesize(ctx context.Context, text string, opts SynthesisO
 // HealthCheck verifies the key against /models. For the local sidecar ANY
 // HTTP response proves reachability (server versions differ in routes).
 func (p *openaiTTS) HealthCheck(ctx context.Context) error {
+	err := p.healthProbe(ctx)
+	if err == nil || !p.local {
+		return err
+	}
+	// A local sidecar's failure gets the full diagnosis, exactly as piper's and
+	// whisper's do. Without this, kokoro alone reported a raw Go error —
+	// `Get "http://127.0.0.1:8880/v1/models": dial tcp ...: connection refused`
+	// — beside neighbours that explained themselves.
+	origin := serverOrigin(p.baseURL)
+	return LocalDiagnosis(p.name, origin, kokoroStartCmd(origin), kokoroCfgKey, err)
+}
+
+// healthProbe is the raw reachability check.
+func (p *openaiTTS) healthProbe(ctx context.Context) error {
 	if p.local {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
 		if err != nil {

@@ -52,7 +52,7 @@ func TestPlannerToolSchemaMatchesPromptContract(t *testing.T) {
 	// a tool the executor has never heard of, at the API level.
 	wantTools := map[string]bool{
 		"response": true, "shell": true, "git": true, "package": true, "recon": true,
-		"web": true,
+		"web": true, "vision": true,
 	}
 	got := schema.Properties.Steps.Items.Properties.Tool.Enum
 	if len(got) != len(wantTools) {

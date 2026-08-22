@@ -268,8 +268,21 @@ type webResult struct {
 // table structure survives the whitespace and attribute-order churn that
 // breaks position-based parsing.
 var (
-	liteLinkRe    = regexp.MustCompile(`(?is)<a\b[^>]*class="[^"]*result-link[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>`)
-	liteSnippetRe = regexp.MustCompile(`(?is)<td\b[^>]*class="[^"]*result-snippet[^"]*"[^>]*>(.*?)</td>`)
+	// Quote-agnostic and attribute-order-agnostic, both learned the hard way.
+	//
+	// These previously required class="..." in DOUBLE quotes and class BEFORE
+	// href. DuckDuckGo now emits <a rel="nofollow" href="..." class='result-link'>
+	// — single quotes, href first — so the pattern matched nothing and every
+	// search returned "No results". That failure is worse than an error: the
+	// planner then answered from the model's own training data, presenting an
+	// ungrounded answer as if it had been retrieved.
+	liteLinkRe = regexp.MustCompile(
+		`(?is)<a\b(?:[^>]*\bclass\s*=\s*["'][^"']*result-link[^"']*["'])[^>]*>(.*?)</a>`)
+	liteLinkOpenRe = regexp.MustCompile(
+		`(?is)<a\b[^>]*\bclass\s*=\s*["'][^"']*result-link[^"']*["'][^>]*>`)
+	hrefRe        = regexp.MustCompile(`(?is)\bhref\s*=\s*["']([^"']+)["']`)
+	liteSnippetRe = regexp.MustCompile(
+		`(?is)<td\b[^>]*\bclass\s*=\s*["'][^"']*result-snippet[^"']*["'][^>]*>(.*?)</td>`)
 	tagRe         = regexp.MustCompile(`(?is)<[^>]*>`)
 	scriptStyleRe = regexp.MustCompile(`(?is)<(script|style|noscript|head)\b.*?</(script|style|noscript|head)>`)
 	whitespaceRe  = regexp.MustCompile(`[ \t]{2,}`)
@@ -287,15 +300,23 @@ var (
 // Returns: up to webSearchMaxResults results.
 // Complexity: O(len(html)).
 func parseLiteResults(html string) []webResult {
+	// Open tags and inner text are matched separately so href can be pulled from
+	// the tag regardless of where it sits among the attributes.
+	opens := liteLinkOpenRe.FindAllString(html, webSearchMaxResults)
 	links := liteLinkRe.FindAllStringSubmatch(html, webSearchMaxResults)
 	snippets := liteSnippetRe.FindAllStringSubmatch(html, webSearchMaxResults)
 
 	out := make([]webResult, 0, len(links))
 	for i, m := range links {
-		href := strings.TrimSpace(unescapeHTML(m[1]))
+		href := ""
+		if i < len(opens) {
+			if h := hrefRe.FindStringSubmatch(opens[i]); len(h) > 1 {
+				href = strings.TrimSpace(unescapeHTML(h[1]))
+			}
+		}
 		// Tags first, then entities: decoding first would let "&lt;b&gt;" turn
 		// into a tag that the stripper then eats, silently deleting real text.
-		title := squashSpace(unescapeHTML(stripTags(m[2])))
+		title := squashSpace(unescapeHTML(stripTags(m[1])))
 		if href == "" || title == "" {
 			continue
 		}

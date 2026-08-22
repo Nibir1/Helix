@@ -347,3 +347,59 @@ func TestCapTextMarksTruncation(t *testing.T) {
 		t.Errorf("capText split a rune: %q", got)
 	}
 }
+
+// TestParseLiteResultsToleratesAttributeVariation is the regression that made
+// every web search return "No results".
+//
+// The old pattern required class="..." in DOUBLE quotes and class BEFORE href.
+// DuckDuckGo emits <a rel="nofollow" href="..." class='result-link'> — single
+// quotes, href first — so nothing matched. The failure was worse than an error:
+// the planner then answered from the model's own training data and presented an
+// ungrounded answer as retrieved.
+func TestParseLiteResultsToleratesAttributeVariation(t *testing.T) {
+	cases := map[string]string{
+		"single quotes, href first": `
+			<a rel="nofollow" href="https://example.com/a" class='result-link'>First Result</a>
+			<td class='result-snippet'>Snippet one</td>`,
+		"double quotes, class first": `
+			<a class="result-link" href="https://example.com/a">First Result</a>
+			<td class="result-snippet">Snippet one</td>`,
+		"extra classes and spacing": `
+			<a rel="nofollow" href = 'https://example.com/a' class = "foo result-link bar" >First Result</a>
+			<td class = 'x result-snippet y'>Snippet one</td>`,
+	}
+	for name, html := range cases {
+		got := parseLiteResults(html)
+		if len(got) != 1 {
+			t.Errorf("%s: parsed %d results, want 1", name, len(got))
+			continue
+		}
+		if got[0].URL != "https://example.com/a" {
+			t.Errorf("%s: url = %q", name, got[0].URL)
+		}
+		if got[0].Title != "First Result" {
+			t.Errorf("%s: title = %q", name, got[0].Title)
+		}
+	}
+}
+
+// TestParseLiteResultsPairsHrefWithItsOwnLink guards the index pairing after
+// href moved out of the main capture group.
+func TestParseLiteResultsPairsHrefWithItsOwnLink(t *testing.T) {
+	html := `
+		<a rel="nofollow" href="https://first.example" class='result-link'>First</a>
+		<td class='result-snippet'>one</td>
+		<a rel="nofollow" href="https://second.example" class='result-link'>Second</a>
+		<td class='result-snippet'>two</td>`
+
+	got := parseLiteResults(html)
+	if len(got) != 2 {
+		t.Fatalf("parsed %d results, want 2", len(got))
+	}
+	if got[0].URL != "https://first.example" || got[0].Title != "First" {
+		t.Errorf("result 0 mispaired: %+v", got[0])
+	}
+	if got[1].URL != "https://second.example" || got[1].Title != "Second" {
+		t.Errorf("result 1 mispaired: %+v", got[1])
+	}
+}

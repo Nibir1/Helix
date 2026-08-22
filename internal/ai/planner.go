@@ -103,7 +103,7 @@ To ensure valid JSON and executable shell commands:
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package" | "recon" | "web",
+      "tool": "response" | "shell" | "git" | "package" | "recon" | "web" | "vision",
       "message": "...",
       "command": "...",
       "action": "...",
@@ -161,6 +161,20 @@ To ensure valid JSON and executable shell commands:
   plan that pretends to already know the results — the search results come back
   to you first, and you answer from them on the next turn.
 
+### VISION TOOL RULES
+
+- tool = "vision"
+- action = "look"
+- args.prompt = the question to ask about what the camera sees (optional; omit it
+  for a plain description)
+- Use it whenever the user asks Helix to look, to see, to turn the camera on, or
+  to read/identify something in front of it.
+- Helix captures ONE frame, in memory only. Frames are never written to disk.
+- NEVER open a camera application under "shell" (open -a "Photo Booth",
+  imagesnap, ffmpeg). This tool is the ONLY camera path.
+- NEVER answer "I have no camera access" — emit a vision step instead. If the
+  camera is off or no model can see, the step itself reports that.
+
 ### GIT TOOL RULES (SAFE + DANGEROUS OPTION C)
 
 SAFE:
@@ -200,6 +214,9 @@ Example for a question that needs current information:
 
 Example for reading one specific page the user named:
 {"intent":"chat","steps":[{"tool":"web","action":"fetch","args":{"url":"https://go.dev/doc/devel/release"}}]}
+
+Example for a request to look through the camera:
+{"intent":"chat","steps":[{"tool":"vision","action":"look","args":{"prompt":"What is in front of the camera?"}}]}
 
 ### FINAL HARD REQUIREMENT
 
@@ -457,6 +474,7 @@ func validatePlan(p *Plan) error {
 		"package":  true,
 		"recon":    true,
 		"web":      true,
+		"vision":   true,
 	}
 
 	var filtered []PlanStep
@@ -541,6 +559,31 @@ func validatePlan(p *Plan) error {
 			step.Command = "" // never a raw command
 			step.Message = ""
 
+		case "vision":
+			// One action, several ways to say it. A synonym is not a reason to
+			// drop the only step in the plan and fail the turn, so the near
+			// misses normalize instead — but the vocabulary still closes, and
+			// anything outside it is dropped like any unknown action.
+			switch step.Action {
+			case "", "look", "describe", "see", "capture", "camera":
+				step.Action = "look"
+			default:
+				color.Yellow("Dropping unsupported vision action: %s", step.Action)
+				continue
+			}
+			// The question is optional — a bare "look" is a valid request for a
+			// plain description — so unlike web there is nothing to drop for.
+			prompt := strings.TrimSpace(step.Args["prompt"])
+			if prompt == "" {
+				prompt = strings.TrimSpace(step.Args["question"])
+			}
+			step.Args = map[string]string{}
+			if prompt != "" {
+				step.Args["prompt"] = prompt
+			}
+			step.Command = "" // never a raw command; never a camera app
+			step.Message = ""
+
 		case "recon":
 			if step.Action == "" {
 				continue
@@ -596,7 +639,7 @@ func containsAny(s string, needles []string) bool {
 // Args: userInput, envDescription. Returns: prompt string. Complexity: O(1).
 func BuildCompactPlannerPrompt(userInput, envDescription string) string {
 	return fmt.Sprintf(`Output ONLY one valid JSON object. First char '{', last char '}'. No markdown, no commentary.
-Schema: {"intent":"chat|shell|git|package|multi_step","steps":[{"tool":"response|shell|git|package|recon|web","message":"...","command":"...","action":"...","args":{}}]}
+Schema: {"intent":"chat|shell|git|package|multi_step","steps":[{"tool":"response|shell|git|package|recon|web|vision","message":"...","command":"...","action":"...","args":{}}]}
 Shell rules: no package managers, no rm -rf /, no curl|bash, no /tmp execution.
 Current info (news, prices, "latest", "who is now"): {"tool":"web","action":"search","args":{"query":"..."}} — never claim you cannot search.
 User Input: %s
@@ -619,13 +662,14 @@ NOW OUTPUT THE COMPLETE JSON:`, strings.TrimSpace(userInput), strings.TrimSpace(
 // Complexity: O(1).
 func BuildMinimalPlannerPrompt(userInput, envDescription string) string {
 	return fmt.Sprintf(`Return ONLY one JSON object. First char '{', last char '}'. No markdown. No commentary.
-Schema: {"intent":"shell|git|package|multi_step|chat","steps":[{"tool":"response|shell|git|package|recon|web","message":"...","command":"...","action":"...","args":{}}]}
+Schema: {"intent":"shell|git|package|multi_step|chat","steps":[{"tool":"response|shell|git|package|recon|web|vision","message":"...","command":"...","action":"...","args":{}}]}
 Rules: steps MUST be non-empty.
 Git commit: {"tool":"git","action":"commit","args":{"message":"..."}}
 Git push: {"tool":"git","action":"push","args":{"remote":"origin","branch":"main"}}
 Git add: {"tool":"git","action":"add","args":{"paths":"file1 file2"}}
 Shell tool for file creation/editing. No package managers in shell tool.
 Web search: {"tool":"web","action":"search","args":{"query":"..."}}
+Camera: {"tool":"vision","action":"look","args":{"prompt":"..."}} — never a shell camera app.
 Request: %s
 Env: %s
 OUTPUT THE COMPLETE JSON NOW:`, strings.TrimSpace(userInput), strings.TrimSpace(envDescription))

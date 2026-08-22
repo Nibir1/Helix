@@ -76,10 +76,14 @@ func newProvider(t *testing.T, name, model, url string) *Provider {
 
 func collect(t *testing.T, p *Provider, model string) error {
 	t.Helper()
+	// A temperature is set because Helix always sends one — that is precisely
+	// why the fixed-temperature model class rejected every call.
+	temp := 0.4
 	_, err := providers.CollectChat(context.Background(), p, providers.ChatRequest{
-		Model:     model,
-		Messages:  []providers.ChatMessage{{Role: "user", Content: "hi"}},
-		MaxTokens: 256,
+		Model:       model,
+		Messages:    []providers.ChatMessage{{Role: "user", Content: "hi"}},
+		Temperature: &temp,
+		MaxTokens:   256,
 	})
 	return err
 }
@@ -291,5 +295,145 @@ func TestAlternateMaxTokensField(t *testing.T) {
 	}
 	if got := providers.AlternateMaxTokensField(providers.FieldMaxCompletionTokens); got != providers.FieldMaxTokens {
 		t.Errorf("alternate of max_completion_tokens = %q", got)
+	}
+}
+
+// fixedTemperatureServer rejects any temperature but its default, as OpenAI's
+// reasoning models do.
+func fixedTemperatureServer(t *testing.T, seen *[]map[string]any, mu *sync.Mutex) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		*seen = append(*seen, body)
+		mu.Unlock()
+
+		if _, bad := body["temperature"]; bad {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Unsupported value: 'temperature' does not support 0.4 with this model. Only the default (1) value is supported.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+}
+
+// TestFixedTemperatureModelRecovers is the reported failure: every planner and
+// chat call returned 400 because Helix has always sent a temperature, and this
+// model class accepts only its default.
+func TestFixedTemperatureModelRecovers(t *testing.T) {
+	var mu sync.Mutex
+	var seen []map[string]any
+	srv := fixedTemperatureServer(t, &seen, &mu)
+	defer srv.Close()
+
+	p := newProvider(t, "openai", "gpt-5.6-luna", srv.URL)
+	if err := collect(t, p, "gpt-5.6-luna"); err != nil {
+		t.Fatalf("should recover by dropping temperature: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("made %d requests, want 2 (reject then corrected)", len(seen))
+	}
+	if _, ok := seen[0]["temperature"]; !ok {
+		t.Error("the first attempt should carry a temperature")
+	}
+	if _, bad := seen[1]["temperature"]; bad {
+		t.Error("the retry must omit temperature entirely")
+	}
+	// Omitted, not pinned to 1: "the default" is the server's to define, and
+	// guessing a number is a second thing to get wrong.
+	if v, present := seen[1]["temperature"]; present {
+		t.Errorf("temperature should be absent, got %v", v)
+	}
+}
+
+// TestFixedTemperatureIsRemembered: one extra round trip per model, not per call.
+func TestFixedTemperatureIsRemembered(t *testing.T) {
+	var mu sync.Mutex
+	var seen []map[string]any
+	srv := fixedTemperatureServer(t, &seen, &mu)
+	defer srv.Close()
+
+	p := newProvider(t, "openai", "gpt-5.6-luna", srv.URL)
+	for i := 0; i < 3; i++ {
+		if err := collect(t, p, "gpt-5.6-luna"); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 4 {
+		t.Fatalf("made %d requests, want 4 — the correction is not cached", len(seen))
+	}
+}
+
+// TestTemperatureKeptWhereSupported: the vast majority of models sample at a
+// requested temperature, and dropping it everywhere would change their output.
+func TestTemperatureKeptWhereSupported(t *testing.T) {
+	var mu sync.Mutex
+	var seen []map[string]any
+	srv := legacyServer(t, &seen, &mu)
+	defer srv.Close()
+
+	p := newProvider(t, "llamacpp", "local-gguf", srv.URL)
+	if err := collect(t, p, "local-gguf"); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if _, ok := seen[0]["temperature"]; !ok {
+		t.Error("temperature must still be sent to models that accept it")
+	}
+}
+
+// TestBothCorrectionsCanApply: a model can reject the token field AND the
+// temperature, and one retry each must resolve both.
+func TestBothCorrectionsCanApply(t *testing.T) {
+	var mu sync.Mutex
+	var seen []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		seen = append(seen, body)
+		mu.Unlock()
+
+		if _, bad := body["temperature"]; bad {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Unsupported value: 'temperature' does not support 0.4. Only the default (1) value is supported.","code":"unsupported_value"}}`))
+			return
+		}
+		if _, bad := body["max_tokens"]; bad {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.","code":"unsupported_parameter"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p := newProvider(t, "openai", "some-strict-model", srv.URL)
+	if err := collect(t, p, "some-strict-model"); err != nil {
+		t.Fatalf("both corrections should apply: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	final := seen[len(seen)-1]
+	if _, bad := final["temperature"]; bad {
+		t.Error("final request must omit temperature")
+	}
+	if _, bad := final["max_tokens"]; bad {
+		t.Error("final request must not use max_tokens")
+	}
+	if _, ok := final["max_completion_tokens"]; !ok {
+		t.Error("final request should use max_completion_tokens")
 	}
 }

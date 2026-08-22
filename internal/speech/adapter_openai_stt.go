@@ -273,7 +273,7 @@ func (p *openaiSTT) wrapErr(err error) error {
 	if !p.local {
 		return fmt.Errorf("%s: %w", p.name, err)
 	}
-	return LocalDiagnosis(p.name, p.origin, whisperStartCmd, whisperCfgKey, err)
+	return LocalDiagnosis(p.name, p.origin, whisperStartCmd(p.origin), whisperCfgKey, err)
 }
 
 // buildForm renders the multipart body. whisper.cpp's /inference and the OpenAI

@@ -110,7 +110,10 @@ func TestRegistryStreamReportsNoStreamingProvider(t *testing.T) {
 func TestPiperSynthesizeStreamConsumesWAVHeader(t *testing.T) {
 	samples := []int16{1, -2, 3, -4, 5, -6}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("text"); got != "hello" {
+		// The text reaches the server either way; which transport carries it
+		// depends on the piper version. Current servers take a JSON body on
+		// POST /synthesize, older ones a ?text= query on GET /.
+		if got := piperRequestText(t, r); got != "hello" {
 			t.Errorf("text = %q, want %q", got, "hello")
 		}
 		_, _ = w.Write(makeWAV(samples, 22050, 1))
@@ -199,4 +202,20 @@ func TestRegistryStreamRequiresConfiguredChain(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "voice-setup") {
 		t.Fatalf("the error should point at the fix, got %v", err)
 	}
+}
+
+// piperRequestText extracts the utterance from a piper request, whichever
+// transport it used.
+func piperRequestText(t *testing.T, r *http.Request) string {
+	t.Helper()
+	if q := r.URL.Query().Get("text"); q != "" {
+		return q
+	}
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return ""
+	}
+	return body.Text
 }

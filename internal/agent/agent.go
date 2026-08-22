@@ -547,6 +547,19 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 				return obs
 			}
 
+		case "vision":
+			// One frame, memory only, and the answer is delivered by the step
+			// itself — so the output is recorded for a replan but not marked
+			// NeedsAnswer (see handleVisionStep).
+			out, err := a.handleVisionStep(step)
+			if err != nil {
+				a.render.PrintError(fmt.Sprintf("Vision step failed: %v", err))
+				o.OK, o.Err = false, err.Error()
+				obs = append(obs, o)
+				return obs
+			}
+			o.Output = out
+
 		case "web":
 			// Provenance escalation keys web steps on their URL (firewall.go):
 			// a fetch target lifted out of retrieved context needs the same
@@ -595,6 +608,7 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 // move is to stop denying the capability and name the phrasing that reaches it.
 const chatCapabilityPreamble = `You are Helix, a local AI shell. Helix can run shell commands, git and package
 operations, recon tools, and — through its "web" tool — search the web and fetch pages.
+With /eyes on it can also look through the camera and describe what it sees.
 Never tell the user you are unable to search the web or look something up: Helix can.
 If answering needs current information you do not have, say that in one line and
 suggest re-asking as "search the web for <topic>", which routes to the web tool.

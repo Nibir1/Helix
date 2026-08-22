@@ -203,19 +203,45 @@ func TestWhisperLocalHealthCheckPassesOnStockServer(t *testing.T) {
 
 // stockPiperServer mimics `python3 -m piper.http_server`: synthesis at the root
 // path, 404 everywhere else.
+// stockPiperServer mimics CURRENT piper (1.6+): synthesis at POST /synthesize
+// with a JSON body, and a web UI at GET / that returns HTML with status 200.
+//
+// That HTML page is why a GET-only adapter failed on every port: it got a 200
+// and a document, never audio.
 func stockPiperServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
+		switch {
+		case r.URL.Path == "/synthesize" && r.Method == http.MethodPost:
+			var body struct {
+				Text string `json:"text"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Text == "" {
+				http.Error(w, "no text", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "audio/wav")
+			_, _ = w.Write(silentWAV(22050, 1, 120))
+		case r.URL.Path == "/":
+			// The web UI: 200, and useless.
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<!DOCTYPE html><html><body>piper</body></html>"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// legacyPiperServer mimics the OLDER GET /?text= server, still in the wild.
+func legacyPiperServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" || r.Method != http.MethodGet || r.URL.Query().Get("text") == "" {
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Query().Get("text") == "" {
-			http.Error(w, "no text", http.StatusBadRequest)
-			return
-		}
 		w.Header().Set("Content-Type", "audio/wav")
-		_, _ = w.Write(silentWAV(22050, 1, 120))
+		_, _ = w.Write(silentWAV(16000, 1, 90))
 	}))
 }
 
@@ -232,6 +258,40 @@ func TestPiperReachesStockPiperServer(t *testing.T) {
 	}
 	if got.Kind != KindWAV || got.SampleRate != 22050 || len(got.Bytes) < 44 {
 		t.Errorf("bad audio: kind=%s rate=%d bytes=%d", got.Kind, got.SampleRate, len(got.Bytes))
+	}
+	if r, ok := p.(interface{ ActiveRoute() string }); ok && r.ActiveRoute() != "POST /synthesize" {
+		t.Errorf("route = %q, want POST /synthesize", r.ActiveRoute())
+	}
+}
+
+// TestPiperReachesLegacyGetServer keeps older servers working.
+func TestPiperReachesLegacyGetServer(t *testing.T) {
+	srv := legacyPiperServer(t)
+	defer srv.Close()
+
+	p := NewPiperTTS(srv.URL)
+	got, err := p.Synthesize(context.Background(), "hello", SynthesisOptions{})
+	if err != nil {
+		t.Fatalf("legacy GET server must still work: %v", err)
+	}
+	if got.SampleRate != 16000 {
+		t.Errorf("rate = %d, want 16000", got.SampleRate)
+	}
+}
+
+// TestPiperDoesNotAcceptTheWebUI is the failure this whole class produced: the
+// current server answers GET / with HTML and status 200, which must never be
+// mistaken for audio.
+func TestPiperDoesNotAcceptTheWebUI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<!DOCTYPE html><html><body>piper web UI</body></html>"))
+	}))
+	defer srv.Close()
+
+	p := NewPiperTTS(srv.URL)
+	if _, err := p.Synthesize(context.Background(), "hello", SynthesisOptions{}); err == nil {
+		t.Fatal("an HTML 200 must not pass as audio")
 	}
 }
 

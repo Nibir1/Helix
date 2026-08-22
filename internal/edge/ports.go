@@ -91,7 +91,7 @@ func PortOccupant(port int) string {
 // Preferring the default matters: someone who launches `whisper-server` with no
 // flags gets 8080, and quietly moving Helix off it would break the stock case to
 // solve a collision that may not exist on this machine. The fallback is only
-// reached when the default is genuinely occupied.
+// reached when the default is genuinely unusable.
 //
 // The fallback is DETERMINISTIC per service — derived from the name, not
 // randomly chosen — so re-running setup suggests the same port, the saved config
@@ -100,14 +100,31 @@ func PortOccupant(port int) string {
 //
 // Returns the port and whether it is the preferred one.
 func FreePortFor(service string, preferred int) (int, bool) {
-	if PortAvailable(preferred) {
+	return FreePortAvoiding(service, preferred, nil)
+}
+
+// FreePortAvoiding is FreePortFor with a set of ports another service already
+// claims.
+//
+// "Free right now" is not the same as "safe to use". whisper.cpp and llama.cpp
+// both default to 8080, so on a machine where neither is running yet, both are
+// free and both get assigned 8080 — creating a collision that only appears later,
+// when the second one starts. Reserving what other configured services claim
+// turns that into a problem Helix never creates.
+func FreePortAvoiding(service string, preferred int, reserved []int) (int, bool) {
+	taken := make(map[int]bool, len(reserved))
+	for _, p := range reserved {
+		taken[p] = true
+	}
+
+	if !taken[preferred] && PortAvailable(preferred) {
 		return preferred, true
 	}
 
 	start := candidateBase + int(hashString(service)%uint32(candidateSpan))
 	for i := 0; i < candidateSpan; i++ {
 		port := candidateBase + (start-candidateBase+i)%candidateSpan
-		if PortAvailable(port) {
+		if !taken[port] && PortAvailable(port) {
 			return port, false
 		}
 	}

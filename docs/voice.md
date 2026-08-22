@@ -121,12 +121,17 @@ disables the camera immediately while staying in voice mode.
 `/eyes on` opts into the camera. Frames are captured **to memory only** and never
 written to disk.
 
-Two ways to use it:
+Three ways to use it:
 
 - **In conversation, spoken**: a question that points at something ("what's wrong
   with *this*?") captures one frame for that turn.
 - **Explicitly, typed or spoken**: `/eyes look [question]`, or say "what do you
   see".
+- **Through the planner**: the `vision` tool is part of the closed harness
+  vocabulary, so a request like "turn on the camera and tell me what you see"
+  plans a `vision` step. It reaches the same capture path — one in-memory frame
+  — and with eyes off the step fails saying so, rather than reaching for a
+  shell workaround like opening a camera app.
 
 Typed conversational input deliberately does **not** trigger the camera, even
 with eyes on. Deictic words are ambiguous in typed input in a way they are not

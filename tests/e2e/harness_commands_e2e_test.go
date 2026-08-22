@@ -163,7 +163,7 @@ func TestE2E_ToolsListsClosedVocabulary(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The vocabulary is a security property, so every member must be visible.
-	for _, tool := range []string{"response", "shell", "git", "package", "recon", "web"} {
+	for _, tool := range []string{"response", "shell", "git", "package", "recon", "web", "vision"} {
 		if err := h.Expect(tool, 5*time.Second); err != nil {
 			t.Fatalf("tool %q missing from /tools: %v", tool, err)
 		}

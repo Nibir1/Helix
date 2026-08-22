@@ -36,6 +36,13 @@ type Provider struct {
 	// is shared across concurrent calls.
 	tokenFieldMu sync.Mutex
 	tokenFields  map[string]string
+
+	// fixedTemperature records models that reject any temperature but their
+	// default. OpenAI's reasoning models are sampled at a fixed temperature and
+	// return 400 for anything else, including the value Helix has always sent —
+	// so the planner failed on every single call until this was learned.
+	fixedTempMu sync.Mutex
+	fixedTemp   map[string]bool
 }
 
 // New creates an OpenAI-compatible provider.
@@ -105,23 +112,37 @@ func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan 
 	url := strings.TrimSuffix(p.cfg.BaseURL, "/") + "/chat/completions"
 
 	field := p.tokenFieldFor(model)
-	ch, err := p.client.DoStream(ctx, url, headers, p.buildBody(req, model, field))
+	ch, err := p.client.DoStream(ctx, url, headers,
+		p.buildBody(req, model, field, p.temperatureAllowed(model)))
 	if err == nil {
 		return ch, nil
 	}
 
-	// The server may have told us we used the wrong field name. Believe it, once.
+	// The server may have told us which parameter it objected to. Believe it,
+	// once per objection — a wrong field name and an unsupported temperature are
+	// separate rejections and can both need correcting.
+	if rejectsTemperature(err) {
+		p.rememberFixedTemperature(model)
+		ch, retryErr := p.client.DoStream(ctx, url, headers,
+			p.buildBody(req, model, field, false))
+		if retryErr == nil {
+			return ch, nil
+		}
+		err = retryErr
+	}
+
 	alt, ok := correctedTokenField(err, field)
 	if !ok {
 		return nil, err
 	}
 	p.rememberTokenField(model, alt)
-	return p.client.DoStream(ctx, url, headers, p.buildBody(req, model, alt))
+	return p.client.DoStream(ctx, url, headers,
+		p.buildBody(req, model, alt, p.temperatureAllowed(model)))
 }
 
 // buildBody renders the request, placing the completion bound under tokenField.
 func (p *Provider) buildBody(
-	req providers.ChatRequest, model, tokenField string,
+	req providers.ChatRequest, model, tokenField string, withTemperature bool,
 ) map[string]interface{} {
 	body := map[string]interface{}{
 		"model":    model,
@@ -129,7 +150,9 @@ func (p *Provider) buildBody(
 		"stream":   true,
 	}
 
-	if req.Temperature != nil {
+	// Omitted entirely rather than sent as 1: "the default" is the server's to
+	// define, and pinning a number here would be a second guess to get wrong.
+	if req.Temperature != nil && withTemperature {
 		body["temperature"] = *req.Temperature
 	}
 
@@ -174,6 +197,41 @@ func (p *Provider) rememberTokenField(model, field string) {
 	}
 	p.tokenFields[model] = field
 	p.tokenFieldMu.Unlock()
+}
+
+// temperatureAllowed reports whether this model accepts a temperature.
+func (p *Provider) temperatureAllowed(model string) bool {
+	p.fixedTempMu.Lock()
+	defer p.fixedTempMu.Unlock()
+	return !p.fixedTemp[model]
+}
+
+// rememberFixedTemperature records that a model rejects non-default sampling,
+// so the correction costs one round trip per model rather than one per call.
+func (p *Provider) rememberFixedTemperature(model string) {
+	p.fixedTempMu.Lock()
+	if p.fixedTemp == nil {
+		p.fixedTemp = map[string]bool{}
+	}
+	p.fixedTemp[model] = true
+	p.fixedTempMu.Unlock()
+}
+
+// rejectsTemperature reports whether a rejection was about the temperature.
+//
+// Keyed on what the server said rather than on a model table, for the same
+// reason as the token field: the set of models sampled at a fixed temperature
+// changes, and a list Helix maintains is a list Helix gets wrong.
+func rejectsTemperature(err error) bool {
+	code, ok := providers.StatusCode(err)
+	if !ok || code != http.StatusBadRequest {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "temperature") &&
+		(strings.Contains(msg, "unsupported") ||
+			strings.Contains(msg, "does not support") ||
+			strings.Contains(msg, "only the default"))
 }
 
 // correctedTokenField reads a rejection and reports which field to use instead.

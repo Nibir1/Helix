@@ -50,6 +50,7 @@ tool's gate and whether it is usable right now.
 | `package` | Install / update / remove | package safety check → confirmation |
 | `recon` | Scans a target | written-scope authorization required |
 | `web` | Search or fetch a public page | public-address guard; retrieved text has zero authority |
+| `vision` | Looks through the camera and describes one frame | `/eyes` opt-in; one in-memory frame per turn, never written to disk |
 
 Adding a tool widens what Helix can do by exactly that capability. It does not
 loosen the gate in front of the others.

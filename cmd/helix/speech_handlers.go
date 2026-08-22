@@ -112,6 +112,11 @@ func askVoiceID(provider string) string {
 // Numbered, like the main table, so the answer is a digit rather than a name
 // spelled exactly right.
 func askFallback(kind string, names []string, primary string) []string {
+	// Callers pass the DISPLAY form ("STT"); every lookup below keys on the
+	// lowercase registry name. Without this, speechCredentialState matched no
+	// case and the whole table rendered as "unknown".
+	key := strings.ToLower(kind)
+
 	options := make([]string, 0, len(names))
 	for _, n := range names {
 		if n != primary {
@@ -124,11 +129,11 @@ func askFallback(kind string, names []string, primary string) []string {
 
 	fmt.Println()
 	color.Cyan("  FALLBACK %s PROVIDERS — used when %s fails", strings.ToUpper(kind), primary)
-	fmt.Printf("  %-4s %-15s %-9s %-24s %s\n", "#", "PROVIDER", "COST", "READY?", "NOTE")
+	fmt.Printf("  %-3s %-14s %-16s %-20s %s\n", "#", "PROVIDER", "COST", "READY?", "NOTE")
 	for i, name := range options {
-		row := fallbackRow(kind, name)
-		fmt.Printf("  %-4d %-15s %-9s %-24s %s\n",
-			i+1, truncStr(name, 15), row.cost, row.ready, row.note)
+		row := fallbackRow(key, name)
+		fmt.Printf("  %-3d %-14s %-16s %-20s %s\n",
+			i+1, truncStr(name, 14), truncStr(row.cost, 16), truncStr(row.ready, 20), row.note)
 	}
 
 	answer := strings.TrimSpace(commands.AskLine(
@@ -194,10 +199,18 @@ func fallbackRow(kind, name string) fallbackDescription {
 		out.cost = "free"
 		if spec, isSidecar := sidecarSpecs()[name]; isSidecar {
 			endpoint := sidecarEndpoint(kind, name, spec.Default)
-			if port := portOfEndpoint(endpoint); port > 0 && !edge.PortAvailable(port) {
-				out.ready = "maybe — port in use"
-				out.note = "needs a local server on " + endpoint
-			} else {
+			// Ask the sidecar directly rather than inferring from the port.
+			// "port in use" was a guess that could mean the sidecar is running,
+			// or that something unrelated holds the address — two states needing
+			// opposite actions, reported identically.
+			switch {
+			case sidecarAnswersAt(kind, name, endpoint):
+				out.ready = "yes — server running"
+				out.note = endpoint
+			case portOfEndpoint(endpoint) > 0 && !edge.PortAvailable(portOfEndpoint(endpoint)):
+				out.ready = "no — port taken"
+				out.note = "something else holds " + endpoint
+			default:
 				out.ready = "needs local server"
 				out.note = "not running yet: " + endpoint
 			}
@@ -263,6 +276,7 @@ func handleVoiceSetup() {
 		// treatment as the primary — previously they were selected by name and
 		// never asked about, so the chain looked deeper than it was.
 		for _, name := range sttCfg.Fallbacks {
+			autoAssignSidecarPort("stt", name, "")
 			prepareSpeechProvider("stt", name)
 		}
 		color.Green("STT: %s", sttCfg.Provider)
@@ -284,6 +298,7 @@ func handleVoiceSetup() {
 		ttsCfg.Voice = askVoiceID(entry.Provider)
 		ttsCfg.Fallbacks = askFallback("TTS", ttsNames, entry.Provider)
 		for _, name := range ttsCfg.Fallbacks {
+			autoAssignSidecarPort("tts", name, "")
 			prepareSpeechProvider("tts", name)
 		}
 		color.Green("TTS: %s", ttsCfg.Provider)
@@ -889,7 +904,19 @@ func prepareSpeechProvider(kind, provider string) {
 			return
 		}
 	}
-	verifySpeechProvider(kind, provider, requiresKey)
+	if verifySpeechProvider(kind, provider, requiresKey) {
+		return
+	}
+
+	// A local sidecar that is not answering is usually not installed or not
+	// started — both of which Helix can now do. Printing the command and moving
+	// on was the step that let voice setup complete five times without ever
+	// producing speech.
+	if !requiresKey {
+		if offerSidecarSetup(kind, provider) {
+			verifySpeechProvider(kind, provider, requiresKey)
+		}
+	}
 }
 
 // speechCredentialState reports whether a provider needs a key and whether one
@@ -955,7 +982,7 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 // selection, so the closing summary can reference it instead of repeating it.
 var verifiedThisRun = map[string]bool{}
 
-func verifySpeechProvider(kind, provider string, requiresKey bool) {
+func verifySpeechProvider(kind, provider string, requiresKey bool) bool {
 	verifiedThisRun[provider] = true
 	err := runCancellableProgressWithTimeout(
 		"VERIFYING "+strings.ToUpper(provider),
@@ -982,7 +1009,7 @@ func verifySpeechProvider(kind, provider string, requiresKey bool) {
 	)
 	if err == nil {
 		color.Green("  %s verified.", provider)
-		return
+		return true
 	}
 
 	// Name the likely cause rather than echoing a status code: a credential
@@ -990,12 +1017,13 @@ func verifySpeechProvider(kind, provider string, requiresKey bool) {
 	if requiresKey && isAuthFailure(err) {
 		color.Red("  %s rejected the API key.", provider)
 		color.Yellow("  Check it at the provider's dashboard and re-run /voice-setup.")
-		return
+		return false
 	}
 	color.Yellow("  %s could not be verified yet:", provider)
 	for _, line := range strings.Split(strings.TrimSpace(err.Error()), "\n") {
 		color.Yellow("    %s", strings.TrimRight(line, " \t"))
 	}
+	return false
 }
 
 // isAuthFailure reports whether an error is a rejected credential.
@@ -1036,28 +1064,34 @@ type sidecarSpec struct {
 }
 
 // sidecarSpecs is the table of local speech sidecars.
+//
+// Launch commands are DERIVED from the same argument builders Helix executes
+// (voiceSidecars), never written out a second time. They had been duplicated,
+// and duplicated tables drift: this one still said
+// "whisper-server -m models/ggml-base.en.bin" — a relative path to a model
+// Helix no longer defaults to — while the code actually ran
+// "-m ~/.helix/whisper-models/ggml-small.en.bin". A user following the printed
+// command would start a server pointed at nothing.
 func sidecarSpecs() map[string]sidecarSpec {
-	return map[string]sidecarSpec{
-		"whisper-local": {
-			Default: whisperDefaultEndpoint, ConfigKey: "stt-url",
-			Launch: func(port int) string {
-				return fmt.Sprintf("whisper-server -m models/ggml-base.en.bin --port %d", port)
-			},
-		},
-		"piper-local": {
-			Default: piperDefaultEndpoint, ConfigKey: "tts-url",
-			Launch: func(port int) string {
-				return fmt.Sprintf(
-					"python3 -m piper.http_server -m en_US-lessac-medium.onnx --port %d", port)
-			},
-		},
-		"kokoro-local": {
-			Default: kokoroDefaultEndpoint, ConfigKey: "tts-url",
-			Launch: func(port int) string {
-				return fmt.Sprintf("docker run -p %d:8880 ghcr.io/remsky/kokoro-fastapi-cpu", port)
-			},
-		},
+	specs := map[string]sidecarSpec{
+		"whisper-local": {Default: whisperDefaultEndpoint, ConfigKey: "stt-url"},
+		"piper-local":   {Default: piperDefaultEndpoint, ConfigKey: "tts-url"},
+		"kokoro-local":  {Default: kokoroDefaultEndpoint, ConfigKey: "tts-url"},
 	}
+
+	runnable := voiceSidecars()
+	for name, spec := range specs {
+		if sc, ok := runnable[name]; ok {
+			binary, args := sc.Binaries[0], sc.Args
+			spec.Launch = func(port int) string {
+				return binary + " " + strings.Join(args(port), " ")
+			}
+		} else {
+			spec.Launch = func(int) string { return "" }
+		}
+		specs[name] = spec
+	}
+	return specs
 }
 
 // autoAssignSidecarPort resolves the endpoint a local sidecar will use, moving
@@ -1092,7 +1126,18 @@ func autoAssignSidecarPort(kind, provider, configured string) string {
 		return configured
 	}
 
-	port, isPreferred := edge.FreePortFor(provider, current)
+	// The thing on that port may be THIS provider, already running and healthy.
+	//
+	// Without this check Helix read its own server as a squatter, moved to a new
+	// port, and started a SECOND copy — two whisper-servers each holding a
+	// 465 MB model, and the original orphaned. "Occupied" is not the question;
+	// "occupied by something else" is.
+	if sidecarAnswersAt(kind, provider, endpoint) {
+		color.Green("  %s is already running on port %d — keeping it.", provider, current)
+		return configured
+	}
+
+	port, isPreferred := edge.FreePortAvoiding(provider, current, reservedSidecarPorts(provider))
 	if isPreferred || port == current {
 		return configured // nothing better found; leave the config alone
 	}
@@ -1110,10 +1155,18 @@ func autoAssignSidecarPort(kind, provider, configured string) string {
 
 	// Persist immediately so the endpoint survives even if the wizard is
 	// interrupted before its final save.
+	//
+	// The PROVIDER is set alongside the URL, and that is not incidental:
+	// registerBuiltins only hands a configured BaseURL to the provider named as
+	// active, so rebuilding with just the URL set left the adapter on its stock
+	// endpoint. The wizard then verified the port it had moved away from and
+	// printed advice for it — the reassignment appeared to have no effect.
 	switch kind {
 	case "stt":
+		cfg.Speech.STT.Provider = provider
 		cfg.Speech.STT.BaseURL = assigned
 	case "tts":
+		cfg.Speech.TTS.Provider = provider
 		cfg.Speech.TTS.BaseURL = assigned
 	}
 	if err := cfg.SavePreferences(); err != nil {
@@ -1135,4 +1188,27 @@ func knownOccupant(port int) string {
 		return "macOS AirPlay Receiver"
 	}
 	return ""
+}
+
+// sidecarAnswersAt reports whether the given provider is already serving at an
+// endpoint.
+//
+// It rebuilds a throwaway adapter pointed at that address rather than asking the
+// registry, because the registry's instance may still carry the OLD endpoint at
+// this point in the wizard — which is precisely the confusion that produced
+// duplicate servers.
+func sidecarAnswersAt(kind, provider, endpoint string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	switch provider {
+	case "whisper-local":
+		return speech.NewWhisperLocalSTT("", endpoint).HealthCheck(ctx) == nil
+	case "piper-local":
+		return speech.NewPiperTTS(endpoint).HealthCheck(ctx) == nil
+	case "kokoro-local":
+		return speech.NewKokoroLocalTTS("", "", endpoint).HealthCheck(ctx) == nil
+	}
+	_ = kind
+	return false
 }

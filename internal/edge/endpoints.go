@@ -14,8 +14,10 @@ package edge
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -40,17 +42,33 @@ type Endpoint struct {
 type Conflict struct {
 	Address   string
 	Endpoints []Endpoint
+
+	// Occupied reports whether something is listening on the address right now.
+	// A collision between two configurations is theoretical until then.
+	Occupied bool
 }
 
-// Involves reports whether the conflict includes an active service — the case
-// that actually breaks something right now.
-func (c Conflict) Involves() bool {
+// ActiveCount is how many of the colliding services are actually selected.
+func (c Conflict) ActiveCount() int {
+	n := 0
 	for _, e := range c.Endpoints {
 		if e.Active {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
+}
+
+// Involves reports whether this collision can break something as configured.
+//
+// TWO active services, not one. A single selected service sharing an address
+// with an unselected one is not a conflict in any meaningful sense — nothing
+// else is going to bind that port — and reporting it as one produced a red
+// warning with a six-line remedy on a machine where the port was simply free.
+// The unselected case is still surfaced, quietly, because it will matter if the
+// other service is ever selected.
+func (c Conflict) Involves() bool {
+	return c.ActiveCount() >= 2
 }
 
 // Describe renders the conflict and what to do about it.
@@ -102,7 +120,11 @@ func FindConflicts(endpoints []Endpoint) []Conflict {
 			continue
 		}
 		sort.Slice(distinct, func(i, j int) bool { return distinct[i].Service < distinct[j].Service })
-		out = append(out, Conflict{Address: addr, Endpoints: distinct})
+		out = append(out, Conflict{
+			Address:   addr,
+			Endpoints: distinct,
+			Occupied:  !portFree(addr),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
 	return out
@@ -144,4 +166,17 @@ func isLoopback(host string) bool {
 		return true
 	}
 	return false
+}
+
+// portFree reports whether an address currently has nothing on it.
+func portFree(hostPort string) bool {
+	_, portStr, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return true
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return true
+	}
+	return PortAvailable(port)
 }

@@ -233,3 +233,64 @@ func TestFreePortForAvoidsAWildcardHolder(t *testing.T) {
 		t.Errorf("assigned port %d is not actually free", got)
 	}
 }
+
+// TestFreePortAvoidingSkipsClaimedPorts is the collision Helix used to create
+// for itself.
+//
+// whisper.cpp and llama.cpp both default to 8080. On a machine where neither is
+// running, both are FREE — so assigning by availability alone hands 8080 to
+// whisper, and the clash only appears later, when the brain starts. "Free right
+// now" is not "safe to use".
+func TestFreePortAvoidingSkipsClaimedPorts(t *testing.T) {
+	// A port that is genuinely free.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	_ = ln.Close()
+	free, _ := strconv.Atoi(portStr)
+
+	// Without a reservation it is preferred.
+	if got, preferred := FreePortAvoiding("whisper-local", free, nil); !preferred || got != free {
+		t.Fatalf("a free unclaimed port should be preferred: got %d (%v)", got, preferred)
+	}
+
+	// Claimed by another service: must be skipped even though it is free.
+	got, preferred := FreePortAvoiding("whisper-local", free, []int{free})
+	if preferred {
+		t.Error("a claimed port must not be reported as preferred")
+	}
+	if got == free {
+		t.Errorf("port %d is claimed by another service and must not be assigned", got)
+	}
+	if !PortAvailable(got) {
+		t.Errorf("the assigned port %d is not actually free", got)
+	}
+}
+
+// TestFreePortAvoidingSkipsClaimedFallbacks: the reservation must apply to the
+// uncommon range too, not just the preferred port.
+func TestFreePortAvoidingSkipsClaimedFallbacks(t *testing.T) {
+	busy := occupy(t)
+
+	first, _ := FreePortAvoiding("piper-local", busy, nil)
+	// Now claim that exact fallback and confirm a different one is chosen.
+	second, _ := FreePortAvoiding("piper-local", busy, []int{first})
+	if second == first {
+		t.Errorf("the claimed fallback %d was assigned anyway", first)
+	}
+	if !PortAvailable(second) {
+		t.Errorf("assigned port %d is not free", second)
+	}
+}
+
+// TestFreePortForDelegates keeps the simpler entry point behaving identically.
+func TestFreePortForDelegates(t *testing.T) {
+	busy := occupy(t)
+	a, aPref := FreePortFor("whisper-local", busy)
+	b, bPref := FreePortAvoiding("whisper-local", busy, nil)
+	if a != b || aPref != bPref {
+		t.Errorf("FreePortFor(%d) = %d/%v, FreePortAvoiding = %d/%v", busy, a, aPref, b, bPref)
+	}
+}

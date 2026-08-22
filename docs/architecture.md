@@ -13,7 +13,7 @@ The entry point for all user input. It uses a weighted evidence system to classi
 
 ### 2. AI Planner & Agent Orchestrator (`internal/ai/planner.go`, `internal/agent/agent.go`)
 - **Strict JSON Protocol**: The planner is forced to output a rigid JSON schema defining `intent` and `steps`.
-- **Tool Use**: Supports `response`, `shell`, `git`, `package`, `recon`, and `web` tools.
+- **Tool Use**: Supports `response`, `shell`, `git`, `package`, `recon`, `web`, and `vision` tools.
 - **Web Tool** (`internal/agent/web.go`): read-only network retrieval —
   `action: "search"` (DuckDuckGo Lite, top 5 results) and `action: "fetch"` (one URL,
   HTML stripped to text). Classified at the same risk tier as a read-only shell
