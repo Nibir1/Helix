@@ -87,7 +87,14 @@ func TestAnalyzerQuietNotSilent(t *testing.T) {
 func TestAnalyzerSensitivityClamped(t *testing.T) {
 	// Sensitivity out of range must be clamped, not panic.
 	a := Analyzer{Sensitivity: 99}
+	// Noise at amp 0.1 has RMS ≈ 0.058, which is above the 0.01 silence floor
+	// but still below the most sensitive loudness threshold (0.10) — so the
+	// correct result is the quiet-but-audible one: no event, and no panic. The
+	// message used to claim a loud event WAS expected, which contradicted the
+	// assertion directly above it and invited a future reader to "fix" the
+	// wrong half.
 	if got := a.Analyze(whiteNoise(rand.New(rand.NewSource(2)), 0.1)); len(got) != 0 {
-		t.Fatalf("sensitivity 99 clamps to 1 (most sensitive); expected a loud event on noise, got %+v", got)
+		t.Fatalf("sensitivity 99 must clamp to 1 and leave sub-threshold noise "+
+			"unreported (rms 0.058 < 0.10), got %+v", got)
 	}
 }

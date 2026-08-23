@@ -221,10 +221,15 @@ func main() {
 	// BlackBox Phase 2: voice channel wiring — prompter swap, persisted mode,
 	// and the spoken-response seam.
 	initVoiceMode()
+	initVoiceLog()
 	agentCore.OnSpeak = func(text string) {
 		if !speech.TTSEnabled() {
 			return
 		}
+		// Recorded here rather than at each caller: this is the one seam every
+		// spoken reply passes through, and it is gated on TTS above, so the log
+		// records what was actually SAID rather than what might have been.
+		logSpoke(text)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
 		// SpeakStream begins playback after the first sentence synthesizes

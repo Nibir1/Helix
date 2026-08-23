@@ -474,7 +474,38 @@ func voiceCommandAllowed(line string) (bool, string) {
 		return false, fmt.Sprintf(
 			"I can tell you what %s is, but changing it has to be typed.", cmd.Name)
 	}
+	if voiceStartsTranscriptLog(line) {
+		return false, "Starting a transcript log has to be typed. " +
+			"I can stop one whenever you ask."
+	}
 	return true, ""
+}
+
+// voiceStartsTranscriptLog reports whether a spoken command would BEGIN
+// recording transcripts to disk.
+//
+// ADR-005 keeps /config and /stealth off the voice surface because they move
+// the approval or privacy posture, and switching on a store of everything the
+// microphone hears is squarely that. But the deny list is per-command and
+// /blackbox has to stay voice-reachable — the "manual mode" safety valve lives
+// on it — so the rule is applied to the subcommand instead of the command.
+//
+// The asymmetry is deliberate and matches the camera: voice may always turn
+// recording OFF, because a privacy control should fail toward collecting less.
+func voiceStartsTranscriptLog(line string) bool {
+	fields := strings.Fields(strings.ToLower(line))
+	if len(fields) < 3 {
+		return false
+	}
+	if fields[0] != "/blackbox" && fields[0] != "/bb" {
+		return false
+	}
+	switch fields[1] {
+	case "log", "logs", "transcript":
+	default:
+		return false
+	}
+	return fields[2] == "on" || fields[2] == "enable"
 }
 
 // -------------------------------------------------------

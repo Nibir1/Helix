@@ -566,7 +566,7 @@ func voiceCommands() []command {
 	return []command{
 		{
 			Name: "/blackbox", VoiceOK: true, Aliases: []string{"/bb"},
-			Usage: "/blackbox [on|off|status|setup|look|eyes|wake|tts|say]", Category: catVoice,
+			Usage: "/blackbox [on|off|status|setup|look|eyes|wake|tts|say|log]", Category: catVoice,
 			Summary: "Live mode — Helix listens, watches, answers, and speaks up",
 			Detail:  blackBoxDetail(),
 			Handler: handleBlackBoxCommand,

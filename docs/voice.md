@@ -89,6 +89,14 @@ ask what the posture is, and changing it has to be typed. The refusal is spoken,
 never silent: a misheard phrase tells you it was refused rather than quietly
 doing something else.
 
+One rule lands on a *subcommand* rather than a command: **voice can stop the
+transcript log but never start it.** `/blackbox log on` has to be typed, for the
+same reason `/config` is unreachable — switching on a store of everything the
+microphone hears moves your privacy posture. `/blackbox log off` always works by
+voice, because a privacy control should fail toward collecting less. `/blackbox`
+itself has to stay voice-reachable regardless: the "manual mode" safety valve
+lives on it.
+
 ---
 
 ## 3. Safety in the voice channel
@@ -233,7 +241,22 @@ name is resolved. See [local_runtimes.md](local_runtimes.md).
 
 ---
 
-## 6. Honest limits
+## 6. What gets written down
+
+Nothing you say is stored unless you ask. `/blackbox log on` starts a local text
+record at `~/.helix/voice_log/` — transcripts, replies, the STT provider and its
+confidence, and what the pipeline did with each utterance (planner, spoken
+command, kill phrase, or refused). With it off there is no directory and no file.
+
+It is **text only, never audio**: captured clips are deleted the moment they are
+read, so there is nothing to point at. The file is 0600 in a 0700 directory,
+rotates at 1 MiB keeping three generations, and `/purge` wipes it. `/blackbox
+log show` reads it back; `/blackbox status` says whether it is recording, beside
+the microphone and camera states.
+
+---
+
+## 7. Honest limits
 
 Worth stating plainly, because "realtime voice AI" implies things this does not
 yet do:
@@ -262,7 +285,7 @@ yet do:
 
 ---
 
-## 7. Setup
+## 8. Setup
 
 ```text
 /blackbox setup     configure STT and TTS providers, then verify the chain
@@ -271,6 +294,14 @@ yet do:
 /blackbox on        go live — microphone, camera, speech, companion
 /blackbox off       back to the keyboard (also stops a reply mid-sentence)
 ```
+
+`/blackbox setup` opens with three **recommended chains** — cheapest cloud
+(Groq + gpt-4o-mini-tts), lowest latency (Deepgram Nova-3 + Aura-2), and fully
+local/private (whisper.cpp + Piper) — so the common case is one keystroke.
+Each cloud chain pre-fills a local fallback; the local one deliberately has
+none. Picking a preset still requests and verifies keys, still assigns and
+probes sidecar ports, and still verifies the chain: it fills in answers rather
+than skipping steps. "Choose manually" shows the full pricing tables.
 
 `/blackbox setup` probes what you selected before reporting success, so a sidecar
 that is not running (or a port owned by something else) is named at setup rather

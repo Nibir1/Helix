@@ -30,25 +30,7 @@ import (
 // speechConfigFrom maps the persisted config section onto the speech package
 // selection.
 func speechConfigFrom(sc config.SpeechConfig) speech.Config {
-	return speech.Config{
-		STT: speech.STTConfig{
-			Provider:      sc.STT.Provider,
-			Model:         sc.STT.Model,
-			BaseURL:       sc.STT.BaseURL,
-			Endpoints:     sc.STT.Endpoints,
-			Fallbacks:     sc.STT.Fallbacks,
-			StreamChunkMs: sc.STT.StreamChunkMs,
-		},
-		TTS: speech.TTSConfig{
-			Provider:    sc.TTS.Provider,
-			Model:       sc.TTS.Model,
-			Voice:       sc.TTS.Voice,
-			BaseURL:     sc.TTS.BaseURL,
-			Endpoints:   sc.TTS.Endpoints,
-			Fallbacks:   sc.TTS.Fallbacks,
-			FirstByteMs: sc.TTS.FirstByteMs,
-		},
-	}
+	return sc.Runtime()
 }
 
 // knownVoices lists valid voice identifiers per TTS provider.
@@ -316,6 +298,16 @@ func handleVoiceSetup() {
 		return
 	}
 
+	// ---- recommended chains (P9.7) ----
+	// Offered before the tables, because for most people this is the whole
+	// decision and the tables are the escape hatch rather than the other way
+	// round. A chosen preset still walks the same key/sidecar/verify path
+	// below — it pre-fills answers, it does not bypass steps.
+	if applied, ok := offerSpeechPresets(reg, catalog); ok {
+		commitSpeechSelection(applied.stt, applied.tts)
+		return
+	}
+
 	// ---- STT selection ----
 	sttNames := reg.STTNames()
 	sttRows := filterCatalog(catalog, "stt", sttNames)
@@ -362,6 +354,17 @@ func handleVoiceSetup() {
 		color.Green("TTS: %s", ttsCfg.Provider)
 	}
 
+	commitSpeechSelection(sttCfg, ttsCfg)
+}
+
+// commitSpeechSelection persists a chosen chain, re-initializes the engine, and
+// verifies it before claiming success.
+//
+// Shared by the manual path and the presets so there is exactly one place that
+// knows how to write this config. That matters more here than anywhere else in
+// the wizard: this function is where Endpoints was dropped the second time, and
+// a preset path with its own copy of the merge would have been a third.
+func commitSpeechSelection(sttCfg config.SpeechSTTConfig, ttsCfg config.SpeechTTSConfig) {
 	if sttCfg.Provider == "" && ttsCfg.Provider == "" {
 		fmt.Println(shell.Hint("voice setup skipped — /blackbox setup runs it again"))
 		return

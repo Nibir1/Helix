@@ -10,6 +10,7 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/commands"
+	"helix/internal/speech"
 )
 
 // Config holds runtime configuration and paths for Helix.
@@ -29,6 +30,7 @@ type Config struct {
 	Vision                VisionConfig           `json:"vision"`
 	Ambient               AmbientConfig          `json:"ambient"`
 	Companion             CompanionConfig        `json:"companion"`
+	VoiceLog              VoiceLogConfig         `json:"voice_log"`
 	ModelConfig           ai.ModelConfig         `json:"model_config"`
 	ExecuteConfig         commands.ExecuteConfig `json:"execute_config"`
 }
@@ -103,6 +105,38 @@ type SpeechConfig struct {
 	STT      SpeechSTTConfig  `json:"stt"`
 	TTS      SpeechTTSConfig  `json:"tts"`
 	WakeWord SpeechWakeConfig `json:"wake_word"`
+}
+
+// Runtime converts the persisted section into the speech package's runtime
+// config.
+//
+// This lives here, once, because it existed twice and the copies drifted: the
+// interactive shell converted Endpoints and the daemon's inline copy did not,
+// so a sidecar the wizard had moved to a free port was dialled correctly by
+// `helix` and at its stale default by `helix daemon` — the third appearance of
+// the same Endpoints-dropped-at-the-boundary bug the dev log records twice.
+// Two callers, one conversion; a field added to the config now reaches both or
+// neither.
+func (sc SpeechConfig) Runtime() speech.Config {
+	return speech.Config{
+		STT: speech.STTConfig{
+			Provider:      sc.STT.Provider,
+			Model:         sc.STT.Model,
+			BaseURL:       sc.STT.BaseURL,
+			Endpoints:     sc.STT.Endpoints,
+			Fallbacks:     sc.STT.Fallbacks,
+			StreamChunkMs: sc.STT.StreamChunkMs,
+		},
+		TTS: speech.TTSConfig{
+			Provider:    sc.TTS.Provider,
+			Model:       sc.TTS.Model,
+			Voice:       sc.TTS.Voice,
+			BaseURL:     sc.TTS.BaseURL,
+			Endpoints:   sc.TTS.Endpoints,
+			Fallbacks:   sc.TTS.Fallbacks,
+			FirstByteMs: sc.TTS.FirstByteMs,
+		},
+	}
 }
 
 // LLMFallbackConfig controls automatic cloud→local language-model failover
@@ -274,6 +308,28 @@ func CompanionDefaults() CompanionConfig {
 	}
 }
 
+// VoiceLogConfig controls the opt-in voice interaction log (BlackBox P2.8).
+//
+// Enabled is false by default and that default is a privacy guarantee, not a
+// convenience: with it off, no directory and no file exist at all (threat V5).
+// Turning it on stores what Helix HEARD and SAID as text — never audio, since
+// captured clips are deleted the moment they are read.
+//
+// The zero value is therefore the correct default, which is why LoadPreferences
+// copies this section wholesale instead of merging field-wise: an absent
+// section must mean "off", and there is no default worth protecting from an
+// empty one.
+type VoiceLogConfig struct {
+	Enabled bool `json:"enabled"`
+
+	// MaxBytes bounds the active log file before it rotates (0 → 1 MiB), and
+	// KeepFiles is how many rotated generations survive (0 → 3). Both exist
+	// because an always-on assistant on a Raspberry Pi shares its filesystem
+	// with everything else on the board.
+	MaxBytes  int64 `json:"max_bytes,omitempty"`
+	KeepFiles int   `json:"keep_files,omitempty"`
+}
+
 // Interval, Cooldown, and Threshold resolve a possibly-zero field to its
 // default, so callers never have to repeat the fallback.
 func (c CompanionConfig) Interval() time.Duration {
@@ -403,6 +459,9 @@ func (cfg *Config) LoadPreferences() error {
 	}
 	// Ambient's zero value is the correct default (disabled); copy wholesale.
 	cfg.Ambient = prefs.Ambient
+	// Same for the voice log: absent section means off, which is the default
+	// we want. See VoiceLogConfig for why this one must NOT be field-merged.
+	cfg.VoiceLog = prefs.VoiceLog
 	// Companion's zero value is NOT its default (Enabled defaults to true), so a
 	// config file written before this section existed must not silently mean
 	// "off". Absence is detected on the whole struct, not per field.

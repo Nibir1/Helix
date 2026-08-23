@@ -28,7 +28,7 @@ reduced authority**, enforced structurally (see ADR-005), not by prompting.
 | V3 | **Voice mimicry / playback attack** used to confirm a dangerous action (recorded "yes", synthesized clone). | Dangerous actions (force push, hard reset, clean worktree, delete main, critical-package removal) require *typed* confirmation. Voice confirmation is structurally impossible: the voice prompter refuses to satisfy typed-confirmation requests and instructs the user to type. |
 | V4 | **Camera privacy.** Frames persisted to disk, sent to an unintended provider, or captured while the user believes vision is off. | Vision is OFF by default and opens only on an explicit act: `/blackbox eyes on`, or `/blackbox on`, which enables it as part of going live. **That second path is a deliberate widening** — live mode is a camera consent moment by definition, so it is announced (TTS + banner) and `/blackbox off` closes the camera with the mode. Frames are memory-only (filesystem-snapshot test enforces zero persistence); one configured vision provider (`vision.provider`/`vision.model`); every frame batch journaled (metadata only, never pixels); `/blackbox eyes off` and the voice phrase "turn off your eyes" deactivate instantly without leaving the conversation. The phrase is matched loosely on purpose: a privacy control should fail toward closing the camera. |
 | V4b | **Unattended capture.** The companion loop samples the camera on a timer, with no per-frame user action. | Runs only inside live mode, which the user entered explicitly and which announced the camera; stops with `/blackbox off` or "turn off your eyes"; `companion.enabled=false` disables initiative entirely while keeping the camera available on request. Frames are diffed in-process and an unchanged scene never reaches a model at all, so a still room is not silently streamed to a provider. Same memory-only and journal guarantees as any other frame. |
-| V5 | **Transcript/audio persistence leakage** from logs. | Voice interaction log opt-in (default absent); 0600 permissions; redaction consistent with the diagnostics package; `/purge` wipes all voice artifacts. |
+| V5 | **Transcript/audio persistence leakage** from logs. | Voice interaction log opt-in and **default absent** — with it off there is no directory and no file, enforced by test, not merely an empty log. Enabled, it stores **text only, never audio**: captured clips are deleted the moment they are read, so there is no audio artifact to reference. `~/.helix/voice_log/` is 0600 inside a 0700 directory, control characters are stripped so a transcript cannot carry terminal escapes into a later `cat`, entries are length-bounded, and the file rotates (1 MiB × 3 generations) so an always-on assistant cannot fill a small board's disk. `/purge` wipes it. **Voice may stop the log but never start it** — enabling it moves the privacy posture, so it is typed-only, while disabling by voice always works. The writing package imports no networking at all, grep-enforced in CI like `internal/diagnostics`. |
 | V6 | **Cloud provider data exposure.** Audio, text, or frames leaving the machine to STT/TTS/vision vendors. | Per-provider explicit opt-in with user-entered keys; the setup wizard states exactly what is sent where; local sidecar chain (whisper.cpp, Piper) is the documented private default; no telemetry, no phone-home pricing/catalog fetches (pricing is embedded data + local user override). |
 | V7 | **Daemon IPC hijack.** A local process connects to the daemon socket and issues commands. | Socket lives in `~/.helix/` (0700 dir) with 0600 permissions — only the owning UID can connect; optional shared-token file; the daemon refuses `submit` while an interactive TTY session holds the active-session lock. |
 | V8 | **Sidecar supply chain.** whisper.cpp / Piper / openWakeWord installers fetch attacker-substituted binaries. | Installer scripts pin versions and publish checksums; installation requires explicit user consent per component (mirrors the Ollama installer UX); health checks report sidecar version mismatches. |
@@ -47,6 +47,11 @@ reduced authority**, enforced structurally (see ADR-005), not by prompting.
 5. Wake-armed sessions lock back to wake-only listening after 60 seconds of
    inactivity.
 6. Every policy decision (cap applied, deny, timeout-decline) is journaled.
+7. Voice may **reduce** what is collected but never increase it. "Turn off your
+   eyes" closes the camera and `/blackbox log off` stops transcript recording,
+   both by voice; opening the camera as part of live mode is an explicit,
+   announced act, and starting the transcript log must be typed. A privacy
+   control should fail toward collecting less.
 
 ## Testing enforcement
 
@@ -55,7 +60,13 @@ reduced authority**, enforced structurally (see ADR-005), not by prompting.
   required — in table-driven unit tests covering the full deny-list matrix
   (action × channel × confidence).
 - A filesystem-snapshot test proves no frame or audio bytes land on disk outside
-  explicitly opt-in paths.
+  explicitly opt-in paths. A second pair — one unit, one end-to-end against the
+  real binary — proves the voice log's *default absence*: the unit test asserts a
+  disabled log leaves the directory uncreated, and the e2e test asserts the
+  shipped wiring leaves it disabled. Those are different claims, and a log opened
+  eagerly at startup would pass the first and fail the second.
+- A grep test keeps `internal/journal` free of networking imports, so the code
+  that writes down what the user said cannot send it anywhere.
 - Hardware-independent CI: all speech tests run against `httptest` mock
   endpoints or WAV fixtures; hardware checks are manual QA with logged
   checklists.

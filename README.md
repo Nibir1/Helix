@@ -277,7 +277,7 @@ See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice
 
 | Command | Description |
 | :--- | :--- |
-| `/blackbox [on\|off\|status\|setup\|look\|eyes\|wake\|tts\|say]` | Live mode — Helix listens, watches, answers, and speaks up |
+| `/blackbox [on\|off\|status\|setup\|look\|eyes\|wake\|tts\|say\|log]` | Live mode — Helix listens, watches, answers, and speaks up |
 | `/listen [seconds]` | Record and transcribe one clip (max 60s) |
 | `/mictest` | 3s self-test: is the mic actually being heard? |
 
@@ -291,6 +291,14 @@ Subcommands:
 - **wake** `on|off` — hands-free wake phrase between turns
 - **tts** `on|off` — whether ordinary replies are spoken aloud
 - **say** *text* — speak text through the TTS chain
+- **log** `on|off|status|show` — keep a local text record of what was heard and said
+
+Nothing you say is stored unless you ask for it. `/blackbox log on` starts a
+transcript log at `~/.helix/voice_log/` (0600, rotated, wiped by `/purge`); with
+it off there is no directory and no file. It records **text only** — transcripts,
+replies, the STT provider and its confidence — never audio, because captured
+clips are deleted the moment they are read. Voice can always stop the log and
+never start it: turning recording on has to be typed.
 
 ### Utilities
 | Command | Description |

@@ -24,6 +24,7 @@ import (
 	"helix/internal/config"
 	"helix/internal/diagnostics"
 	"helix/internal/input"
+	"helix/internal/journal"
 	"helix/internal/ollama"
 	"helix/internal/session"
 	"helix/internal/shell"
@@ -89,6 +90,7 @@ type Daemon struct {
 	sess     *session.RingStore
 	undo     *session.UndoJournal
 	journal  *Journal
+	voiceLog *journal.VoiceLog // P2.8: nil unless the user opted in
 	renderer *daemonRenderer
 	server   *Server
 
@@ -134,9 +136,21 @@ func New() (*Daemon, error) {
 		}
 	}
 
-	journal, err := NewJournal()
+	jrn, err := NewJournal()
 	if err != nil {
 		return nil, err
+	}
+
+	// P2.8: the opt-in voice transcript log. Off by default, in which case
+	// OpenVoiceLog returns nil and every record call is a no-op — the daemon
+	// must not create a transcript store the user never asked for.
+	vlDir, vlErr := journal.DefaultVoiceLogDir()
+	var voiceLog *journal.VoiceLog
+	if vlErr == nil {
+		voiceLog, _ = journal.OpenVoiceLog(vlDir, cfg.VoiceLog.Enabled, journal.Options{
+			MaxBytes:  cfg.VoiceLog.MaxBytes,
+			KeepFiles: cfg.VoiceLog.KeepFiles,
+		})
 	}
 
 	// P11.2: arm the cloud→local brain failover. A misconfigured fallback is
@@ -144,7 +158,7 @@ func New() (*Daemon, error) {
 	// and refusing to start over it would be a worse failure than the one it
 	// guards against.
 	if ferr := ai.ConfigureLocalFallback(cfg.AIFallback()); ferr != nil {
-		journal.Record("lifecycle", "", "", "llm fallback disabled: "+ferr.Error())
+		jrn.Record("lifecycle", "", "", "llm fallback disabled: "+ferr.Error())
 	}
 	sess, err := session.NewRingStore(cfg.Daemon.SessionTurns)
 	if err != nil {
@@ -155,19 +169,11 @@ func New() (*Daemon, error) {
 		return nil, err
 	}
 
-	if err := speech.Init(speech.Config{
-		STT: speech.STTConfig{
-			Provider: cfg.Speech.STT.Provider, Model: cfg.Speech.STT.Model,
-			BaseURL: cfg.Speech.STT.BaseURL, Fallbacks: cfg.Speech.STT.Fallbacks,
-			StreamChunkMs: cfg.Speech.STT.StreamChunkMs,
-		},
-		TTS: speech.TTSConfig{
-			Provider: cfg.Speech.TTS.Provider, Model: cfg.Speech.TTS.Model,
-			Voice: cfg.Speech.TTS.Voice, BaseURL: cfg.Speech.TTS.BaseURL,
-			Fallbacks: cfg.Speech.TTS.Fallbacks, FirstByteMs: cfg.Speech.TTS.FirstByteMs,
-		},
-	}); err != nil {
-		journal.Record("lifecycle", "", "", "speech init failed: "+err.Error())
+	// One shared conversion (config.SpeechConfig.Runtime), not a second inline
+	// copy: this one had silently dropped Endpoints, so a sidecar the wizard
+	// moved to a free port was dialled at its stale default by the daemon only.
+	if err := speech.Init(cfg.Speech.Runtime()); err != nil {
+		jrn.Record("lifecycle", "", "", "speech init failed: "+err.Error())
 	}
 
 	// A background daemon has no meaningful launch cwd (LaunchAgents/systemd
@@ -187,6 +193,9 @@ func New() (*Daemon, error) {
 		if !speech.TTSEnabled() {
 			return
 		}
+		// Gated on TTS above, so the log records what was actually said rather
+		// than what would have been said had speech been on.
+		voiceLog.Spoke(text)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
 		_ = speech.SpeakStream(ctx, text)
@@ -199,7 +208,8 @@ func New() (*Daemon, error) {
 	}
 
 	d := &Daemon{
-		agent: ag, sess: sess, undo: undo, journal: journal,
+		agent: ag, sess: sess, undo: undo, journal: jrn,
+		voiceLog: voiceLog,
 		renderer: renderer, server: server,
 		startedAt: time.Now(), stopping: make(chan struct{}),
 		breakReminderMin: cfg.Daemon.BreakReminderMin,
@@ -775,6 +785,7 @@ func (d *Daemon) runVoiceTurn(ctx context.Context) bool {
 	// the kind of clip STT hallucinates a word out of.
 	if !speech.UsableSpeech(clip) {
 		d.journal.Record("voice", "", "", "no speech detected — re-arming")
+		d.voiceLog.Note("no speech detected — re-arming")
 		return false
 	}
 
@@ -786,10 +797,12 @@ func (d *Daemon) runVoiceTurn(ctx context.Context) bool {
 	text := strings.TrimSpace(transcript.Text)
 	if text == "" {
 		d.journal.Record("voice", "", "", "empty transcript — re-arming")
+		d.voiceLog.Note("empty transcript — re-arming")
 		return false
 	}
 
 	d.journal.Record("submit", "voice", text, "hands-free")
+	d.voiceLog.Heard(text, transcript.Provider, transcript.Confidence, journal.OutcomePlanner)
 	d.mu.Lock()
 	d.agent.HandleInputEvent(input.InputEvent{
 		Text: text, Channel: input.ChannelVoice,

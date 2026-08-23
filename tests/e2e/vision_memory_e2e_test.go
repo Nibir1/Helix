@@ -48,7 +48,7 @@ func TestE2E_HelpRendersBlackBoxCommands(t *testing.T) {
 	// Usage strings come from the command registry, so assert on the usage
 	// lines the registry actually publishes rather than a second hand-kept copy.
 	for _, cmd := range []string{
-		"/blackbox [on|off|status|setup|look|eyes|wake|tts|say]",
+		"/blackbox [on|off|status|setup|look|eyes|wake|tts|say|log]",
 		"/memory [show|clear]"} {
 		if err := h.Expect(cmd, 10*time.Second); err != nil {
 			t.Fatal(err)

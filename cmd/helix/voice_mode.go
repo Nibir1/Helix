@@ -22,6 +22,7 @@ import (
 	"helix/internal/audio"
 	"helix/internal/commands"
 	"helix/internal/input"
+	"helix/internal/journal"
 	"helix/internal/shell"
 	"helix/internal/speech"
 	"helix/internal/utils"
@@ -474,6 +475,7 @@ func finishVoiceTranscript(text string, transcript speech.Transcript) (input.Inp
 	// Hands-free kill switches (ADR-005 wake controls): recognized before
 	// dispatch.
 	if isVoiceKillPhrase(text) {
+		logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeKillPhrase)
 		// blackBoxOff, not exitVoiceMode: live mode opened the camera and the
 		// companion loop too, and a safety valve that leaves either running has
 		// not actually let go.
@@ -484,6 +486,7 @@ func finishVoiceTranscript(text string, transcript speech.Transcript) (input.Inp
 	// Vision privacy kill switch (threat V4): "turn off your eyes" deactivates
 	// the camera immediately WITHOUT leaving live mode.
 	if isEyesOffPhrase(text) {
+		logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeEyesOff)
 		setVisionEnabled(false)
 		return input.InputEvent{}, errVoiceStopped
 	}
@@ -497,9 +500,11 @@ func finishVoiceTranscript(text string, transcript speech.Transcript) (input.Inp
 	// before the planner (so "what's on my list" reads the list instead of
 	// becoming a shell plan).
 	if dispatchVoiceCommand(text) {
+		logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeCommand)
 		return input.InputEvent{}, errVoiceHandled
 	}
 
+	logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomePlanner)
 	return input.InputEvent{
 		Text:    text,
 		Channel: input.ChannelVoice,

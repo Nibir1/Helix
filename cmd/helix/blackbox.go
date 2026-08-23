@@ -49,6 +49,7 @@ var blackBoxUsage = []string{
 	"/blackbox wake on|off      hands-free wake phrase between turns",
 	"/blackbox tts on|off       whether ordinary replies are spoken aloud",
 	"/blackbox say <text>       speak text through the TTS chain",
+	"/blackbox log on|off       keep a local text record of what was heard and said",
 }
 
 // handleBlackBoxCommand implements /blackbox and its subcommands.
@@ -78,6 +79,8 @@ func handleBlackBoxCommand(c cmdArgs) {
 		handleSayCommand(c.Shift())
 	case "mictest":
 		handleMicTest()
+	case "log", "logs", "transcript":
+		handleVoiceLogCommand(c.Shift())
 
 	default:
 		color.Yellow("Unknown: /blackbox %s", c.Sub())
@@ -178,12 +181,16 @@ func blackBoxStatus() {
 		mode = shell.Badge(shell.StateGood, "LIVE") + shell.Muted("  listening")
 	}
 
-	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "INITIATIVE")
+	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "INITIATIVE", "TRANSCRIPT")
 	fmt.Println(shell.PanelTitle("blackbox"))
 	fmt.Println(shell.KV("MODE", mode, w))
 	fmt.Println(shell.KV("HEARING", blackBoxHearingLine(), w))
 	fmt.Println(shell.KV("SIGHT", blackBoxEyesLine(), w))
 	fmt.Println(shell.KV("INITIATIVE", companionStatusLine(), w))
+	// Whether speech is being written to disk belongs in the same report as
+	// whether the microphone and camera are open: it is the third thing a
+	// privacy-conscious user wants to know, and it had no surface at all.
+	fmt.Println(shell.KV("TRANSCRIPT", voiceLogStatusLine(), w))
 	fmt.Println(shell.PanelEnd())
 
 	// The deep chain report (STT/TTS providers, recorder, latencies) is the
@@ -264,6 +271,9 @@ func blackBoxDetail() []string {
 		"",
 		"Camera frames are captured one at a time, held in memory, and never",
 		"written to disk. Only metadata reaches the journal.",
+		"",
+		"Nothing you say is stored unless you ask: /blackbox log on keeps a local",
+		"text record of transcripts and replies (never audio), and /purge wipes it.",
 		"",
 		"The microphone is muted while Helix is speaking — it cannot hear itself,",
 		"which also means it cannot be interrupted by voice mid-sentence.")

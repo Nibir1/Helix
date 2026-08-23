@@ -18,6 +18,29 @@ daemon, camera vision, and the privacy controls behind each.
 On a fresh install this runs automatically as part of first boot, after the AI
 provider and the system-package stage (`/setup` re-runs any stage later).
 
+### Recommended chains (the one-pick route)
+
+The wizard opens with three pre-worked answers, because for most people the
+provider tables are the escape hatch rather than the decision:
+
+| Chain | Hears you | Answers you | Why |
+| :--- | :--- | :--- | :--- |
+| **Cheapest cloud** ★ | `groq` whisper-large-v3-turbo | `openai` gpt-4o-mini-tts | large-model accuracy at ~$0.04/hr (ADR-011) |
+| **Lowest latency** | `deepgram` nova-3 | `deepgram` aura-2 | streaming partials, ~300 ms first byte |
+| **Fully local / private** | `whisper-local` | `piper-local` | no key, no per-call cost, nothing leaves the machine, no Docker |
+
+Each cloud chain pre-fills a **local** fallback, because the point of a fallback
+is surviving the failure most likely to happen — the network — and a second
+cloud vendor does not. The local chain deliberately has no fallback: adding a
+cloud one would quietly undo the reason you picked private.
+
+Picking a chain does not skip any step. Keys are still requested and verified,
+sidecar ports are still assigned and probed, and the chain is still verified
+before the wizard claims success — a preset fills in answers, it does not take
+shortcuts. "Choose manually" is always the last option.
+
+### Choosing it yourself
+
 The wizard prints a pricing table (provider, model, estimated $/month at 2h/day,
 latency, what it requires, ★ best value) for both speech-to-text (STT) and
 text-to-speech (TTS), then collects API keys and optional fallback providers.
@@ -192,16 +215,57 @@ looking like a hang.
 (`vocal|log|ignore`) and cooldowns so Helix never response-spams. Disabled by
 default; runs only in full voice mode.
 
-## 8. Privacy & data layout
+## 8. The voice interaction log (opt-in, off by default)
+
+Nothing you say is written to disk unless you ask for it.
+
+```text
+/blackbox log on        # start recording transcripts and replies
+/blackbox log off       # stop; existing entries are kept until /purge
+/blackbox log status    # is anything being recorded, and where
+/blackbox log show [n]  # read the last n entries (default 20)
+```
+
+With it **off there is no directory and no file** — that is the guarantee, not
+just an empty log. Turning it on creates `~/.helix/voice_log/voice.jsonl`
+(0600, in a 0700 directory) and records, per utterance:
+
+- what Helix **heard**, the STT provider that transcribed it, that provider's
+  confidence, and **what the pipeline did about it** — dispatched to the
+  planner, matched a spoken command, hit a kill phrase, or was refused by the
+  Voice Risk Policy;
+- what Helix **said**, when speech was actually on;
+- session notes such as "no speech detected — re-arming".
+
+It records **text only, never audio.** Captured clips are deleted the moment
+they are read and camera frames are never written at all, so there is no audio
+file for the log to point at — and storing a path to a file that no longer
+exists would be a liability that bought nothing.
+
+The log **rotates** at 1 MiB and keeps three generations
+(`voice_log.max_bytes` / `voice_log.keep_files` tune it), so an always-on
+assistant cannot fill a small board's filesystem. `/purge` wipes it, and
+`/blackbox status` shows whether it is recording next to the microphone and
+camera states.
+
+**Voice can stop the log but never start it.** Switching on a store of
+everything the microphone hears moves your privacy posture, which is why
+ADR-005 keeps `/config` and `/stealth` off the voice surface; enabling the log
+has to be typed. Turning it *off* by voice always works, because a privacy
+control should fail toward collecting less.
+
+## 9. Privacy & data layout
 
 - **Keys:** `~/.helix/secrets.json` (0600), namespaced `stt.*` / `tts.*`.
 - **Session:** `~/.helix/session.json` (0600) — `/memory clear` wipes it.
 - **Journals:** `~/.helix/journal/` (interactions, undo, vision metadata) —
-  append-only, redacted, `/purge` wipes all of it.
+  append-only, redacted, rotated at 1 MiB × 3 generations, `/purge` wipes all of it.
+- **Voice log:** `~/.helix/voice_log/` — **absent unless you enable it** (§8);
+  text only, same permissions and rotation, `/purge` wipes it.
 - **Metrics:** `~/.helix/metrics/` (wake events) — local only.
 - **No telemetry:** nothing leaves the machine without a provider + key you
   entered; the pricing catalog is embedded data + a local override
   (`~/.helix/pricing.json`).
 
-`/purge` wipes keys, DBs, session memory, journals, metrics, and the daemon
-socket for a clean slate.
+`/purge` wipes keys, DBs, session memory, journals, the voice log, metrics, and
+the daemon socket for a clean slate.

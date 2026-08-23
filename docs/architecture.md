@@ -160,6 +160,35 @@ command reference against the same table.
   `CLAUDE.md`, discovered by walking up from the working directory and fenced as
   data-only — a committed file is content from whoever wrote the repository.
 
+### 5d. Local Logs (`internal/journal/`)
+
+One append-only NDJSON writer behind every on-disk record Helix keeps: the
+daemon's interaction journal and the opt-in voice interaction log. Both wanted
+the same three properties, so they share one implementation rather than two that
+drift.
+
+- **Permissions and rotation are the package's job, schemas belong to callers.**
+  Files are 0600 in a 0700 directory and rotate at 1 MiB keeping three
+  generations. Rotation happens *before* the write that would exceed the budget,
+  not after — checking afterwards leaves a file over its limit until the next
+  append, which on a log that goes quiet is indefinitely. The journal had no
+  rotation at all before this, despite the roadmap describing it as rotated
+  since the day it was written.
+- **Redaction keeps content visible and bounds it.** These logs exist so a user
+  can audit exactly what was asked and heard, so redaction strips control
+  characters (a transcript must not carry terminal escapes into a later `cat`)
+  and length-bounds each entry — truncating on a rune boundary, because a
+  severed UTF-8 sequence makes the whole JSON line unparseable and silently
+  drops the entry on read-back.
+- **`Open` does not create the file.** For the voice log, "default absent" is a
+  privacy guarantee (threat V5), and a zero-byte file is still a file that says
+  a voice session happened.
+- **Nil is the disabled state.** A nil `*VoiceLog` is a working no-op, so call
+  sites record unconditionally and never guard — a forgotten guard is how an
+  opt-out leaks.
+- **No networking, grep-enforced.** The package that writes down what the user
+  said cannot send it anywhere, the same contract `internal/diagnostics` carries.
+
 ## Data Flow
 ```text
 User Input → Classifier → [Shell Command] → Safety Pipeline → Sandbox → OS Shell

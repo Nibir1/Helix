@@ -45,6 +45,13 @@ type harness struct {
 	outMu     sync.Mutex
 	outBuf    bytes.Buffer
 	closeOnce sync.Once
+
+	// plannerPrompts returns the prompts the mock provider actually received.
+	// Assertions about CONTEXT (what Helix told the model) cannot be made from
+	// terminal output — the prompt is the only place session memory, RAG blocks
+	// and directives are visible. It is a closure over the handler's own state
+	// rather than a copy, so there is one source of truth.
+	plannerPrompts func() []string
 }
 
 // newHarness boots helix under a PTY with an isolated HOME and a mock provider
@@ -57,6 +64,8 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 
 	hits := new(int32)
 	ttsHits := new(int32)
+	var promptMu sync.Mutex
+	var prompts []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/chat/completions":
@@ -66,6 +75,9 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 			// plan with shell steps. Answer it with a well-formed "yes" so the
 			// pre-firewall scenarios keep their original behavior.
 			promptText := extractPromptFromRequest(r)
+			promptMu.Lock()
+			prompts = append(prompts, promptText)
+			promptMu.Unlock()
 			if strings.Contains(promptText, "safety critic") || strings.Contains(promptText, "plan critic") {
 				reply = `{"verdict":"yes"}`
 			}
@@ -166,6 +178,11 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		project:  project,
 		chatHits: hits,
 		ttsHits:  ttsHits,
+		plannerPrompts: func() []string {
+			promptMu.Lock()
+			defer promptMu.Unlock()
+			return append([]string(nil), prompts...)
+		},
 	}
 	go h.readLoop()
 
