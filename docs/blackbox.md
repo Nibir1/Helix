@@ -229,6 +229,20 @@ neither is sufficient — an unauthorised camera passes both checks.
 (`vocal|log|ignore`) and cooldowns so Helix never response-spams. Disabled by
 default; runs only in full voice mode.
 
+In `vocal` mode Helix offers one short line per category and then holds its
+tongue: *"Are you okay?"* after a loud noise (10-minute cooldown), *"sounds like
+an alarm. Want me to check?"* (5 minutes), *"I lost the sound of your voice. Want
+me to repeat?"* after prolonged silence (2 minutes). **Music gets no remark at
+all** — it is recognised so Helix can avoid commenting on it, not so it can talk
+about it.
+
+These are heuristics on energy and spectral shape, not a trained classifier: a
+pure tone reads as alarm-like, broadband noise as a loud noise, many tones as
+music. Real-world accuracy needs the classifier sidecar the roadmap defers; what
+is measured today is the rules against the acoustic shapes they were written for
+(100% on a 57-fixture corpus). It shares the wake loop's microphone stream and
+costs about 0.04% of a core while live mode is on.
+
 ## 8. The voice interaction log (opt-in, off by default)
 
 Nothing you say is written to disk unless you ask for it.
