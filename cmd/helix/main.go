@@ -237,6 +237,8 @@ func main() {
 		if err := speech.SpeakStream(ctx, text); err != nil && utils.IsDebugMode() {
 			fmt.Fprintf(os.Stderr, "[voice] speak: %v\n", err)
 		}
+		// §10's TTS first-audio number is only auditable if it is written down.
+		logSpeechLatency()
 	}
 
 	// BlackBox Phase 11: arm the cloud→local brain failover. The interactive

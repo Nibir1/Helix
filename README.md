@@ -277,7 +277,7 @@ See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice
 
 | Command | Description |
 | :--- | :--- |
-| `/blackbox [on\|off\|status\|setup\|look\|eyes\|wake\|tts\|say\|log]` | Live mode — Helix listens, watches, answers, and speaks up |
+| `/blackbox [on\|off\|status\|setup\|look\|eyes\|wake\|tts\|say\|log\|stats]` | Live mode — Helix listens, watches, answers, and speaks up |
 | `/listen [seconds]` | Record and transcribe one clip (max 60s) |
 | `/mictest` | 3s self-test: is the mic actually being heard? |
 
@@ -292,6 +292,7 @@ Subcommands:
 - **tts** `on|off` — whether ordinary replies are spoken aloud
 - **say** *text* — speak text through the TTS chain
 - **log** `on|off|status|show` — keep a local text record of what was heard and said
+- **stats** — measured latencies and wake rate, judged against the §10 targets
 
 Nothing you say is stored unless you ask for it. `/blackbox log on` starts a
 transcript log at `~/.helix/voice_log/` (0600, rotated, wiped by `/purge`); with

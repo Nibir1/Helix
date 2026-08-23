@@ -9,12 +9,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +21,7 @@ import (
 	"helix/internal/commands"
 	"helix/internal/input"
 	"helix/internal/journal"
+	"helix/internal/metrics"
 	"helix/internal/shell"
 	"helix/internal/speech"
 	"helix/internal/utils"
@@ -772,32 +771,21 @@ func handleMicTest() {
 // appendMetricsRecord appends one JSON line to ~/.helix/metrics/<name>.jsonl
 // (0600, local only, never transmitted). All §10 "measured by metrics log"
 // numbers land here so the release run can be audited from one directory.
+//
+// The writing itself now lives in internal/metrics, which also reads these
+// files for `/blackbox stats`. That is deliberate: for three years of commits
+// the field names existed only at the write site, so a reader added anywhere
+// else would have been free to spell them differently — the same
+// dropped-at-the-boundary bug that cost the speech config its Endpoints three
+// separate times.
 func appendMetricsRecord(name string, fields map[string]any) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	dir := filepath.Join(home, ".helix", "metrics")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return
-	}
-	f, err := os.OpenFile(filepath.Join(dir, name+".jsonl"),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	line, err := json.Marshal(fields)
-	if err != nil {
-		return
-	}
-	_, _ = f.Write(append(line, '\n'))
+	metrics.Append(name, fields)
 }
 
 // appendAmbientEvent records one ambient event to the local metrics journal
 // (~/.helix/metrics/ambient.jsonl, local only, never transmitted).
 func appendAmbientEvent(ev ambient.Event) {
-	appendMetricsRecord("ambient", map[string]any{
+	appendMetricsRecord(metrics.FileAmbient, map[string]any{
 		"ts":        time.Now().UTC().Format(time.RFC3339),
 		"category":  string(ev.Category),
 		"intensity": ev.Intensity,
@@ -807,7 +795,7 @@ func appendAmbientEvent(ev ambient.Event) {
 // logWakeEvent appends one wake event to the local metrics journal
 // (~/.helix/metrics/wake.jsonl, local only, never transmitted).
 func logWakeEvent(ev wakeword.WakeEvent) {
-	appendMetricsRecord("wake", map[string]any{
+	appendMetricsRecord(metrics.FileWake, map[string]any{
 		"ts":     ev.DetectedAt.UTC().Format(time.RFC3339),
 		"score":  ev.Score,
 		"phrase": ev.Phrase,
@@ -827,13 +815,51 @@ func logVoiceLatency(metric string, d time.Duration, meta map[string]any) {
 			fields[k] = v
 		}
 	}
-	appendMetricsRecord("voice", fields)
+	appendMetricsRecord(metrics.FileVoice, fields)
+}
+
+// logSpeechLatency records TTS time-to-first-audio (§10 target ≤800ms cloud,
+// ≤1.5s local).
+//
+// This was the one §10 number with a hard millisecond budget that never reached
+// the metrics directory: it lived in an atomic in internal/speech, so
+// /blackbox status could show the LAST value and it vanished on exit. A release
+// run that has to audit "all §10 numbers from one directory" could not audit
+// this one at all.
+//
+// Called after speech, and only when a measurement exists — a spoken reply with
+// TTS disabled records nothing rather than a zero that would drag the p50 down.
+func logSpeechLatency() {
+	ms := speech.LastSynthesizeLatencyMs()
+	if ms <= 0 {
+		return
+	}
+	appendMetricsRecord(metrics.FileSpeech, map[string]any{
+		"ts":       time.Now().UTC().Format(time.RFC3339),
+		"metric":   metrics.MetricFirstAudio,
+		"latency":  ms,
+		"provider": activeTTSProvider(),
+		"streamed": speech.LastSpeechStreamed(),
+	})
+}
+
+// activeTTSProvider names the head of the TTS chain, so a recorded latency can
+// be judged against the cloud or local column of §10 rather than an assumed one.
+func activeTTSProvider() string {
+	reg := speech.Default()
+	if reg == nil {
+		return ""
+	}
+	if chain := reg.TTSChain(); len(chain) > 0 {
+		return chain[0]
+	}
+	return ""
 }
 
 // logVisionLatency records a frame-to-insight sample (§10 target ≤5s
 // best-effort on llava). provider is the vision LLM that answered.
 func logVisionLatency(metric string, d time.Duration, provider string) {
-	appendMetricsRecord("vision", map[string]any{
+	appendMetricsRecord(metrics.FileVision, map[string]any{
 		"ts":       time.Now().UTC().Format(time.RFC3339),
 		"metric":   metric,
 		"latency":  d.Milliseconds(),

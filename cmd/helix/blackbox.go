@@ -50,6 +50,7 @@ var blackBoxUsage = []string{
 	"/blackbox tts on|off       whether ordinary replies are spoken aloud",
 	"/blackbox say <text>       speak text through the TTS chain",
 	"/blackbox log on|off       keep a local text record of what was heard and said",
+	"/blackbox stats            measured latencies and wake rate against the §10 targets",
 }
 
 // handleBlackBoxCommand implements /blackbox and its subcommands.
@@ -81,6 +82,8 @@ func handleBlackBoxCommand(c cmdArgs) {
 		handleMicTest()
 	case "log", "logs", "transcript":
 		handleVoiceLogCommand(c.Shift())
+	case "stats", "metrics":
+		handleVoiceStatsCommand()
 
 	default:
 		color.Yellow("Unknown: /blackbox %s", c.Sub())

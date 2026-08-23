@@ -299,7 +299,22 @@ yet do:
 
 ---
 
-## 8. Setup
+## 8. Measured performance
+
+`/blackbox stats` summarizes what Helix has actually measured on this machine —
+wake-to-execution, TTS time-to-first-audio, frame-to-insight — against the
+project's latency targets, with local and cloud paths graded separately because
+they have different budgets. It reports a median and a worst case, says *typical
+only* when the median passes and the worst case does not, and refuses to print a
+percentile a small sample cannot support. Wake events include an
+unanswered-wake count, which is an upper bound on false positives rather than a
+measurement of them.
+
+Samples are local NDJSON under `~/.helix/metrics/`, wiped by `/purge`.
+
+---
+
+## 9. Setup
 
 ```text
 /blackbox setup     configure STT and TTS providers, then verify the chain

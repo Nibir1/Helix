@@ -262,7 +262,38 @@ ADR-005 keeps `/config` and `/stealth` off the voice surface; enabling the log
 has to be typed. Turning it *off* by voice always works, because a privacy
 control should fail toward collecting less.
 
-## 9. Privacy & data layout
+## 9. Measured performance (`/blackbox stats`)
+
+```text
+/blackbox stats
+```
+
+Helix records a local sample every time it does something with a latency target:
+a wake-to-execution turn, a spoken reply's time-to-first-audio, a camera
+frame-to-insight. `/blackbox stats` summarizes them against the targets in the
+roadmap's §10 table.
+
+Three things it deliberately will not do, because a performance report that
+flatters is worse than none:
+
+- **It grades local and cloud separately.** They have different budgets (3s vs
+  6s for a voice turn; 800ms vs 1.5s for first audio), so each sample is judged
+  by the provider that produced it. A blended average would be measured against
+  a threshold that applies to neither half.
+- **It will not show a p95 it cannot support.** Below 20 samples you get the
+  maximum, labelled as the maximum.
+- **It distinguishes "typical" from "always".** When the median meets the budget
+  and the worst case does not, the verdict reads *typical only* rather than
+  *meets target* — that gap is the whole reason to look.
+
+The wake section reports events per hour and how many wakes produced no turn.
+That second number is an **upper bound on false positives, not a measurement**:
+Helix cannot tell a false trigger from someone changing their mind.
+
+Samples live in `~/.helix/metrics/` (0600, local only, never transmitted) and
+`/purge` wipes them.
+
+## 10. Privacy & data layout
 
 - **Keys:** `~/.helix/secrets.json` (0600), namespaced `stt.*` / `tts.*`.
 - **Session:** `~/.helix/session.json` (0600) — `/memory clear` wipes it.
@@ -270,7 +301,8 @@ control should fail toward collecting less.
   append-only, redacted, rotated at 1 MiB × 3 generations, `/purge` wipes all of it.
 - **Voice log:** `~/.helix/voice_log/` — **absent unless you enable it** (§8);
   text only, same permissions and rotation, `/purge` wipes it.
-- **Metrics:** `~/.helix/metrics/` (wake events) — local only.
+- **Metrics:** `~/.helix/metrics/` — wake, voice, speech, vision and ambient
+  samples; local only, read by `/blackbox stats` (§9).
 - **No telemetry:** nothing leaves the machine without a provider + key you
   entered; the pricing catalog is embedded data + a local override
   (`~/.helix/pricing.json`).

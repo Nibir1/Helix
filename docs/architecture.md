@@ -189,6 +189,28 @@ drift.
 - **No networking, grep-enforced.** The package that writes down what the user
   said cannot send it anywhere, the same contract `internal/diagnostics` carries.
 
+### 5e. Local Metrics (`internal/metrics/`)
+
+The latency samples behind `/blackbox stats` and the §10 release table: wake,
+voice, speech (TTS first audio), vision and ambient, each an NDJSON file under
+`~/.helix/metrics/` at 0600 in a 0700 directory, local only.
+
+- **One package owns both ends.** Writing lived at the call site in `cmd/helix`
+  and reading did not exist, so a reader added elsewhere would have re-declared
+  the field names and been free to disagree with the writer. Paths, field names,
+  parsing and summaries are defined once.
+- **Verdicts are chosen by the sample's own provider.** §10 sets separate cloud
+  and local budgets, so a whisper-local turn is graded against the 6s local
+  target and a Groq turn against the 3s cloud one. A blended figure would be
+  measured against a threshold that applies to neither half.
+- **The summaries refuse to overstate.** A p95 is reported only above 20 samples;
+  below that the maximum is shown as the maximum. A metric whose median passes
+  while its worst case fails reads "typical only". An absent file is "not
+  measured", never a pass. The wake false-positive figure is an explicit upper
+  bound, because a false trigger and a change of mind are indistinguishable from
+  here.
+- **Telemetry-free, grep-enforced**, like `diagnostics` and `journal`.
+
 ## Data Flow
 ```text
 User Input → Classifier → [Shell Command] → Safety Pipeline → Sandbox → OS Shell
