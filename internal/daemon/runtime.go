@@ -25,6 +25,7 @@ import (
 	"helix/internal/diagnostics"
 	"helix/internal/input"
 	"helix/internal/journal"
+	"helix/internal/metrics"
 	"helix/internal/ollama"
 	"helix/internal/session"
 	"helix/internal/shell"
@@ -380,6 +381,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 
 	go func() {
+		defer diagnostics.Guard("daemon-uptime")()
+		d.recordUptimeLoop(runCtx)
+	}()
+
+	go func() {
 		defer diagnostics.Guard("daemon-llm-ready")()
 		d.ensureLocalBrainReady(runCtx)
 	}()
@@ -401,6 +407,43 @@ func (d *Daemon) Run(ctx context.Context) error {
 	return d.server.Serve(runCtx, d)
 }
 
+// recordUptimeLoop writes a liveness heartbeat on metrics.UptimeInterval.
+//
+// This exists because Phase 4's acceptance asks for "99.5% uptime over 72h soak
+// (metrics file evidences it)" and no file evidenced anything: the soak script
+// kept its own log, in a format that was not valid JSON, so the criterion could
+// only be checked by reading thousands of lines by eye.
+//
+// A heartbeat is in-band, which is exactly why it works as evidence: downtime is
+// what a MISSING sample looks like. Availability is observed-over-expected, and a
+// restart shows up as the uptime counter falling back toward zero, since each
+// process counts from its own start. The daemon does not try to record its own
+// death — a process cannot — so the reader infers it from the gap.
+func (d *Daemon) recordUptimeLoop(ctx context.Context) {
+	ticker := time.NewTicker(metrics.UptimeInterval)
+	defer ticker.Stop()
+
+	// One sample immediately, so a short run still produces evidence rather than
+	// waiting a full interval to say anything.
+	d.recordUptime()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.recordUptime()
+		}
+	}
+}
+
+// recordUptime appends one liveness sample.
+func (d *Daemon) recordUptime() {
+	metrics.Append(metrics.FileUptime, map[string]any{
+		"metric":   metrics.MetricUptime,
+		"uptime_s": int64(time.Since(d.startedAt).Seconds()),
+	})
+}
+
 // watchConnectivity journals and announces online/offline transitions.
 func (d *Daemon) watchConnectivity(ctx context.Context) {
 	wasOnline := true
@@ -417,23 +460,7 @@ func (d *Daemon) watchConnectivity(ctx context.Context) {
 				continue
 			}
 			wasOnline = online
-			// Ears, voice, and brain move together (P11.2): before this, the
-			// speech chain went local-first while the planner kept dialing a
-			// dead cloud endpoint, so Helix could still hear and speak but
-			// could no longer think. ai.SetOfflineMode fires its own spoken
-			// notice only when a local brain is actually reachable, so a
-			// machine with no local model stays silent about it.
-			if online {
-				speech.SetOfflineMode(false)
-				ai.SetOfflineMode(false)
-				d.journal.Record("connectivity", "", "", "online — restored configured speech + LLM chains")
-				d.speakNotice("Internet connection restored.")
-			} else {
-				speech.SetOfflineMode(true)
-				ai.SetOfflineMode(true)
-				d.journal.Record("connectivity", "", "", "offline — switched speech + LLM chains to local fallback")
-				d.speakNotice("I lost internet connection. Switching to local processing; some features may be limited.")
-			}
+			d.applyConnectivityChange(online)
 		}
 	}
 }
@@ -813,6 +840,35 @@ func (d *Daemon) runVoiceTurn(ctx context.Context) bool {
 	})
 	d.mu.Unlock()
 	return true
+}
+
+// applyConnectivityChange performs one online↔offline transition.
+//
+// Extracted from the poll loop so the transition can be tested without a network
+// or a five-second wait: P4.10's acceptance ("network cut mid-session → local
+// fallback engages within 5s, spoken notice heard") had no test at all, because
+// the only way in was a real TCP probe on a ticker. The ≤5s half is the ticker
+// interval above; this is the half that says WHAT happens, and it is the half
+// that can regress silently.
+//
+// Ears, voice, and brain move together (P11.2): before that, the speech chain
+// went local-first while the planner kept dialing a dead cloud endpoint, so Helix
+// could still hear and speak but could no longer think. ai.SetOfflineMode fires
+// its own spoken notice only when a local brain is actually reachable, so a
+// machine with no local model stays silent about the brain while still saying it
+// lost the network.
+func (d *Daemon) applyConnectivityChange(online bool) {
+	if online {
+		speech.SetOfflineMode(false)
+		ai.SetOfflineMode(false)
+		d.journal.Record("connectivity", "", "", "online — restored configured speech + LLM chains")
+		d.speakNotice("Internet connection restored.")
+		return
+	}
+	speech.SetOfflineMode(true)
+	ai.SetOfflineMode(true)
+	d.journal.Record("connectivity", "", "", "offline — switched speech + LLM chains to local fallback")
+	d.speakNotice("I lost internet connection. Switching to local processing; some features may be limited.")
 }
 
 // ttyActive reports whether an interactive Helix session holds the

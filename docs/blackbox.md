@@ -286,6 +286,12 @@ flatters is worse than none:
   and the worst case does not, the verdict reads *typical only* rather than
   *meets target* — that gap is the whole reason to look.
 
+When the daemon has been running, a **daemon** panel reports availability:
+heartbeats observed against heartbeats expected, restarts, and the longest gap
+between them. The gap is shown next to the percentage on purpose — 99.5% of three
+days is 21 minutes of downtime, and it matters a great deal whether that was one
+outage or four hundred.
+
 The wake section reports events per hour and how many wakes produced no turn.
 That second number is an **upper bound on false positives, not a measurement**:
 Helix cannot tell a false trigger from someone changing their mind.
@@ -301,8 +307,8 @@ Samples live in `~/.helix/metrics/` (0600, local only, never transmitted) and
   append-only, redacted, rotated at 1 MiB × 3 generations, `/purge` wipes all of it.
 - **Voice log:** `~/.helix/voice_log/` — **absent unless you enable it** (§8);
   text only, same permissions and rotation, `/purge` wipes it.
-- **Metrics:** `~/.helix/metrics/` — wake, voice, speech, vision and ambient
-  samples; local only, read by `/blackbox stats` (§9).
+- **Metrics:** `~/.helix/metrics/` — wake, voice, speech, vision, ambient and
+  daemon-uptime samples; local only, read by `/blackbox stats` (§9).
 - **No telemetry:** nothing leaves the machine without a provider + key you
   entered; the pricing catalog is embedded data + a local override
   (`~/.helix/pricing.json`).

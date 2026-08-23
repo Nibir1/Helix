@@ -47,7 +47,9 @@ func handleVoiceStatsCommand() {
 	speechRecs := loadMetric(dir, metrics.FileSpeech)
 	ambient := loadMetric(dir, metrics.FileAmbient)
 
-	if len(wake)+len(voice)+len(vision)+len(speechRecs)+len(ambient) == 0 {
+	uptime := loadMetric(dir, metrics.FileUptime)
+
+	if len(wake)+len(voice)+len(vision)+len(speechRecs)+len(ambient)+len(uptime) == 0 {
 		fmt.Println(shell.PanelTitle("voice metrics"))
 		for _, l := range shell.PanelWrap(
 			"nothing measured yet. Metrics are written as you use live mode — wake "+
@@ -86,6 +88,7 @@ func handleVoiceStatsCommand() {
 	fmt.Println(shell.PanelEnd())
 
 	printWakePanel(wake, voice)
+	printDaemonPanel(uptime)
 	printAmbientPanel(ambient)
 
 	fmt.Println(shell.Hint("verdicts compare the p50 against §10 · " +
@@ -221,6 +224,50 @@ func printWakePanel(wake, voice []metrics.Record) {
 			"trigger or a change of mind. Treat the rate above as an upper bound.",
 		shell.Muted) {
 		fmt.Println(l)
+	}
+	fmt.Println(shell.PanelEnd())
+}
+
+// printDaemonPanel reports daemon availability against the 99.5% target.
+//
+// Availability is observed heartbeats over expected ones, which is the only
+// honest reading of an in-band measurement: a dead daemon writes nothing, so
+// downtime is absence. The longest gap is shown beside the percentage because a
+// percentage cannot distinguish one long outage from hundreds of brief ones, and
+// 99.5% of 72 hours is 21 minutes either way.
+func printDaemonPanel(uptime []metrics.Record) {
+	if len(uptime) == 0 {
+		return
+	}
+	av := metrics.SummarizeAvailability(uptime)
+
+	w := shell.KVWidth("SAMPLES", "AVAILABILITY", "RESTARTS", "LONGEST GAP")
+	fmt.Println(shell.PanelTitle("daemon"))
+	fmt.Println(shell.KV("SAMPLES", shell.Value(fmt.Sprint(av.Samples))+
+		shell.Muted(fmt.Sprintf("  of %d expected  ·  over %s",
+			av.Expected, av.Window.Round(time.Minute))), w))
+
+	if av.Expected <= 1 {
+		// One heartbeat proves it ran; it cannot support a percentage.
+		fmt.Println(shell.KV("AVAILABILITY", shell.Badge(shell.StateIdle, "not computable")+
+			shell.Muted("  needs a longer window"), w))
+	} else {
+		state := shell.StateGood
+		if av.Percent < metrics.UptimeTarget {
+			state = shell.StateBad
+		}
+		fmt.Println(shell.KV("AVAILABILITY",
+			shell.Badge(state, fmt.Sprintf("%.2f%%", av.Percent))+
+				shell.Muted(fmt.Sprintf("  target ≥%.1f%%", metrics.UptimeTarget)), w))
+	}
+
+	fmt.Println(shell.KV("RESTARTS", shell.Value(fmt.Sprint(av.Restarts))+
+		shell.Muted("  uptime counter reset"), w))
+	if av.LongestGap > 0 {
+		fmt.Println(shell.KV("LONGEST GAP",
+			shell.Value(av.LongestGap.Round(time.Second).String())+
+				shell.Muted(fmt.Sprintf("  heartbeat is every %s",
+					metrics.UptimeInterval)), w))
 	}
 	fmt.Println(shell.PanelEnd())
 }

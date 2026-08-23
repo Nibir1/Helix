@@ -40,13 +40,30 @@ const (
 	// millisecond budget vanished on exit and could not be audited from the
 	// metrics directory the roadmap says holds all of them.
 	FileSpeech = "speech"
+
+	// FileUptime holds the daemon's own liveness heartbeat. Phase 4's acceptance
+	// asks for "99.5% uptime over 72h soak (metrics file evidences it)", and no
+	// file evidenced anything: soak.sh wrote its own bespoke log that was not
+	// even valid JSON, so the criterion could only be checked by eye over
+	// thousands of lines.
+	FileUptime = "uptime"
 )
+
+// UptimeInterval is how often the daemon records a liveness sample.
+//
+// Writer and reader MUST agree on this or availability is meaningless: the
+// measurement is observed-samples over expected-samples, and "expected" is the
+// window divided by this constant. Keeping it here — rather than one value in the
+// daemon and another in whatever reads the file — is the whole reason this
+// package owns both ends.
+const UptimeInterval = 60 * time.Second
 
 // Metric names recorded inside the files.
 const (
 	MetricWakeToExec     = "wake_to_exec"
 	MetricFrameToInsight = "frame_to_insight"
 	MetricFirstAudio     = "tts_first_audio"
+	MetricUptime         = "uptime"
 )
 
 // Record is one metrics line. Every field is optional: the files are NDJSON
@@ -68,6 +85,13 @@ type Record struct {
 	Intensity float64 `json:"intensity,omitempty"`
 
 	Streamed bool `json:"streamed,omitempty"`
+
+	// UptimeS is the daemon's reported uptime in seconds at sample time. A
+	// DECREASE between consecutive samples is how a restart is detected: each
+	// daemon process starts counting from zero, so the counter falling is the
+	// only in-band evidence that the process is not the one that wrote the
+	// previous line.
+	UptimeS int64 `json:"uptime_s,omitempty"`
 }
 
 // Dir returns ~/.helix/metrics.
@@ -282,6 +306,72 @@ func SummarizeWake(wake, voice []Record) WakeStats {
 	}
 	return st
 }
+
+// Availability describes daemon liveness over the observed window.
+type Availability struct {
+	Samples  int
+	Expected int
+	Window   time.Duration
+
+	// Percent is observed/expected, capped at 100. It is an availability
+	// measure, not an uptime one: a dead daemon writes nothing, so absence is
+	// what downtime looks like from in-band sampling.
+	Percent float64
+
+	// Restarts counts uptime counters going backwards.
+	Restarts int
+
+	// LongestGap is the biggest interval between consecutive samples — the
+	// closest thing to "how long was it down at worst", which a percentage
+	// cannot express. 99.5% over 72 hours is 21 minutes of downtime, and it
+	// matters enormously whether that was one outage or four hundred.
+	LongestGap time.Duration
+}
+
+// SummarizeAvailability computes liveness from uptime heartbeats.
+//
+// Expected samples come from the window and UptimeInterval, so a daemon that
+// stopped writing for an hour scores that hour as unavailable even though no
+// record says so — which is the only honest reading of a heartbeat that stopped.
+func SummarizeAvailability(recs []Record) Availability {
+	av := Availability{Samples: len(recs)}
+	if len(recs) == 0 {
+		return av
+	}
+
+	window, ok := Window(recs)
+	if !ok {
+		// A single sample proves the daemon ran once and supports no rate.
+		return av
+	}
+	av.Window = window
+	av.Expected = int(window/UptimeInterval) + 1
+	if av.Expected > 0 {
+		av.Percent = float64(av.Samples) / float64(av.Expected) * 100
+		if av.Percent > 100 {
+			av.Percent = 100
+		}
+	}
+
+	// Restarts and gaps need chronological order; the file is append-only, but
+	// a reader should not depend on that.
+	ordered := make([]Record, len(recs))
+	copy(ordered, recs)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].TS.Before(ordered[j].TS) })
+
+	for i := 1; i < len(ordered); i++ {
+		if ordered[i].UptimeS < ordered[i-1].UptimeS {
+			av.Restarts++
+		}
+		if gap := ordered[i].TS.Sub(ordered[i-1].TS); gap > av.LongestGap {
+			av.LongestGap = gap
+		}
+	}
+	return av
+}
+
+// UptimeTarget is Phase 4's acceptance threshold.
+const UptimeTarget = 99.5
 
 // CategoryCounts tallies ambient events by category.
 func CategoryCounts(recs []Record) map[string]int {

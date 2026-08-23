@@ -292,3 +292,91 @@ func TestTargetsMatchRecordedMetrics(t *testing.T) {
 		}
 	}
 }
+
+// Availability is observed-over-expected, because a dead daemon writes nothing:
+// downtime is what a MISSING heartbeat looks like from in-band sampling.
+func TestSummarizeAvailabilityCountsMissingHeartbeats(t *testing.T) {
+	base := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+
+	// A full hour of minute heartbeats would be 61 samples (inclusive of both
+	// ends). Drop ten to simulate ten minutes of downtime.
+	var recs []Record
+	for i := 0; i <= 60; i++ {
+		if i >= 20 && i < 30 {
+			continue // the outage
+		}
+		recs = append(recs, Record{
+			TS:      base.Add(time.Duration(i) * time.Minute),
+			UptimeS: int64(i * 60),
+		})
+	}
+
+	av := SummarizeAvailability(recs)
+	if av.Expected != 61 {
+		t.Fatalf("expected 61 heartbeats in an hour at a 60s interval, got %d", av.Expected)
+	}
+	if av.Samples != 51 {
+		t.Fatalf("samples = %d, want 51", av.Samples)
+	}
+	// 51/61 ≈ 83.6%: well under the target, which is the point.
+	if av.Percent > 85 || av.Percent < 82 {
+		t.Errorf("availability = %.2f%%, want ~83.6%%", av.Percent)
+	}
+	if av.Percent >= UptimeTarget {
+		t.Error("an hour with a ten-minute hole must not pass the 99.5% target")
+	}
+	// The gap is the honest headline a percentage cannot express.
+	if av.LongestGap != 11*time.Minute {
+		t.Errorf("longest gap = %v, want 11m (last sample before to first after)", av.LongestGap)
+	}
+}
+
+// A restart is the uptime counter going backwards: each process counts from its
+// own start, so that is the only in-band evidence of one.
+func TestSummarizeAvailabilityDetectsRestarts(t *testing.T) {
+	base := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	recs := []Record{
+		{TS: base, UptimeS: 60},
+		{TS: base.Add(time.Minute), UptimeS: 120},
+		{TS: base.Add(2 * time.Minute), UptimeS: 5}, // restarted
+		{TS: base.Add(3 * time.Minute), UptimeS: 65},
+		{TS: base.Add(4 * time.Minute), UptimeS: 3}, // restarted again
+	}
+	av := SummarizeAvailability(recs)
+	if av.Restarts != 2 {
+		t.Fatalf("restarts = %d, want 2", av.Restarts)
+	}
+}
+
+// An unbroken run must score 100% and never exceed it — a heartbeat that fires a
+// few milliseconds early would otherwise produce 100.4% availability, which
+// reads as a bug in Helix.
+func TestSummarizeAvailabilityCapsAtHundred(t *testing.T) {
+	base := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	var recs []Record
+	// Slightly denser than the nominal interval.
+	for i := 0; i <= 70; i++ {
+		recs = append(recs, Record{
+			TS:      base.Add(time.Duration(i) * 50 * time.Second),
+			UptimeS: int64(i * 50),
+		})
+	}
+	av := SummarizeAvailability(recs)
+	if av.Percent > 100 {
+		t.Fatalf("availability must cap at 100%%, got %.2f%%", av.Percent)
+	}
+	if av.Restarts != 0 {
+		t.Errorf("a monotonic run has no restarts, got %d", av.Restarts)
+	}
+}
+
+// One heartbeat proves the daemon ran and supports no percentage.
+func TestSummarizeAvailabilityWithSingleSample(t *testing.T) {
+	av := SummarizeAvailability([]Record{{TS: time.Now(), UptimeS: 1}})
+	if av.Samples != 1 {
+		t.Fatalf("samples = %d, want 1", av.Samples)
+	}
+	if av.Percent != 0 {
+		t.Errorf("a single sample cannot yield a percentage, got %.2f", av.Percent)
+	}
+}

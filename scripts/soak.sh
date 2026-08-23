@@ -50,8 +50,15 @@ probe_uptime() {
   printf '%s' "$out" | awk '/^uptime_s/{print $2}'
 }
 
+# log_event appends one NDJSON line: the timestamp goes INSIDE the object.
+#
+# It used to print "<timestamp> <json>", which made every line of a file named
+# metrics.jsonl unparseable as JSON — so the acceptance criterion this script
+# exists to evidence ("99.5% uptime over 72h, metrics file evidences it") could
+# only be checked by eye across thousands of lines. The ts field name matches
+# internal/metrics so the same reader handles both.
 log_event() {
-  printf '%s %s\n' "$(date -u +%FT%TZ)" "$1" | tee -a "$METRICS"
+  printf '{"ts":"%s",%s\n' "$(date -u +%FT%TZ)" "${1#\{}" | tee -a "$METRICS"
 }
 
 start_daemon
@@ -86,3 +93,8 @@ done
 kill "$DAEMON_PID" 2>/dev/null || true
 echo "Soak complete. Metrics: $METRICS"
 echo "Daemon log: $SOAK_HOME/daemon.log"
+echo
+echo "The daemon also wrote its own liveness heartbeats. For the availability"
+echo "verdict against the 99.5% target, read them with Helix itself:"
+echo "  HOME=\"$SOAK_HOME\" $BIN"
+echo "  /blackbox stats"

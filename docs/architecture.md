@@ -209,6 +209,12 @@ voice, speech (TTS first audio), vision and ambient, each an NDJSON file under
   measured", never a pass. The wake false-positive figure is an explicit upper
   bound, because a false trigger and a change of mind are indistinguishable from
   here.
+- **Daemon availability is observed-over-expected.** The daemon heartbeats every
+  60s; a dead daemon writes nothing, so downtime is the absent sample rather than
+  a recorded event, and a restart is the uptime counter falling back toward zero
+  (each process counts from its own start). The longest gap is reported beside the
+  percentage because a percentage cannot distinguish one long outage from many
+  short ones.
 - **Telemetry-free, grep-enforced**, like `diagnostics` and `journal`.
 
 ## Data Flow
