@@ -154,6 +154,14 @@ fuzz-ci:
 	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=20s
 	@go test ./internal/journal -run=^$$ -fuzz=FuzzRedact -fuzztime=20s
 
+# Run the live sidecar measurements: real whisper.cpp + Piper servers, driven
+# through Helix's own adapters. Needs the binaries and a downloaded model/voice;
+# skips loudly with the reason when any is missing, so this is safe anywhere.
+# Covers the §10 local STT accuracy row (see docs/BlackBox_Development.md §10A).
+live-sidecar:
+	@echo "Running live sidecar measurements (whisper.cpp + Piper)..."
+	HELIX_LIVE_SIDECAR=1 go test ./internal/speech/ -run 'TestLive' -v -count=1 -timeout 600s
+
 # Run the end-to-end TTY harness (Linux/macOS; the build tag skips Windows)
 e2e:
 	@echo "Running E2E TTY harness..."

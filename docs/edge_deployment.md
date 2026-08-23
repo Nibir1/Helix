@@ -234,8 +234,38 @@ Run these inside Helix after install:
   sidecar's reachability, whether the offline-LLM fallback model is pulled, and
   temperature with a throttling verdict.
 - `/blackbox status` — STT/TTS chain health, which keys are set, recorder detection.
+- `/blackbox stats` — what the board has actually *measured*: wake→execution
+  latency, TTS time-to-first-audio, frame-to-insight, wake rate, and daemon
+  availability, each judged against the project's targets with local and cloud
+  paths graded separately. On an edge box this is the honest answer to "is this
+  fast enough here", replacing a guess with the numbers from your own hardware.
 - `/mictest` — 3-second capture self-test: proves the mic is actually being heard (level + dBFS +
   speech-gate verdict). The fastest way to catch a wrong input device on a headless board.
+
+### Measured costs of the always-on parts
+
+Numbers from an M4 Mac — a fast box, so treat these as a floor and re-measure on
+the board with `/blackbox stats` and `make live-sidecar`. They are here because
+"will the always-listening parts eat my Pi?" is the first question an edge
+deployment raises, and it now has an answer instead of an assurance.
+
+| Always-on component | Cost per 1.5 s chunk | Duty cycle |
+| :--- | :--- | :--- |
+| Wake-word detection (energy engine) | 21 µs, zero allocations | **0.0014 %** |
+| Ambient analysis (when `ambient.enabled`) | 571 µs, 852 KB allocated | **0.038 %** |
+
+Both are pure Go on the CPU and both are tee'd off one capture stream, so
+enabling ambient awareness does not add a second microphone reader. The ambient
+figure includes a WAV decode and an FFT padded to 32768 points; it scales
+superlinearly with chunk length, so raising `speech.wake_word.chunk_ms` costs more
+than proportionally.
+
+One-shot local sidecar costs on the same machine, for scale against the cloud
+path: whisper.cpp `ggml-base.en` transcribed a 3-second clip in **133 ms** at
+**97 % word accuracy** on synthesized clean speech; Piper returned a short
+sentence in **103 ms**. A Pi 5 will be several times slower on both and still
+comfortably inside a conversational budget; a Pi 4 or Jetson Nano is why §4
+recommends the cloud path.
 
 Useful environment knobs for edge boards:
 
@@ -243,6 +273,14 @@ Useful environment knobs for edge boards:
   want (e.g. a USB mic on a Jetson).
 - `HELIX_SOX_SILENCE_PCT` — raise the silence floor (e.g. `2%`) in a noisy room / with a hot mic so
   endpointing doesn't trip early.
+
+**Camera note for headless boards.** Vision shells out to `ffmpeg` against
+`/dev/video0` by default. A capture is bounded at 8 seconds and then reports why
+it failed, so a missing or busy device says so instead of stalling a turn — and
+`/blackbox status` will not claim the camera is working until a frame has actually
+arrived. On Linux the usual causes are the user not being in the `video` group, or
+no camera at all; there is no per-app permission prompt to grant as there is on
+macOS.
 
 ---
 

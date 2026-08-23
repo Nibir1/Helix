@@ -265,7 +265,7 @@ A pseudo-terminal (PTY) based end-to-end suite that boots the real `helix`
 binary against a mock OpenAI-compatible provider (in-process `httptest`
 server) with an isolated `$HOME` and a pre-seeded knowledge meta key (to keep
 the run fully offline). It proves, with zero real AI and zero network:
-- High-confidence shell input bypasses the planner.
+- High-confidence **typed** shell input bypasses the planner (voice never does — see 6a).
 - Natural language routes through the strict-JSON planner and executes.
 - Medium-risk commands require confirmation; declining skips execution.
 - High-risk commands are hard-blocked.

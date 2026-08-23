@@ -291,7 +291,9 @@ control should fail toward collecting less.
 Helix records a local sample every time it does something with a latency target:
 a wake-to-execution turn, a spoken reply's time-to-first-audio, a camera
 frame-to-insight. `/blackbox stats` summarizes them against the targets in the
-roadmap's §10 table.
+roadmap's §10 table; §10A records what has actually been measured so far, and
+which rows still wait on a microphone, an API key, a human ear or a 72-hour
+clock.
 
 Three things it deliberately will not do, because a performance report that
 flatters is worse than none:

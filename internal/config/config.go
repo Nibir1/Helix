@@ -548,7 +548,13 @@ func (cfg *Config) SavePreferences() error {
 
 // Versioning and model metadata.
 const (
-	HelixVersion  = "1.0.0"
+	// HelixVersion is the fallback version for builds that do not stamp one.
+	// Official releases override it via goreleaser ldflags
+	// (-X helix/internal/config.HelixVersion={{.Version}}), but `make current`,
+	// `go install` and a plain `go build` do not — so this constant is what a
+	// source build reports, and it has to track the tag or /version lies about
+	// which Helix you are running.
+	HelixVersion  = "1.5.0"
 	ModelName     = "TinyLlama-1.1B-Chat-v1.0-GGUF"
 	ModelURL      = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf"
 	ModelChecksum = "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556"

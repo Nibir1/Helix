@@ -1,3 +1,115 @@
+## Helix v1.5.0 — BlackBox: The Voice-First Companion
+
+v1.0.0 taught the terminal to speak human. v1.5.0 lets you stop typing.
+
+BlackBox turns Helix from a reactive text tool into an always-on multimodal companion: it listens, transcribes, plans, executes, watches through a camera when you ask, answers aloud, and — with `helix daemon` — keeps doing so after you close the terminal. The intelligence is the same intelligence. Every spoken word lands in the *same* pipeline typed input has always used (classify → plan → Instruction Firewall → risk tiers → sandbox → kernel confinement), because a new input channel is not a reason to build a second, weaker door.
+
+It remains local-first and telemetry-free. The whole voice stack runs offline if you want it to — whisper.cpp for ears, Piper for a voice, Ollama or llama.cpp for a brain — and **no component requires Docker**. Keys stay in a 0600 file. Nothing you say is written to disk unless you ask for it, and camera frames are never written at all.
+
+**56,000 lines across 12 new packages, one unchanged moat.**
+
+### 🎙️ Voice
+
+- **Multi-provider speech** with failover chains: Groq, OpenAI and Deepgram for transcription; OpenAI, Deepgram, ElevenLabs for speech; whisper.cpp, Piper and Kokoro as local sidecars. Pricing is *data* (`pricing.json`, user-overridable), never hardcoded routing.
+- **Recommended chains** — one keystroke in `/blackbox setup` picks cheapest-cloud (Groq + `gpt-4o-mini-tts`), lowest-latency (Deepgram Nova-3 + Aura-2), or fully-local/private (whisper.cpp + Piper). Every cloud chain pre-fills a *local* fallback, because the failure worth surviving is the network.
+- **Hands-free wake word** — energy detector by default (pure Go, works everywhere, honest about detecting onset rather than a phrase) or an openWakeWord-class sidecar for true keyword spotting. Between turns Helix holds in wake-only listening: nothing is transcribed until a wake event fires.
+- **Streaming both ways** — live interim transcripts (Deepgram WebSocket), and sentence-pipelined TTS that starts playing after the first sentence synthesizes instead of the whole paragraph. Time-to-first-audio dropped from a measured 2,280 ms to ~150 ms + network.
+- **Barge-in** — Ctrl+C stops a spoken reply mid-sentence (~50 ms), not at the next sentence boundary.
+- **A sci-fi HUD** — listening waveform driven by the real microphone level (log-scaled, because speech RMS on a linear meter barely leaves the floor), decode sweep, speaking wave, wake-standby pulse. Terminal-native; no GUI dependency.
+
+### 👁️ Vision
+
+- **Opt-in camera** via `ffmpeg`, one frame at a time, downscaled to ≤1024 px, **held in memory and never written to disk** — enforced by a filesystem-snapshot test. Only metadata reaches the journal.
+- **The planner has a `vision` tool.** Ask "what can you see?" and the model chooses the camera itself. An earlier heuristic that fired on any sentence containing "this" was removed: it answered "what do we have in *this* directory?" by describing the room.
+- **A companion loop** that looks on a timer and may speak unprompted — with a 16×16 luminance fingerprint diffed in-process, so an unchanged scene never costs a model call.
+- **Capture failures are legible.** A camera the OS has not authorized opens and then delivers nothing; Helix gives up after 8 seconds and names the likely cause, and `/blackbox status` will not claim the camera is watching until a frame has actually arrived.
+
+### 🧠 The agentic harness
+
+- **Bounded plan → act → observe → replan** (`/agentic on`). A failed step feeds its exit code and a sanitized tail of its output back to the planner, which self-corrects. Every iteration re-enters the *entire* safety pipeline; the harness decides only whether to plan again.
+- **Native tool calling** across eight providers — one normalized `ToolDefinition` over three different wire formats (OpenAI-shaped, Anthropic's flat `input_schema` blocks, Ollama's `/api/chat`), sharing one streamed-fragment reassembler instead of three chances to re-bug it. Capability reporting describes what the *adapter* can drive, not what the vendor sells: `custom` and llama.cpp are excluded because their tool support is genuinely undetectable, and Ollama is gated **per model** — Helix's own default local model ships no tool template, so it does not waste a round trip pretending otherwise. Where tool calling is unavailable the planner falls back to the prompt ladder silently, costing at most one request.
+- **Streaming token render** — replies appear as they generate, and the spinner stops at the first token rather than the last.
+- **Session memory** — a persisted ring of recent turns, injected as a zero-authority fenced block. "What did I ask a moment ago" works; a transcript Helix did not trust is labelled `not understood` rather than quoted back as if you had said it cleanly.
+- **Safe-subset undo** — `"undo that"` reverses a journalled action (a commit becomes a soft reset) through the normal confirmation and safety path. Overwrites and deletions are explicitly out of scope, and the docs say so.
+
+### 🛰️ The Living AI daemon
+
+- **`helix daemon`** — a supervised background service with its own headless Agent, session memory, wake loop and sidecar health checks. Panic-guarded, restart-backed-off, and it heartbeats its own liveness so uptime is measurable rather than asserted.
+- **NDJSON IPC over a 0600 Unix socket** (loopback TCP + token on Windows), driven by `helix remote status|say|mode|logs|stop`. No Redis, no gRPC, no broker — filesystem permissions are the auth.
+- **Service installers** for launchd, `systemd --user` and Windows, consent-gated, with lingering detection on Linux because a `--user` service that stops at logout is not installed in any useful sense.
+- **Graceful degradation** — a connectivity monitor moves ears, voice *and* brain to local providers together, says so out loud, and journals it.
+
+### 🔌 Providers & offline resilience
+
+- **Ten LLM providers**: OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM, xAI (Grok), Ollama, llama.cpp, and any OpenAI-compatible custom endpoint.
+- **Circuit-breaker failover** (CLOSED → OPEN → HALF-OPEN) keeps Helix *thinking* when the cloud disappears, not merely hearing and speaking. It health-checks the local brain before every switch, so a machine with no local runtime never degrades onto a dead endpoint, and an explicit `/provider use` always outranks it.
+- **Misdirected-key guard** — a pasted key whose prefix unambiguously belongs to another vendor is caught before it is stored. GroqCloud and xAI are different companies one letter apart.
+
+### 🖥️ Linux edge devices
+
+- **A per-board deployment matrix** (`docs/edge_deployment.md`) for Raspberry Pi 5/4, first-gen Jetson Nano, amd64 mini-PCs, arm64 SBCs and RISC-V — including the two Linux gotchas that fail *silently*: `audio_cgo` for on-device speaker output, and bubblewrap where Landlock is unavailable.
+- **`scripts/edge-setup.sh`** — arch/board detection, consent-gated installs, and a SHA-256-verified Ollama install that fails closed. It refuses Ollama on the Jetson Nano, the one board in the matrix that cannot run it, and points at the cloud path instead.
+- **`/doctor` gained an edge section**: board, build flavour, the confinement backend *actually* in force, recorder presence, per-sidecar reachability, and thermals with a throttling verdict.
+
+### 🛡️ New security & privacy controls
+
+Voice is treated as an **untrusted input channel**, because a television, a podcast or a person in the room becomes text with user authority the moment it is transcribed.
+
+- **Risk capped at Medium** from voice, whatever the phrasing, with a spoken refusal.
+- **Typed confirmations stay typed** — force push, hard reset, worktree clean, deleting main. The voice prompter refuses them outright, so a perfect impersonation still cannot satisfy one.
+- **Confirmations fail closed** — silence, timeout or an unintelligible answer counts as "no".
+- **Spoken input never takes the shell fast path.** The classifier decides on the first token and English sentences start with command names, so "make a new branch called test" now reaches the planner that produces `git checkout -b test` instead of being executed verbatim.
+- **Voice may reduce what is collected, never increase it.** "Turn off your eyes" and `/blackbox log off` work by voice; opening the camera is an explicit announced act and starting a transcript log must be typed.
+- **Opt-in transcript log** (`/blackbox log on`) — off by default, and off means *no directory and no file*. Text and metadata only, never audio. 0600, rotated, `/purge`-able.
+- **Three packages are provably network-free** (diagnostics, journal, metrics), each grep-enforced in CI.
+
+Full model: `docs/threat_model_voice.md`. Policy summary: `docs/SECURITY.md`.
+
+### 📊 Measured, not asserted
+
+`/blackbox stats` reads the latency and liveness samples Helix records locally and grades them against the project's targets — local and cloud paths separately, because they have different budgets. Measured on an M-series Mac:
+
+| What | Measured | Target |
+| :--- | :--- | :--- |
+| Wake detection (energy engine, fixtures) | **100 %** with **0** false positives | ≥97 % |
+| Local STT word accuracy (whisper.cpp `base.en`) | **97.0 %**, slowest 133 ms | ≥90 % |
+| Local TTS time-to-first-audio (Piper) | **103 ms** | ≤1.5 s |
+| Ambient noise classification (57 fixtures) | **100 %** | ≥90 % |
+| Wake detection CPU, continuous | **0.0014 %** duty cycle | — |
+| Ambient analysis CPU, continuous | **0.038 %** duty cycle | <5 % |
+| Frame-to-insight, local `gemma4:e2b` warm | **8.8 s** | best-effort locally |
+
+The report refuses to flatter: it will not print a p95 a small sample cannot support, it says "not measured" rather than implying a pass, and where the median meets a budget but the worst case does not it says **typical only**.
+
+### ⌨️ New commands
+
+`/blackbox` (`on·off·status·setup·look·eyes·wake·tts·say·log·stats`) replaces eight separate voice verbs — typing an old name tells you where it went. Plus `/agentic`, `/memory`, `/undo`, `/listen`, `/mictest`, `/web`, `/todo`, `/plan`, `/review`, `/diff`, `/context`, `/cost`, `/tools`, `/hooks`, `/permissions`, `/export`, `/resume`, `/compact`, and `helix daemon` / `helix remote`.
+
+### 🚧 Known limits, stated plainly
+
+This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
+
+- **Hybrid mode is not reachable.** `input.HybridSource` exists and is unit-tested, but nothing constructs one: simultaneous typing and speaking would mean racing a blocking raw-mode line read against a voice capture, which is a change to the interactive loop rather than plumbing.
+- **Music ducking was specified and is not implemented** — and as written it cannot be: Helix controls only its own voice, so "ducking" would make it *less* audible. Music is recognised and deliberately not remarked upon.
+- **Cloud-path latency numbers are unmeasured.** The one figure anyone measured (2,280 ms TTS) was against the buffered path that streaming replaced, so quoting it would defame code that no longer exists.
+- **Real keyword spotting needs the sidecar.** The default engine detects speech onset; it will wake on "hey helix", on "hello there" and on a dropped mug.
+- **The 72-hour soak has not been run**, though the tooling and the verdict now exist (`scripts/soak.sh`, then `/blackbox stats`).
+- **macOS camera access must be granted by hand** (System Settings → Privacy & Security → Camera). Until it is, the camera opens and delivers nothing — which Helix now says instead of hanging.
+- **Full-duplex barge-in is parked.** Interrupting by *voice* mid-reply needs acoustic echo cancellation, which conflicts with the CGO-free build unless a headset is assumed.
+
+### Upgrading from v1.0.0
+
+Nothing is required. Voice is entirely opt-in: existing configs keep working, every new subsystem is off until you enable it, and typed behaviour is unchanged by design (the PTY end-to-end suite is the proof). To start talking:
+
+```text
+/blackbox setup     # pick a chain — or take the recommended one
+/blackbox on        # go live
+```
+
+Say **"manual mode"** to get back to the keyboard.
+
+---
+
 ## Helix v1.0.0 — The AI-Native Shell
 
 Helix inverts the terminal paradigm: instead of forcing humans to speak machine, the machine learns to speak human. A single prompt accepts raw shell commands, natural-language requests, git workflows, package operations, and defensive threat-intelligence queries with zero mode switching. Every action flows through a multi-layer safety pipeline (Unicode-aware validation → risk tiering → directory sandbox → typed confirmations), delivering power without recklessness.

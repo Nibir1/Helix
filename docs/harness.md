@@ -16,7 +16,7 @@ Policy.
 ```
 input ──▶ classify ──▶ [slash command?] ──▶ dispatch, done
                 │
-                ├──▶ [high-confidence shell?] ──▶ safety pipeline ──▶ exec
+                ├──▶ [high-confidence shell? TYPED only] ──▶ safety pipeline ──▶ exec
                 │
                 └──▶ retrieve ──▶ plan ──▶ firewall ──▶ prepare ──▶ per-step:
                                                                      tier gate
@@ -25,6 +25,15 @@ input ──▶ classify ──▶ [slash command?] ──▶ dispatch, done
                                                                      exec
                                                                      post-hook
 ```
+
+**The fast path is typed-only.** When you type a confidently recognised command
+line it runs as typed — that is the point of a shell that does not nag. Spoken
+input never takes that branch: the classifier decides on the first token, and
+ordinary sentences begin with command names, so "make a new branch called test"
+was being executed as `make a new branch called test` instead of reaching the
+planner that would have produced `git checkout -b test`. Voice always goes down
+the right-hand path. The safety pipeline covered both branches throughout, so
+this is a routing correction rather than a closed hole.
 
 With `/agentic on`, a failing step feeds its **observed** outcome — exit status
 and a bounded, sanitized tail of its output — back to the planner, which replans.
@@ -196,6 +205,13 @@ can never instruct it.
 | Project context | `HELIX.md` / `AGENTS.md` / `CLAUDE.md` | 16 KB read, 6 KB injected |
 
 `/context` shows the live size of each, with estimated token counts.
+
+Session turns carry provenance as well as text. A turn whose transcript the Voice
+Risk Policy refused to act on — below the confidence gate — is labelled
+`user(voice, not understood)` rather than quoted as if you had said it cleanly.
+That matters because the alternative silently launders a guess into the model's
+context for the next twenty turns, and Helix could then answer the misheard
+version of a question nobody asked.
 
 Project context is discovered by walking **up** from the working directory, so a
 subdirectory still finds the repository's notes, and a nested file overrides the

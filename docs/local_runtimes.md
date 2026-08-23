@@ -274,6 +274,13 @@ It deliberately does not play the audio — that needs a device, and whether the
 bytes are correct is a separate question from whether your speakers work. For
 that, `/blackbox say voice link online`.
 
+The same switch runs the **local STT accuracy measurement**: a corpus of
+synthesized utterances through the real whisper.cpp server, scored as word
+accuracy against the known text. Measured with `ggml-base.en` on an M4 Mac:
+**97.0%** (65/67 words, 8/10 utterances perfect, slowest 133ms). That is
+synthesized clean speech and therefore an upper bound — a person in a room with a
+fridge running will do worse.
+
 ### Health checks now prove the service, not the socket
 
 Both local adapters used to treat *any* HTTP response — 404 included — as proof
