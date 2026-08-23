@@ -157,11 +157,19 @@ an interactive TTY session holds the active-session lock.
 BlackBox keeps the CGO-free single binary by delegating local models to
 external HTTP services — the same pattern Helix already uses for Ollama:
 
-| Component | Service | Endpoint |
-|-----------|---------|----------|
-| Local STT | whisper.cpp server (OpenAI-compatible) | `http://127.0.0.1:8080` |
-| Local TTS | Piper (`/api/tts`, WAV) | `http://127.0.0.1:5000` |
-| Wake word | openWakeWord-class (`/predict`) | configured in `speech.wake_word.sidecar_url` |
+| Component | Service | Default endpoint | Route |
+|-----------|---------|------------------|-------|
+| Local STT | whisper.cpp `whisper-server` | `http://127.0.0.1:8080` | `/inference`, or `/v1/audio/transcriptions` on an OpenAI-shaped server — **discovered, not assumed** |
+| Local TTS | Piper `http_server` | `http://127.0.0.1:5000` | `/`, or `/api/tts` on older Rhasspy builds — likewise discovered |
+| Wake word | openWakeWord-class (`/predict`) | configured in `speech.wake_word.sidecar_url` | `/predict` |
+
+Both speech adapters try the known routes in order and remember which answered,
+because both once shipped pointing at a single route their upstream servers do
+not serve — a stock `whisper-server` answers at `/inference`, and Piper at `/`,
+so every request came back 404 and local speech was unusable as shipped.
+`/blackbox status` prints the route that actually answered. Verified against the
+real binaries, not just mocks: see
+[local_runtimes.md](local_runtimes.md) §3 for the one-line command.
 
 Set `stt.provider = "whisper-local"` / `tts.provider = "piper-local"` in the
 speech config section (or pick them in `/blackbox setup`).

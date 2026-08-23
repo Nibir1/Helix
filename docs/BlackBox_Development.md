@@ -29,7 +29,9 @@ exact sequence:
    reading all of §6. **As of 2026-08-23 every one of those is hardware-, key- or owner-gated** —
    there is no unwritten code left in the plan, so if you are here to write Go, the honest answer
    is that the next task is a device, a credential, or a decision. (Full-duplex barge-in is code,
-   but it is parked on an ADR-level conflict, not waiting for an implementer.)
+   but it is parked on an ADR-level conflict, not waiting for an implementer.) Verify that before
+   trusting it: on 2026-08-23 two "done" items turned out to be partly unwritten, one of them a
+   checkbox naming two deliverables of which only one existed.
 4. **Read that phase's section in §6** and every file it lists under "Files touched".
 5. **Verify the baseline is green before changing anything:**
    ```bash
@@ -584,6 +586,13 @@ setup wizard, and push-to-talk recording utility. No main-loop integration yet (
       ElevenLabs TTS (requests PCM 24k), Deepgram STT (nova-2 REST).
 - [x] P1.5 Local sidecar adapters: `whisper-local` (OpenAI-compatible whisper.cpp server, no
       auth header) and `piper-local` (`/api/tts` WAV).
+      > **Both routes named here were wrong** (recorded, not rewritten — this is what shipped).
+      > A stock `whisper-server` transcribes at `/inference` and Piper's `http_server`
+      > synthesizes at `/`, so as written both adapters got HTTP 404 for every request and
+      > local speech was unusable. Replaced by route discovery: try the known routes, remember
+      > which answered, print it in `/blackbox status`. Proven against the real binaries on
+      > 2026-08-23 (see the Phase 1 acceptance criteria) — a mock could not settle it, because
+      > the repo's fakes implemented the same wrong contract the adapters did.
 - [x] P1.6 `internal/audio/speech.go` — `PlaySpeech(SpeechFormat, volume)`: pure-Go WAV
       (int16 + float32) and raw-PCM decode, beep resample to 44.1kHz, 120s playback cap,
       volume scaling; noop backend returns `ErrSpeechUnsupported`. **MP3 deliberately not
@@ -602,8 +611,17 @@ setup wizard, and push-to-talk recording utility. No main-loop integration yet (
        round trip; `TestE2E_TTSToggle`. Unit: registry failover matrix (5 tests), pricing
        (parse/override/estimates), 7 adapter contract tests, WAV parser (incl. stale-size
        tolerance), audio decode (mono/stereo/mp3-reject/disabled-fail-closed), recorder smoke.
-- [x] P1.11 Fuzz seeds deferred: WAV parsing is covered by tolerant-parse unit tests; fuzzing
-       of pricing merge + WAV headers scheduled with Phase 7 hardening pass (tracker note).
+- [x] P1.11 Fuzz seeds — **fully closed 2026-08-23.** The WAV half landed in the Phase 7
+       hardening pass as `FuzzWAVHeaderInfo`; the **pricing-merge half was never written**, and
+       this checkbox had been ticked with only one of its two halves done. `FuzzPricingMerge`
+       closes it: `~/.helix/pricing.json` is user-authored by design (ADR-006 exists so a user
+       can fix rotted prices without a rebuild), which makes the merge a parser of untrusted
+       input under §9 rule 5. The contract it pins is availability, not just absence of panics —
+       `LoadMergedCatalog` must ALWAYS return a usable catalog, because a wizard that cannot
+       render its table cannot configure speech at all — plus that every surviving entry stays
+       safe to render and to price (a NaN would print as "$NaN/mo" in a column of dollars, which
+       reads as a bug in Helix rather than a bad override). 46k execs clean; listed in both
+       Makefile fuzz targets.
 
 **Files touched:** new `internal/speech/*`; `internal/audio/` additions; `cmd/helix/handlers.go`,
 `helpers.go`, `main.go` (wizard wiring); `internal/config/config.go` (speech section);
@@ -618,7 +636,29 @@ setup wizard, and push-to-talk recording utility. No main-loop integration yet (
 - [x] Push-to-talk helper (`/listen`) records → transcribes → prints with provider (+confidence
       when the provider reports it).
 - [x] Failover proven by unit test (`TestRegistrySTTFailover`/`TestRegistryTTSFailover`).
-- [ ] Local sidecar adapter against a real whisper.cpp server — manual QA log still pending.
+- [x] Local sidecar adapter against a real whisper.cpp server — **done 2026-08-23, and both
+      directions rather than just STT.** Run on an M4 Mac against a stock `whisper-server`
+      (Homebrew `whisper-cpp`, `ggml-base.en.bin`) and piper's own `http_server`
+      (`en_US-lessac-medium`), driving **Helix's own adapters and registry chain** rather than
+      curl:
+
+      | Adapter | Result | Latency |
+      |---------|--------|---------|
+      | `whisper-local` | "The quick brown fox jumps over the lazy dog." transcribed exactly | **167 ms** |
+      | `whisper-local` via registry chain | same, provider reported `whisper-local` | ~1 turn |
+      | `piper-local` | 83,500 bytes of WAV, decoded by Helix's own decoder to 41,728 samples @ 22,050 Hz mono, non-silent | **103 ms** |
+
+      Kept as a repeatable test (`internal/speech/live_sidecar_test.go`) rather than a prose QA
+      log, because the bug that made this item worth holding open cannot be caught by a mock:
+      both local adapters shipped pointing at routes their upstream servers do not serve
+      (whisper.cpp answers at `/inference`, piper at `/`), and every fake in the repo agreed
+      with the fake. It is **opt-in via `HELIX_LIVE_SIDECAR=1`** and skips loudly with the
+      reason when the binary, model or voice is absent (§9 rule 6) — a CI run reports "not
+      exercised" instead of passing silently. Route discovery is asserted against the stock
+      server specifically, including that the discovered route is reused on a second call.
+      **Not covered, deliberately:** playback. That needs a device, §9 rule 1 keeps audio
+      hardware out of the suite, and "can Helix decode what the sidecar returned" is the half
+      that has ever actually broken.
 - [x] `make test` equivalent (`go test ./... -count=1`) green on all 31 packages incl. e2e
       (2026-08-16); zero regressions to pre-existing suites.
 - [x] No regressions: full existing suite passes untouched.
@@ -1552,7 +1592,19 @@ necessary.
 | Frame-to-insight, local `gemma4:e2b` (5.1B) | best-effort | 31.6s cold → 19.2s → **8.8s** warm | misses the ≤5s cloud target; cloud path still unmeasured |
 | Frame-to-insight, `moondream:1.8b-v2-q4_K_M` | — | ~0.3s | **rejected** — Ollama's build returns an empty string for instruction-style prompts and coordinate arrays (`ids: [0.39, …]`) otherwise. Speed is irrelevant if the output cannot be used. |
 
-Two things this exposed that the table could not. A **reasoning** model spends its budget before
+**Local sidecar measurements (2026-08-23, M4 MacBook Air, through Helix's own adapters):**
+
+| Path | Measured | Against |
+|------|----------|---------|
+| `whisper-local` STT, `ggml-base.en` (3 s clip) | **167 ms** | STT is not separately targeted in the table; for scale, the ≤6 s local wake→execution budget |
+| `piper-local` TTS first bytes, `en_US-lessac-medium` | **103 ms** | ≤1.5 s local TTS first-audio target — comfortably inside it |
+
+Both are the sidecar round trip only: no microphone capture, no speaker playback, no model cold
+start (the server was already up, which is how the daemon runs it). They say the local chain is
+fast enough that latency on the private path is dominated by capture and playback rather than by
+the models — which is the opposite of the vision path, where the model dominates everything.
+
+Two things the first measurements exposed that the table could not. A **reasoning** model spends its budget before
 it answers: `gemma4:e2b` at the 512-token chat default produced ~770 characters of private
 reasoning and emitted no answer at all, which reached the user as "the vision model returned
 nothing" — vision calls now get 1024 tokens and budget exhaustion is reported rather than
@@ -1610,7 +1662,7 @@ honest number today is ~9s warm, so the companion's interval is a floor rather t
 | Phase | Status | Started | Completed | Notes |
 |-------|--------|---------|-----------|-------|
 | 0 — Decisions & Threat Model | `DONE` | 2026-08-16 | 2026-08-16 | Baseline green; ADRs ratified; `docs/threat_model_voice.md` written; 6 skeleton packages compiling+tested; CI covers them automatically |
-| 1 — Speech Provider Layer | `DONE` | 2026-08-16 | 2026-08-16 | speech pkg (types/registry/failover/pricing/5 adapters/capture), audio.PlaySpeech (WAV/PCM, MP3 skipped by design), the setup/say/listen/tts/status commands (all folded into `/blackbox` in Phase 13), 40+ new tests green; manual QA (audible speech, real whisper.cpp) pending. **Phase 13 added** per-provider endpoint overrides and verify-then-reuse for saved keys |
+| 1 — Speech Provider Layer | `DONE` | 2026-08-16 | 2026-08-23 | speech pkg (types/registry/failover/pricing/5 adapters/capture), audio.PlaySpeech (WAV/PCM, MP3 skipped by design), the setup/say/listen/tts/status commands (all folded into `/blackbox` in Phase 13), 40+ new tests green. **Phase 13 added** per-provider endpoint overrides and verify-then-reuse for saved keys. **Closed 2026-08-23:** the local-sidecar QA ran live against a stock `whisper-server` (167 ms, exact transcript) and piper's `http_server` (103 ms, decodable non-silent WAV) through Helix's own adapters, kept as an opt-in repeatable test rather than a prose log; and `FuzzPricingMerge` finished P1.11, whose checkbox had been ticked with only its WAV half written. Audible-playback QA remains the one manual item, by design — it needs a speaker, not a test |
 | 2 — Voice Input & Policy | `DONE` | 2026-08-16 | 2026-08-23 | HandleInputEvent channel stamping, Voice Risk Policy (cap+gate+deny list), VoicePrompter fail-closed, /voice /manual + graceful fallback, spoken responses. **P2.8 closed 2026-08-23**: opt-in voice interaction log on new shared `internal/journal` machinery (rotation, 0600-in-0700, redaction) which the Phase 4 daemon journal now shares — the deferral was correct, it produced one implementation instead of two. Full multi-turn clarification remains carried (Phase 4 session memory); real-mic QA pending |
 | 3 — Wake Word | `DONE` | 2026-08-16 | 2026-08-16 | energy detector default + openWakeWord-class sidecar client; wake-only between turns (ADR-005 §5 by construction); kill phrases; wake.jsonl metrics; fixture+mock tested. Real-keyword accuracy (sidecar) + FP/hour = manual QA pending |
 | 4 — Daemon & Living AI | `DONE` | 2026-08-16 | 2026-08-16 | Renderer + SlashDispatcher seams, session ring buffer + `/memory`, undo journal, `helix daemon` + NDJSON IPC (UDS / Windows token TCP) + `helix remote`, connectivity local-first failover, service installers, journal + `diagnostics.Guard`, greeting + break reminder, `scripts/soak.sh`, e2e remote test; per-sidecar `Health()` polling loop; manual QA (72h soak, logout/reboot) pending |
@@ -1632,7 +1684,7 @@ hardware- or key-gated, not unwritten code**:
 
 | Phase | Open | Kind |
 |-------|------|------|
-| 1 | whisper.cpp sidecar QA log | manual |
+| 1 | audible playback on a machine with speakers | manual |
 | 4 | logout/reboot survival on 3 OSes; 72h soak; undo-after-voice-commit and network-cut scenarios | manual |
 | 5 | camera QA; frame-to-insight ≤5s (local measured at 8.8s warm, cloud unmeasured) | hardware |
 | 7 | P7.8 §10 metrics run; P7.9 `blackbox-v0.1.0` tag | manual + owner |
@@ -1642,11 +1694,20 @@ hardware- or key-gated, not unwritten code**:
 | 12 | P12.6 HUD/latency QA; mic barge-in needs echo cancellation | manual + **deferred** |
 | 13 | real camera frame; end-to-end voice session after the endpoint fix | hardware |
 
-**As of 2026-08-23 there is no unwritten code left in the plan.** P2.8 (voice log), P9.7 (chain
-presets) and Phase 6's acceptance measurement were the last three named ones; a fourth turned up
-while auditing this table — Phase 4's session-recall criterion said "(e2e)" and no such test
-existed, so it was written too (plus the planner-prompt recorder it needed, and a fence check that
-P4.4 had specified and nothing verified). Phases 2, 6 and 9 lost their `code` markers above.
+**As of 2026-08-23 there is no unwritten code left in the plan** — but that sentence has now been
+wrong once, so treat it as a claim to re-verify rather than a fact to inherit. P2.8 (voice log),
+P9.7 (chain presets) and Phase 6's acceptance measurement were the last three *named* items. Two
+more surfaced only by reading code against this table:
+
+- Phase 4's session-recall criterion said "(e2e)" and no such test existed (written, plus the
+  planner-prompt recorder it needed and a data-only fence check P4.4 had specified and nothing
+  verified).
+- **P1.11 was ticked with half of it unwritten.** It promised fuzzing of "pricing merge + WAV
+  headers"; only the WAV half was ever built. This is the useful lesson for whoever reads next: a
+  ticked checkbox can be half done, and a task whose text names two deliverables is worth
+  re-reading against the code. `FuzzPricingMerge` closes it.
+
+Phases 1, 2, 6 and 9 lost their `code` markers above.
 
 The only remaining item that is *code* is full-duplex barge-in, which is **parked rather than
 pending** — it needs acoustic echo cancellation, which conflicts with the CGO-free guarantee
@@ -1720,6 +1781,7 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 | 2026-08-22 | **Fallback tables converted — and the fitter that should have existed first.** The fallback chooser was the last flat screen: five look-alike readiness phrases in one grey column ("yes — server running", "NO — key required", "needs local server") that the reader had to compare by hand. Readiness is the only column that decides the choice, so it is badge-coloured now, and a container-hosted sidecar on a host with no daemon reports **needs docker** with a pointer to piper-local rather than the misleading "not running yet" — the same informed-choice fix as the pricing table, in the other place the choice is made. **Screenshotting caught what the code could not see**: the seven-column pricing table overflowed its panel and wrapped, dropping "★ best value" onto its own line at column zero — the exact failure the panel system exists to prevent, committed by the panel system's own first customer. Fixed twice over: the table lost the raw unit price (the monthly estimate is derived from it and is the number people actually decide on) and merged needs/where into one `requires` column, AND `shell.Table` now **fits itself** to the panel by shaving its widest column, so no future caller can reintroduce the bug. That needed `truncateANSI`, which copies escape sequences verbatim while counting only visible runes — naive slicing either counts escape bytes as content or severs a sequence and bleeds its colour across the rest of the line. A width test written against the no-TTY default (72 columns, stricter than the dev machine's 92) is what proved the table still overflowed an 80-column terminal after the first fix. Also converted: the piper voice-id prompt block and the last two bare `askNumber` prompts, so every question in the wizard now speaks in one voice. 3 new tests. Build, vet, lint and the full suite incl. e2e green | Uncommitted, on branch `blackBox` | Every wizard screen is now on the panel system; the companion loop still has not seen a real camera frame |
 | 2026-08-22 | **Documentation audit — three docs were still describing deleted behaviour.** Asked whether the docs were fully updated, the honest answer was no. `docs/voice.md` and `docs/blackbox.md` both still taught the **deictic camera path** as a live feature ("a question that points at something captures one frame", "typed input deliberately does not trigger the camera") — the exact heuristic deleted earlier the same day for hijacking most of a QA session. Both now describe the two explicit doors (`/blackbox look` and the planner's `vision` tool) and say plainly what was removed and why, because a reader who used the old behaviour deserves to know it is gone rather than wonder why it stopped working. **The threat model was materially out of date, which matters more.** V4 read "Vision strictly opt-in (`/blackbox eyes on`, default OFF)" while `/blackbox on` now enables the camera as part of going live. That is a real widening of when a camera can open, and a threat model that does not say so is worse than one that never mentioned it: V4 now records both entry points and marks the second as deliberate, and a new **V4b** covers unattended capture by the companion loop — bounded by live mode, stopped by the same kill phrase, and with the in-process frame diff noted as the control that keeps a still room from being streamed to a provider at all. **`docs/architecture.md` gained the four subsystems built this session** and had no entry for: persona (3c), live mode and the companion (3d), host dependencies (3e), and report rendering (5c) — the last documenting the two load-bearing, non-cosmetic properties, that widths measure visible text because `%-9s` counts escape bytes, and that `Table` fits itself because an overflowing table destroys the alignment it exists for. Also: `docs/blackbox.md` learned that voice setup now runs as part of first boot, that saved keys are verified-and-reused rather than re-requested, that default sidecar ports collide and are reassigned **per provider**, and that "manual mode" is matched at the end of a sentence. The Phase 5 roadmap entries describing deictic routing were left alone — a decision log records what was decided at the time and should not be rewritten. Docs only; build, vet, lint and the full suite incl. e2e re-run green | Uncommitted, on branch `blackBox` | The companion loop still has not seen a real camera frame |
 | 2026-08-23 | **The last of the unwritten code: voice log, chain presets, an accuracy measurement — and a bug found on the way.** Asked to finish everything implementable before moving on, which meant §13's three remaining `code` items rather than a phase. **(1) P2.8 voice interaction log**, deferred since Phase 2 to share the Phase 4 journal's machinery — and the deferral was right, because that machinery did not exist: the journal had been described as "rotated" in §7 since the day the roadmap was written and had **no rotation at all**, which on an always-on daemon on a Pi is an unbounded file. New `internal/journal` owns one rotating NDJSON appender (0600 in 0700, 1 MiB × 3 generations, rotate BEFORE the write that would exceed the budget — checking after leaves a quiet log over its limit indefinitely) plus redaction; the daemon journal now delegates to it, public API unchanged, its tests green untouched. The voice log's contract is three negatives: **default absent** (no directory, no file — a nil `*VoiceLog` is a working no-op so no call site can forget a guard), **no audio ever** (§7's "transcripts + audio refs" was wrong from the start — clips are deleted as they are read, so a stored path would point at nothing while still being a liability; a test asserts no entry names one), and **wipeable** (`/purge` already had the target). It records the OUTCOME per utterance — planner, spoken command, kill phrase, refusal — because "heard X" alone cannot distinguish a command that ran from one a policy declined. Redaction truncates on a rune boundary: a severed UTF-8 sequence makes the JSON line unparseable and silently drops the entry, so the audit would lose exactly the over-long utterance someone was looking for. Surfaced as `/blackbox log on|off|status|show`, plus a TRANSCRIPT row in `/blackbox status` — whether speech is being written to disk belongs beside the mic and camera states and had no surface at all. **A policy question fell out of it:** `/blackbox` is VoiceOK because the "manual mode" safety valve lives there, so voice could reach `log on` — switching on a store of everything the microphone hears, which is exactly why ADR-005 denies `/config` and `/stealth`. Resolved with an asymmetry rather than a new deny entry: **voice may reduce what is collected, never increase it.** ADR-005 gains that as a stated principle, since it now governs the camera, live mode and the log alike. **(2) P9.7 chain presets** — three pre-worked answers at the top of `/blackbox setup` (cheapest cloud, lowest latency, fully local), each pre-filling primary + fallback. Deliberately NOT a second code path: presets feed the same key-verify, port-assign and chain-verify steps, because a shortcut would produce a chain that looks configured and cannot serve a request. The sketch said "whisper-local + Kokoro/Piper" for the private chain; shipped as piper-local, because Kokoro needs Docker and a preset named *private* must not walk someone into a container runtime. Cloud presets fall back to LOCAL (the failure worth surviving is the network); the local preset has no fallback (a cloud one would undo the reason it was chosen). Pinned to `pricing.json` by test. **(3) Phase 6 acceptance** — a 57-fixture corpus spanning the analyzer's real operating range measures **100%** against the ≥90% target, per category as well as overall, and logs the number; the test states plainly that this measures the rules against the shapes they were written for, not real-world audio. The cooldown proof and the default-off doc line turned out to already exist and had simply never been ticked. **(4) The bug:** wiring the daemon's log revealed it builds its own `speech.Config` inline and **drops `Endpoints`** — so a sidecar the wizard had moved to a free port was dialled correctly by `helix` and at its stale default by `helix daemon`, silently. That is the *third* appearance of this exact bug (the dev log records two), so the fix is the root cause rather than the instance: one shared `config.SpeechConfig.Runtime()`, both callers, and a test asserting every field survives the conversion. **(5) A fourth gap, found by auditing my own "what is left" table rather than trusting it:** Phase 4's acceptance criterion for `"what did I ask five minutes ago"` said **(e2e)** and no such test existed — the ring store was well unit-tested, `/memory show` had an e2e, and the gap between "the store holds the turn" and "the model is told about it" had nothing. Now `TestE2E_PriorTurnReachesPlannerContext` drives two real turns through the real binary and asserts the first reaches the planner; the harness gained a planner-prompt recorder to make it possible, since what Helix TELLS the model is invisible in terminal output. A companion test pins that the replayed turn lands inside the `<session_history authority="data-only">` fence with its never-obey line — which P4.4 specified in 2026-08-16 and nothing had ever verified end to end. Writing it also cost me one wrong assertion worth recording: my first version searched the whole prompt for the phrase and failed, because the phrase is ALSO in the first turn's prompt as the live user request, where being unfenced is correct — it *is* the instruction. The fence belongs on the replayed copy, so the test now checks inside the block rather than anywhere in the prompt. Also clarified an ambient test whose failure message claimed the opposite of its own assertion. 33 new tests (7 journal, 5 voice log, 6 presets, 4 config/conversion, 2 ambient corpus, 4 cmd surface, 3 e2e incl. an e2e proof that the shipped wiring leaves the log absent — a log opened eagerly at startup would pass the unit test and fail that one). Build + vet + full suite incl. e2e + `make lint` 0 issues green; cross-compiled for 6 targets and vetted for 3 OSes | Uncommitted, on branch `blackBox` | **No unwritten code remains in the plan** (four items found and closed, not three — see (5)). Everything open is hardware-, key- or owner-gated: P7.8 metrics run and P7.9 tag are the release gate; a real camera frame and one end-to-end voice session are still the two things needing a human. Worth noting for whoever picks this up: two of the four gaps were criteria that had been MET and never ticked, and one was a test the roadmap said existed. Auditing the tracker against the code found more than reading the tracker did |
+| 2026-08-23 | **Phase 1 closed: the local voice chain proven against real servers, and a fuzz half that had been ticked without being written.** Asked to proceed to Phase 1, whose only open acceptance item was "local sidecar adapter against a real whisper.cpp server — manual QA log still pending". Two findings before any work started. **(1) P1.11 was ticked with half of it missing.** It promised "fuzzing of pricing merge + WAV headers scheduled with Phase 7"; the WAV half shipped as `FuzzWAVHeaderInfo` and the pricing half never did. That also means my own claim in the previous session — that no unwritten code remained in the plan — was wrong, and the checkbox is exactly why: a task marked done can still be half done, and only reading the code finds it. `FuzzPricingMerge` closes it. The contract it pins is **availability**, not merely "does not panic": `~/.helix/pricing.json` is user-authored by design (ADR-006 exists so prices can be corrected without a rebuild), so a malformed override must still yield a usable catalog, because a wizard that cannot render its table cannot configure speech at all. It also asserts every surviving entry stays safe to render and to price — a NaN would print as "$NaN/mo" in a column of dollars, which reads as a bug in Helix rather than as a bad override. 46k execs clean. **(2) The QA was runnable here, not blocked.** This machine already had Homebrew `whisper-cpp`, `sox`, `ffmpeg`, two ggml models and a Piper voice from an earlier setup run, so the item needed no downloads and no hardware I did not have — it had simply never been attempted. Ran it live against a **stock** `whisper-server` and piper's own `http_server`, driving Helix's adapters and registry chain rather than curl: `whisper-local` transcribed "The quick brown fox jumps over the lazy dog." exactly in **167 ms**; `piper-local` returned 83,500 bytes in **103 ms** which Helix's own decoder read as 41,728 non-silent samples at 22,050 Hz mono. Both numbers are in §10 now. **Kept as a repeatable opt-in test rather than a prose QA log** (`internal/speech/live_sidecar_test.go`, `HELIX_LIVE_SIDECAR=1`), because the bug that justified holding this item open is invisible to a mock: both local adapters shipped speaking routes their upstream servers do not serve — whisper.cpp answers at `/inference`, piper at `/` — and every fake in the repo agreed with the fake. It skips loudly when the binary, model or voice is absent (§9 rule 6), so CI reports "not exercised" rather than passing silently, and it asserts route discovery against the stock server including reuse of the discovered route on a second call. Playback is deliberately NOT covered: that needs a device, §9 rule 1 keeps audio hardware out of the suite, and "can Helix decode what the sidecar returned" is the half that has ever actually broken. **One test hardened by its own first run:** the registry-chain case originally spoke "Helix hears me locally" and `base.en` returned "He looks, here's me locally" — the chain worked perfectly and the assertion was one synonym from a false failure, so the audio is now a phrase small models transcribe reliably. Proper nouns are exactly what they get wrong. 5 new tests (4 live + 1 fuzz). Build + vet + gofmt + full suite incl. e2e + `make lint` 0 issues green | Uncommitted, on branch `blackBox` | Phase 1's only remaining item is audible playback, which needs a speaker and a human ear. The broader gate is unchanged: P7.8 metrics run and P7.9 tag |
 
 ### Phase 2 carry-overs (do with Phase 4)
 

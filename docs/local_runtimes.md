@@ -251,6 +251,29 @@ So a stock `whisper-server` and a stock `piper.http_server` both work with no
 flags, and an OpenAI-shaped sidecar (Speaches, Faster-Whisper-Server, LocalAI)
 keeps working as before.
 
+### Verifying it yourself against the real servers
+
+Mocks cannot settle this one — the adapters' fakes agreed with the adapters
+while both were pointed at the wrong route. So the check runs against the real
+binaries, opt-in:
+
+```bash
+HELIX_LIVE_SIDECAR=1 go test ./internal/speech/ -run TestLive -v
+```
+
+It starts a stock `whisper-server` and a stock `piper.http_server` on free
+ports, drives Helix's own adapters and failover chain against them, and asserts
+that whisper's transcript matches the spoken words and that Piper's WAV decodes
+to non-silent audio through Helix's own decoder. Missing binary, model or voice
+makes it **skip with the reason** rather than fail, so it is safe to run
+anywhere. Measured on an M4 Mac with `ggml-base.en` and `en_US-lessac-medium`:
+**167 ms** to transcribe a three-second clip, **103 ms** to synthesize a short
+sentence.
+
+It deliberately does not play the audio — that needs a device, and whether the
+bytes are correct is a separate question from whether your speakers work. For
+that, `/blackbox say voice link online`.
+
 ### Health checks now prove the service, not the socket
 
 Both local adapters used to treat *any* HTTP response — 404 included — as proof

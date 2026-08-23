@@ -134,6 +134,7 @@ fuzz:
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=$(FUZZTIME)
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=$(FUZZTIME)
 	@go test ./internal/speech -run=^$$ -fuzz=FuzzWAVHeaderInfo -fuzztime=$(FUZZTIME)
+	@go test ./internal/speech -run=^$$ -fuzz=FuzzPricingMerge -fuzztime=$(FUZZTIME)
 	@go test ./internal/ambient -run=^$$ -fuzz=FuzzAnalyzer -fuzztime=$(FUZZTIME)
 	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=$(FUZZTIME)
 	@go test ./internal/journal -run=^$$ -fuzz=FuzzRedact -fuzztime=$(FUZZTIME)
@@ -148,6 +149,7 @@ fuzz-ci:
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=20s
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=20s
 	@go test ./internal/speech -run=^$$ -fuzz=FuzzWAVHeaderInfo -fuzztime=20s
+	@go test ./internal/speech -run=^$$ -fuzz=FuzzPricingMerge -fuzztime=20s
 	@go test ./internal/ambient -run=^$$ -fuzz=FuzzAnalyzer -fuzztime=20s
 	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=20s
 	@go test ./internal/journal -run=^$$ -fuzz=FuzzRedact -fuzztime=20s
