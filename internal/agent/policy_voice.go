@@ -74,6 +74,7 @@ func (a *Agent) HandleInputEvent(ev input.InputEvent) {
 	a.turnMeta = ev.Meta
 	a.lastResponse = ""
 	a.turnWasControl = false
+	a.turnUnreliable = false
 	defer func() {
 		a.channel = input.ChannelText
 		a.turnMeta = nil
@@ -88,10 +89,24 @@ func (a *Agent) HandleInputEvent(ev input.InputEvent) {
 		policy := DefaultVoicePolicy()
 		if conf, ok := numericMeta(ev.Meta, "stt_confidence"); ok && conf > 0 &&
 			conf < policy.MinTranscriptConfidence {
-			a.speak("I did not catch that clearly. Could you repeat it?")
+			const askAgain = "I did not catch that clearly. Could you repeat it?"
+			a.speak(askAgain)
 			a.render.PrintWarning(fmt.Sprintf(
 				"[voice policy] transcript confidence %.2f below gate %.2f — asking to repeat",
 				conf, policy.MinTranscriptConfidence))
+			// Record the clarification as the turn's reply, and mark the
+			// transcript unreliable.
+			//
+			// Both halves were missing, and each one broke multi-turn
+			// clarification in its own way. Without the reply, the user's repeat
+			// arrived at the planner with no sign that Helix had asked for one,
+			// so a follow-up answering the question read as a fresh request.
+			// Without the mark, a transcript the policy had just refused to act
+			// on was stored as ordinary user speech — so the model could answer
+			// the misheard version of a question nobody asked, for the next
+			// twenty turns.
+			a.lastResponse = askAgain
+			a.turnUnreliable = true
 			return
 		}
 	}
@@ -183,9 +198,10 @@ func (a *Agent) recordTurn(ev input.InputEvent) {
 		return
 	}
 	a.Session.Append(session.Turn{
-		Channel:  string(ev.Channel),
-		UserText: ev.Text,
-		Reply:    a.lastResponse,
+		Channel:    string(ev.Channel),
+		UserText:   ev.Text,
+		Reply:      a.lastResponse,
+		Unreliable: a.turnUnreliable,
 	})
 }
 

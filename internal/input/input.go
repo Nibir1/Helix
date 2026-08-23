@@ -41,8 +41,20 @@ type InputEvent struct {
 }
 
 // Source produces input events until closed or the context is cancelled.
-// Implementations: TTYSource (Phase 2), VoiceSource (Phase 2), HybridSource
-// (Phase 7).
+//
+// STATUS, stated plainly because this comment used to promise otherwise: the
+// only implementations are HybridSource (Phase 7) and the EventsFrom test
+// helper. TTYSource and VoiceSource were named here as "(Phase 2)" and were
+// never written — P2.1 deferred them until a second consumer existed, and the
+// REPL instead dispatches per mode (a typed turn or a voice turn), passing
+// InputEvent values directly to Agent.HandleInputEvent. That design works and is
+// what ships; InputEvent and Channel are the load-bearing parts of this package.
+//
+// Nothing in cmd/ or internal/ outside this package consumes Source today, so
+// HybridSource is built and tested but not reachable by a user. Wiring it means
+// letting a blocking raw-mode line read and a voice capture race, which is a real
+// change to the REPL rather than a plumbing job — see the P7.1 note in the
+// roadmap. Keep this comment honest if that changes.
 type Source interface {
 	// Events starts the source and returns its event stream. The channel
 	// closes when ctx is cancelled or Close is called.

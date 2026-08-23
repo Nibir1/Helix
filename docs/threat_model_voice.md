@@ -47,7 +47,14 @@ reduced authority**, enforced structurally (see ADR-005), not by prompting.
 5. Wake-armed sessions lock back to wake-only listening after 60 seconds of
    inactivity.
 6. Every policy decision (cap applied, deny, timeout-decline) is journaled.
-7. Voice may **reduce** what is collected but never increase it. "Turn off your
+7. Spoken input never takes the shell fast path. A confidently-classified command
+   line runs directly when TYPED; on the voice channel it always goes to the
+   planner, because the classifier decides on the first token and ordinary
+   sentences begin with command names ("make a new branch called test" ran as
+   `make ...`). The safety pipeline covered that path throughout — validation,
+   risk tiers and the Medium cap all applied — so this is defence in depth and a
+   correctness fix, not a closed hole.
+8. Voice may **reduce** what is collected but never increase it. "Turn off your
    eyes" closes the camera and `/blackbox log off` stops transcript recording,
    both by voice; opening the camera as part of live mode is an explicit,
    announced act, and starting the transcript log must be typed. A privacy

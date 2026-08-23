@@ -35,6 +35,20 @@ providers record a clip and transcribe it. Spoken replies stream sentence by
 sentence, so the first word plays after roughly one short sentence's synthesis
 rather than the whole paragraph's.
 
+**Anything that is not a kill phrase or a spoken command goes to the planner** —
+speech never runs as a shell command directly. When you type, Helix runs a
+confidently-recognised command line as typed; spoken input deliberately does not
+take that shortcut, because the recogniser decides on the first word and English
+sentences start with command names all the time. "Make a new branch called test"
+used to run `make a new branch called test`; it now reaches the planner, which
+runs `git checkout -b test`. The cost is one model round trip on a spoken "git
+status", which is the right trade for not executing a misread sentence.
+
+If a transcript comes back below the confidence gate, Helix asks you to repeat it
+and records the exchange as unclear rather than as something you said — so your
+second attempt reads as a repeat, and a misheard phrase never becomes context the
+planner treats as your words.
+
 ---
 
 ## 2. Spoken commands

@@ -21,6 +21,21 @@ type Turn struct {
 	Channel   string    `json:"channel"` // "text" | "voice"
 	UserText  string    `json:"user_text"`
 	Reply     string    `json:"reply"`
+
+	// Unreliable marks a turn whose UserText Helix did NOT trust — today, a
+	// transcript below the Voice Risk Policy confidence gate (ADR-005 rule 4).
+	//
+	// It exists because the alternative is worse than losing the turn: a
+	// rejected transcript was still recorded as ordinary user speech, so text
+	// Helix had just refused to act on became authoritative context for the
+	// next twenty turns, and the planner could answer the misheard version of a
+	// question the user never asked. Recording it AS unreliable keeps the
+	// conversation coherent — the next utterance is visibly a repeat, not a new
+	// request — without laundering a guess into a quotation.
+	//
+	// Optional and omitempty: session.json files written before this field
+	// existed load unchanged.
+	Unreliable bool `json:"unreliable,omitempty"`
 }
 
 // DefaultCapacity is the ring-buffer size for session memory.

@@ -79,6 +79,11 @@ type Agent struct {
 	Undo         *session.UndoJournal
 	lastResponse string
 
+	// turnUnreliable marks the current turn's user text as untrusted (a
+	// transcript below the voice confidence gate), so session memory can record
+	// it as a guess rather than as a quotation.
+	turnUnreliable bool
+
 	// BlackBox Phase 5: opt-in camera perception seams (wired by main; nil =
 	// vision unavailable). VisionCapture returns one memory-only JPEG frame;
 	// VisionCall runs a vision-capable model over prompt + frame.
@@ -274,7 +279,7 @@ func (a *Agent) HandleInput(userInput string) {
 		classification.RootCommand, classification.Reason,
 	))
 
-	if classification.Kind == shell.KindShellCommand && classification.Confidence >= shell.HighConfidence {
+	if a.directShellAllowed(classification) {
 		if err := a.runDirectShellCommand(userInput); err != nil {
 			a.render.PrintError(fmt.Sprintf("Command failed: %v", err))
 			return
@@ -757,6 +762,44 @@ func extractFencedShellBlocks(text string) []string {
 //
 // Args: command: raw shell command.
 // Returns: error if execution fails. Complexity: O(execution time).
+// directShellAllowed reports whether this turn may skip the planner and run the
+// input directly as a shell command.
+//
+// For TYPED input the rule is unchanged: a confident shell classification runs
+// as typed, which is the whole point of a shell that does not nag.
+//
+// For VOICE it is always false, and that is a fix rather than a restriction.
+// The classifier decides on the FIRST TOKEN, so any spoken sentence whose first
+// word happens to be an executable was classified as a command and executed
+// verbatim — measured on real phrasings, "make a new branch called test" ran as
+// `make a new branch called test` (confidence 1.00), and so did "top three
+// biggest directories", "test the code", "history of my commands" and "clear the
+// screen". The planner would have produced `git checkout -b test`.
+//
+// This is the same shape as the deictic camera hijack removed in Phase 13: a
+// pattern match on English intercepting a spoken sentence before the model that
+// could understand it. The resolution is the same — delete the shortcut and let
+// the planner choose — and §2.3's claim that "voice transcripts naturally route
+// to the AI planner" becomes true here, at the routing layer, rather than being
+// an accident of the classifier that only held for sentences not starting with a
+// command name.
+//
+// Not a safety fix: the direct path runs handleShellStep, so validation, risk
+// tiers and the ADR-005 Medium cap always applied (guardrail §12 #3 was never
+// bypassed). It is a correctness fix — voice reaching the whole shell, which
+// ADR-005's amendment widened toward, means the PLANNER reaching it, not the
+// classifier guessing from one word.
+//
+// Cost, stated honestly: a spoken "git status" now pays one planner round trip.
+// The deterministic fast path below still runs for voice, so common local
+// workflows do not need the model either.
+func (a *Agent) directShellAllowed(c shell.Classification) bool {
+	if c.Kind != shell.KindShellCommand || c.Confidence < shell.HighConfidence {
+		return false
+	}
+	return !a.voiceActive()
+}
+
 func (a *Agent) runDirectShellCommand(command string) error {
 	a.render.PrintDebug("shell.classify: direct shell execution (AI bypass)")
 	step := ai.PlanStep{Tool: "shell", Command: command}
@@ -1412,7 +1455,16 @@ func (a *Agent) sessionContextBlock() string {
 	for _, t := range turns {
 		user := rag.SanitizeRetrievedText(t.UserText, 160)
 		reply := rag.SanitizeRetrievedText(t.Reply, 160)
-		line := fmt.Sprintf("user(%s): %s", t.Channel, user)
+		// An unreliable turn is labelled in the text the model reads, not just
+		// in the struct. A flag the prompt does not surface changes nothing:
+		// the point is that the planner can tell a confident quotation from a
+		// transcript Helix refused to act on, so it treats the next utterance
+		// as a repeat instead of answering the misheard version.
+		speaker := t.Channel
+		if t.Unreliable {
+			speaker += ", not understood"
+		}
+		line := fmt.Sprintf("user(%s): %s", speaker, user)
 		if reply != "" {
 			line += fmt.Sprintf(" | helix: %s", reply)
 		}

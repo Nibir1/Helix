@@ -220,6 +220,18 @@ registry (`VoiceOK`, `VoiceReadOnly`), so the whole voice policy is one readable
 testable table rather than a guard inside each handler — and a refusal is spoken,
 never silent. See `docs/voice.md`.
 
+**Voice never takes the direct-shell bypass** (`Agent.directShellAllowed`). A
+confidently-classified command line runs as typed when typed; on the voice
+channel it always goes to the planner. `shell.Classify` decides on the first
+token, so spoken sentences beginning with an executable's name — "make a new
+branch called test", "top three biggest directories" — were classified as shell
+commands at full confidence and executed verbatim. The safety pipeline covered
+that path the whole time (validation, risk tiers, the ADR-005 Medium cap), so
+this is a routing-correctness fix rather than a closed hole: voice reaching the
+whole shell has to mean the planner reaching it, not the classifier guessing from
+one word. Same failure shape as the deictic camera heuristic (3d), resolved the
+same way — remove the pattern match on English and let the model choose.
+
 ### 6. E2E TTY Harness (`tests/e2e/`)
 A pseudo-terminal (PTY) based end-to-end suite that boots the real `helix`
 binary against a mock OpenAI-compatible provider (in-process `httptest`
