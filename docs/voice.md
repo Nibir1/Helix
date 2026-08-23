@@ -153,6 +153,14 @@ written to disk.
 rather than a second switch to remember. `"turn off your eyes"` closes it
 without ending the conversation.
 
+**On macOS, grant the terminal camera access first** (System Settings → Privacy
+& Security → Camera, then restart the terminal). Without it the camera does not
+error — it opens and delivers nothing forever — so Helix gives up after 8
+seconds and names that as the likely cause. `/blackbox status` will not say
+*watching* until a frame has actually arrived; until then it says **no frames**,
+because ffmpeg being installed and the model being multimodal are both necessary
+and neither is sufficient.
+
 Two ways to use it, and both are explicit:
 
 - **Ask outright**: `/blackbox look [question]`, typed or spoken.

@@ -211,10 +211,16 @@ avfoundation on macOS, dshow on Windows, v4l2 on Linux; the capture rate is
 negotiated from what the device reports rather than assumed. Route frames to a
 different model than chat with `vision.model`.
 
-On macOS the OS must also grant camera access to the terminal running Helix. An
+On macOS the OS must also grant camera access to the terminal running Helix:
+**System Settings → Privacy & Security → Camera**, then restart the terminal. An
 unauthorised camera does not error — it opens and then delivers nothing — so a
-capture that produces no frame before its deadline says so explicitly instead of
-looking like a hang.
+capture gives up after 8 seconds and names that as the likely cause, rather than
+stalling the turn for half a minute and quoting whatever ffmpeg last printed.
+
+`/blackbox status` will not claim the camera is *watching* until a frame has
+actually arrived. If every attempt has failed it reports **no frames**, because
+ffmpeg being installed and the model being multimodal are both necessary and
+neither is sufficient — an unauthorised camera passes both checks.
 
 ## 7. Ambient awareness (optional, opt-in)
 

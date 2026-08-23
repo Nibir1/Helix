@@ -224,6 +224,13 @@ func blackBoxHearingLine() string {
 func blackBoxEyesLine() string {
 	ready, why := visionReady()
 	switch {
+	case cfg.Vision.Enabled && ready && cameraDeliveredNothing():
+		// Enabled, ffmpeg present, model can see — and the camera has never
+		// actually produced a frame. Saying "watching" here is the readiness lie
+		// this file exists to prevent: on macOS an unauthorized camera passes
+		// every check that can be made cheaply and delivers nothing forever.
+		return shell.Badge(shell.StateBad, "no frames") +
+			shell.Muted("  camera opens but delivers nothing — likely OS permission; /blackbox look shows why")
 	case cfg.Vision.Enabled && ready:
 		return shell.Badge(shell.StateGood, "watching") + shell.Muted("  ") +
 			shell.Value(visionRouteDescription()) +
@@ -238,6 +245,20 @@ func blackBoxEyesLine() string {
 	default:
 		return shell.Badge(shell.StateIdle, "off") + shell.Muted("  "+why)
 	}
+}
+
+// cameraDeliveredNothing reports whether every capture attempt so far has
+// failed.
+//
+// "Never attempted" is deliberately NOT a failure: a fresh session has not tried
+// yet and must not be accused of being broken. Only a recorded failure with no
+// success behind it counts.
+func cameraDeliveredNothing() bool {
+	if visionSvc == nil {
+		return false
+	}
+	err, everWorked := visionSvc.LastFailure()
+	return err != nil && !everWorked
 }
 
 // visionReady reports whether a frame could actually be captured AND
