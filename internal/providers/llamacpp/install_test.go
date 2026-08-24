@@ -188,11 +188,28 @@ func TestCacheDirsFallsBackToDefaults(t *testing.T) {
 	}
 }
 
-func TestCachedModelsFindsGGUFAtDepth(t *testing.T) {
+// isolateCaches points every cache root CacheDirs() consults at a temp dir.
+//
+// Setting LLAMA_CACHE/HF_HUB_CACHE/HF_HOME is not enough: CacheDirs also adds
+// $HOME/.cache/llama.cpp and $HOME/.cache/huggingface/hub from os.UserHomeDir(),
+// so without overriding HOME these tests scan the developer's REAL model cache.
+// They then pass or fail depending on whether that machine happens to hold a
+// GGUF — which is how they behaved until a genuine model download made them fail.
+// A test whose result depends on what else is installed is not testing the code.
+func isolateCaches(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
 	t.Setenv("LLAMA_CACHE", root)
 	t.Setenv("HF_HUB_CACHE", "")
 	t.Setenv("HF_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
+	return root
+}
+
+func TestCachedModelsFindsGGUFAtDepth(t *testing.T) {
+	root := isolateCaches(t)
 
 	// The HF hub layout: models--org--name/snapshots/<hash>/file.gguf
 	deep := filepath.Join(root, "models--ggml-org--gemma", "snapshots", "abc123")
@@ -232,10 +249,7 @@ func TestCachedModelsDeduplicatesSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ")
 	}
-	root := t.TempDir()
-	t.Setenv("LLAMA_CACHE", root)
-	t.Setenv("HF_HUB_CACHE", "")
-	t.Setenv("HF_HOME", "")
+	root := isolateCaches(t)
 
 	blobs := filepath.Join(root, "blobs")
 	snaps := filepath.Join(root, "snapshots", "abc")
@@ -258,9 +272,8 @@ func TestCachedModelsDeduplicatesSymlinks(t *testing.T) {
 }
 
 func TestCachedModelsHandlesMissingDirs(t *testing.T) {
+	isolateCaches(t)
 	t.Setenv("LLAMA_CACHE", filepath.Join(t.TempDir(), "absent"))
-	t.Setenv("HF_HUB_CACHE", "")
-	t.Setenv("HF_HOME", "")
 	// Must not panic or error — never having pulled anything is normal.
 	if got := CachedModels(); len(got) != 0 {
 		t.Errorf("expected no models, got %+v", got)

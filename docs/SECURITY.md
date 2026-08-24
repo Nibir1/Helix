@@ -95,6 +95,14 @@ Full model, including the residual risk accepted for a voice-first assistant:
   transcript log; with it off there is no directory and no file. It records text
   and metadata only — never audio, because captured clips are deleted the moment
   they are read.
+- **Conversational context retention is opt-in and never reaches disk.** A
+  context-conditioned voice (Sesame CSM-1B) needs to hear the last few turns, so
+  enabling `speech.tts.context_turns` makes Helix hold recent audio in memory for
+  longer than the turn that produced it. That retention is **memory only** — the
+  store imports no filesystem or networking API, enforced by a test — bounded by
+  both turn count and total bytes, and dropped when live mode ends. The audio was
+  already in memory a moment earlier for transcription; what changes is how long,
+  which is why the bounds are the control. Off by default.
 
 ## Secret Handling
 - API keys are stored in `~/.helix/secrets.json` with strict `0600` file permissions.

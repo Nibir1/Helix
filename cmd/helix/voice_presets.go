@@ -82,6 +82,19 @@ func speechPresets() []speechPreset {
 			TTSFallbacks: []string{"piper-local"},
 		},
 		{
+			Name: "Most natural, local (needs a GPU)",
+			Note: "Sesame CSM-1B — conversational prosody, nothing leaves the machine · ~8GB VRAM",
+			// whisper-local ears, CSM voice, and piper as the fallback that
+			// keeps the chain usable when CSM is too slow on this hardware —
+			// which is the expected outcome on any machine without a GPU candle
+			// can use, notably Intel Macs.
+			STTProvider:  "whisper-local",
+			STTFallbacks: nil,
+			TTSProvider:  "csm-local",
+			TTSVoice:     "0",
+			TTSFallbacks: []string{"piper-local"},
+		},
+		{
 			Name: "Fully local / private",
 			Note: "no key, no per-call cost, nothing leaves the machine · no docker",
 			// No fallback in either direction: see the function comment.

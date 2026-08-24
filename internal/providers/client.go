@@ -184,6 +184,37 @@ func (c *HTTPClient) DoRaw(
 	return data, nil
 }
 
+// DoRawWithHeaders is DoRaw plus the response headers.
+//
+// Some servers answer a question in a header rather than the body — notably
+// whether an optional request feature was actually honored. Serde-based servers
+// ignore unknown JSON fields by default, so "the request was accepted" does not
+// mean "the field was used", and a client that cannot read the response headers
+// cannot tell the difference.
+func (c *HTTPClient) DoRawWithHeaders(
+	ctx context.Context,
+	method string,
+	url string,
+	headers map[string]string,
+	contentType string,
+	body []byte,
+) ([]byte, http.Header, error) {
+	resp, err := c.doRaw(ctx, method, url, headers, contentType, body)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read response body: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, resp.Header, &StatusError{Code: resp.StatusCode, Snippet: apiErrorSnippet(data)}
+	}
+	return data, resp.Header, nil
+}
+
 // doRaw is the retrying transport under DoRaw, mirroring do() but with an
 // explicit content type and a pre-marshaled body.
 func (c *HTTPClient) doRaw(

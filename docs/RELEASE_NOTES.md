@@ -10,12 +10,37 @@ It remains local-first and telemetry-free. The whole voice stack runs offline if
 
 ### 🎙️ Voice
 
-- **Multi-provider speech** with failover chains: Groq, OpenAI and Deepgram for transcription; OpenAI, Deepgram, ElevenLabs for speech; whisper.cpp, Piper and Kokoro as local sidecars. Pricing is *data* (`pricing.json`, user-overridable), never hardcoded routing.
+- **Multi-provider speech** with failover chains: Groq, OpenAI and Deepgram for transcription; OpenAI, Deepgram, ElevenLabs for speech; whisper.cpp, Piper, Kokoro and **Sesame CSM-1B** as local sidecars. Pricing is *data* (`pricing.json`, user-overridable), never hardcoded routing.
 - **Recommended chains** — one keystroke in `/blackbox setup` picks cheapest-cloud (Groq + `gpt-4o-mini-tts`), lowest-latency (Deepgram Nova-3 + Aura-2), or fully-local/private (whisper.cpp + Piper). Every cloud chain pre-fills a *local* fallback, because the failure worth surviving is the network.
 - **Hands-free wake word** — energy detector by default (pure Go, works everywhere, honest about detecting onset rather than a phrase) or an openWakeWord-class sidecar for true keyword spotting. Between turns Helix holds in wake-only listening: nothing is transcribed until a wake event fires.
 - **Streaming both ways** — live interim transcripts (Deepgram WebSocket), and sentence-pipelined TTS that starts playing after the first sentence synthesizes instead of the whole paragraph. Time-to-first-audio dropped from a measured 2,280 ms to ~150 ms + network.
 - **Barge-in** — Ctrl+C stops a spoken reply mid-sentence (~50 ms), not at the next sentence boundary.
 - **A sci-fi HUD** — listening waveform driven by the real microphone level (log-scaled, because speech RMS on a linear meter barely leaves the floor), decode sweep, speaking wave, wake-standby pulse. Terminal-native; no GUI dependency.
+
+### 🗣️ Sesame CSM-1B — a local voice that sounds like a conversation
+
+The speech model behind Sesame's "crossing the uncanny valley of voice" demo, running
+on your own machine with **no Python, no Docker and no API calls**. Not the whole demo —
+what Sesame open-sourced is the speech *generator*, which cannot produce text — so Helix's
+planner still decides what to say. What it changes is how that sounds.
+
+- **A Rust sidecar, not PyTorch.** `csm.rs` (candle) with CUDA, Metal, Accelerate and MKL
+  backends and an OpenAI-shaped endpoint. The CGO-free single binary is untouched.
+- **Conditioned on the conversation.** CSM's prosody depends on hearing the last few turns,
+  which is the difference between very good TTS and something that sounds like it was
+  listening. Helix assembles that context and sends it; `docs/csm-context.patch` is the
+  (verified, working) upstream patch that teaches a CSM server to accept it.
+- **Honest about whether it worked.** An unpatched server accepts the context field and
+  silently drops it, so Helix reads a response header rather than assuming: if context is
+  being ignored, status says so instead of claiming prosody it is not getting.
+- **Retention is memory-only, bounded and off by default.** Context needs prior audio;
+  nothing is written to disk, it is capped by turns and bytes, and `/blackbox off` drops it.
+
+**It wants a discrete GPU.** Measured 1.69× real-time on an M4 Air (slower than playback:
+csm.rs runs the quantized weights on CPU regardless of the Metal build), against a ~0.8×
+reference figure on an NVIDIA GPU. Pair it with `piper-local` as the fallback and a machine
+that cannot keep up simply uses the fast voice. Setup, per-platform build flags and a
+per-machine expectation table are in `docs/local_runtimes.md` §3.5–3.6.
 
 ### 👁️ Vision
 
@@ -95,6 +120,10 @@ This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
 - **Real keyword spotting needs the sidecar.** The default engine detects speech onset; it will wake on "hey helix", on "hello there" and on a dropped mug.
 - **The 72-hour soak has not been run**, though the tooling and the verdict now exist (`scripts/soak.sh`, then `/blackbox stats`).
 - **macOS camera access must be granted by hand** (System Settings → Privacy & Security → Camera). Until it is, the camera opens and delivers nothing — which Helix now says instead of hanging.
+- **CSM-1B needs a GPU**, and its conversational context needs a patched sidecar. Unpatched
+  servers silently ignore the context field — Helix detects and reports that rather than
+  overstating, but the prosody benefit only arrives once `docs/csm-context.patch` (or an
+  equivalent upstream change) is in place.
 - **Full-duplex barge-in is parked.** Interrupting by *voice* mid-reply needs acoustic echo cancellation, which conflicts with the CGO-free build unless a headset is assumed.
 
 ### Upgrading from v1.0.0

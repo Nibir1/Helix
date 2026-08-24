@@ -63,6 +63,11 @@ func initVoiceMode() {
 func enterVoiceMode(persist bool) {
 	voiceModeActive = true
 	commands.SetPrompter(voicePrompter)
+
+	// Conversational context is scoped to the mode: it only makes sense while a
+	// conversation is happening, and scoping it here is what makes "leaving live
+	// mode drops the retained audio" true rather than aspirational.
+	speech.EnableConversationContext(cfg.Speech.TTS.ContextTurns, cfg.Speech.TTS.ContextMaxBytes)
 	if persist {
 		cfg.UserPrefs.VoiceMode = true
 		_ = cfg.SavePreferences()
@@ -134,6 +139,10 @@ func exitVoiceMode(persist bool) {
 	// Without this, leaving live mode returned the prompt to the keyboard while the
 	// previous reply kept talking over it.
 	speech.StopSpeaking()
+
+	// Drop retained conversation audio with the mode. Nothing here was ever
+	// written to disk, so this is the only place it needs to be released.
+	speech.EnableConversationContext(0, 0)
 
 	voiceModeActive = false
 	if ttyPrompter != nil {
@@ -321,7 +330,7 @@ func batchVoiceTurn() (input.InputEvent, error) {
 	if err != nil {
 		return input.InputEvent{}, fmt.Errorf("transcribe: %w", err)
 	}
-	return finishVoiceTranscript(strings.TrimSpace(transcript.Text), transcript)
+	return finishVoiceTranscript(strings.TrimSpace(transcript.Text), transcript, clip)
 }
 
 // errStreamDial marks a failure to open the streaming connection (distinct
@@ -405,7 +414,9 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 			return input.InputEvent{}, speech.ErrEmptyTranscript
 		}
 		fmt.Print("\r\x1b[2K")
-		return finishVoiceTranscript(last, speech.Transcript{Text: last, Provider: s.Name(), IsFinal: true})
+		return finishVoiceTranscript(last,
+			speech.Transcript{Text: last, Provider: s.Name(), IsFinal: true},
+			speech.AudioFormat{})
 	}
 
 	for {
@@ -436,7 +447,9 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 			}
 			yieldLine()
 			fmt.Print("\r\x1b[2K")
-			return finishVoiceTranscript(text, t)
+			// Streaming: the utterance arrived as chunks, so there is no single
+			// clip to retain. The turn contributes text-only context.
+			return finishVoiceTranscript(text, t, speech.AudioFormat{})
 		case <-idle.C:
 			return finalize()
 		case <-ctx.Done():
@@ -458,7 +471,13 @@ func resetTimer(t *time.Timer, d time.Duration) {
 
 // finishVoiceTranscript applies kill-switch checks and stamps the input event
 // shared by the batch and streaming turn paths.
-func finishVoiceTranscript(text string, transcript speech.Transcript) (input.InputEvent, error) {
+// finishVoiceTranscript funnels every finalized transcript.
+//
+// audio is the clip the transcript came from, retained as conversational context
+// for a context-conditioned voice. It may be the zero value: the streaming path
+// consumes the utterance as chunks and never holds one contiguous clip, so those
+// turns contribute text-only context, which CSM still conditions on.
+func finishVoiceTranscript(text string, transcript speech.Transcript, audio speech.AudioFormat) (input.InputEvent, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return input.InputEvent{}, speech.ErrEmptyTranscript
@@ -504,6 +523,10 @@ func finishVoiceTranscript(text string, transcript speech.Transcript) (input.Inp
 	}
 
 	logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomePlanner)
+	// The user's half of the context CSM conditions on. Recorded here because
+	// this is the one funnel every finalized transcript passes through, and only
+	// for turns that reach the planner — a kill phrase is not conversation.
+	speech.RecordUserTurn(text, audio)
 	return input.InputEvent{
 		Text:    text,
 		Channel: input.ChannelVoice,

@@ -161,6 +161,7 @@ external HTTP services — the same pattern Helix already uses for Ollama:
 |-----------|---------|------------------|-------|
 | Local STT | whisper.cpp `whisper-server` | `http://127.0.0.1:8080` | `/inference`, or `/v1/audio/transcriptions` on an OpenAI-shaped server — **discovered, not assumed** |
 | Local TTS | Piper `http_server` | `http://127.0.0.1:5000` | `/`, or `/api/tts` on older Rhasspy builds — likewise discovered |
+| Local TTS (natural) | Sesame CSM-1B via `csm.rs` | `http://127.0.0.1:28195` | `/v1/audio/speech` (OpenAI-shaped) |
 | Wake word | openWakeWord-class (`/predict`) | configured in `speech.wake_word.sidecar_url` | `/predict` |
 
 Both speech adapters try the known routes in order and remember which answered,
@@ -174,7 +175,24 @@ real binaries, not just mocks: see
 Set `stt.provider = "whisper-local"` / `tts.provider = "piper-local"` in the
 speech config section (or pick them in `/blackbox setup`).
 
-**Neither needs Docker**, and neither does Helix. Kokoro is the one optional
+**Sesame CSM-1B** with `context_turns` set is the closest Helix gets to the
+Sesame demo: prosody conditioned on the last few turns rather than each sentence
+synthesized cold. Helix assembles and sends that context today; a CSM server that
+accepts it is the remaining piece, and until one does, Helix detects the refusal
+once and falls back to ordinary synthesis for the session. See
+[local_runtimes.md](local_runtimes.md) §3.6 — including why retention is
+memory-only and off by default.
+
+**Sesame CSM-1B** is the quality option: a 1B conversational speech model whose
+prosody is conditioned on the dialogue, run through the Rust `csm.rs` sidecar —
+**no Python, no Docker**. It wants a GPU (~8 GB VRAM) to stay ahead of playback;
+on a machine without one, pair it with `piper-local` as the fallback so a slow
+box simply uses the fast voice. Setup, per-platform build flags, the gated-weights
+step and an honest per-machine expectation table are in
+[local_runtimes.md](local_runtimes.md) §3.5; `make live-csm` measures the
+real-time factor on your own hardware.
+
+**None of them needs Docker**, and neither does Helix. Kokoro is the one optional
 container-hosted voice: Helix will not install a container runtime, refuses
 early when no daemon answers, and marks it `no docker` in the provider table so
 the constraint is visible before the choice.

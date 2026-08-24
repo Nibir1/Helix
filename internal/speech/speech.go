@@ -125,6 +125,7 @@ func registerBuiltins(reg *Registry, cfg Config) {
 	reg.RegisterTTS(NewDeepgramTTS(ttsModel("deepgram"), ttsEndpointFor(cfg, "deepgram")))
 	reg.RegisterTTS(NewElevenLabsTTS(ttsModel("elevenlabs"), ttsVoice("elevenlabs"), ttsEndpointFor(cfg, "elevenlabs")))
 	reg.RegisterTTS(NewKokoroLocalTTS(ttsModel("kokoro-local"), ttsVoice("kokoro-local"), ttsEndpointFor(cfg, "kokoro-local")))
+	reg.RegisterTTS(NewCSMLocalTTS(ttsModel("csm-local"), ttsVoice("csm-local"), ttsEndpointFor(cfg, "csm-local")))
 	reg.RegisterTTS(NewPiperTTS(ttsEndpointFor(cfg, "piper-local")))
 
 	reg.SetConfig(cfg)
@@ -154,6 +155,77 @@ func Transcribe(ctx context.Context, clip AudioFormat) (Transcript, error) {
 		return Transcript{}, fmt.Errorf("speech not initialized")
 	}
 	return reg.Transcribe(ctx, clip)
+}
+
+// conversation is the package-level context store, nil unless a context-capable
+// provider is configured with a turn budget.
+//
+// Package-level rather than threaded through every caller for the same reason
+// the offline flag is: the voice loop, the daemon and /blackbox say all speak
+// through the same entry points, and a parameter would have to cross all of them
+// to serve one provider.
+var conversation *ConversationContext
+
+// EnableConversationContext turns on retention of recent turns for providers
+// whose prosody is conditioned on them (CSM-1B).
+//
+// turns <= 0 disables it and drops whatever was held. Retention is memory-only
+// and bounded; see internal/speech/conversation.go for why those two properties
+// are the design rather than a detail.
+func EnableConversationContext(turns, maxBytes int) {
+	mu.Lock()
+	defer mu.Unlock()
+	if turns <= 0 {
+		if conversation != nil {
+			conversation.Clear()
+		}
+		conversation = nil
+		return
+	}
+	conversation = NewConversationContext(turns, maxBytes)
+}
+
+// RecordUserTurn adds what the user said, with the audio that was captured.
+func RecordUserTurn(text string, audio AudioFormat) {
+	mu.RLock()
+	c := conversation
+	mu.RUnlock()
+	c.Append(ConversationTurn{Speaker: SpeakerUser, Text: text, Audio: audio})
+}
+
+// RecordAssistantTurn adds what Helix said, with the audio it produced.
+func RecordAssistantTurn(text string, audio AudioFormat) {
+	mu.RLock()
+	c := conversation
+	mu.RUnlock()
+	c.Append(ConversationTurn{Speaker: SpeakerAssistant, Text: text, Audio: audio})
+}
+
+// ClearConversationContext drops retained turns — called when live mode ends.
+func ClearConversationContext() {
+	mu.RLock()
+	c := conversation
+	mu.RUnlock()
+	c.Clear()
+}
+
+// ConversationStats reports retention for status output.
+func ConversationStats() (turns, bytes int) {
+	mu.RLock()
+	c := conversation
+	mu.RUnlock()
+	return c.Len(), c.Bytes()
+}
+
+// currentContext returns the turns to condition on.
+func currentContext() []ConversationTurn {
+	mu.RLock()
+	c := conversation
+	mu.RUnlock()
+	if c == nil {
+		return nil
+	}
+	return c.Recent(c.maxTurns)
 }
 
 // Synthesize runs the global TTS failover chain with the configured voice,
@@ -191,7 +263,10 @@ func synthesizeChain(ctx context.Context, text string) (AudioFormat, error) {
 		return AudioFormat{}, fmt.Errorf("speech not initialized")
 	}
 	cfg := reg.ActiveConfig()
-	return reg.Synthesize(ctx, text, SynthesisOptions{Voice: cfg.TTS.Voice})
+	return reg.Synthesize(ctx, text, SynthesisOptions{
+		Voice:   cfg.TTS.Voice,
+		Context: currentContext(),
+	})
 }
 
 // LastSynthesizeLatencyMs returns the most recent TTS latency in milliseconds

@@ -87,6 +87,19 @@ type SpeechTTSConfig struct {
 	Endpoints map[string]string `json:"endpoints,omitempty"`
 	// FirstByteMs is the TTS first-byte latency budget (0 → 800ms).
 	FirstByteMs int `json:"first_byte_ms"`
+
+	// ContextTurns is how many recent conversation turns are retained and sent
+	// to a context-conditioned voice (CSM-1B). 0 disables it, which is the
+	// default and the behavior of every other provider.
+	//
+	// Retention is memory-only and bounded — see internal/speech/conversation.go.
+	// It is off by default because it means holding recent AUDIO in memory for
+	// longer than a single turn, which is a privacy-relevant change even though
+	// nothing reaches disk.
+	ContextTurns int `json:"context_turns,omitempty"`
+
+	// ContextMaxBytes caps retained audio (0 → 4 MiB).
+	ContextMaxBytes int `json:"context_max_bytes,omitempty"`
 }
 
 // SpeechWakeConfig controls wake-word listening (BlackBox §7).
@@ -138,6 +151,9 @@ func (sc SpeechConfig) Runtime() speech.Config {
 		},
 	}
 }
+
+// ContextEnabled reports whether conversational context retention is on.
+func (sc SpeechConfig) ContextEnabled() bool { return sc.TTS.ContextTurns > 0 }
 
 // LLMFallbackConfig controls automatic cloud→local language-model failover
 // (BlackBox P11.2). It is the brain's counterpart to the speech chain's

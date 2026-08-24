@@ -242,6 +242,16 @@ Run these inside Helix after install:
 - `/mictest` — 3-second capture self-test: proves the mic is actually being heard (level + dBFS +
   speech-gate verdict). The fastest way to catch a wrong input device on a headless board.
 
+### A note on CSM-1B for edge boards
+
+Sesame CSM-1B (§3.5 of [local_runtimes.md](local_runtimes.md)) is the best local
+voice Helix can use and is **not** an edge-board option. It is a 1B autoregressive
+model generating 12.5 audio frames per second and wants roughly 8 GB of VRAM to
+stay ahead of playback; a Pi 5 has neither the memory bandwidth nor a candle
+backend for it. On every board in this matrix, Piper remains the right voice.
+CSM belongs on the workstation-class machines at the top of §4: a discrete NVIDIA
+GPU, or Apple Silicon with Metal.
+
 ### Measured costs of the always-on parts
 
 Numbers from an M4 Mac — a fast box, so treat these as a floor and re-measure on

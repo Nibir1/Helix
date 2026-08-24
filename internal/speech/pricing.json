@@ -143,6 +143,20 @@
       "notes": "Kokoro-82M via Kokoro-FastAPI (OpenAI-compatible, ADR-002). Near-cloud quality, free/offline; ~1x realtime on a Raspberry Pi 5. Best local voice."
     },
     {
+      "provider": "csm-local",
+      "kind": "tts",
+      "model": "sesame/csm-1b",
+      "price_per_unit": 0.0,
+      "unit": "1k_chars",
+      "latency": "medium",
+      "quality_tier": "premium",
+      "languages": "en",
+      "requires_key": false,
+      "local": true,
+      "recommended": false,
+      "notes": "Sesame CSM-1B via the csm.rs Rust sidecar. The most natural local voice; needs a GPU (~8GB VRAM) for real-time. No Python, no Docker."
+    },
+    {
       "provider": "piper-local",
       "kind": "tts",
       "model": "piper (sidecar)",

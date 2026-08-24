@@ -157,6 +157,7 @@ const (
 	whisperCfgKey = "stt-url"
 	piperCfgKey   = "tts-url"
 	kokoroCfgKey  = "tts-url"
+	csmCfgKey     = "tts-url"
 )
 
 // Launch commands are rendered against the endpoint ACTUALLY configured, not a
@@ -174,6 +175,16 @@ func whisperStartCmd(origin string) string {
 
 func piperStartCmd(origin string) string {
 	return fmt.Sprintf("python3 -m piper.http_server -m en_US-lessac-medium.onnx --port %s",
+		endpointPort(origin))
+}
+
+// csmStartCmd names the csm.rs server invocation against the configured port.
+//
+// The --port is explicit because csm.rs defaults to 8080, which whisper.cpp and
+// llama.cpp also default to: a user with a local STT chain or a local brain is
+// exactly the user who wants CSM, and they would collide on first launch.
+func csmStartCmd(origin string) string {
+	return fmt.Sprintf("csm-server --model-id sesame/csm-1b --port %s",
 		endpointPort(origin))
 }
 

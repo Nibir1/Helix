@@ -273,6 +273,8 @@ Helix has a **persona**, not a default assistant register: it answers first, kee
 
 **No Docker required, anywhere.** The local voice chain is whisper.cpp plus Piper, which need a binary and Python. Kokoro is the one optional component that ships as a container; Helix will not install a runtime for it, and marks it `needs docker` in the table rather than walking you into a failed pull.
 
+**Sesame CSM-1B** is the quality local voice: the speech model from Sesame's "uncanny valley" demo, run through a Rust sidecar with **no Python and no Docker**, and — uniquely among Helix's voices — conditioned on the last few turns of the conversation rather than synthesizing each sentence cold. It wants a discrete GPU (~8 GB VRAM); pair it with `piper-local` as the fallback so a machine that cannot keep up simply uses the fast voice. See [docs/local_runtimes.md](docs/local_runtimes.md) §3.5.
+
 See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits (capture is half-duplex — the mic is muted while Helix speaks, so a reply is interrupted with Ctrl+C rather than by talking over it).
 
 | Command | Description |

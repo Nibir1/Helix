@@ -110,6 +110,37 @@ func voiceSidecars() map[string]voiceSidecar {
 				}
 			},
 		},
+		// Sesame CSM-1B via csm.rs — a Rust/candle server, no Python, no Docker.
+		//
+		// Two things make this different from the other sidecars and both are
+		// visible in the fields below. It is BUILT rather than installed, because
+		// the backend is a compile-time choice (cuda / metal / accelerate / mkl)
+		// and picking one for the user would silently hand a 3080 owner a CPU
+		// build. And its weights are GATED on Hugging Face: the user must accept
+		// Sesame's terms and hold a token, which Helix will not and cannot do on
+		// their behalf.
+		"csm-local": {
+			Binaries: []string{"csm-server"},
+			InstallCmd: func() (string, bool) {
+				// Deliberately no auto-install. The llama.cpp precedent applies
+				// exactly: "Helix offers to run an install only when there is one
+				// obvious command that makes no choices on the user's behalf."
+				// A CSM build chooses a compute backend, so it is printed.
+				return "", false
+			},
+			ModelHint: func() (string, string, bool) {
+				return "huggingface-cli login   # then accept the terms at https://huggingface.co/sesame/csm-1b",
+					"CSM's weights are gated: accept Sesame's terms once and log in, " +
+						"then csm.rs downloads them on first run (~2 GB, or ~700 MB for the q4_k GGUF)",
+					true
+			},
+			Args: func(port int) []string {
+				return []string{
+					"--model-id", "sesame/csm-1b",
+					"--port", fmt.Sprint(port),
+				}
+			},
+		},
 		"kokoro-local": {
 			// Docker-hosted, so the "binary" is docker and the image is the
 			// argument. Helix does not install Docker, and does not ask the

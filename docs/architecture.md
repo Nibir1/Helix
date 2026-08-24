@@ -69,6 +69,40 @@ Four user-managed local services (ADR-002: Helix never launches them).
 
 See `docs/local_runtimes.md`.
 
+**Sesame CSM-1B** joins the same pattern as the quality local voice
+(`internal/speech/adapter_csm_tts.go`). Two things about it shaped the
+integration. Its reference implementation is PyTorch, so Helix speaks to the Rust
+`csm.rs` server instead — the CGO-free binary and the no-Python rule both hold,
+and the OpenAI-shaped `/v1/audio/speech` contract meant no new transport. And its
+default port is 8080, which whisper.cpp and llama.cpp also claim, so Helix
+defaults it to 28195: the person running a local chain is exactly the person who
+wants CSM, and they would otherwise collide on first launch. Unlike the other
+sidecars it is neither auto-installed (the compute backend is a compile-time
+choice, and choosing it for the user would hand a GPU owner a CPU build) nor
+auto-downloaded (the weights are gated on Hugging Face behind the user's own
+account).
+
+**Conversational context** (`internal/speech/conversation.go`) is what separates
+CSM from ordinary TTS in this codebase. CSM conditions on prior turns as
+(speaker, text, audio), so Helix keeps a bounded ring of them and sends it with
+each synthesis. Three properties are load-bearing rather than incidental:
+
+- **Memory only.** Context needs prior AUDIO, and the standing guarantee is that
+  captured clips are deleted the moment they are read. The store therefore
+  imports no filesystem or networking API — a test parses its imports and fails
+  if it ever gains `os` or `net` — so "never written to disk" is unchanged and
+  `/purge` has nothing new to reach.
+- **Bounded twice and mode-scoped.** Turn count and total bytes, oldest-first,
+  cleared when live mode ends. The audio was already in memory a moment earlier
+  for transcription; what changed is how long, which is why the bounds are the
+  design.
+- **Never assumed to have worked.** No upstream CSM server implements a context
+  field, and csm.rs's request struct ignores unknown fields rather than rejecting
+  them — so an unpatched server accepts context and silently drops it. Helix
+  reads an `X-CSM-Context-Segments` response header (added by
+  `docs/csm-context.patch`) and reports "ignored" when it is absent, rather than
+  claiming conversational prosody it is not receiving.
+
 ### 3c. Persona (`internal/agent/persona.go`)
 Who is speaking, as opposed to what may be executed. Every other prompt in the
 tree constrains format — emit this JSON, use that tool — so replies came back in

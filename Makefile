@@ -162,6 +162,13 @@ live-sidecar:
 	@echo "Running live sidecar measurements (whisper.cpp + Piper)..."
 	HELIX_LIVE_SIDECAR=1 go test ./internal/speech/ -run 'TestLive' -v -count=1 -timeout 600s
 
+# Measure a running Sesame CSM-1B sidecar (csm.rs) and report its real-time
+# factor — the number that decides whether conversation flows or stutters.
+# Skips loudly when no sidecar is listening. HELIX_CSM_URL overrides the port.
+live-csm:
+	@echo "Measuring CSM-1B sidecar (skips if none is running)..."
+	HELIX_LIVE_SIDECAR=1 go test ./internal/speech/ -run 'TestLiveCSM' -v -count=1 -timeout 300s
+
 # Run the end-to-end TTY harness (Linux/macOS; the build tag skips Windows)
 e2e:
 	@echo "Running E2E TTY harness..."

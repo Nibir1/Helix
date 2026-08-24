@@ -153,6 +153,20 @@ written to disk.
 rather than a second switch to remember. `"turn off your eyes"` closes it
 without ending the conversation.
 
+For the most natural local voice, `/blackbox setup` offers a **"Most natural,
+local (needs a GPU)"** chain: whisper.cpp ears with Sesame CSM-1B as the voice
+and Piper as the fallback. CSM is conditioned on conversation context, so replies
+sound like part of a dialogue rather than isolated lines — at the cost of wanting
+a GPU. See [local_runtimes.md](local_runtimes.md) §3.5 for what to expect on your
+hardware.
+
+Set `speech.tts.context_turns` and Helix sends CSM the last few turns — text and
+audio — so its prosody follows the conversation instead of resetting each
+sentence. That retention is memory-only, bounded, dropped when you leave live
+mode, and off until you ask for it. It also needs a sidecar that accepts the
+context field: Helix detects one that quietly ignores it and says so in
+`/blackbox status` rather than implying a benefit you are not getting.
+
 **On macOS, grant the terminal camera access first** (System Settings → Privacy
 & Security → Camera, then restart the terminal). Without it the camera does not
 error — it opens and delivers nothing forever — so Helix gives up after 8

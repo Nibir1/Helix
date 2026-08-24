@@ -48,6 +48,16 @@ type Transcript struct {
 type SynthesisOptions struct {
 	Voice string  // provider-specific voice id/name; empty = provider default
 	Speed float64 // 1.0 = normal; 0 = provider default
+
+	// Context is the recent conversation, oldest first, for providers whose
+	// prosody is conditioned on it (CSM-1B). Every other adapter ignores it,
+	// which is why this rides the options struct rather than the interface:
+	// adding a parameter to TTSProvider.Synthesize would have touched six
+	// adapters to serve one.
+	//
+	// Empty means single-utterance synthesis — the behavior of every provider
+	// before CSM arrived, and still the default.
+	Context []ConversationTurn
 }
 
 // STTProvider is the unified speech-to-text contract. Adapters exist for each

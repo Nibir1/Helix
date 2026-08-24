@@ -409,3 +409,146 @@ func TestLivePiperLocalSynthesizes(t *testing.T) {
 		t.Fatal("decoded audio is entirely silent")
 	}
 }
+
+// TestLiveCSMLocalSynthesizes measures a REAL csm.rs sidecar when one is running.
+//
+// Unlike the whisper and piper live tests, this one does not start the server:
+// csm.rs is built per-machine with a compute backend chosen at compile time
+// (cuda / metal / accelerate / mkl), and its weights are gated on Hugging Face
+// behind the user's own account. Helix cannot and should not arrange either. So
+// this attaches to whatever is already listening and measures it.
+//
+// It is the answer to "will CSM be smooth on this machine": it reports the
+// real-time factor, which is the number that decides whether a conversation
+// flows or stutters. RTF below 1.0 means audio is produced faster than it plays.
+func TestLiveCSMLocalSynthesizes(t *testing.T) {
+	requireLiveSidecar(t)
+
+	endpoint := os.Getenv("HELIX_CSM_URL")
+	if endpoint == "" {
+		endpoint = CSMDefaultEndpoint
+	}
+
+	adapter := NewCSMLocalTTS("", "0", endpoint)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	// Probe first so an absent sidecar skips with guidance instead of failing.
+	if err := adapter.HealthCheck(ctx); err != nil {
+		t.Skipf("no csm.rs sidecar at %s — start one and re-run, or set HELIX_CSM_URL.\n%v",
+			endpoint, err)
+	}
+
+	// A sentence long enough that startup cost does not dominate the ratio.
+	const line = "Right, the build finished. Two tests failed, both in the parser, " +
+		"and they look like the same root cause."
+
+	start := time.Now()
+	out, err := adapter.Synthesize(ctx, line, SynthesisOptions{})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("live CSM synthesis failed: %v", err)
+	}
+	if len(out.Bytes) == 0 {
+		t.Fatal("synthesis returned no audio")
+	}
+
+	samples, derr := DecodeWAVPCM16(out.Bytes)
+	if derr != nil {
+		t.Fatalf("CSM output is not decodable by Helix's WAV decoder: %v", derr)
+	}
+	if len(samples) == 0 {
+		t.Fatal("decoded zero samples — the clip would be silent")
+	}
+
+	rate := out.SampleRate
+	if rate <= 0 {
+		rate = 24000 // CSM's native rate
+	}
+	audioDur := time.Duration(float64(len(samples)) / float64(rate) * float64(time.Second))
+	rtf := elapsed.Seconds() / audioDur.Seconds()
+
+	t.Logf("CSM-1B live: synthesized %s of audio in %s",
+		audioDur.Round(time.Millisecond), elapsed.Round(time.Millisecond))
+	t.Logf("  real-time factor: %.2fx  (below 1.0 = faster than playback)", rtf)
+	t.Logf("  output: %d samples @ %d Hz, %d channel(s)", len(samples), rate, out.Channels)
+
+	// Non-silence: a header-only or all-zero clip decodes fine and plays as
+	// nothing, which is exactly what a broken backend produces.
+	var peak int16
+	for _, s := range samples {
+		if s > peak {
+			peak = s
+		}
+	}
+	if peak == 0 {
+		t.Fatal("decoded audio is entirely silent")
+	}
+
+	// Not a hard failure: a slow machine is a documented outcome, not a bug in
+	// Helix. The number is the deliverable.
+	if rtf > 1.0 {
+		t.Logf("  NOTE: slower than real-time on this machine — conversation will " +
+			"pause between sentences. Consider a quantized GGUF, or piper-local.")
+	}
+}
+
+// TestLiveCSMContextIsHonored proves the whole chain end to end: Helix assembles
+// conversational context, sends it, and a patched sidecar reports having
+// conditioned on it.
+//
+// This is the test that distinguishes "CSM as a better TTS" from "CSM as a
+// participant in the conversation". Against an UNPATCHED sidecar it does not
+// fail — it reports that context was ignored, which is the honest outcome and
+// the thing Helix must never paper over.
+func TestLiveCSMContextIsHonored(t *testing.T) {
+	requireLiveSidecar(t)
+
+	endpoint := os.Getenv("HELIX_CSM_URL")
+	if endpoint == "" {
+		endpoint = CSMDefaultEndpoint
+	}
+	adapter := NewCSMLocalTTS("", "0", endpoint)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+	defer cancel()
+	if err := adapter.HealthCheck(ctx); err != nil {
+		t.Skipf("no csm.rs sidecar at %s: %v", endpoint, err)
+	}
+
+	// A prior turn WITH audio, which is the case that exercises Mimi encoding
+	// on the server: text-only context would not prove the audio path at all.
+	prior, err := adapter.Synthesize(ctx, "Two tests failed.", SynthesisOptions{})
+	if err != nil {
+		t.Fatalf("priming synthesis failed: %v", err)
+	}
+
+	turns := []ConversationTurn{
+		{Speaker: SpeakerUser, Text: "did the build pass"},
+		{Speaker: SpeakerAssistant, Text: "Two tests failed.", Audio: prior},
+	}
+
+	out, err := adapter.Synthesize(ctx, "Both of them are in the parser.",
+		SynthesisOptions{Context: turns})
+	if err != nil {
+		t.Fatalf("context-conditioned synthesis failed: %v", err)
+	}
+	if len(out.Bytes) == 0 {
+		t.Fatal("no audio returned")
+	}
+
+	honored, ignored, rejected := adapter.(*csmTTS).ContextStatus()
+	switch {
+	case honored:
+		t.Logf("context HONORED: the sidecar conditioned on %d prior turns", len(turns))
+		t.Logf("  conditioned reply: %d bytes at %d Hz", len(out.Bytes), out.SampleRate)
+	case ignored:
+		t.Logf("context IGNORED: this sidecar accepted the field and dropped it " +
+			"(unpatched — see docs/csm-context.patch)")
+	case rejected:
+		t.Logf("context REJECTED: this sidecar refused the field; Helix fell back")
+	}
+	if !honored && !ignored && !rejected {
+		t.Error("context outcome was never recorded — status would have nothing honest to say")
+	}
+}

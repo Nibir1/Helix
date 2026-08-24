@@ -309,6 +309,276 @@ succeeded.
 
 ---
 
+## 3.5 Sesame CSM-1B — the most natural local voice
+
+CSM is the speech model behind Sesame's "crossing the uncanny valley of voice"
+demo. What they open-sourced (Apache-2.0) is the **speech generator** from that
+system, not the system: the model card is blunt that it "cannot generate text".
+So in Helix it is a TTS provider — Helix's planner still decides what to say and
+whisper.cpp still does the listening.
+
+Why it sounds different from Piper: a Llama-1B backbone reads interleaved text
+and audio and predicts the first codebook of **Mimi**, a split-RVQ neural codec
+running at 12.5 Hz, and a small (~100M) decoder fills in the remaining acoustic
+codebooks. It is conditioned on conversation context, so replies sound like part
+of a dialogue rather than isolated lines. It is also why it wants a GPU: one
+second of speech is 12.5 autoregressive steps through a 1B transformer, where
+Piper is a single forward pass through something far smaller.
+
+### No Python, no Docker
+
+The reference implementation is PyTorch. Helix does not use it. The sidecar is
+[`csm.rs`](https://github.com/cartesia-one/csm.rs) — a Rust/[candle](https://github.com/huggingface/candle)
+build with CUDA, Metal, Accelerate and MKL backends and an OpenAI-shaped HTTP
+server, which is exactly the sidecar contract Helix already speaks.
+
+```bash
+git clone https://github.com/cartesia-one/csm.rs && cd csm.rs
+
+# NVIDIA (Linux / Windows)
+cargo build --release --features cuda        # or: --features cudnn
+
+# Apple Silicon (M1–M4) — GPU
+cargo build --release --features metal
+
+# macOS CPU (Intel Macs)
+RUSTFLAGS="-C target-cpu=native" cargo build --release --features accelerate
+
+# Linux / Windows CPU
+RUSTFLAGS="-C target-cpu=native" cargo build --release --features mkl
+```
+
+The backend is a **compile-time** choice, which is why Helix prints these rather
+than running one for you: picking `mkl` for someone with a 3080 would silently
+hand them a CPU build, and Helix's rule is that it only auto-installs when there
+is one obvious command that makes no choices on your behalf.
+
+Then start it on the port Helix expects:
+
+```bash
+./target/release/server --model-id sesame/csm-1b --port 28195
+```
+
+**Not 8080.** csm.rs defaults there, and so do whisper.cpp and llama.cpp — the
+collision hits exactly the person running a local chain, which is the person most
+likely to want CSM. Helix defaults `csm-local` to **28195** and reassigns per
+provider if something is already listening.
+
+### The weights are gated
+
+`sesame/csm-1b` requires accepting Sesame's terms once and being logged in:
+
+```bash
+huggingface-cli login    # then accept at https://huggingface.co/sesame/csm-1b
+```
+
+csm.rs downloads them on first run (~2 GB bf16, or ~700 MB for the `q4_k` GGUF
+from `cartesia/sesame-csm-1b-gguf`). Helix will not do this for you — gated
+weights need your account, and a multi-gigabyte download is consent-gated by
+policy anyway.
+
+### Will it be smooth on my machine?
+
+Published figures put CSM-1B at **~8 GB VRAM** for comfortable operation and a
+**real-time factor of ~0.8×** on a GPU — audio produced about 25% faster than it
+plays, which is what a flowing conversation needs. Below is what that implies per
+machine class. **These are projections from those figures, not measurements taken
+here**; the last column is how you get a real number on your own hardware.
+
+| Machine | Backend | Expectation | Verify with |
+| :--- | :--- | :--- | :--- |
+| **RTX 3080 laptop (16 GB)** | `cuda` / `cudnn` | Comfortable. Full bf16 weights fit with room; RTF should sit near or below the ~0.8× reference | `make live-csm` |
+| **MacBook Air M4 (16 GB)** | `metal` build, but see note | **Measured 1.69× — slower than playback.** csm.rs runs the quantized GGUF on CPU regardless of the metal feature; the full-precision (gated) weights are what Metal accelerates | `make live-csm` |
+| **MacBook Pro 2019, Intel i9 (32 GB)** | `accelerate` (CPU) | **Not smooth for live conversation.** candle's Metal backend targets Apple Silicon, so an Intel Mac runs this on CPU: a 1B autoregressive model at 12.5 frames per second of audio will very likely be slower than real time, and replies will pause between sentences | `make live-csm` — and if RTF > 1, use `piper-local` there |
+
+That last row is the honest answer to "all three machines, smoothly". CSM is a
+GPU model; the Intel MacBook has no GPU candle can use. Helix handles this
+gracefully rather than pretending otherwise — set CSM as your primary and
+`piper-local` as the fallback, and the machine that cannot keep up simply uses
+the fast voice.
+
+Measure rather than trust the table:
+
+```bash
+make live-csm     # attaches to a running csm.rs and reports the real-time factor
+```
+
+It skips loudly if no sidecar is listening, and prints the RTF plus a note when
+the machine is slower than real time.
+
+## 3.6 Conversational context — the part that makes CSM CSM
+
+CSM's distinguishing capability is not its voice, it is that its prosody is
+conditioned on how the conversation has been going. The model card says it
+"sounds best when provided with context", and the reference API takes prior turns
+as `Segment(text, speaker, audio)`. Synthesize each sentence in isolation and you
+get a very good single-shot voice; give it the last few turns and it starts
+sounding like a participant.
+
+**Helix now assembles and sends that context.** What is missing is a server that
+accepts it: `csm.rs`'s HTTP API is stateless single-utterance, and no CSM server
+today implements a context field. So this section specifies the extension, and
+Helix behaves correctly on both sides of it.
+
+### What Helix sends
+
+An extra `context` array on the ordinary `/v1/audio/speech` request, oldest turn
+first, mirroring the reference `Segment` shape so an implementation has an
+obvious target:
+
+```jsonc
+{
+  "model": "sesame/csm-1b",
+  "input": "Both failures are in the parser.",
+  "speaker_id": 0,
+  "temperature": 0.7,
+  "response_format": "wav",
+  "context": [
+    { "speaker": 1, "text": "did the build pass",  "audio_b64": "…", "format": "wav" },
+    { "speaker": 0, "text": "no — two tests failed" }
+  ]
+}
+```
+
+`speaker` follows CSM's convention (0 = assistant, 1 = user). `audio_b64` is
+optional: a turn with text but no audio is still worth conditioning on, and that
+is what a streamed reply or a streamed transcript produces, since neither leaves
+one contiguous clip behind.
+
+### How Helix knows whether it worked
+
+Reading csm.rs's source settled a question that guessing had got wrong.
+`SpeechRequest` derives `Deserialize` **without** `deny_unknown_fields`, and
+serde's default is to ignore unknown fields — so today's server does not reject
+a `context` field, it **accepts the request and silently drops it**. The audio
+comes back fine. Nothing was conditioned on. From the outside that is
+indistinguishable from success, which is the worst possible failure mode for a
+feature whose entire value is subjective.
+
+So the patch adds a response header, and Helix reads it:
+
+```
+X-CSM-Context-Segments: 2
+```
+
+- **Header present** → the sidecar understands context and reports what it used.
+- **Header absent** → an unpatched sidecar dropped it. Helix records the context
+  as *ignored* and does not claim conversational prosody it is not getting.
+- **`4xx`** → a stricter server rejected the field. Helix retries immediately
+  without context and stops sending it for the session.
+- **`5xx` or a dropped connection** → explicitly *not* read as refusal. A busy or
+  restarting sidecar says nothing about whether it understands the field, and
+  treating a hiccup as a refusal would permanently downgrade the voice.
+
+Against today's csm.rs the audible behavior is exactly what it was; the
+difference is that Helix now knows, and says, that context is not being applied.
+Context can make the voice better; it cannot make it absent.
+
+### Turning it on
+
+```jsonc
+"speech": {
+  "tts": {
+    "provider": "csm-local",
+    "context_turns": 4,          // 0 = off (default)
+    "context_max_bytes": 4194304 // 4 MiB of retained audio
+  }
+}
+```
+
+**Off by default, deliberately.** Enabling it means Helix holds recent audio in
+memory for longer than the turn that produced it, which is a privacy-relevant
+change even though nothing reaches disk. The bounds are the design:
+
+- **Memory only.** Nothing in `internal/speech/conversation.go` touches the
+  filesystem — a test enforces that it imports neither `os` nor `net`. The
+  "captured audio is never written to disk" guarantee is unchanged, and there is
+  nothing new for `/purge` to wipe because there is nothing new on disk.
+- **Bounded twice**, by turn count and by total bytes, evicting oldest-first. One
+  oversize turn is kept rather than dropping to nothing, because a long sentence
+  should not erase the conversation.
+- **Scoped to live mode.** `/blackbox off` drops it. The audio does not outlive
+  the conversation it belongs to.
+
+### The patch
+
+`docs/csm-context.patch` implements this against csm.rs as it stands. It is
+smaller than it sounds, because everything needed is already in the codebase:
+`audio_tokens_and_mask(frame)` turns one Mimi frame into model tokens, and the
+`audio_tokenizer` is a `moshi::mimi::Mimi` that encodes as well as decodes. So
+context is **token assembly, not new model loading** — no extra weights and no
+extra VRAM beyond the KV cache the longer prompt occupies.
+
+What it does:
+
+1. Adds `ContextSegment { speaker_id, text, audio }` to `csm-core`.
+2. Encodes each segment's audio to Mimi frames with the same codebook count
+   `decode_frames` uses, so the backbone sees frames shaped like the ones it was
+   trained to produce.
+3. Interleaves text-then-audio per segment, oldest first, and prepends the whole
+   prefix to the current prompt — trimming from the FRONT at `max_seq_len`, so a
+   long history degrades to recent history instead of erroring.
+4. Adds `context: Vec<ContextSegmentDto>` to the server request, decoding
+   base64 WAV (by parsing the `data` chunk rather than assuming a 44-byte header,
+   since encoders emit `LIST`/`INFO` chunks and a fixed offset shifts the audio
+   audibly) or raw PCM.
+5. Returns `X-CSM-Context-Segments` so a client can tell conditioning from
+   silence.
+
+Segments are validated **before** the response starts streaming, so a malformed
+one is a clean 400 rather than a failure discovered after the WAV header has
+already gone out.
+
+### Verified end to end (2026-08-24)
+
+The patch was applied to `cartesia-one/csm.rs@facfd06`, built with
+`--features metal`, and run against the **public** `cartesia/sesame-csm-1b-gguf`
+weights — which are ungated, so no Hugging Face token was needed to prove it:
+
+| Check | Result |
+| :--- | :--- |
+| Patch compiles | clean, no warnings introduced |
+| Plain synthesis (no context) | `200`, `x-csm-context-segments: 0` |
+| Context with real audio | `200`, **`x-csm-context-segments: 2`** |
+| Text-only context segment | `200`, `x-csm-context-segments: 1` |
+| Malformed `audio_b64` | clean `400`, before streaming starts |
+| Through Helix's own adapter | context **HONORED**, 2 turns conditioned |
+
+The audio-bearing case is the one that matters: it exercises Mimi *encoding* on
+the server, which is the half of the patch that had never been run before.
+
+**Measured on an M4 Air (16 GB): real-time factor 1.69×** — 11.0 s of audio in
+18.7 s. Slower than playback, and the reason is worth knowing: csm.rs loads the
+**quantized GGUF path on CPU**, logging `Using device: Cpu for generation`, so
+Metal is not used for that path at all. The `--features metal` build only helps
+the full-precision safetensors weights, which are the gated ones. So on Apple
+Silicon the choice is between a CPU-bound quantized model and gated full weights;
+neither reaches the ~0.8× a discrete NVIDIA GPU manages.
+
+### Licensing, stated plainly
+
+The **model weights** are Apache-2.0. **csm.rs is AGPL-3.0**, and Helix is MIT.
+Helix never links, bundles or redistributes csm.rs — it is a separate process you
+install and run, spoken to over HTTP, exactly like whisper.cpp and Ollama — so
+Helix's MIT licence is unaffected. The AGPL obligation attaches to whoever
+*operates* the server: running it locally for yourself owes nothing, while
+exposing it as a public network service would oblige you to offer its source.
+
+### Select it
+
+```text
+/blackbox setup     # pick csm-local as your TTS, with piper-local as fallback
+/blackbox status    # confirms the endpoint answers
+/blackbox say the build finished and two tests failed
+```
+
+Speaker identity is a number, not a voice file: CSM was trained on multi-speaker
+conversation with the speaker encoded in the text stream. The wizard's voice
+prompt takes a speaker id (`0` is the conventional assistant slot); anything
+non-numeric falls back to `0` rather than failing.
+
+---
+
 ## 4. Setup commands
 
 ```bash

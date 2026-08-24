@@ -17,6 +17,7 @@ import (
 	"helix/internal/edge"
 	"helix/internal/providers/llamacpp"
 	"helix/internal/shell"
+	"helix/internal/speech"
 )
 
 // localSidecarEndpoints returns every local service this configuration points
@@ -57,6 +58,15 @@ func localSidecarEndpoints() []edge.Endpoint {
 				containsFold(cfg.Speech.TTS.Fallbacks, "piper-local"),
 		})
 	}
+	if url := localTTSURL("csm-local", speech.CSMDefaultEndpoint); url != "" {
+		out = append(out, edge.Endpoint{
+			Service: "csm-local",
+			Role:    "TTS",
+			URL:     url,
+			Active: cfg.Speech.TTS.Provider == "csm-local" ||
+				containsFold(cfg.Speech.TTS.Fallbacks, "csm-local"),
+		})
+	}
 	if url := localTTSURL("kokoro-local", kokoroDefaultEndpoint); url != "" {
 		out = append(out, edge.Endpoint{
 			Service: "kokoro-local",
@@ -72,6 +82,8 @@ func localSidecarEndpoints() []edge.Endpoint {
 // Stock endpoints for the local speech sidecars, mirrored here because the
 // adapters keep them unexported. A drift test pins them to the adapters.
 const (
+	// csm-local is deliberately absent here: its default is
+	// speech.CSMDefaultEndpoint, exported so there is nothing to mirror.
 	whisperDefaultEndpoint = "http://127.0.0.1:8080"
 	piperDefaultEndpoint   = "http://127.0.0.1:5000"
 	kokoroDefaultEndpoint  = "http://127.0.0.1:8880/v1"

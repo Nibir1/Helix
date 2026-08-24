@@ -76,34 +76,48 @@ func TestCloudPresetsFallBackToLocal(t *testing.T) {
 	}
 }
 
-// The private preset must stay private: no key, no cloud fallback, and no
-// component that needs a container runtime (ADR-002 amendment).
-func TestLocalPresetIsFullyLocalAndDockerFree(t *testing.T) {
-	var local *speechPreset
-	for i, p := range speechPresets() {
-		if !p.needsKey() {
-			local = &speechPresets()[i]
-			break
+// Every keyless preset must stay private: no cloud provider anywhere in the
+// chain — primary OR fallback — and nothing needing a container runtime
+// (ADR-002 amendment).
+//
+// ASSERTION WIDENED (2026-08-23), on intent rather than convenience. This used
+// to find the first keyless preset and require it to have NO fallbacks at all,
+// which was an accurate proxy while exactly one such preset existed and it had
+// none. Adding the CSM chain broke that proxy without touching the rule it
+// stood for: CSM falls back to piper-local, which is local, and the fallback is
+// the point — CSM needs a GPU, so on a machine without one the chain has to
+// degrade to a voice that works rather than to nothing. What must never happen
+// is a *cloud* fallback on a chain someone chose for privacy, and that is now
+// asserted directly, for every keyless preset rather than just the first.
+func TestLocalPresetsAreFullyLocalAndDockerFree(t *testing.T) {
+	presets := speechPresets()
+
+	var keyless int
+	for _, p := range presets {
+		if p.needsKey() {
+			continue
+		}
+		keyless++
+
+		for _, name := range append([]string{p.STTProvider, p.TTSProvider},
+			append(p.STTFallbacks, p.TTSFallbacks...)...) {
+			if name == "" {
+				continue
+			}
+			if !isLocalSpeechProvider(name) {
+				t.Errorf("preset %q reaches a cloud provider %q — that would quietly "+
+					"undo the reason someone picked a private chain", p.Name, name)
+			}
+			// Kokoro is the one voice that needs Docker; the docker-free
+			// guarantee is the promise being made here.
+			if strings.Contains(name, "kokoro") {
+				t.Errorf("preset %q requires a container runtime via %q", p.Name, name)
+			}
 		}
 	}
-	if local == nil {
-		t.Fatal("there must be a fully-local preset (ADR-012)")
-	}
 
-	if !isLocalSpeechProvider(local.STTProvider) || !isLocalSpeechProvider(local.TTSProvider) {
-		t.Fatalf("local preset uses a cloud provider: %+v", local)
-	}
-	if len(local.STTFallbacks) != 0 || len(local.TTSFallbacks) != 0 {
-		t.Errorf("the local preset must not carry a cloud fallback — it would "+
-			"quietly undo the reason someone picked private: %+v", local)
-	}
-
-	// Kokoro is the one voice that needs Docker, so the private preset must not
-	// reach for it: the docker-free guarantee is the promise being made here.
-	for _, name := range []string{local.STTProvider, local.TTSProvider} {
-		if strings.Contains(name, "kokoro") {
-			t.Errorf("the local preset must not require a container runtime, got %q", name)
-		}
+	if keyless == 0 {
+		t.Fatal("there must be at least one fully-local preset (ADR-012)")
 	}
 }
 

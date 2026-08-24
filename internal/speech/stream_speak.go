@@ -44,6 +44,16 @@ func SpeakStream(ctx context.Context, text string) error {
 	release := beginSpeaking(cancel)
 	defer release()
 
+	// Record the assistant's half of the conversational context ONCE per reply,
+	// before synthesis, so the next turn's context includes what was just said.
+	//
+	// Per reply rather than per sentence: this path pipelines sentences, and
+	// appending each one would fill a four-turn context with fragments of a
+	// single answer. Text-only by design — the reply is synthesized in pieces and
+	// there is no one clip to retain, and CSM conditions on text as well as
+	// audio, so the transcript is the part worth keeping whole.
+	RecordAssistantTurn(text, AudioFormat{})
+
 	sentences := SplitSentences(text)
 	if len(sentences) <= 1 {
 		return speakOnce(ctx, text)
@@ -211,7 +221,10 @@ func speakOnceStreamed(ctx context.Context, text string) error {
 	}
 
 	start := time.Now()
-	stream, _, err := reg.SynthesizeStream(ctx, text, SynthesisOptions{Voice: reg.ActiveConfig().TTS.Voice})
+	stream, _, err := reg.SynthesizeStream(ctx, text, SynthesisOptions{
+		Voice:   reg.ActiveConfig().TTS.Voice,
+		Context: currentContext(),
+	})
 	if err != nil {
 		return err
 	}

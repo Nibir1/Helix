@@ -1278,6 +1278,7 @@ func sidecarSpecs() map[string]sidecarSpec {
 		"whisper-local": {Default: whisperDefaultEndpoint, ConfigKey: "stt-url"},
 		"piper-local":   {Default: piperDefaultEndpoint, ConfigKey: "tts-url"},
 		"kokoro-local":  {Default: kokoroDefaultEndpoint, ConfigKey: "tts-url"},
+		"csm-local":     {Default: speech.CSMDefaultEndpoint, ConfigKey: "tts-url"},
 	}
 
 	runnable := voiceSidecars()
