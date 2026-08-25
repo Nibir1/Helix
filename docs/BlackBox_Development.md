@@ -933,7 +933,9 @@ headless-capable Agent core.
       `TTYRenderer` (wraps ux) and `HeadlessRenderer` (no-op + structured log). Replace direct
       `*ux.UX` field (`internal/agent/agent.go`) — mechanical, test-guarded.
 - [x] P4.2 Move slash-command dispatch behind a `SlashDispatcher` interface so the daemon can run
-      without `cmd/helix` closures (`OnSlashCommand` wiring at `cmd/helix/main.go:166`).
+      without `cmd/helix` closures (wired through `OnSlashCommand` at the time; that symbol
+      was removed with the blackBox blueprint — the equivalent today is `handleSlashCommand`
+      in `cmd/helix/registry.go`).
 - [x] P4.3 Verify: interactive behavior byte-identical (PTY e2e suite unchanged and green is the
       proof).
 
@@ -944,14 +946,14 @@ headless-capable Agent core.
       keep planner prompt strict-JSON contract intact; history goes in a clearly-fenced context
       block with data-only authority, mirroring firewall conventions).
 - [x] P4.5 Referential queries: "what did I ask five minutes ago", "do that again" answered from
-      the store; `NewSlashCommands`: `/memory <clear|show>`.
+      the store; new slash commands: `/memory <clear|show>`.
 - [x] P4.6 Safe-subset **undo journal**: actions with a known reversal (git commit → `git reset
       --soft HEAD~1`; file created → move to trash dir `~/.helix/trash/`) are journaled;
       `"undo that"` offers the reversal (still passes the safety pipeline + risk policy).
       Explicitly out of scope: reversing overwrites/deletes (documented honestly).
 
 **Stage 4C — Daemon & IPC:**
-- [x] P4.7 `internal/daemon/` + `cmd/helix/daemon.go` — `helix daemon`:
+- [x] P4.7 `internal/daemon/` + `cmd/helix/daemon_cmd.go` — `helix daemon`:
       owns wake service, speech providers, VoiceSource, headless Agent; supervision loop
       (panic recovery via `diagnostics.Guard` precedent, restart backoff); owns sidecar health
       checks (Ollama, whisper, piper, wakeword — `Health()` polling).
