@@ -16,9 +16,13 @@ exact sequence:
 
 1. **Read this document top-to-bottom.** It contains the complete plan, all architecture decisions,
    and the current state.
-2. **Verify repository state:**
+2. **Verify repository state.** Deliberately no absolute path: this step used to hardcode one
+   developer's home directory, which was wrong for everyone else and eventually wrong for its own
+   author. Identify the checkout by what it *is*, not where it sits.
    ```bash
-   cd /Users/laptopbazaar/Projects/Helix   # (or wherever the repo lives)
+   cd <your Helix clone>                   # wherever it lives on this machine
+   git rev-parse --show-toplevel           # you should be at the repo ROOT, not a subdirectory
+   grep '^module' go.mod                   # MUST be: module helix
    git branch --show-current               # MUST be blackBox
    git log --oneline -10                   # see what changed since this doc was written
    git status                              # note any uncommitted work
@@ -27,11 +31,18 @@ exact sequence:
    Note that "core DONE" is not "done": phases 7, 9, 10, 11 and 12 all carry unfinished tasks,
    and §13 now lists every open checkbox in one place so the remaining work is visible without
    reading all of §6. **As of 2026-08-23 every one of those is hardware-, key- or owner-gated** —
-   there is no unwritten code left in the plan, so if you are here to write Go, the honest answer
-   is that the next task is a device, a credential, or a decision. (Full-duplex barge-in is code,
-   but it is parked on an ADR-level conflict, not waiting for an implementer.) Verify that before
-   trusting it: on 2026-08-23 two "done" items turned out to be partly unwritten, one of them a
-   checkbox naming two deliverables of which only one existed.
+   there is no unwritten *planned* code left, so if you are here to work through the tracker, the
+   honest answer is that the next task is a device, a credential, or a decision. (Full-duplex
+   barge-in is code, but it is parked on an ADR-level conflict, not waiting for an implementer.)
+   Verify that before trusting it: on 2026-08-23 two "done" items turned out to be partly
+   unwritten, one of them a checkbox naming two deliverables of which only one existed.
+
+   **An empty tracker is not the same as correct code, and the entries after 2026-08-23 are the
+   evidence.** Everything since — CSM-1B and its context conditioning, the interface pass, and the
+   three panel-primitive width bugs — was work no checkbox asked for: a capability the owner
+   requested, then defects found by auditing and by *rendering* what the code produced. None of it
+   would have been visible from §13. If you are here to write Go and the tracker looks finished,
+   read §9's rules 8 and 9 and go looking at output rather than at checkboxes.
 4. **Read that phase's section in §6** and every file it lists under "Files touched".
 5. **Verify the baseline is green before changing anything:**
    ```bash
@@ -45,8 +56,11 @@ exact sequence:
    what changed, what's next), then commit with a conventional message
    (`feat(speech): ...`, `refactor(agent): ...`, etc.). Do NOT push to main. Do NOT merge.
 
-> **Note on line numbers:** file:line references in this document are accurate for commit `fd34503`.
-> They will drift as code changes — use them as guides (symbol names are the stable anchor).
+> **Note on line numbers:** file:line references in this document were accurate for commit
+> `fd34503` (2026-08-16) and are now **33 commits stale** — treat them as historical, not as
+> coordinates. Symbol names are the stable anchor: grep for the function or constant, not the
+> line. This note is not re-pinned on every commit deliberately; a number that is refreshed
+> occasionally is more misleading than one that is openly out of date.
 
 > **Note on command names (2026-08-22):** the voice/perception surface was
 > **unified into one command**. `/voice`, `/manual`, `/voice-setup`,
@@ -155,7 +169,8 @@ internal/diagnostics/        Telemetry-free local crash reports (0600, redacted)
 internal/journal/            One rotating NDJSON writer: daemon journal + opt-in voice log
 internal/speech/conversation.go  Bounded in-memory turn history conditioning CSM-1B (ADR-017)
 internal/ux/                 Terminal UX: typewriter, PrintAIMessage ← TTS tap-in point
-internal/shell/panel.go      Report rendering: panels, badges, self-fitting tables (one visual language)
+internal/shell/panel.go      Report rendering: panels, badges, wrapping KV rows, self-fitting tables
+                             (one visual language; all widths in VISIBLE columns via visibleWidth)
 internal/agent/persona.go    Who Helix IS — tone for planner/chat/vision replies, never authority
 internal/agent/vision.go     Camera turns; two explicit doors only (/blackbox look, vision tool)
 internal/deps/               Host packages Helix needs + per-OS install commands (never Docker)
@@ -1860,6 +1875,19 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
    (`t.Skipf`) — never silently pass.
 7. **Baseline rule**: `make test && make e2e` green on `blackBox` before every merge/commit-series;
    pre-existing suites are never weakened — only extended.
+8. **A regression test must be able to REACH the regression.** Assert the precondition that puts
+   the code under test on the path, not just the outcome. The `Table` alignment test written for
+   the `truncateANSI` column bug passed against the buggy code: its fixture was not wide enough
+   for `fitTableWidths` to shave anything, so the truncation path never ran. It now asserts the
+   cell actually carries an ellipsis before asserting alignment. A test that cannot reach its
+   target is worse than no test, because it reads as coverage. **Verify a fix by reverting the
+   implementation and watching the test fail** — that is the only cheap proof the test bites.
+9. **Rendered output is verified by RENDERING it.** Reading the code gave a confident wrong answer
+   three times in the panel primitives: `KV` overflowing, `PanelWrap` counting bytes,
+   `truncateANSI` counting runes. All three look correct in source and break on screen. Print the
+   panel (or screenshot the PTY) and measure the visible width; and when the bug is about units,
+   check the units of the ASSERTION too — two of the tests written for that batch had the same
+   byte-vs-column confusion they were written to catch.
 
 ---
 
