@@ -1,5 +1,5 @@
 // cmd/helix/wake.go
-// Purpose: /wake on|off|status — the UI for true hands-free conversation.
+// Purpose: /blackbox wake on|off|status — the UI for true hands-free conversation.
 // Enabling turns on wake-word listening (between turns in the interactive
 // shell; continuously in `helix daemon`), applying safe defaults the first
 // time. Privacy stays opt-in: off by default, instant to disable.
@@ -9,12 +9,13 @@ import (
 	"fmt"
 
 	"helix/internal/config"
+	"helix/internal/shell"
 	"helix/internal/speech"
 
 	"github.com/fatih/color"
 )
 
-// handleWakeCommand implements /wake <on|off|status>.
+// handleWakeCommand implements /blackbox wake <on|off|status>.
 func handleWakeCommand(c cmdArgs) {
 	switch c.Lower() {
 	case "on", "enable":
@@ -26,7 +27,7 @@ func handleWakeCommand(c cmdArgs) {
 	case "", "status":
 		printWakeStatus()
 	default:
-		color.Yellow("Usage: /wake <on|off|status>")
+		color.Yellow("Usage: /blackbox wake <on|off|status>")
 	}
 }
 
@@ -63,7 +64,7 @@ func enableWakeWord() {
 	}
 }
 
-// wakeBannerLines is the /wake on explanation, worded for the engine that will
+// wakeBannerLines is the /blackbox wake on explanation, worded for the engine that will
 // actually do the detecting.
 //
 // The banner used to promise `after each turn I listen for "hey helix"`
@@ -98,7 +99,7 @@ func wakeBannerLines(engine, phrase string) []string {
 	return append(lines,
 		"The wake word gates turns AFTER this one — a voice turn already in progress needs no wake.",
 		"For always-on conversation (no terminal open), run:  helix daemon",
-		"Say \"go to sleep\" or \"stop listening\" anytime to pause; /wake off to disable.")
+		"Say \"go to sleep\" or \"stop listening\" anytime to pause; /blackbox wake off to disable.")
 }
 
 // engineOrDefault names the engine that will run when config leaves it blank.
@@ -110,37 +111,51 @@ func engineOrDefault(engine string) string {
 }
 
 // printWakeStatus summarizes the hands-free configuration and readiness.
+//
+// The phrase is reported differently per engine on purpose. The default
+// `energy` detector scores normalized RMS and cannot match words at all, so
+// stating "phrase: hey helix" beside it — which this panel used to do
+// unconditionally — is the same false promise the enable banner was corrected
+// for in wakeBannerLines. A stored-but-unused phrase is said to be exactly that.
 func printWakeStatus() {
 	ww := cfg.Speech.WakeWord
-	state := "off"
-	if ww.Enabled {
-		state = "on"
-	}
-	engine := ww.Engine
-	if engine == "" {
-		engine = "energy"
-	}
-	phrase := ww.Phrase
-	if phrase == "" {
-		phrase = "hey helix"
-	}
-	fmt.Printf("Wake word: %s (phrase %q, engine %s, preset %s)\n",
-		state, phrase, engine, orDefault(ww.SensitivityPreset, "balanced"))
+	engine := engineOrDefault(ww.Engine)
+	phrase := orDefault(ww.Phrase, "hey helix")
+
+	w := shell.KVWidth("STATE", "DETECTOR", "PHRASE", "RECORDER")
+	fmt.Println(shell.PanelTitle("wake word"))
 
 	if ww.Enabled {
-		if _, err := speech.DetectRecorder(); err != nil {
-			color.Red("Recorder: missing — run /setup to install sox.")
-			return
-		}
-		color.Green("Recorder: ok — hands-free is ready.")
-		if ww.Engine == "sidecar" {
-			color.Cyan("Detector: sidecar (%s) — matches the phrase", ww.SidecarURL)
-		} else {
-			color.Cyan("Detector: energy onset (everywhere-works default) — wakes on ANY speech,")
-			color.Cyan("          not on the phrase; the phrase is only used by the sidecar engine.")
-		}
+		fmt.Println(shell.KV("STATE", shell.Badge(shell.StateGood, "on")+
+			shell.Muted("  listening between turns"), w))
 	} else {
-		color.Cyan("Run /wake on to enable hands-free conversation.")
+		fmt.Println(shell.KV("STATE", shell.Badge(shell.StateIdle, "off")+
+			shell.Muted("  /blackbox wake on enables hands-free conversation"), w))
+	}
+
+	if engine == "sidecar" {
+		fmt.Println(shell.KV("DETECTOR", shell.Value("sidecar")+
+			shell.Muted("  "+orDefault(ww.SidecarURL, "no URL configured")), w))
+		fmt.Println(shell.KV("PHRASE", shell.Value(fmt.Sprintf("%q", phrase))+
+			shell.Muted("  ·  sensitivity "+orDefault(ww.SensitivityPreset, "balanced")), w))
+	} else {
+		fmt.Println(shell.KV("DETECTOR", shell.Value("energy onset")+
+			shell.Muted("  the everywhere-works default  ·  wakes on ANY speech or loud sound"), w))
+		fmt.Println(shell.KV("PHRASE", shell.Muted(fmt.Sprintf(
+			"%q is stored but unused — this engine cannot match words", phrase)), w))
+	}
+
+	if _, err := speech.DetectRecorder(); err != nil {
+		fmt.Println(shell.KV("RECORDER", shell.Badge(shell.StateBad, "missing")+
+			shell.Muted("  /setup installs sox — hands-free cannot work without it"), w))
+	} else {
+		fmt.Println(shell.KV("RECORDER", shell.Badge(shell.StateGood, "ready"), w))
+	}
+	fmt.Println(shell.PanelEnd())
+
+	if engine != "sidecar" {
+		fmt.Println(shell.Hint("for true phrase spotting run an openWakeWord-class sidecar · " +
+			"docs/edge_deployment.md §5.1"))
 	}
 }
 

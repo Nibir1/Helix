@@ -103,6 +103,18 @@ each synthesis. Three properties are load-bearing rather than incidental:
   `docs/csm-context.patch`) and reports "ignored" when it is absent, rather than
   claiming conversational prosody it is not receiving.
 
+That last property is only worth having if it reaches a person, so the detection
+is exposed rather than merely recorded. `ContextCapable` is an optional interface
+a TTS provider implements to report what the server did with the context it was
+sent; `ConversationReport` combines that with retention state, and the `CONTEXT`
+row of `/blackbox status` renders it as **conditioning** (acknowledged),
+**not applied** (accepted and silently discarded — an unpatched sidecar),
+**retained, unused** (turns held with no context-capable voice in the chain, a
+privacy cost with no benefit) or **ready** (nothing sent yet, so nothing known).
+The interface is asserted at compile time because it is satisfied structurally: a
+renamed method would otherwise downgrade the row to "no context-capable voice"
+without a single test failing.
+
 ### 3c. Persona (`internal/agent/persona.go`)
 Who is speaking, as opposed to what may be executed. Every other prompt in the
 tree constrains format — emit this JSON, use that tool — so replies came back in

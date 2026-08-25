@@ -233,7 +233,7 @@ Run these inside Helix after install:
   in force plus how to fix it if it degraded, recorder presence, each local
   sidecar's reachability, whether the offline-LLM fallback model is pulled, and
   temperature with a throttling verdict.
-- `/blackbox status` — STT/TTS chain health, which keys are set, recorder detection.
+- `/blackbox status` — mode, hearing, sight, wake, retained context; then STT/TTS chain health, which keys are set, recorder detection.
 - `/blackbox stats` — what the board has actually *measured*: wake→execution
   latency, TTS time-to-first-audio, frame-to-insight, wake rate, and daemon
   availability, each judged against the project's targets with local and cloud

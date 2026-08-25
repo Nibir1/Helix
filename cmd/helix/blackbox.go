@@ -41,12 +41,12 @@ import (
 var blackBoxUsage = []string{
 	"/blackbox on               live mode — microphone, camera, speech, companion",
 	"/blackbox off              back to the keyboard (also: say \"manual mode\")",
-	"/blackbox status           one report: hearing, sight, speech, wake, companion",
+	"/blackbox status           one report: hearing, sight, wake, context, transcript",
 	"/blackbox setup            configure the STT/TTS providers with live pricing",
 	"",
-	"/blackbox look [question]   capture one frame now and answer a question about it",
+	"/blackbox look [question]  capture one frame now and answer a question about it",
 	"/blackbox eyes on|off      camera only, without leaving or entering live mode",
-	"/blackbox wake on|off      hands-free wake phrase between turns",
+	"/blackbox wake on|off      hands-free between turns; a phrase needs a sidecar",
 	"/blackbox tts on|off       whether ordinary replies are spoken aloud",
 	"/blackbox say <text>       speak text through the TTS chain",
 	"/blackbox log on|off       keep a local text record of what was heard and said",
@@ -184,12 +184,22 @@ func blackBoxStatus() {
 		mode = shell.Badge(shell.StateGood, "LIVE") + shell.Muted("  listening")
 	}
 
-	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "INITIATIVE", "TRANSCRIPT")
+	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "WAKE", "INITIATIVE", "CONTEXT", "TRANSCRIPT")
 	fmt.Println(shell.PanelTitle("blackbox"))
 	fmt.Println(shell.KV("MODE", mode, w))
 	fmt.Println(shell.KV("HEARING", blackBoxHearingLine(), w))
 	fmt.Println(shell.KV("SIGHT", blackBoxEyesLine(), w))
+	// The usage text has advertised wake since this command was created, and
+	// wake was the one state it never printed —
+	// it lived only behind /blackbox wake status. A summary that omits a state
+	// it advertises is the same overstatement rule this file opens with.
+	fmt.Println(shell.KV("WAKE", blackBoxWakeLine(), w))
 	fmt.Println(shell.KV("INITIATIVE", companionStatusLine(), w))
+	// Conversational context sits with the sensors rather than in the speech
+	// chain below because it is the same question they answer: what is Helix
+	// holding on to right now. It retains recent AUDIO in memory, so a user
+	// reading this panel for privacy reasons needs it in the panel.
+	fmt.Println(shell.KV("CONTEXT", blackBoxContextLine(speech.ConversationReport()), w))
 	// Whether speech is being written to disk belongs in the same report as
 	// whether the microphone and camera are open: it is the third thing a
 	// privacy-conscious user wants to know, and it had no surface at all.
@@ -219,6 +229,27 @@ func blackBoxHearingLine() string {
 		shell.Muted("  ") + shell.Value(strings.Join(reg.STTChain(), " → "))
 }
 
+// blackBoxWakeLine summarises hands-free triggering in one line.
+//
+// It names what the configured engine actually does rather than the phrase,
+// because the default energy detector cannot match words — the same correction
+// wakeBannerLines and printWakeStatus carry. A phrase shown here would be the
+// third place making a promise the detector does not keep.
+func blackBoxWakeLine() string {
+	ww := cfg.Speech.WakeWord
+	if !ww.Enabled {
+		return shell.Badge(shell.StateIdle, "off") +
+			shell.Muted("  /blackbox wake on for hands-free turns")
+	}
+	if engineOrDefault(ww.Engine) == "sidecar" {
+		return shell.Badge(shell.StateGood, "listening") + shell.Muted("  ") +
+			shell.Value(orDefault(ww.Phrase, "hey helix")) +
+			shell.Muted("  ·  sidecar")
+	}
+	return shell.Badge(shell.StateGood, "listening") +
+		shell.Muted("  any speech or loud sound  ·  energy onset")
+}
+
 // blackBoxEyesLine is the camera's honest one-liner, used by both the merged
 // status and the eyes subcommand.
 func blackBoxEyesLine() string {
@@ -230,7 +261,7 @@ func blackBoxEyesLine() string {
 		// this file exists to prevent: on macOS an unauthorized camera passes
 		// every check that can be made cheaply and delivers nothing forever.
 		return shell.Badge(shell.StateBad, "no frames") +
-			shell.Muted("  camera opens but delivers nothing — likely OS permission; /blackbox look shows why")
+			shell.Muted("  likely an OS permission  ·  /blackbox look")
 	case cfg.Vision.Enabled && ready:
 		return shell.Badge(shell.StateGood, "watching") + shell.Muted("  ") +
 			shell.Value(visionRouteDescription()) +
@@ -245,6 +276,73 @@ func blackBoxEyesLine() string {
 	default:
 		return shell.Badge(shell.StateIdle, "off") + shell.Muted("  "+why)
 	}
+}
+
+// blackBoxContextLine reports conversational context without overstating it.
+//
+// Takes the report rather than fetching it so every branch below is reachable
+// from a test. That matters more than it looks: KV neither wraps nor truncates,
+// so a value that outgrows the panel wraps at the TERMINAL edge and its tail
+// restarts at column zero, escaping the block it belongs to — the exact defect
+// PanelWrap was written for. Five of these seven branches did that when first
+// written, and only rendering them revealed it.
+//
+// The states are separated because they mean genuinely different things, and
+// the interesting ones are the unhappy middle:
+//
+//   - "not applied" is the state this whole mechanism exists to expose. An
+//     unpatched csm.rs ACCEPTS a context field and silently discards it, so the
+//     request succeeds and the voice is never conditioned. Rendering that as
+//     "on" would claim prosody the user is not getting.
+//   - "retained, unused" is the privacy-relevant inverse: audio is being held in
+//     memory and no voice in the chain can consume it. A cost with no benefit,
+//     invisible unless said.
+//   - "ready" is honest ignorance. Before the first spoken reply nothing has
+//     been sent, and an unconfirmed feature must not render as a working one.
+func blackBoxContextLine(rep speech.ContextReport) string {
+	switch {
+	case !rep.Enabled && rep.Provider == "":
+		return shell.Badge(shell.StateIdle, "off") +
+			shell.Muted("  replies are synthesized one at a time")
+	case !rep.Enabled:
+		return shell.Badge(shell.StateIdle, "off") + shell.Muted("  ") +
+			shell.Value(rep.Provider) +
+			shell.Muted(" can use it  ·  speech.tts.context_turns")
+	case rep.Provider == "":
+		return shell.Badge(shell.StateWarn, "retained, unused") +
+			shell.Muted("  no context-capable voice in the chain")
+	}
+
+	held := shell.Muted(fmt.Sprintf("  %d turn%s  ·  %s",
+		rep.Turns, plural(rep.Turns), compactBytes(rep.Bytes)))
+
+	switch {
+	case rep.Rejected:
+		return shell.Badge(shell.StateBad, "refused") + shell.Muted("  ") +
+			shell.Value(rep.Provider) + shell.Muted(" dropped it — plain synthesis")
+	case rep.Ignored:
+		return shell.Badge(shell.StateWarn, "not applied") +
+			shell.Muted("  sidecar needs docs/csm-context.patch")
+	case rep.Honored:
+		return shell.Badge(shell.StateGood, "conditioning") + shell.Muted("  ") +
+			shell.Value(rep.Provider) + held
+	default:
+		return shell.Badge(shell.StateIdle, "ready") + shell.Muted("  ") +
+			shell.Value(rep.Provider) + held + shell.Muted("  ·  not yet sent")
+	}
+}
+
+// compactBytes renders a retained-audio size in the shortest honest unit.
+//
+// The default budget is 4 MiB, so a KB-only format spends six digits saying
+// "4096.0 KB" for the ordinary full buffer — wider than the column and harder
+// to read than the number it stands for.
+func compactBytes(n int) string {
+	const kb = 1024
+	if n < 1024*kb {
+		return fmt.Sprintf("%.1f KB", float64(n)/kb)
+	}
+	return fmt.Sprintf("%.1f MB", float64(n)/(1024*kb))
 }
 
 // cameraDeliveredNothing reports whether every capture attempt so far has
@@ -271,7 +369,7 @@ func cameraDeliveredNothing() bool {
 // a frame.
 func visionReady() (bool, string) {
 	if !captureAvailable() {
-		return false, "no ffmpeg on PATH — run /setup to install it"
+		return false, "no ffmpeg on PATH — /setup installs it"
 	}
 	if !visionAvailable() {
 		return false, fmt.Sprintf("%s cannot process images", visionRouteDescription())

@@ -31,6 +31,7 @@ import (
 type speechPreset struct {
 	Name string
 	Note string // why you would pick this one
+	Tag  string // a short precondition marker, e.g. "needs a GPU"
 
 	STTProvider  string
 	STTModel     string
@@ -82,7 +83,13 @@ func speechPresets() []speechPreset {
 			TTSFallbacks: []string{"piper-local"},
 		},
 		{
-			Name: "Most natural, local (needs a GPU)",
+			// The precondition rides the Tag rather than the label: the menu
+			// sizes its description column to the LONGEST label, so a
+			// parenthetical here indents every other preset's note to pay for
+			// this one. Tags are also where "needs a key" already lives, so the
+			// two preconditions read the same way.
+			Name: "Most natural, local",
+			Tag:  "needs a GPU",
 			Note: "Sesame CSM-1B — conversational prosody, nothing leaves the machine · ~8GB VRAM",
 			// whisper-local ears, CSM voice, and piper as the fallback that
 			// keeps the chain usable when CSM is too slow on this hardware —
@@ -108,12 +115,23 @@ func speechPresets() []speechPreset {
 func presetMenuItems(presets []speechPreset) []shell.MenuItem {
 	items := make([]shell.MenuItem, 0, len(presets)+1)
 	for i, p := range presets {
-		it := shell.MenuItem{Label: p.Name, Note: p.Note}
-		if i == 0 {
-			it.Tag, it.Good = "recommended", true
-		}
-		if p.needsKey() {
+		it := shell.MenuItem{Label: p.Name, Note: p.Note, Tag: p.Tag}
+		if it.Tag == "" && p.needsKey() {
 			it.Tag = "needs a key"
+		}
+		// The recommendation is COMBINED with the precondition rather than
+		// replacing it. Assigning "recommended" first and letting needsKey
+		// overwrite it meant the recommended preset never actually said so —
+		// it rendered "needs a key" in the endorsement colour, so the top entry
+		// looked like a warning painted green and the recommendation was
+		// invisible on every menu Helix has ever drawn.
+		if i == 0 {
+			it.Good = true
+			if it.Tag == "" {
+				it.Tag = "recommended"
+			} else {
+				it.Tag = "recommended · " + it.Tag
+			}
 		}
 		items = append(items, it)
 	}

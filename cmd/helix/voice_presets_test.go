@@ -178,7 +178,25 @@ func TestPresetMenuAlwaysOffersManualChoice(t *testing.T) {
 	if !strings.Contains(strings.ToLower(last.Label), "manual") {
 		t.Fatalf("last menu entry must be the manual escape hatch, got %q", last.Label)
 	}
-	if !items[0].Good || items[0].Tag == "" {
-		t.Error("the first preset should be badged as the recommendation")
+	// Tag != "" is not enough, and asserting only that is what let the bug
+	// through: "recommended" was assigned first and then overwritten by
+	// "needs a key", so the recommendation never rendered while its endorsement
+	// COLOUR stayed on, painting a precondition green.
+	if !items[0].Good {
+		t.Error("the first preset should be badged as an endorsement")
+	}
+	if !strings.Contains(items[0].Tag, "recommended") {
+		t.Errorf("the first preset must actually say it is recommended, got tag %q", items[0].Tag)
+	}
+	// A precondition must survive being combined with the recommendation.
+	if presets[0].needsKey() && !strings.Contains(items[0].Tag, "needs a key") {
+		t.Errorf("the recommendation must not swallow the precondition, got tag %q", items[0].Tag)
+	}
+	// Every preset with a precondition must show it.
+	for i, p := range presets {
+		if p.Tag != "" && !strings.Contains(items[i].Tag, p.Tag) {
+			t.Errorf("preset %q must surface its precondition %q, got tag %q",
+				p.Name, p.Tag, items[i].Tag)
+		}
 	}
 }

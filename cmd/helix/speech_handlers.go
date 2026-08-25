@@ -451,7 +451,7 @@ func verifySpeechSelection() {
 		return
 	}
 	color.Yellow("%d selected provider(s) cannot serve a request yet.", problems)
-	color.Yellow("Fix the above, then re-check with /voice-status — no need to re-run the wizard.")
+	color.Yellow("Fix the above, then re-check with /blackbox status — no need to re-run the wizard.")
 }
 
 // filterCatalog narrows pricing rows to registered providers of one kind.
@@ -581,7 +581,7 @@ func askNumber(prompt string, max int) int {
 func handleSayCommand(c cmdArgs) {
 	text := c.Rest
 	if text == "" {
-		fmt.Println("Usage: /say <text>")
+		fmt.Println("Usage: /blackbox say <text>")
 		return
 	}
 
@@ -594,7 +594,7 @@ func handleSayCommand(c cmdArgs) {
 	// bypassed streaming entirely, which made /say the one command guaranteed to
 	// blow the first-byte budget — and to leave /voice-status reporting
 	// "buffered" even on a build where streaming works.
-	fmt.Printf("[voice] %s\n", truncStr(text, 60))
+	fmt.Println(shell.Muted("speaking  ") + shell.Value(truncStr(text, 60)))
 	if err := speech.Speak(ctx, text); err != nil {
 		color.Red("Speech failed: %v", err)
 		return
@@ -608,7 +608,8 @@ func handleSayCommand(c cmdArgs) {
 	if speech.LastSpeechStreamed() {
 		path = "streamed"
 	}
-	fmt.Printf("spoken (%s, first audio %dms)\n", path, speech.LastSynthesizeLatencyMs())
+	fmt.Println(shell.Hint(fmt.Sprintf("%s  ·  first audio %dms",
+		path, speech.LastSynthesizeLatencyMs())))
 }
 
 // handleTTSCommand toggles automatic spoken responses (Phase 2 gate).
@@ -616,16 +617,19 @@ func handleTTSCommand(c cmdArgs) {
 	switch c.Lower() {
 	case "on":
 		speech.SetTTSEnabled(true)
-		color.Green("Automatic spoken responses enabled.")
+		color.Green("Replies are now spoken aloud.")
 	case "off":
 		speech.SetTTSEnabled(false)
-		color.Green("Automatic spoken responses disabled (/say still speaks).")
+		// Yellow rather than green: switching a capability off is the same kind
+		// of event as /blackbox wake off, and it should read the same way.
+		color.Yellow("Replies are silent — /blackbox say still speaks on demand.")
 	default:
-		state := "off"
+		state := shell.Badge(shell.StateIdle, "silent")
 		if speech.TTSEnabled() {
-			state = "on"
+			state = shell.Badge(shell.StateGood, "spoken aloud")
 		}
-		fmt.Printf("Usage: /tts <on|off>   (currently: %s)\n", state)
+		fmt.Println(shell.KV("REPLIES", state, shell.KVWidth("REPLIES")))
+		fmt.Println(shell.Hint("/blackbox tts <on|off>"))
 	}
 }
 

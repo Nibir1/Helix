@@ -500,6 +500,31 @@ change even though nothing reaches disk. The bounds are the design:
 - **Scoped to live mode.** `/blackbox off` drops it. The audio does not outlive
   the conversation it belongs to.
 
+### Telling conditioning from silence
+
+This matters more than it first appears. csm.rs's request struct does **not**
+derive `deny_unknown_fields`, so serde discards a `context` field it does not
+know about and answers `200` anyway. An unpatched sidecar therefore *accepts*
+context, uses none of it, and looks exactly like success — the worst failure mode
+for a feature whose whole value is how something sounds.
+
+So Helix does not report what it sent, it reports what the server acknowledged.
+The `CONTEXT` row of `/blackbox status` reads:
+
+| Row says | Meaning |
+| :--- | :--- |
+| **conditioning** | The sidecar acknowledged the turns, with the count and bytes held |
+| **not applied** | It accepted them and silently dropped them — apply `docs/csm-context.patch` |
+| **refused** | It rejected the field outright; Helix stopped sending it for this session and speaks plainly |
+| **retained, unused** | Turns are being held but no context-capable voice is in the chain — a privacy cost buying nothing |
+| **ready** | Nothing has been sent yet, so nothing is known. Unconfirmed, and not claimed as working |
+| **off** | Retention is disabled (`context_turns: 0`) |
+
+A rejection is permanent for the session but never fatal: the turn is re-sent
+without context and still spoken. A `5xx` is explicitly *not* treated as a
+refusal — a busy sidecar says nothing about whether it understands the field, and
+one hiccup must not silently downgrade the voice for the rest of the session.
+
 ### The patch
 
 `docs/csm-context.patch` implements this against csm.rs as it stands. It is
@@ -567,8 +592,8 @@ exposing it as a public network service would oblige you to offer its source.
 ### Select it
 
 ```text
-/blackbox setup     # pick csm-local as your TTS, with piper-local as fallback
-/blackbox status    # confirms the endpoint answers
+/blackbox setup     # "Most natural, local" [needs a GPU] — csm-local + piper fallback
+/blackbox status    # confirms the endpoint answers, and what CONTEXT is doing
 /blackbox say the build finished and two tests failed
 ```
 

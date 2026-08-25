@@ -273,7 +273,7 @@ Helix has a **persona**, not a default assistant register: it answers first, kee
 
 **No Docker required, anywhere.** The local voice chain is whisper.cpp plus Piper, which need a binary and Python. Kokoro is the one optional component that ships as a container; Helix will not install a runtime for it, and marks it `needs docker` in the table rather than walking you into a failed pull.
 
-**Sesame CSM-1B** is the quality local voice: the speech model from Sesame's "uncanny valley" demo, run through a Rust sidecar with **no Python and no Docker**, and — uniquely among Helix's voices — conditioned on the last few turns of the conversation rather than synthesizing each sentence cold. It wants a discrete GPU (~8 GB VRAM); pair it with `piper-local` as the fallback so a machine that cannot keep up simply uses the fast voice. See [docs/local_runtimes.md](docs/local_runtimes.md) §3.5.
+**Sesame CSM-1B** is the quality local voice: the speech model from Sesame's "uncanny valley" demo, run through a Rust sidecar with **no Python and no Docker**, and — uniquely among Helix's voices — conditioned on the last few turns of the conversation rather than synthesizing each sentence cold. It wants a discrete GPU (~8 GB VRAM); pair it with `piper-local` as the fallback so a machine that cannot keep up simply uses the fast voice. Context retention is opt-in, memory-only and bounded, and `/blackbox status` reports whether the sidecar is *actually* conditioning on it rather than assuming so — an unpatched server accepts the context field and silently discards it. See [docs/local_runtimes.md](docs/local_runtimes.md) §3.5.
 
 See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits (capture is half-duplex — the mic is muted while Helix speaks, so a reply is interrupted with Ctrl+C rather than by talking over it).
 
@@ -286,11 +286,11 @@ See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice
 Subcommands:
 
 - **on** / **off** — go live, or return to the keyboard
-- **status** — one report: hearing, sight, speech, wake, companion
+- **status** — one report: hearing, sight, wake, initiative, retained context and transcript logging, then the full speech chain
 - **setup** — configure the STT/TTS providers with live pricing
 - **look** *[question]* — capture one frame now and answer a question about it
 - **eyes** `on|off` — camera only, without entering or leaving live mode
-- **wake** `on|off` — hands-free wake phrase between turns
+- **wake** `on|off` — hands-free waking between turns (the default detector wakes on any speech; true phrase spotting needs a sidecar)
 - **tts** `on|off` — whether ordinary replies are spoken aloud
 - **say** *text* — speak text through the TTS chain
 - **log** `on|off|status|show` — keep a local text record of what was heard and said

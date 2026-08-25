@@ -295,6 +295,12 @@ func (p *csmTTS) recordContextOutcome(applied int) {
 	}
 }
 
+// csmTTS is the reference ContextCapable provider. Asserted at compile time
+// because the interface is satisfied structurally: renaming this method would
+// otherwise drop the status row to "no context-capable voice" silently, which is
+// exactly the quiet degradation the header detection exists to prevent.
+var _ ContextCapable = (*csmTTS)(nil)
+
 // ContextStatus reports what is actually happening with conversational context,
 // for status output that must not overstate.
 func (p *csmTTS) ContextStatus() (honored, ignored, rejected bool) {

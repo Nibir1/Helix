@@ -20,7 +20,7 @@ everything below follows from that.
 ## 1. The turn
 
 ```
-wake phrase (optional)
+wake event (optional)
   └─▶ capture ──▶ transcribe ──▶ confidence gate
                                    │
                                    ├─▶ kill phrase?        → leave voice mode
@@ -134,10 +134,18 @@ These hold regardless of the approval posture:
 ## 4. Hands-free
 
 `/blackbox wake on` holds the microphone in wake-only listening between turns — no
-transcription happens until the wake phrase fires, so nothing leaves the machine
+transcription happens until a wake event fires, so nothing leaves the machine
 while you are not addressing it. After a completed turn Helix returns to wake-only
 listening; when the idle window lapses it says so once rather than silently
 reverting to open capture.
+
+**"Wake event", not "wake phrase", and the difference is the whole caveat.** The
+default `energy` engine scores loudness and cannot match words — it wakes on
+"hey helix", on "hello there", and on a dropped mug. Only the openWakeWord-class
+`sidecar` engine actually spots the phrase. `/blackbox wake status` names which
+detector is running and reports a configured phrase as *stored but unused* when
+the engine cannot act on it; the `WAKE` row of `/blackbox status` says the same
+in one line.
 
 Kill phrases end voice mode without touching the keyboard. "Turn off your eyes"
 disables the camera immediately while staying in voice mode.
@@ -154,7 +162,7 @@ rather than a second switch to remember. `"turn off your eyes"` closes it
 without ending the conversation.
 
 For the most natural local voice, `/blackbox setup` offers a **"Most natural,
-local (needs a GPU)"** chain: whisper.cpp ears with Sesame CSM-1B as the voice
+local"** chain (tagged *needs a GPU*): whisper.cpp ears with Sesame CSM-1B as the voice
 and Piper as the fallback. CSM is conditioned on conversation context, so replies
 sound like part of a dialogue rather than isolated lines — at the cost of wanting
 a GPU. See [local_runtimes.md](local_runtimes.md) §3.5 for what to expect on your
@@ -164,8 +172,12 @@ Set `speech.tts.context_turns` and Helix sends CSM the last few turns — text a
 audio — so its prosody follows the conversation instead of resetting each
 sentence. That retention is memory-only, bounded, dropped when you leave live
 mode, and off until you ask for it. It also needs a sidecar that accepts the
-context field: Helix detects one that quietly ignores it and says so in
-`/blackbox status` rather than implying a benefit you are not getting.
+context field. Helix detects one that quietly ignores it and reports that on the
+`CONTEXT` row of `/blackbox status` rather than implying a benefit you are not
+getting: **conditioning** means the sidecar acknowledged the turns it was sent,
+**not applied** means it accepted them and silently discarded them (an unpatched
+sidecar — see `docs/csm-context.patch`), and **retained, unused** means turns are
+being held in memory with no voice in the chain able to use them.
 
 **On macOS, grant the terminal camera access first** (System Settings → Privacy
 & Security → Camera, then restart the terminal). Without it the camera does not
@@ -340,7 +352,7 @@ Samples are local NDJSON under `~/.helix/metrics/`, wiped by `/purge`.
 
 ```text
 /blackbox setup     configure STT and TTS providers, then verify the chain
-/blackbox status    chains, health, endpoints, resolved routes, spoken vocabulary
+/blackbox status    chains, health, endpoints, retained context, spoken vocabulary
 /mictest            3-second check: is the microphone actually being heard?
 /blackbox on        go live — microphone, camera, speech, companion
 /blackbox off       back to the keyboard (also stops a reply mid-sentence)

@@ -217,6 +217,84 @@ func ConversationStats() (turns, bytes int) {
 	return c.Len(), c.Bytes()
 }
 
+// ContextCapable is implemented by TTS providers whose prosody is conditioned on
+// prior turns AND which can report what the server actually did with them.
+//
+// An interface rather than a type switch because the honest answer is
+// provider-specific: only the adapter knows whether its sidecar acknowledged the
+// context it was sent, and only it can distinguish "used" from "silently
+// dropped".
+type ContextCapable interface {
+	ContextStatus() (honored, ignored, rejected bool)
+}
+
+// ContextReport is what the status surface needs to describe conversational
+// context WITHOUT overstating it.
+//
+// The distinction that matters is Honored vs Ignored. Retention being on says
+// only that Helix is holding turns; it says nothing about whether the voice is
+// actually conditioned on them, because an unpatched csm.rs accepts a context
+// field and silently discards it (serde ignores unknown fields). Reporting
+// "context: on" in that case would claim a capability the user is not getting,
+// which is the same class of bug as the camera reporting "ready" on a host that
+// could never capture a frame.
+type ContextReport struct {
+	// Enabled is retention: Helix is holding recent turns in memory.
+	Enabled bool
+	Turns   int
+	Bytes   int
+
+	// Provider names the context-capable voice in the chain, empty when none is
+	// configured — retention with nothing to use it is worth showing as such.
+	Provider string
+
+	// Attempted records that context was actually sent at least once. Before the
+	// first spoken reply nothing is known yet, and "unknown" must not render as
+	// either success or failure.
+	Attempted bool
+
+	// Honored: the server acknowledged the context it was sent.
+	// Ignored: it answered without acknowledging — an unpatched sidecar.
+	// Rejected: it refused the field outright and Helix stopped sending it.
+	Honored  bool
+	Ignored  bool
+	Rejected bool
+}
+
+// ConversationReport describes conversational context for status output.
+func ConversationReport() ContextReport {
+	turns, bytes := ConversationStats()
+
+	mu.RLock()
+	enabled := conversation != nil
+	reg := registry
+	mu.RUnlock()
+
+	rep := ContextReport{Enabled: enabled, Turns: turns, Bytes: bytes}
+	if reg == nil {
+		return rep
+	}
+
+	// The whole chain, not just the primary: a context-capable voice sitting
+	// behind a fallback still shapes what the user hears when the primary fails.
+	for _, name := range reg.TTSChain() {
+		p, ok := reg.TTSProvider(name)
+		if !ok {
+			continue
+		}
+		cc, ok := p.(ContextCapable)
+		if !ok {
+			continue
+		}
+		honored, ignored, rejected := cc.ContextStatus()
+		rep.Provider = name
+		rep.Honored, rep.Ignored, rep.Rejected = honored, ignored, rejected
+		rep.Attempted = honored || ignored || rejected
+		break
+	}
+	return rep
+}
+
 // currentContext returns the turns to condition on.
 func currentContext() []ConversationTurn {
 	mu.RLock()

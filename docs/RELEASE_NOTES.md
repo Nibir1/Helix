@@ -31,8 +31,10 @@ planner still decides what to say. What it changes is how that sounds.
   listening. Helix assembles that context and sends it; `docs/csm-context.patch` is the
   (verified, working) upstream patch that teaches a CSM server to accept it.
 - **Honest about whether it worked.** An unpatched server accepts the context field and
-  silently drops it, so Helix reads a response header rather than assuming: if context is
-  being ignored, status says so instead of claiming prosody it is not getting.
+  silently drops it, so Helix reads a response header rather than assuming. The `CONTEXT`
+  row of `/blackbox status` distinguishes *conditioning* from *not applied*, and flags
+  *retained, unused* when turns are being held that no configured voice can consume —
+  retention with a privacy cost and no benefit is surfaced, not hidden.
 - **Retention is memory-only, bounded and off by default.** Context needs prior audio;
   nothing is written to disk, it is capped by turns and bytes, and `/blackbox off` drops it.
 
@@ -105,6 +107,29 @@ Full model: `docs/threat_model_voice.md`. Policy summary: `docs/SECURITY.md`.
 | Frame-to-insight, local `gemma4:e2b` warm | **8.8 s** | best-effort locally |
 
 The report refuses to flatter: it will not print a p95 a small sample cannot support, it says "not measured" rather than implying a pass, and where the median meets a budget but the worst case does not it says **typical only**.
+
+### ✨ Interface
+
+The terminal UI is the whole product surface here, so it gets the same honesty rules as
+everything else: a panel may not report a state the machine cannot deliver.
+
+- **Status reports what it advertises.** `/blackbox status` gained the `WAKE` row it had
+  promised in its own usage text since the command was created, and a `CONTEXT` row for
+  retained conversation audio — the one privacy-relevant state that had no surface at all.
+- **Guidance points at commands that exist.** Seven strings still told users to run `/wake`,
+  `/say`, `/tts` and `/voice-status` — verbs folded into `/blackbox` and removed from the
+  registry, so Helix was recommending commands it would then answer with "folded into
+  /blackbox".
+- **The recommended chain now says it is recommended.** The setup menu assigned the
+  `recommended` tag and then overwrote it with `needs a key`, so the recommendation never
+  rendered while its endorsement colour stayed on — painting a caution green. Both are
+  shown now.
+- **The wake panel stopped promising phrase detection it does not do.** It printed the
+  configured phrase unconditionally, but the default energy detector scores loudness and
+  cannot match words; a stored phrase is now reported as stored and unused.
+- **Panels stay inside their frame.** Over-wide status values wrapped at the terminal edge
+  and restarted at column zero, escaping the panel — including a camera message at 95
+  columns in a 74-column row. Fixed, with a width test measured against the narrowest panel.
 
 ### ⌨️ New commands
 

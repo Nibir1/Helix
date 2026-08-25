@@ -4,7 +4,7 @@
 // Purpose: BlackBox Phase 1 e2e — /say drives the real binary's TTS chain
 // into the in-process mock (zero real network, zero real keys). Playback
 // itself is device-dependent and not asserted; synthesis reaching the mock
-// and the [voice] transcript line are.
+// and the echoed transcript line are.
 package e2e
 
 import (
@@ -22,7 +22,9 @@ func TestE2E_SayHitsMockTTS(t *testing.T) {
 	}
 
 	h.WriteLine("/blackbox say voice link online")
-	if err := h.Expect("[voice] voice link online", 20*time.Second); err != nil {
+	// The two-space gap is what distinguishes the echoed OUTPUT line from the
+	// PTY echo of the typed command, which also contains the text.
+	if err := h.Expect("speaking  voice link online", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -42,11 +44,11 @@ func TestE2E_TTSToggle(t *testing.T) {
 	defer h.Close()
 
 	h.WriteLine("/blackbox tts off")
-	if err := h.Expect("Automatic spoken responses disabled", 10*time.Second); err != nil {
+	if err := h.Expect("Replies are silent", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	h.WriteLine("/blackbox tts on")
-	if err := h.SendExpect("/blackbox tts on", "Automatic spoken responses enabled", 10*time.Second); err != nil {
+	if err := h.SendExpect("/blackbox tts on", "Replies are now spoken aloud", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

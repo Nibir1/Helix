@@ -102,7 +102,11 @@ Full model, including the residual risk accepted for a voice-first assistant:
   store imports no filesystem or networking API, enforced by a test — bounded by
   both turn count and total bytes, and dropped when live mode ends. The audio was
   already in memory a moment earlier for transcription; what changes is how long,
-  which is why the bounds are the control. Off by default.
+  which is why the bounds are the control. Off by default. **It is visible while
+  it is happening:** the `CONTEXT` row of `/blackbox status` reports how many
+  turns and how much audio are being held, and says **retained, unused** when
+  turns are being kept that no configured voice can actually consume — retention
+  with a cost and no benefit is the case worth surfacing, not hiding.
 
 ## Secret Handling
 - API keys are stored in `~/.helix/secrets.json` with strict `0600` file permissions.

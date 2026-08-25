@@ -54,7 +54,9 @@ speech services.
 
 - **Private-by-default:** configure the local sidecars (`whisper-local` STT,
   `piper-local` TTS) to keep audio on your machine. See §5.
-- `/blackbox status` shows chain health, key state, and recorder availability.
+- `/blackbox status` is the one report: mode, hearing, sight, wake, initiative,
+  retained context and transcript logging, followed by chain health, key state
+  and recorder availability.
 - `/blackbox say <text>` speaks text immediately; `/blackbox tts on|off` gates automatic spoken
   responses; `/listen [sec]` records and transcribes one clip (push-to-talk).
 
@@ -101,7 +103,8 @@ be before sox treats it as silence.
 ```text
 /blackbox wake on       # enable hands-free (applies safe defaults the first time)
 /blackbox wake off      # disable
-/blackbox status   # phrase, engine, recorder readiness
+/blackbox wake status   # detector, phrase, recorder readiness
+/blackbox status        # the WAKE row, alongside hearing, sight and context
 ```
 
 The command does the config edit for you (no manual JSON): enabling applies the
@@ -113,8 +116,10 @@ Once on, Helix holds in **wake-only listening** between turns — nothing is
 transcribed until a wake event fires, so ambient speech between turns is never
 executed (ADR-005 §5).
 
-- **Interactive shell:** after each turn it listens for the phrase, beeps, and
-  runs the next turn — keep the terminal open and talk hands-free.
+- **Interactive shell:** after each turn it listens for a wake event, beeps, and
+  runs the next turn — keep the terminal open and talk hands-free. With the
+  default `energy` engine that event is any speech or loud sound, not the
+  phrase; see the engine note below.
 - **Always-on (no terminal):** run `helix daemon` — its own voice loop does
   wake → capture → pipeline → spoken reply → wake, forever. `helix remote
   status` reports `wake_enabled` / `wake_phrase` / `voice_loop` so you can
