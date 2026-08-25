@@ -175,11 +175,35 @@ closing rule, content-measured tables, and state badges. It exists because
 flat stack of coloured lines.
 
 Two properties are load-bearing rather than cosmetic. Widths are measured on
-VISIBLE text, because `%-9s` counts ANSI escape bytes and pads a coloured cell
-to nothing. And `Table` fits itself to the panel by shaving its widest column
-(`truncateANSI` preserves escape sequences while counting only runes), because a
-table wider than its frame wraps at the terminal edge and restarts at column
-zero — destroying the alignment it exists for.
+VISIBLE COLUMNS, because `%-9s` counts ANSI escape bytes and pads a coloured
+cell to nothing, and because a rune is not a column — a CJK character occupies
+two. `visibleWidth` is the single definition (ANSI stripped, `runewidth`
+applied), and every primitive measures through it. And **nothing is allowed to
+leave the frame** — a line wider than the panel wraps at the TERMINAL edge and
+restarts at column zero, outside the gutter, destroying the block it belongs to.
+Each primitive handles that in the way its content allows: `Table` shaves its
+widest column (`truncateANSI` cuts to a column budget, preserving escape
+sequences), `PanelWrap` wraps prose and splits a word too long to fit, and `KV`
+wraps its value with continuation lines hanging under the value column.
+
+All three measured in the wrong unit at some point, in three different ways —
+`KV` did not wrap at all, `PanelWrap` counted bytes, `truncateANSI` counted
+runes — and each produced output that looked correct in source and broke on
+screen. Hence the single shared definition rather than three local ones.
+
+`KV`'s wrapping is colour-aware in both directions, which is the only reason it
+can be done at the primitive rather than pushed onto callers: escape sequences
+are never counted toward a width and never severed, and the colour in effect at
+a break is closed at the end of one line and reopened at the start of the next —
+otherwise a wrapped value renders its first line coloured and its remainder
+plain, and a line ending mid-colour bleeds into the gutter glyph beneath it. A
+value that already fits is returned byte for byte unchanged, so adding the
+wrapping changed no panel that was already correct.
+
+That last point is why this belongs in the primitive at all. Before it, every
+caller was implicitly responsible for keeping strings short enough for a width
+it cannot see — a rule nothing enforced and several callers broke, including a
+camera message 95 columns wide in a 74-column row.
 
 ### 5a. Command Registry (`cmd/helix/registry.go`, `registry_tables.go`)
 One table per command holding its name, aliases, usage line, help text,

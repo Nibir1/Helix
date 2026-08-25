@@ -25,6 +25,8 @@ package shell
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // Panel glyphs. Box-drawing only — no emoji, no double-width runes, because
@@ -91,8 +93,9 @@ func PanelLine(text string) string {
 // terminal edge and its tail starts at column zero, visually escaping the block
 // it belongs to. The endpoint-conflict note did exactly that.
 //
-// Args: text: plain prose (colour is applied to the whole line by the caller).
-// Returns: the wrapped lines, each already gutter-prefixed.
+// Args: text: prose, normally plain (colour is applied per line by the caller,
+// though pre-coloured text measures correctly too).
+// Returns: the wrapped lines, each already gutter-prefixed; nil for blank input.
 // Complexity: O(len(text)).
 func PanelWrap(text string, colour func(string) string) []string {
 	if colour == nil {
@@ -104,20 +107,40 @@ func PanelWrap(text string, colour func(string) string) []string {
 	}
 	var out []string
 	var line string
+	flush := func() {
+		if line != "" {
+			out = append(out, PanelLine(colour(line)))
+			line = ""
+		}
+	}
 	for _, word := range strings.Fields(text) {
+		// A word too long for any line is split rather than allowed to run past
+		// the frame. A URL, an absolute path or an endpoint is the realistic
+		// case, and letting one escape defeats the point of wrapping at all.
+		if visibleWidth(word) > limit {
+			flush()
+			for _, part := range wrapANSI(word, limit) {
+				out = append(out, PanelLine(colour(part)))
+			}
+			continue
+		}
 		switch {
 		case line == "":
 			line = word
-		case len(line)+1+len(word) <= limit:
+		// Measured on VISIBLE width, not bytes. len() counts a multi-byte rune
+		// once per byte, so prose containing "·", "—" or "→" — which this
+		// codebase's panels are full of — wrapped up to three columns early per
+		// such rune. Harmless in the sense that it never overflowed, but it
+		// broke lines that had room, and it is the same class of bug as
+		// measuring ANSI escapes as content.
+		case visibleWidth(line)+1+visibleWidth(word) <= limit:
 			line += " " + word
 		default:
-			out = append(out, PanelLine(colour(line)))
+			flush()
 			line = word
 		}
 	}
-	if line != "" {
-		out = append(out, PanelLine(colour(line)))
-	}
+	flush()
 	return out
 }
 
@@ -127,16 +150,188 @@ func PanelGap() string {
 	return "  " + Fg(HexSubtle, glyphGutter)
 }
 
-// KV renders an aligned label/value row inside a panel.
+// KV renders an aligned label/value row inside a panel, wrapping the value to
+// the panel width and hanging continuation lines under the value column.
 //
-// Args: label, value: already-coloured or plain; width: the label column,
-// from KVWidth so every row in a block agrees.
+// Wrapping is the point rather than a refinement. KV used to emit one line
+// whatever its length, so a value wider than the rule wrapped at the TERMINAL
+// edge instead and its tail restarted at column zero — outside the gutter,
+// visually detached from the row it belongs to. That is the exact defect
+// PanelWrap was written to prevent for prose, and nothing prevented it here:
+// /blackbox status carried a camera message 95 columns wide in a 74-column row,
+// and it read fine in source. A caller cannot reasonably be asked to keep
+// every string short enough for a width it cannot see, so the primitive
+// handles it.
+//
+// A value that already fits is emitted byte for byte as before, so every panel
+// that renders correctly today is untouched.
+//
+// Args: label, value: already-coloured or plain; width: the label column, from
+// KVWidth so every row in a block agrees.
+// Returns: one or more newline-joined lines, ready for a single Println.
 func KV(label, value string, width int) string {
 	pad := width - runeLen(label)
 	if pad < 0 {
 		pad = 0
 	}
-	return PanelLine(Fg(HexSubtle, label) + strings.Repeat(" ", pad+2) + value)
+	head := Fg(HexSubtle, label) + strings.Repeat(" ", pad+2)
+
+	// The value column starts after the gutter (4 cells, per PanelLine) and the
+	// label block (width + 2), inside the same limit PanelWrap uses.
+	limit := panelWidth() - 2 - (width + 2)
+	if limit < kvMinValueWidth {
+		// A pathologically long label would otherwise leave one column per line.
+		// Overflowing slightly beats a value rendered one character at a time.
+		limit = kvMinValueWidth
+	}
+
+	lines := wrapANSI(value, limit)
+	out := PanelLine(head + lines[0])
+	indent := strings.Repeat(" ", width+2)
+	for _, l := range lines[1:] {
+		out += "\n" + PanelLine(indent+l)
+	}
+	return out
+}
+
+// kvMinValueWidth is the floor for a wrapped value column.
+const kvMinValueWidth = 16
+
+// kvCell is one printable rune plus the escape sequences that immediately
+// precede it.
+//
+// Wrapping coloured text needs both halves separated: the escapes must travel
+// with the rune they colour, but must never count toward a width or be severed
+// by a line break. Pairing them makes wrapping pure index arithmetic over
+// visible cells, with the colour reassembled afterwards.
+type kvCell struct {
+	pre string // escape sequences sitting in front of this rune
+	r   rune
+	w   int // visible cells this rune occupies (0, 1 or 2)
+}
+
+// splitCells decomposes a coloured string into cells plus any trailing escapes
+// (usually the final reset, which belongs to no rune).
+func splitCells(s string) ([]kvCell, string) {
+	rs := []rune(s)
+	out := make([]kvCell, 0, len(rs))
+	var pre strings.Builder
+	for i := 0; i < len(rs); i++ {
+		if rs[i] == 0x1b {
+			start := i
+			for i < len(rs) && rs[i] != 'm' {
+				i++
+			}
+			end := i + 1
+			if end > len(rs) {
+				end = len(rs)
+			}
+			pre.WriteString(string(rs[start:end]))
+			continue
+		}
+		out = append(out, kvCell{pre: pre.String(), r: rs[i], w: runewidth.RuneWidth(rs[i])})
+		pre.Reset()
+	}
+	return out, pre.String()
+}
+
+// sgrAfter reports which SGR sequence is still in effect after `esc`, given the
+// one in effect before it. A reset clears; anything else replaces.
+func sgrAfter(prev, esc string) string {
+	rs := []rune(esc)
+	for i := 0; i < len(rs); i++ {
+		if rs[i] != 0x1b {
+			continue
+		}
+		start := i
+		for i < len(rs) && rs[i] != 'm' {
+			i++
+		}
+		end := i + 1
+		if end > len(rs) {
+			end = len(rs)
+		}
+		if seq := string(rs[start:end]); seq == ansiReset {
+			prev = ""
+		} else {
+			prev = seq
+		}
+	}
+	return prev
+}
+
+// wrapANSI breaks an already-coloured string into lines of at most `width`
+// visible columns, preferring word boundaries.
+//
+// Colour is carried across breaks: the sequence in effect at the end of a line
+// is closed there and reopened at the start of the next. Without that, a
+// wrapped value renders its first line coloured and the remainder plain, and a
+// line that ended mid-colour would bleed into the gutter glyph beneath it.
+//
+// A string that already fits is returned untouched, byte for byte, so every
+// panel that fits today renders exactly as it does today.
+func wrapANSI(s string, width int) []string {
+	if width <= 0 || visibleWidth(s) <= width {
+		return []string{s}
+	}
+	cells, tail := splitCells(s)
+
+	// Greedy fill. Each iteration consumes at least one cell, so this
+	// terminates even when width is smaller than a single wide rune.
+	var groups [][]kvCell
+	for i := 0; i < len(cells); {
+		if len(groups) > 0 {
+			// A continuation line never starts with the padding that separated
+			// two words on the line above.
+			for i < len(cells) && cells[i].r == ' ' {
+				i++
+			}
+			if i >= len(cells) {
+				break
+			}
+		}
+		end, w, lastSpace := i, 0, -1
+		for end < len(cells) && w+cells[end].w <= width {
+			if cells[end].r == ' ' {
+				lastSpace = end
+			}
+			w += cells[end].w
+			end++
+		}
+		if end < len(cells) && lastSpace > i {
+			end = lastSpace // break at the word boundary rather than mid-word
+		}
+		if end == i {
+			end = i + 1 // width narrower than one cell: make progress anyway
+		}
+		groups = append(groups, cells[i:end])
+		i = end
+	}
+
+	out := make([]string, 0, len(groups))
+	open := "" // colour in effect when the current line starts
+	for gi, g := range groups {
+		var b strings.Builder
+		b.WriteString(open)
+		state := open
+		for _, c := range g {
+			if c.pre != "" {
+				b.WriteString(c.pre)
+				state = sgrAfter(state, c.pre)
+			}
+			b.WriteRune(c.r)
+		}
+		if gi == len(groups)-1 && tail != "" {
+			b.WriteString(tail)
+			state = sgrAfter(state, tail)
+		}
+		if state != "" {
+			b.WriteString(ansiReset)
+		}
+		out = append(out, b.String())
+		open = state
+	}
+	return out
 }
 
 // KVWidth is the widest label in a set, so a caller never hardcodes a column.
@@ -351,16 +546,37 @@ func fitTableWidths(widths []int, limit int) {
 	}
 }
 
-// truncateANSI cuts a possibly-coloured string to a visible width.
+// truncateANSI cuts a possibly-coloured string to a visible width, in COLUMNS.
 //
 // Escape sequences are copied verbatim and never counted, so colour survives
 // the cut and the reset at the end of the original still lands — naive slicing
 // would either count escape bytes as content or sever a sequence mid-way and
 // bleed the colour into the rest of the line.
+//
+// The budget is columns rather than runes, which is not the same thing and used
+// not to be honoured: the guard below compares columns while the loop used to
+// count runes, so a CJK cell — every rune two columns wide — came back at up to
+// twice the requested width. `truncateANSI(cjk, 15)` returned 29 columns. Table
+// is entirely column-based (it measures cells with runeLen and pads with the
+// difference), so an over-wide cell drove its pad negative, collapsed the gap to
+// nothing and shifted every column after it — destroying exactly the alignment
+// Table shaves columns to preserve.
+//
+// A wide rune that does not fit in what remains is dropped rather than half
+// printed, so the result may come back one column under budget. Under is safe;
+// over is the bug.
 func truncateANSI(s string, width int) string {
 	if width <= 0 || runeLen(s) <= width {
 		return s
 	}
+	// The ellipsis occupies part of the budget; measure it rather than assuming
+	// one column, since that is the assumption this function is being fixed for.
+	const ellipsis = '…'
+	budget := width - runewidth.RuneWidth(ellipsis)
+	if budget < 0 {
+		budget = 0
+	}
+
 	var b strings.Builder
 	seen := 0
 	runes := []rune(s)
@@ -375,13 +591,14 @@ func truncateANSI(s string, width int) string {
 			}
 			continue
 		}
-		if seen >= width-1 {
+		w := runewidth.RuneWidth(runes[i])
+		if seen+w > budget {
 			break
 		}
 		b.WriteRune(runes[i])
-		seen++
+		seen += w
 	}
-	b.WriteString("…")
+	b.WriteRune(ellipsis)
 	b.WriteString(ansiReset)
 	return b.String()
 }

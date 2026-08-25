@@ -1,16 +1,19 @@
 // cmd/helix/blackbox_status_width_test.go
-// Purpose: status rows must fit inside the panel that frames them.
+// Purpose: status rows must stay readable at the narrowest panel.
 //
-// shell.KV neither wraps nor truncates. A value wider than the rule therefore
-// wraps at the TERMINAL edge instead, and its tail restarts at column zero —
-// outside the gutter, visually detached from the block it belongs to. That is
-// the defect shell.PanelWrap exists to prevent for prose, and nothing was
-// preventing it for KV rows: when /blackbox status first grew a CONTEXT row,
-// five of its seven branches overflowed, as did the camera's "no frames" line
-// at 95 columns into a 74-column row. All of them read fine in source.
+// shell.KV now wraps and hangs continuation lines under the value column, so an
+// over-wide value is no longer a rendering BUG — it used to wrap at the terminal
+// edge and restart at column zero, outside the gutter, and /blackbox status
+// carried one such line 95 columns wide.
 //
-// The budget is computed for the NARROWEST panel (a 72-column rule), because
-// that is the case that breaks; a wide terminal merely hides the bug.
+// What is left is a readability budget rather than a correctness one, and it is
+// still worth holding. A summary panel exists to be scanned; if every row runs
+// to two lines it has stopped being a summary. So the states seen in ordinary
+// operation must fit on one line, while the diagnostic states — which say what
+// went wrong and how to fix it, and are worth the room — may take a second.
+//
+// Everything is measured against the NARROWEST panel (a 72-column rule): a wide
+// terminal merely hides the question.
 package main
 
 import (
@@ -34,45 +37,62 @@ func visibleWidth(s string) int {
 // column that shell.KV puts in front of every value.
 func statusRowBudget(t *testing.T) int {
 	t.Helper()
-	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "WAKE", "INITIATIVE", "CONTEXT", "TRANSCRIPT")
 	// PanelLine prefix is "  " + gutter + " " = 4 columns; KV then pads the
-	// label out to w and adds 2 more.
-	return (72 + 2) - (4 + w + 2)
+	// label out to the column width and adds 2 more.
+	return (72 + 2) - (4 + statusLabelWidth() + 2)
 }
 
-func TestContextLineFitsThePanel(t *testing.T) {
+// statusLabelWidth is the label column /blackbox status renders with.
+func statusLabelWidth() int {
+	return shell.KVWidth("MODE", "HEARING", "SIGHT", "WAKE",
+		"INITIATIVE", "CONTEXT", "TRANSCRIPT")
+}
+
+func TestContextLineStaysReadable(t *testing.T) {
 	budget := statusRowBudget(t)
 
 	// Values chosen to be the widest each branch can realistically render:
 	// the longest provider name in the chain, and a full context buffer.
 	cases := []struct {
 		name string
-		rep  speech.ContextReport
+		// oneLine marks the states seen in ordinary operation. The diagnostic
+		// states may wrap: telling someone their sidecar is silently discarding
+		// context, and naming the patch that fixes it, is worth a second line.
+		oneLine bool
+		rep     speech.ContextReport
 	}{
-		{"disabled, no capable provider", speech.ContextReport{}},
-		{"disabled, capable provider", speech.ContextReport{Provider: "csm-local"}},
-		{"retained but unusable", speech.ContextReport{Enabled: true, Turns: 4, Bytes: 4 << 20}},
-		{"refused", speech.ContextReport{
-			Enabled: true, Provider: "csm-local", Turns: 4, Bytes: 4 << 20,
-			Attempted: true, Rejected: true}},
-		{"ignored by an unpatched sidecar", speech.ContextReport{
-			Enabled: true, Provider: "csm-local", Turns: 4, Bytes: 4 << 20,
-			Attempted: true, Ignored: true}},
-		{"honored", speech.ContextReport{
+		{"disabled, no capable provider", true, speech.ContextReport{}},
+		{"disabled, capable provider", true, speech.ContextReport{Provider: "csm-local"}},
+		{"honored", true, speech.ContextReport{
 			Enabled: true, Provider: "csm-local", Turns: 4, Bytes: 4 << 20,
 			Attempted: true, Honored: true}},
-		{"awaiting the first reply", speech.ContextReport{
+		{"awaiting the first reply", true, speech.ContextReport{
 			Enabled: true, Provider: "csm-local", Turns: 4, Bytes: 4 << 20}},
+		{"retained but unusable", false, speech.ContextReport{
+			Enabled: true, Turns: 4, Bytes: 4 << 20}},
+		{"refused", false, speech.ContextReport{
+			Enabled: true, Provider: "csm-local", Turns: 4, Bytes: 4 << 20,
+			Attempted: true, Rejected: true}},
+		{"ignored by an unpatched sidecar", false, speech.ContextReport{
+			Enabled: true, Provider: "csm-local", Turns: 4, Bytes: 4 << 20,
+			Attempted: true, Ignored: true}},
 	}
 
 	for _, tc := range cases {
 		line := blackBoxContextLine(tc.rep)
-		if got := visibleWidth(line); got > budget {
-			t.Errorf("%s: %d columns exceeds the %d-column budget:\n  %s",
-				tc.name, got, budget, ansiSeq.ReplaceAllString(line, ""))
-		}
 		if line == "" {
 			t.Errorf("%s: produced no line at all", tc.name)
+			continue
+		}
+		if tc.oneLine && visibleWidth(line) > budget {
+			t.Errorf("%s is an everyday state and must fit one line: %d columns, budget %d\n  %s",
+				tc.name, visibleWidth(line), budget, ansiSeq.ReplaceAllString(line, ""))
+		}
+		// Even a diagnostic may not sprawl: two rendered lines, never three.
+		rendered := shell.KV("CONTEXT", line, statusLabelWidth())
+		if n := strings.Count(rendered, "\n") + 1; n > 2 {
+			t.Errorf("%s renders as %d lines, too much for a summary row:\n%s",
+				tc.name, n, ansiSeq.ReplaceAllString(rendered, ""))
 		}
 	}
 }

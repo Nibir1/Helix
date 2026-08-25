@@ -182,3 +182,266 @@ func TestFitTableWidthsRespectsAFloor(t *testing.T) {
 		t.Error("columns already at the floor must be left alone")
 	}
 }
+
+// A value that fits must be emitted exactly as it was before KV learned to
+// wrap. Every panel in the app renders through this, so a change in the common
+// case would be a change everywhere at once.
+func TestKVLeavesFittingValuesAlone(t *testing.T) {
+	w := KVWidth("MODE", "INITIATIVE")
+	value := Badge(StateGood, "LIVE") + Muted("  listening")
+
+	got := KV("MODE", value, w)
+	if strings.Contains(got, "\n") {
+		t.Errorf("a value that fits must stay on one line, got %q", got)
+	}
+	if want := PanelLine(Fg(HexSubtle, "MODE") +
+		strings.Repeat(" ", w-len("MODE")+2) + value); got != want {
+		t.Errorf("fitting output changed:\n got %q\nwant %q", got, want)
+	}
+}
+
+// The defect this exists for: KV emitted one line whatever its length, so an
+// over-wide value wrapped at the TERMINAL edge and its tail restarted at column
+// zero, outside the gutter. /blackbox status carried one 95 columns wide.
+func TestKVWrapsInsideThePanel(t *testing.T) {
+	w := KVWidth("MODE", "INITIATIVE", "TRANSCRIPT")
+	value := Badge(StateBad, "no frames") + Muted("  camera opens but delivers "+
+		"nothing — likely an OS permission; /blackbox look shows why")
+
+	lines := strings.Split(KV("SIGHT", value, w), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("an over-wide value must wrap, got one line: %q", lines[0])
+	}
+	// +2 for the indent PanelLine adds before the gutter.
+	limit := panelWidth() + 2
+	for i, l := range lines {
+		if got := visibleWidth(l); got > limit {
+			t.Errorf("line %d is %d columns, past the %d-column rule: %q",
+				i, got, limit, ansiRegex.ReplaceAllString(l, ""))
+		}
+		if !strings.Contains(l, glyphGutter) {
+			t.Errorf("line %d escaped the gutter: %q", i, l)
+		}
+	}
+
+	// Continuation lines hang under the value column, not under the label.
+	plain := ansiRegex.ReplaceAllString(lines[1], "")
+	body := plain[strings.Index(plain, glyphGutter)+len(glyphGutter)+1:]
+	if got := len(body) - len(strings.TrimLeft(body, " ")); got != w+2 {
+		t.Errorf("continuation indent = %d, want %d (the value column)", got, w+2)
+	}
+}
+
+// Wrapping must not break the words it wraps, and must not lose them.
+func TestKVWrapPreservesTextAndBreaksOnWords(t *testing.T) {
+	w := KVWidth("LABEL")
+	value := "alpha bravo charlie delta echo foxtrot golf hotel india juliet " +
+		"kilo lima mike november oscar papa quebec romeo sierra tango"
+
+	lines := strings.Split(KV("LABEL", value, w), "\n")
+	var words []string
+	for _, l := range lines {
+		plain := ansiRegex.ReplaceAllString(l, "")
+		// Every line carries the gutter; only the first carries the label.
+		plain = plain[strings.Index(plain, glyphGutter)+len(glyphGutter):]
+		words = append(words, strings.Fields(plain)...)
+	}
+	words = words[1:] // the label on the first line
+	if got, want := strings.Join(words, " "), value; got != want {
+		t.Errorf("wrapping altered the text:\n got %q\nwant %q", got, want)
+	}
+}
+
+// A token longer than the column has no break point, so it must be split rather
+// than allowed to overflow — a long path or URL is the realistic case.
+func TestKVWrapHardBreaksAnUnbreakableToken(t *testing.T) {
+	w := KVWidth("LABEL")
+	lines := strings.Split(KV("LABEL", strings.Repeat("x", 200), w), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("a 200-column token must split across lines, got %d", len(lines))
+	}
+	total := 0
+	for _, l := range lines {
+		if got := visibleWidth(l); got > panelWidth()+2 {
+			t.Errorf("hard-broken line still overflows at %d columns", got)
+		}
+		total += strings.Count(l, "x")
+	}
+	if total != 200 {
+		t.Errorf("hard break lost characters: %d of 200 survived", total)
+	}
+}
+
+// Colour must survive a break in both directions: the sequence in effect at the
+// end of a line is closed there and reopened on the next. Without the reopen a
+// wrapped value renders coloured then plain; without the close it bleeds into
+// the gutter glyph of the line beneath.
+func TestWrapANSICarriesColourAcrossBreaks(t *testing.T) {
+	value := Muted(strings.Repeat("word ", 40))
+	lines := wrapANSI(value, 30)
+	if len(lines) < 2 {
+		t.Fatal("expected several lines")
+	}
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "\x1b") {
+			t.Errorf("line %d does not reopen the active colour: %q", i, l)
+		}
+		if !strings.HasSuffix(l, ansiReset) {
+			t.Errorf("line %d does not close its colour: %q", i, l)
+		}
+		if got := visibleWidth(l); got > 30 {
+			t.Errorf("line %d is %d visible columns, want <= 30", i, got)
+		}
+	}
+}
+
+// Escapes are zero-width: a heavily coloured value must not wrap earlier than
+// the same text uncoloured, which is what counting escape bytes would cause.
+func TestWrapANSIDoesNotCountEscapes(t *testing.T) {
+	plain := "alpha bravo charlie delta echo foxtrot golf hotel india"
+	var coloured string
+	for i, word := range strings.Fields(plain) {
+		if i > 0 {
+			coloured += " "
+		}
+		coloured += Value(word)
+	}
+	if got, want := len(wrapANSI(coloured, 20)), len(wrapANSI(plain, 20)); got != want {
+		t.Errorf("coloured text wrapped into %d lines, plain into %d", got, want)
+	}
+}
+
+// A width narrower than a single cell must still terminate rather than spin.
+func TestWrapANSIMakesProgressAtAbsurdWidths(t *testing.T) {
+	for _, w := range []int{-1, 0, 1, 2} {
+		lines := wrapANSI(Value("hello world"), w)
+		if len(lines) == 0 {
+			t.Errorf("width %d produced no output", w)
+		}
+	}
+}
+
+// PanelWrap measured with len(), which counts a multi-byte rune once per byte.
+// This codebase's panels are full of "·", "—" and "→" (2-3 bytes each, one
+// column each), so prose carrying them wrapped early — breaking lines that had
+// room. Never past the frame, but wrong, and the same class of bug as measuring
+// ANSI escapes as content.
+func TestPanelWrapMeasuresColumnsNotBytes(t *testing.T) {
+	// Same column width per word, very different byte counts: "ab" is 2 bytes
+	// wide and 2 columns; "——" is 6 bytes and 2 columns.
+	ascii := strings.TrimSpace(strings.Repeat("ab ", 40))
+	multi := strings.TrimSpace(strings.Repeat("—— ", 40))
+
+	got, want := len(PanelWrap(multi, nil)), len(PanelWrap(ascii, nil))
+	if want < 2 {
+		t.Fatalf("precondition: the ASCII case must wrap, got %d lines", want)
+	}
+	if got != want {
+		t.Errorf("multi-byte prose wrapped into %d lines, equivalent ASCII into %d",
+			got, want)
+	}
+	for i, l := range PanelWrap(multi, nil) {
+		plain := ansiRegex.ReplaceAllString(l, "")
+		if visibleWidth(plain) > panelWidth()+2 {
+			t.Errorf("line %d overflows the panel at %d columns: %q",
+				i, visibleWidth(plain), plain)
+		}
+	}
+}
+
+// A word longer than the panel has no break point, so PanelWrap emitted it as
+// its own over-wide line — letting content escape the very frame it exists to
+// keep it inside. A URL or an absolute path is the realistic case.
+func TestPanelWrapSplitsAnUnbreakableWord(t *testing.T) {
+	url := "https://example.invalid/" + strings.Repeat("segment/", 20)
+	lines := PanelWrap("the endpoint is "+url+" which is unreachable", nil)
+	if len(lines) < 2 {
+		t.Fatal("expected several lines")
+	}
+
+	var joined string
+	for i, l := range lines {
+		plain := ansiRegex.ReplaceAllString(l, "")
+		if visibleWidth(plain) > panelWidth()+2 {
+			t.Errorf("line %d escapes the panel at %d columns: %q",
+				i, visibleWidth(plain), plain)
+		}
+		joined += strings.TrimPrefix(plain, "  "+glyphGutter+" ")
+	}
+	// A hard break splits the token across lines, so the URL survives only as a
+	// contiguous run once the line boundaries are removed.
+	if !strings.Contains(joined, url) {
+		t.Errorf("splitting the URL lost or reordered it:\n%s", joined)
+	}
+}
+
+// truncateANSI's guard compared COLUMNS while its loop counted RUNES, so a cell
+// of double-width runes came back at nearly twice the requested width:
+// truncateANSI(cjk, 15) returned 29 columns.
+func TestTruncateANSIBudgetsColumnsNotRunes(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"ascii", strings.Repeat("abcdefghij", 6)},
+		{"cjk", strings.Repeat("日本語のモデル名", 6)},
+		{"mixed", strings.Repeat("model-日本語-name", 6)},
+		{"coloured cjk", Value(strings.Repeat("日本語のモデル名", 6))},
+	}
+	for _, tc := range cases {
+		for _, width := range []int{1, 2, 5, 15, 40} {
+			got := truncateANSI(tc.text, width)
+			if w := visibleWidth(got); w > width {
+				t.Errorf("%s at width %d came back %d columns: %q",
+					tc.name, width, w, ansiRegex.ReplaceAllString(got, ""))
+			}
+			// Cutting inside an escape would leave an ESC with no terminator.
+			// Count well-formed sequences rather than the letter "m", which
+			// also occurs in ordinary text like "model".
+			if strings.Count(got, "\x1b") != len(ansiRegex.FindAllString(got, -1)) {
+				t.Errorf("%s at width %d severed an escape: %q", tc.name, width, got)
+			}
+		}
+	}
+}
+
+// The consequence in the caller: Table measures cells with runeLen and pads with
+// the difference, so an over-wide truncation drove the pad negative, collapsed
+// the two-space gap and shifted every column after it.
+func TestTableStaysAlignedWithWideRunes(t *testing.T) {
+	// Wide enough that fitTableWidths must SHAVE the CJK column — otherwise the
+	// truncation path is never reached and this test proves nothing about it.
+	rows := [][]string{
+		{"whisper-local", strings.Repeat("日本語のモデル名", 5), "free"},
+		{"groq", "whisper-large-v3-turbo", "$0.04/hr"},
+	}
+	lines := Table([]string{"provider", "model", "price"}, rows)
+	if len(lines) != len(rows)+1 {
+		t.Fatalf("expected a header and %d rows, got %d lines", len(rows), len(lines))
+	}
+	if !strings.Contains(lines[1], "…") {
+		t.Fatal("precondition: the wide cell must actually be truncated")
+	}
+	for i, l := range lines {
+		plain := ansiRegex.ReplaceAllString(l, "")
+		if w := visibleWidth(plain); w > panelWidth()+2 {
+			t.Errorf("row %d is %d columns, past the %d-column rule: %q",
+				i, w, panelWidth()+2, plain)
+		}
+	}
+	// The last column must start at the same VISIBLE column on every row — the
+	// alignment the shaving exists to protect. Measured in columns, not byte
+	// offsets: a CJK rune is three bytes and two columns, so a byte index would
+	// report a misalignment that is not there (and miss one that is).
+	col := -1
+	for i, l := range lines {
+		plain := ansiRegex.ReplaceAllString(l, "")
+		at := visibleWidth(plain[:strings.LastIndex(plain, "  ")])
+		if col == -1 {
+			col = at
+		} else if at != col {
+			t.Errorf("row %d's final column starts at column %d, others at %d: %q",
+				i, at, col, plain)
+		}
+	}
+}

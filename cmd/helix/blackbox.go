@@ -261,7 +261,8 @@ func blackBoxEyesLine() string {
 		// this file exists to prevent: on macOS an unauthorized camera passes
 		// every check that can be made cheaply and delivers nothing forever.
 		return shell.Badge(shell.StateBad, "no frames") +
-			shell.Muted("  likely an OS permission  ·  /blackbox look")
+			shell.Muted("  camera opens but delivers nothing — likely an OS "+
+				"permission  ·  /blackbox look shows why")
 	case cfg.Vision.Enabled && ready:
 		return shell.Badge(shell.StateGood, "watching") + shell.Muted("  ") +
 			shell.Value(visionRouteDescription()) +
@@ -281,11 +282,10 @@ func blackBoxEyesLine() string {
 // blackBoxContextLine reports conversational context without overstating it.
 //
 // Takes the report rather than fetching it so every branch below is reachable
-// from a test. That matters more than it looks: KV neither wraps nor truncates,
-// so a value that outgrows the panel wraps at the TERMINAL edge and its tail
-// restarts at column zero, escaping the block it belongs to — the exact defect
-// PanelWrap was written for. Five of these seven branches did that when first
-// written, and only rendering them revealed it.
+// from a test — which is how the wording below is held to one line each. KV now
+// wraps rather than escaping the panel, so length is a readability question
+// rather than a rendering bug, but a status panel whose every row runs to two
+// lines is still worse than one whose rows do not.
 //
 // The states are separated because they mean genuinely different things, and
 // the interesting ones are the unhappy middle:
@@ -319,10 +319,12 @@ func blackBoxContextLine(rep speech.ContextReport) string {
 	switch {
 	case rep.Rejected:
 		return shell.Badge(shell.StateBad, "refused") + shell.Muted("  ") +
-			shell.Value(rep.Provider) + shell.Muted(" dropped it — plain synthesis")
+			shell.Value(rep.Provider) +
+			shell.Muted(" rejected it — plain synthesis for the rest of this session")
 	case rep.Ignored:
-		return shell.Badge(shell.StateWarn, "not applied") +
-			shell.Muted("  sidecar needs docs/csm-context.patch")
+		return shell.Badge(shell.StateWarn, "not applied") + shell.Muted("  ") +
+			shell.Value(rep.Provider) +
+			shell.Muted(" accepted it silently  ·  needs docs/csm-context.patch")
 	case rep.Honored:
 		return shell.Badge(shell.StateGood, "conditioning") + shell.Muted("  ") +
 			shell.Value(rep.Provider) + held

@@ -129,7 +129,18 @@ everything else: a panel may not report a state the machine cannot deliver.
   cannot match words; a stored phrase is now reported as stored and unused.
 - **Panels stay inside their frame.** Over-wide status values wrapped at the terminal edge
   and restarted at column zero, escaping the panel — including a camera message at 95
-  columns in a 74-column row. Fixed, with a width test measured against the narrowest panel.
+  columns in a 74-column row. Fixed in the primitive rather than in each caller: `shell.KV`
+  now wraps at word boundaries and hangs continuation lines under the value column, joining
+  the table and prose renderers so nothing can spill outside the frame. The wrapping is
+  colour-aware — escapes are never counted toward a width or severed, and the active colour
+  is closed at a break and reopened on the next line — and a value that already fits is
+  returned byte for byte unchanged, so no panel that rendered correctly before changed.
+  The prose renderer was measuring byte length rather than columns, so panels built from
+  `·`, `—` and `→` wrapped into twice as many lines as their width needed; and a word longer
+  than the panel (a URL, an absolute path) was emitted whole, once rendering 188 columns into
+  a 74-column frame. Table cells were cut to a count of runes rather than columns, so a
+  CJK model name came back at twice its budget and shifted every column after it. All fixed,
+  and every panel primitive now measures width through one shared definition.
 
 ### ⌨️ New commands
 
