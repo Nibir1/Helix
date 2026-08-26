@@ -423,3 +423,44 @@ func TestFailoverStatusDegradedNamesTheDisplacedProvider(t *testing.T) {
 		t.Errorf("degraded status must keep the retry window, got %q", status)
 	}
 }
+
+// A breaker that falls back to the provider it is protecting protects nothing.
+//
+// Choosing Ollama at first run — the ordinary outcome of picking the local
+// option — made the primary and the fallback the same provider, and the status
+// line rendered "armed — will switch to ollama if ollama fails". That is not a
+// degradation path, it is a sentence. Reported from a real session.
+func TestFailoverStatusDoesNotOfferToFallBackToItself(t *testing.T) {
+	failoverMu.Lock()
+	savedCfg, savedDegraded, savedActive := fallbackCfg, degraded, activeProvider
+	failoverMu.Unlock()
+	t.Cleanup(func() {
+		failoverMu.Lock()
+		fallbackCfg, degraded, activeProvider = savedCfg, savedDegraded, savedActive
+		failoverMu.Unlock()
+	})
+
+	failoverMu.Lock()
+	degraded = false
+	fallbackCfg = LocalFallback{Enabled: true, Provider: "ollama"}
+	activeProvider = nil // primaryNameLocked falls back to a placeholder
+	failoverMu.Unlock()
+
+	// With a DIFFERENT primary the armed wording is correct and must survive.
+	if got := FailoverStatus(); !strings.Contains(got, "armed") {
+		t.Errorf("a real fallback should read as armed, got %q", got)
+	}
+
+	// Now make the primary the same provider as the fallback.
+	failoverMu.Lock()
+	activeProvider = &failoverFake{name: "ollama"}
+	failoverMu.Unlock()
+
+	got := FailoverStatus()
+	if strings.Contains(got, "switch to ollama if ollama fails") {
+		t.Errorf("a fallback to itself must not be reported as a fallback: %q", got)
+	}
+	if !strings.Contains(got, "already the local provider") {
+		t.Errorf("the status should say why there is no fallback, got %q", got)
+	}
+}

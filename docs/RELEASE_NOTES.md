@@ -146,6 +146,15 @@ everything else: a panel may not report a state the machine cannot deliver.
 - **The wake panel stopped promising phrase detection it does not do.** It printed the
   configured phrase unconditionally, but the default energy detector scores loudness and
   cannot match words; a stored phrase is now reported as stored and unused.
+- **Every status and report screen renders as a panel.** `/status`, `/rag-status`,
+  `/knowledge-status`, `/cost`, `/context` and `/memory` were the last flat ones. `/cost` was
+  also 92 columns wide against an 80-column terminal, so it wrapped at the edge and destroyed
+  its own grid; the self-fitting table fixed that as a side effect. `/status` also got reordered — approval posture and the agentic
+  harness open it, since they decide how much happens without being asked, and the four on/off
+  switches collapsed into one line that names only what is on.
+- **A fallback that fell back to itself.** Picking Ollama at first run made the primary and
+  the offline fallback the same provider, so the status line read "armed — will switch to
+  ollama if ollama fails". It now says the fallback is not applicable, and why.
 - **A failed model download no longer ends the session.** First run on a clean machine, with
   Ollama's registry briefly returning `503`, printed "Setup failed:" and dropped the user back
   to their login shell — Helix exited because a *download* did not finish. Setup failures are

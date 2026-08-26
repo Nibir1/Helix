@@ -217,6 +217,16 @@ func FailoverStatus() string {
 		return fmt.Sprintf("ACTIVE — using local %s (%s retry in %s)",
 			fallbackCfg.Provider, displacedNameLocked(), remainingLocked().Round(time.Second))
 	}
+	// A breaker that falls back to the provider it is protecting protects
+	// nothing. When the user has selected the local provider directly — the
+	// ordinary outcome of choosing Ollama at first run — this rendered
+	// "armed — will switch to ollama if ollama fails", which is not a
+	// degradation path, it is a sentence.
+	if strings.EqualFold(primaryNameLocked(), fallbackCfg.Provider) {
+		return fmt.Sprintf("not applicable — %s is already the local provider",
+			fallbackCfg.Provider)
+	}
+
 	// Deliberately not "ready": readiness is only known at switch time, when
 	// degradeLocked health-checks the provider. Claiming a fallback is ready
 	// when it might not be pulled is exactly the false comfort P11.3 exists to

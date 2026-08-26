@@ -35,7 +35,12 @@ func TestE2E_MemoryShowEmpty(t *testing.T) {
 	defer h.Close()
 
 	h.WriteLine("/memory show")
-	if err := h.Expect("Conversation memory is empty", 10*time.Second); err != nil {
+	// The panel titles the screen and states the condition in its body; assert
+	// on both, so a rename of either is caught.
+	if err := h.Expect("CONVERSATION MEMORY", 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Expect("empty", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

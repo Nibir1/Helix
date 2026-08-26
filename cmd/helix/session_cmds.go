@@ -404,12 +404,14 @@ func handleContextCommand() {
 	if !requireAgent() {
 		return
 	}
-	fmt.Println()
-	color.Cyan("⚡ CONTEXT BUDGET")
-	color.Yellow("Token figures are ESTIMATES (~4 characters per token). No provider in the")
-	color.Yellow("registry returns a usage block on the streaming path Helix uses, so an exact")
-	color.Yellow("count is not available to report.")
-	fmt.Println()
+	fmt.Println(shell.PanelTitle("context budget"))
+	for _, l := range shell.PanelWrap(
+		"Token figures are ESTIMATES (~4 characters per token). No provider in the "+
+			"registry returns a usage block on the streaming path Helix uses, so an "+
+			"exact count is not available to report.", shell.Muted) {
+		fmt.Println(l)
+	}
+	fmt.Println(shell.PanelGap())
 
 	type block struct {
 		name   string
@@ -459,27 +461,38 @@ func handleContextCommand() {
 	if ragSystem != nil && ragSystem.IsInitialized() {
 		ragDetail = "ready — retrieves per request, fenced as zero-authority data"
 	}
-	fmt.Printf("  %-22s %s\n", "Block", "Estimated tokens")
-	fmt.Println("  " + strings.Repeat("─", 62))
+	rows := make([][]string, 0, len(blocks)+2)
 	var total int64
 	for _, b := range blocks {
 		est := ai.EstimateTokens(b.text)
 		total += est
-		fmt.Printf("  %-22s %8d   %s\n", b.name, est, shell.Fg(shell.HexMuted, b.detail))
+		rows = append(rows, []string{
+			shell.Value(b.name), shell.Value(fmt.Sprint(est)), shell.Muted(b.detail),
+		})
 	}
-	fmt.Printf("  %-22s %8s   %s\n", "Retrieved knowledge", "varies", shell.Fg(shell.HexMuted, ragDetail))
-	fmt.Println("  " + strings.Repeat("─", 62))
-	fmt.Printf("  %-22s %8d   %s\n", "Persistent total", total,
-		shell.Fg(shell.HexMuted, "carried into every planner prompt"))
-	fmt.Println()
+	rows = append(rows,
+		[]string{shell.Value("Retrieved knowledge"), shell.Muted("varies"), shell.Muted(ragDetail)},
+		[]string{shell.Value("Persistent total"), shell.Value(fmt.Sprint(total)),
+			shell.Muted("carried into every planner prompt")},
+	)
+	for _, l := range shell.Table([]string{"block", "est. tokens", ""}, rows) {
+		fmt.Println(l)
+	}
 
 	if len(turns) >= capacity && capacity > 0 {
-		color.Yellow("Memory ring is full — the oldest turn is dropped on each new one.")
-		color.Yellow("Run /compact to keep the thread in a fraction of the space.")
+		fmt.Println(shell.PanelGap())
+		for _, l := range shell.PanelWrap(
+			"Memory ring is full — the oldest turn is dropped on each new one. "+
+				"/compact keeps the thread in a fraction of the space.", shell.Muted) {
+			fmt.Println(l)
+		}
 	}
-	color.Cyan("Model: %s (%s) · planner transport: %s",
-		ai.ActiveModel(), ai.ActiveProviderName(), ai.PlannerTransport())
-	fmt.Println()
+	fmt.Println(shell.PanelGap())
+	w := shell.KVWidth("MODEL", "PLANNER")
+	fmt.Println(shell.KV("MODEL", shell.Value(ai.ActiveModel())+
+		shell.Muted("  ·  "+ai.ActiveProviderName()), w))
+	fmt.Println(shell.KV("PLANNER", shell.Muted(ai.PlannerTransport()), w))
+	fmt.Println(shell.PanelEnd())
 }
 
 // -------------------------------------------------------
@@ -488,45 +501,73 @@ func handleContextCommand() {
 
 func handleCostCommand() {
 	rep := ai.Usage()
-	fmt.Println()
-	color.Cyan("⚡ SESSION MODEL USAGE")
+	fmt.Println(shell.PanelTitle("session model usage"))
+
 	if rep.Calls == 0 {
-		color.Yellow("No model calls yet this session.")
-		fmt.Println()
+		fmt.Println(shell.PanelLine(shell.Muted("no model calls yet this session")))
+		fmt.Println(shell.PanelEnd())
 		return
 	}
 
-	color.Yellow("Calls, failures, and latency are exact. Token counts are ESTIMATED from")
-	color.Yellow("text length (~4 chars/token) — no provider returns usage on the streaming")
-	color.Yellow("path Helix uses. Helix ships no price table: rates change without notice,")
-	color.Yellow("and a stale hardcoded rate is worse than an honest token count.")
-	fmt.Println()
-
-	fmt.Printf("  %-9s %-11s %-22s %5s %5s %9s %9s %8s\n",
-		"PURPOSE", "PROVIDER", "MODEL", "CALLS", "FAIL", "EST IN", "EST OUT", "AVG ms")
-	fmt.Println("  " + strings.Repeat("─", 92))
-	for _, row := range rep.Rows {
-		fmt.Printf("  %-9s %-11s %-22s %5d %5d %9d %9d %8d\n",
-			row.Kind, truncStr(row.Provider, 11), truncStr(row.Model, 22),
-			row.Calls, row.Failures,
-			row.EstPromptTokens, row.EstResponseTokens,
-			row.AvgLatency().Milliseconds())
+	for _, l := range shell.PanelWrap(
+		"Calls, failures and latency are exact. Token counts are ESTIMATED from text "+
+			"length (~4 chars/token) — no provider returns usage on the streaming path "+
+			"Helix uses. Helix ships no price table: rates change without notice, and a "+
+			"stale hardcoded rate is worse than an honest token count.", shell.Muted) {
+		fmt.Println(l)
 	}
-	fmt.Println("  " + strings.Repeat("─", 92))
-	fmt.Printf("  %-44s %5d %5d %9d %9d\n", "TOTAL",
-		rep.Calls, rep.Failures, rep.EstPromptTokens, rep.EstResponseTokens)
-	fmt.Println()
+	fmt.Println(shell.PanelGap())
 
+	// Provider and model share a cell, and the table shaves whichever column is
+	// widest. The old layout was a hand-padded 92 columns with a hardcoded rule
+	// under it — wider than the panel, wider than an 80-column terminal, so it
+	// wrapped at the edge and destroyed its own alignment.
+	rows := make([][]string, 0, len(rep.Rows)+1)
+	for _, row := range rep.Rows {
+		rows = append(rows, []string{
+			shell.Value(string(row.Kind)),
+			shell.Muted(row.Provider + " · " + row.Model),
+			shell.Value(fmt.Sprint(row.Calls)),
+			failureCell(row.Failures),
+			shell.Muted(fmt.Sprintf("%d/%d", row.EstPromptTokens, row.EstResponseTokens)),
+			shell.Muted(fmt.Sprintf("%dms", row.AvgLatency().Milliseconds())),
+		})
+	}
+	rows = append(rows, []string{
+		shell.Value("TOTAL"), shell.Muted(""),
+		shell.Value(fmt.Sprint(rep.Calls)),
+		failureCell(rep.Failures),
+		shell.Muted(fmt.Sprintf("%d/%d", rep.EstPromptTokens, rep.EstResponseTokens)),
+		shell.Muted(""),
+	})
+	for _, l := range shell.Table(
+		[]string{"purpose", "model", "calls", "fail", "est in/out", "avg"}, rows) {
+		fmt.Println(l)
+	}
+
+	fmt.Println(shell.PanelGap())
+	w := shell.KVWidth("METERED", "FAILURES")
 	if !rep.Started.IsZero() {
-		color.Cyan("Metered since %s (%s of wall clock, %s spent waiting on providers).",
+		fmt.Println(shell.KV("METERED", shell.Muted(fmt.Sprintf(
+			"since %s  ·  %s wall clock  ·  %s waiting on providers",
 			rep.Started.Format("15:04:05"),
-			roundDuration(time.Since(rep.Started)), roundDuration(rep.Latency))
+			roundDuration(time.Since(rep.Started)), roundDuration(rep.Latency))), w))
 	}
 	if rep.Failures > 0 {
-		color.Yellow("%d call(s) failed — /provider-status shows whether the brain is reachable.",
-			rep.Failures)
+		fmt.Println(shell.KV("FAILURES", shell.Badge(shell.StateWarn, fmt.Sprint(rep.Failures))+
+			shell.Muted("  /provider-status shows whether the brain is reachable"), w))
 	}
-	fmt.Println()
+	fmt.Println(shell.PanelEnd())
+}
+
+// failureCell keeps a zero quiet and a non-zero loud. A column of "0"s in the
+// same colour as the counts beside them reads as data; the only number worth
+// noticing here is a failure that is not zero.
+func failureCell(n int) string {
+	if n == 0 {
+		return shell.Muted("0")
+	}
+	return shell.Badge(shell.StateWarn, fmt.Sprint(n))
 }
 
 // roundDuration trims sub-second noise from a duration for display.

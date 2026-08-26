@@ -253,7 +253,7 @@ func TestE2E_ClearArchivesConversation(t *testing.T) {
 	if err := h.Expect("Archived as", 5*time.Second); err != nil {
 		t.Fatal("a clear that archives nothing is a destructive clear")
 	}
-	if err := h.SendExpect("/memory", "Conversation memory is empty", 15*time.Second); err != nil {
+	if err := h.SendExpect("/memory", "CONVERSATION MEMORY", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// And the archive must be listed by /resume, or it is unreachable.
@@ -308,7 +308,7 @@ func TestE2E_CostAndContextLabelEstimates(t *testing.T) {
 	h := newHarness(t, `{"intent":"chat","steps":[{"tool":"response","message":"counted"}]}`)
 	defer h.Close()
 
-	if err := h.SendExpect("/cost", "No model calls yet", 15*time.Second); err != nil {
+	if err := h.SendExpect("/cost", "no model calls yet", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.SendExpect("spend one model call", "counted", 40*time.Second); err != nil {
@@ -427,7 +427,7 @@ func TestE2E_AliasesDispatch(t *testing.T) {
 	h := newHarness(t, commandsNoPlan)
 	defer h.Close()
 
-	if err := h.SendExpect("/usage", "No model calls yet", 15*time.Second); err != nil {
+	if err := h.SendExpect("/usage", "no model calls yet", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.SendExpect("/mode", "APPROVAL POSTURE", 15*time.Second); err != nil {

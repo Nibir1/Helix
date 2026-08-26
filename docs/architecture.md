@@ -205,9 +205,17 @@ itself by hand, with a hardcoded 76-column rule and a fixed 30-column gutter
 that clamped its padding when a usage line ran long — so nine of fifty-six
 commands started their description at a different column, and the widest row
 was 124 columns against a rule that could not hold it. `/help`,
-`/help <command>`, `/about` and the unknown-command screen now render through
-the same primitives as everything else, which is what the paragraph above
+`/help <command>`, `/about`, `/status`, `/rag-status`, `/knowledge-status`,
+`/provider-status`, `/doctor`, `/cost`, `/context`, `/memory` and the
+unknown-command screen — every status and report screen in `cmd/helix` — now
+render through the same primitives as everything else, which is what the paragraph above
 always claimed.
+
+Converting a screen is not only a repaint. `/status` printed twelve rows of
+equal weight, so the approval posture and the agentic harness — the two states
+that decide how much happens without being asked — carried no more emphasis than
+four lines reading "DISABLED". Panelling forces the question of what the reader
+came for, which is most of the value.
 
 One trap the shared primitives do not remove, recorded because it looks correct
 in source: `Value(strings.Join(items, Muted(sep)))` puts a colour RESET inside a

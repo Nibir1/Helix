@@ -27,8 +27,14 @@ func TestE2E_ManualModeSafetyValve(t *testing.T) {
 	}
 
 	// ...and it always restores a working typed loop.
-	h.WriteLine("/blackbox off")
-	if err := h.Expect("Already in keyboard mode", 10*time.Second); err != nil {
+	//
+	// SendExpect, not WriteLine+Expect. Expect matches the FIRST occurrence in
+	// the accumulated buffer, so a second command printing the SAME marker
+	// matches the previous command's output and returns while this one is still
+	// running — the harness documents that exact trap. The test then raced
+	// ahead to the `ls` below and intermittently lost it. Flaked twice before
+	// anyone read the failure instead of re-running it.
+	if err := h.SendExpect("/blackbox off", "Already in keyboard mode", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 

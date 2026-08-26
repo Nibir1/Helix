@@ -275,136 +275,145 @@ func handleDebugCommand(c cmdArgs) {
 // STATUS / SANDBOX / CD / GIT
 // -------------------------------------------------------
 
+// handleStatus reports the session at a glance.
+//
+// Panelized like every other report. It was a flat stack of cyan lines with
+// box-drawing pseudo-tree glyphs, in which "Stealth Mode: ENABLED" and
+// "Typewrite-All: DISABLED" carried identical weight — so the two lines that
+// actually decide how much happens without being asked (approval posture and
+// the agentic harness) had to be hunted for.
 func handleStatus() {
-	color.Cyan("⚡ HELIX BACKGROUND STATUS")
+	w := shell.KVWidth("KNOWLEDGE", "PROVIDER", "APPROVAL", "HARNESS", "MEMORY", "PROJECT")
 
-	// RAG System
-	if ragSystem != nil {
-		stats := ragSystem.GetSystemStats()
-		statusText := ragSystem.GetInitializationStatus()
-		color.Cyan("  RAG System: %s", statusText)
-		if indexedPages, ok := stats["indexed_pages"]; ok {
-			color.Cyan("    └─ MAN Pages Indexed: %v", indexedPages)
-		}
-		if totalDocs, ok := stats["total_documents"]; ok {
-			color.Cyan("    └─ Vector Documents: %v", totalDocs)
-		}
-	} else {
-		color.Yellow("  RAG System: Not initialized")
-	}
+	fmt.Println(shell.PanelTitle("session"))
 
-	// Knowledge Base
-	if ragSystem != nil && ragSystem.GetDB() != nil {
-		stats := ragSystem.GetSystemStats()
-		color.Cyan("  Knowledge Base:")
-		if cves, ok := stats["db_cves"]; ok {
-			color.Cyan("    └─ CVEs: %v", cves)
-		}
-		if exploits, ok := stats["db_exploits"]; ok {
-			color.Cyan("    └─ Exploits: %v", exploits)
-		}
-		if kev, ok := stats["db_kev"]; ok {
-			color.Cyan("    └─ KEV (CISA): %v", kev)
-		}
-		if mitre, ok := stats["db_mitre"]; ok {
-			color.Cyan("    └─ MITRE Techniques: %v", mitre)
-		}
-		if last := rag.KnowledgeLastUpdate(ragSystem.GetDB()); last != "" {
-			color.Cyan("    └─ Last Update: %s", last)
-		} else {
-			color.Yellow("    └─ Last Update: never")
-		}
-	} else {
-		color.Yellow("  Knowledge Base: Not initialized")
-	}
-
-	// AI Provider
-	color.Cyan("  AI Provider: %s (%s)", ai.ActiveProviderName(), ai.ActiveModel())
-
-	// Audio Engine
-	if audio.IsEnabled() {
-		color.Green("  Audio Engine: Active")
-	} else {
-		color.Yellow("  Audio Engine: Inactive (Use /audio on)")
-	}
-
-	// Agentic harness + approval posture. These two decide how much happens
-	// without being asked, which makes them the most consequential lines here.
+	// Approval posture and the harness first: they decide how much happens
+	// without being asked, which makes them the most consequential state here
+	// and the reason to open with them rather than with index counts.
 	if agentCore != nil {
 		mode := agentCore.Permission()
-		line := fmt.Sprintf("  Permission mode: %s — %s", mode, mode.Describe())
-		if mode == agent.PermissionAsk {
-			color.Cyan(line)
-		} else {
-			color.Yellow(line)
+		state := shell.StateGood
+		if mode != agent.PermissionAsk {
+			state = shell.StateWarn
 		}
+		fmt.Println(shell.KV("APPROVAL", shell.Badge(state, string(mode))+
+			shell.Muted("  "+mode.Describe()), w))
+
 		if agentCore.Agentic {
-			color.Green("  Agentic harness: ON (step budget %d)", agenticStepBudget())
+			fmt.Println(shell.KV("HARNESS", shell.Badge(shell.StateGood, "agentic")+
+				shell.Muted(fmt.Sprintf("  observes and self-corrects, %d steps",
+					agenticStepBudget())), w))
 		} else {
-			color.Yellow("  Agentic harness: OFF (single-shot planning)")
-		}
-		if n := agentCore.HookCount(); n > 0 {
-			color.Cyan("  Local policy hooks: %d loaded (/hooks)", n)
+			fmt.Println(shell.KV("HARNESS", shell.Badge(shell.StateIdle, "single-shot")+
+				shell.Muted("  /agentic on lets Helix self-correct"), w))
 		}
 	}
 
-	// Task list — open work the planner can see.
+	fmt.Println(shell.KV("PROVIDER", shell.Value(ai.ActiveProviderName())+
+		shell.Muted("  ·  ")+shell.Value(ai.ActiveModel()), w))
+	fmt.Println(shell.KV("SANDBOX", shell.Muted(sandboxMode())+
+		shell.Muted("  ·  confinement: "+confinement.BackendName()), w))
+
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.KV("INDEX", ragIndexLine(), w))
+	fmt.Println(shell.KV("KNOWLEDGE", knowledgeLine(), w))
+
+	fmt.Println(shell.PanelGap())
+	if agentCore != nil && agentCore.Session != nil {
+		fmt.Println(shell.KV("MEMORY", shell.Value(fmt.Sprintf("%d/%d turns",
+			agentCore.Session.Len(), agentCore.Session.Capacity())), w))
+	}
+	if usage := ai.Usage(); usage.Calls > 0 {
+		fmt.Println(shell.KV("SPEND", shell.Value(fmt.Sprint(usage.Calls))+
+			shell.Muted(fmt.Sprintf(" calls  ·  %d failed  ·  ~%d est. tokens  ·  /cost",
+				usage.Failures, usage.EstTotalTokens())), w))
+	}
 	if todoList != nil {
 		counts := todoList.Counts()
 		open := counts[session.TodoPending] + counts[session.TodoInProgress] +
 			counts[session.TodoBlocked]
-		if open > 0 {
-			color.Cyan("  Tasks: %d open, %d done (/todo)", open, counts[session.TodoDone])
-		} else if counts[session.TodoDone] > 0 {
-			color.Cyan("  Tasks: all %d complete (/todo prune to clear)", counts[session.TodoDone])
+		if open > 0 || counts[session.TodoDone] > 0 {
+			fmt.Println(shell.KV("TASKS", shell.Value(fmt.Sprint(open))+
+				shell.Muted(fmt.Sprintf(" open  ·  %d done  ·  /todo", counts[session.TodoDone])), w))
 		}
 	}
-
-	// Project context.
 	if _, path, ok := loadProjectContext(); ok {
-		color.Cyan("  Project context: %s", path)
+		fmt.Println(shell.KV("PROJECT", shell.Badge(shell.StateGood, "loaded")+
+			shell.Muted("  "+path), w))
 	} else {
-		color.Yellow("  Project context: none here (/init writes HELIX.md)")
+		fmt.Println(shell.KV("PROJECT", shell.Badge(shell.StateIdle, "none here")+
+			shell.Muted("  /init writes HELIX.md"), w))
 	}
 
-	// Conversation memory and session spend.
-	if agentCore != nil && agentCore.Session != nil {
-		color.Cyan("  Conversation memory: %d/%d turns",
-			agentCore.Session.Len(), agentCore.Session.Capacity())
-	}
-	if usage := ai.Usage(); usage.Calls > 0 {
-		color.Cyan("  Model calls: %d (%d failed) · ~%d est. tokens (/cost)",
-			usage.Calls, usage.Failures, usage.EstTotalTokens())
-	}
-
-	// Stealth Mode
-	if agentCore != nil && agentCore.IsStealthEnabled() {
-		color.Magenta("  Stealth Mode: ENABLED (History suppression active)")
-	} else {
-		color.Yellow("  Stealth Mode: DISABLED")
-	}
-
-	// Typewrite-all
-	if cfg.UserPrefs.TypewriteAll {
-		color.Green("  Typewrite-All: ENABLED (All output animated)")
-	} else {
-		color.Yellow("  Typewrite-All: DISABLED (AI output only)")
-	}
-
-	// Debug Mode
-	if utils.IsDebugMode() {
-		color.Magenta("  Debug Mode: ENABLED")
-	} else {
-		color.Yellow("  Debug Mode: DISABLED")
-	}
-
-	// Sandbox
-	if sandbox != nil {
-		color.Cyan("  Sandbox: %s", sandbox.ModeString())
-		if sandbox.GetMode() == commands.SandboxStrict {
-			color.Cyan("    └─ Confinement: %s", confinement.BackendName())
+	// Toggles last, on one line each only when they are OFF the default —
+	// twelve rows of "DISABLED" is what made this screen unreadable.
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.KV("TOGGLES", sessionToggleLine(), w))
+	if agentCore != nil {
+		if n := agentCore.HookCount(); n > 0 {
+			fmt.Println(shell.KV("HOOKS", shell.Value(fmt.Sprint(n))+
+				shell.Muted(" loaded  ·  /hooks"), w))
 		}
 	}
+	fmt.Println(shell.PanelEnd())
+}
+
+// sessionToggleLine renders the on/off switches as one line.
+//
+// Each used to own a row and say "DISABLED", so the default configuration
+// produced four lines of nothing-is-happening. Only what is ON is named; when
+// everything is at its default the line says so once.
+func sessionToggleLine() string {
+	var on []string
+	if audio.IsEnabled() {
+		on = append(on, "audio")
+	}
+	if agentCore != nil && agentCore.IsStealthEnabled() {
+		on = append(on, "stealth")
+	}
+	if cfg.UserPrefs.TypewriteAll {
+		on = append(on, "typewrite-all")
+	}
+	if utils.IsDebugMode() {
+		on = append(on, "debug")
+	}
+	if len(on) == 0 {
+		return shell.Muted("all at defaults")
+	}
+	return shell.Value(strings.Join(on, shell.Muted("  ·  ")))
+}
+
+// ragIndexLine summarises the MAN-page index.
+func ragIndexLine() string {
+	if ragSystem == nil {
+		return shell.Badge(shell.StateWarn, "not initialized")
+	}
+	stats := ragSystem.GetSystemStats()
+	pages, docs := stats["indexed_pages"], stats["total_documents"]
+	state := shell.StateGood
+	status := ragSystem.GetInitializationStatus()
+	if !strings.EqualFold(status, "COMPLETED") {
+		state = shell.StateWarn
+	}
+	return shell.Badge(state, strings.ToLower(status)) +
+		shell.Muted(fmt.Sprintf("  %v MAN pages  ·  %v vector documents", pages, docs))
+}
+
+// knowledgeLine summarises the threat-intelligence corpus.
+func knowledgeLine() string {
+	if ragSystem == nil || ragSystem.GetDB() == nil {
+		return shell.Badge(shell.StateWarn, "not initialized")
+	}
+	stats := ragSystem.GetSystemStats()
+	last := rag.KnowledgeLastUpdate(ragSystem.GetDB())
+	if last == "" {
+		last = "never — auto-bootstraps in the background when online"
+	}
+	// One line, no embedded newline: KV wraps its value itself, and a raw "\n"
+	// here would escape the gutter instead of hanging under the value column.
+	return shell.Value(fmt.Sprintf("%v", stats["db_cves"])) +
+		shell.Muted(fmt.Sprintf(" CVEs  ·  %v exploits  ·  %v KEV  ·  %v MITRE  ·  updated %s",
+			stats["db_exploits"], stats["db_kev"], stats["db_mitre"], last))
 }
 
 func handleSandboxCommand(c cmdArgs) {
@@ -468,48 +477,56 @@ func handleGitCommand(c cmdArgs) {
 // RAG STATUS / REINDEX / RESET / REBUILD
 // -------------------------------------------------------
 
+// handleRAGStatus reports the MAN-page index.
+//
+// Deliberately does NOT query the knowledge DB: that avoids hanging while the
+// knowledge bootstrap or an update is running, which is the whole reason this
+// is a separate command from /knowledge-status.
 func handleRAGStatus() {
-	color.Cyan("RAG System Status:")
-
+	fmt.Println(shell.PanelTitle("man page index"))
 	if ragSystem == nil {
-		color.Red("RAG system not initialized")
+		fmt.Println(shell.PanelLine(shell.Badge(shell.StateBad, "not initialized")))
+		fmt.Println(shell.PanelEnd())
 		return
 	}
 
-	// IMPORTANT: /rag-status should not query the knowledge DB.
-	// That avoids hangs while knowledge bootstrap/update is running.
 	stats := ragSystem.GetRAGStats()
 	statusText := ragSystem.GetInitializationStatus()
-
 	initialized, _ := stats["initialized"].(bool)
 	indexedPages := stats["indexed_pages"]
 
-	color.Cyan("Statistics:")
-	color.Cyan("  • Status: %v", statusText)
-	color.Cyan("  • Initialized: %v", initialized)
-	color.Cyan("  • Indexed MAN Pages: %v", indexedPages)
+	w := shell.KVWidth("STATUS", "MAN PAGES", "VECTORS", "COMMANDS")
+
+	state := shell.StateWarn
+	detail := "indexing, or partially complete"
+	switch {
+	case initialized:
+		state, detail = shell.StateGood, "ready for retrieval"
+	case pagesIndexed(indexedPages) == 0:
+		state, detail = shell.StateBad, "no MAN pages indexed yet"
+	}
+	fmt.Println(shell.KV("STATUS", shell.Badge(state, strings.ToLower(statusText))+
+		shell.Muted("  "+detail), w))
+	fmt.Println(shell.KV("MAN PAGES", shell.Value(fmt.Sprintf("%v", indexedPages)), w))
 
 	if initialized {
 		if totalDocs, ok := stats["total_documents"]; ok {
-			color.Cyan("    • Vector Documents: %v", totalDocs)
+			fmt.Println(shell.KV("VECTORS", shell.Value(fmt.Sprintf("%v", totalDocs)), w))
 		}
-
 		if unique, ok := stats["unique_commands"]; ok {
-			color.Cyan("    • Unique Commands: %v", unique)
+			fmt.Println(shell.KV("COMMANDS", shell.Value(fmt.Sprintf("%v", unique))+
+				shell.Muted("  distinct"), w))
 		}
-
-		color.Green("RAG system ACTIVE and ready for retrieval")
-	} else {
-		switch v := indexedPages.(type) {
-		case int:
-			if v > 0 {
-				color.Yellow("RAG indexing in progress or partially completed…")
-				return
-			}
-		}
-
-		color.Yellow("RAG not initialized yet (no MAN pages indexed).")
 	}
+	fmt.Println(shell.PanelEnd())
+}
+
+// pagesIndexed reads the page count out of the stats map, which is typed any.
+func pagesIndexed(v any) int {
+	if n, ok := v.(int); ok {
+		return n
+	}
+	return 0
 }
 
 func handleRAGReindex() {
@@ -749,21 +766,38 @@ func handleMemoryCommand(c cmdArgs) {
 	switch action {
 	case "show", "list", "ls", "":
 		turns := agentCore.Session.Recent(agentCore.Session.Len())
+		fmt.Println(shell.PanelTitle("conversation memory"))
 		if len(turns) == 0 {
-			color.Cyan("Conversation memory is empty.")
+			fmt.Println(shell.PanelLine(shell.Muted(
+				"empty — nothing from this session is being replayed to the planner")))
+			fmt.Println(shell.PanelEnd())
 			return
 		}
-		color.Cyan("Conversation memory (%d turns, oldest first):", len(turns))
+		// PanelWrap, not PanelLine: this sentence is 78 columns and PanelLine
+		// does not wrap, so it escaped the frame.
+		for _, l := range shell.PanelWrap(fmt.Sprintf(
+			"%d of %d turns, oldest first — replayed to the planner as zero-authority data",
+			len(turns), agentCore.Session.Capacity()), shell.Muted) {
+			fmt.Println(l)
+		}
+		fmt.Println(shell.PanelGap())
+
+		w := shell.KVWidth("00:00:00")
 		for _, t := range turns {
 			channel := t.Channel
 			if channel == "" {
 				channel = "text"
 			}
-			fmt.Printf("  [%s] (%s) %s\n", t.Timestamp.Format("15:04:05"), channel, truncStr(t.UserText, 80))
+			// The channel rides with the timestamp rather than taking a column:
+			// it matters (a voice turn carries reduced authority) but it is one
+			// word, and a column of "text" would be four rows of noise.
+			fmt.Println(shell.KV(t.Timestamp.Format("15:04:05"),
+				shell.Muted(channel+"  ")+shell.Value(truncStr(t.UserText, 90)), w))
 			if t.Reply != "" {
-				fmt.Printf("         ↳ %s\n", truncStr(t.Reply, 80))
+				fmt.Println(shell.KV("", shell.Muted("↳ "+truncStr(t.Reply, 90)), w))
 			}
 		}
+		fmt.Println(shell.PanelEnd())
 	case "clear", "wipe", "reset":
 		if !commands.AskForConfirmation("Clear all conversation memory?") {
 			color.Yellow("Memory clear cancelled.")
@@ -1037,30 +1071,36 @@ func handleKnowledgeUpdate() {
 	color.Green("Knowledge base updated successfully.")
 }
 
+// handleKnowledgeStats reports the threat-intelligence corpus.
 func handleKnowledgeStats() {
+	fmt.Println(shell.PanelTitle("threat intelligence"))
 	if ragSystem == nil || ragSystem.GetDB() == nil {
-		color.Red("Knowledge database not available.")
+		fmt.Println(shell.PanelLine(shell.Badge(shell.StateBad, "database unavailable")))
+		fmt.Println(shell.PanelEnd())
 		return
 	}
+
 	stats := ragSystem.GetSystemStats()
-	color.Cyan("Knowledge Base Statistics:")
-	if cves, ok := stats["db_cves"]; ok {
-		color.Cyan("  CVEs: %v", cves)
+	w := shell.KVWidth("CVES", "EXPLOITS", "KEV (CISA)", "MITRE", "LAST UPDATE")
+
+	for _, row := range []struct{ label, key string }{
+		{"CVES", "db_cves"},
+		{"EXPLOITS", "db_exploits"},
+		{"KEV (CISA)", "db_kev"},
+		{"MITRE", "db_mitre"},
+	} {
+		if v, ok := stats[row.key]; ok {
+			fmt.Println(shell.KV(row.label, shell.Value(fmt.Sprintf("%v", v)), w))
+		}
 	}
-	if exploits, ok := stats["db_exploits"]; ok {
-		color.Cyan("  Exploits: %v", exploits)
-	}
-	if kev, ok := stats["db_kev"]; ok {
-		color.Cyan("  KEV (CISA): %v", kev)
-	}
-	if mitre, ok := stats["db_mitre"]; ok {
-		color.Cyan("  MITRE Techniques: %v", mitre)
-	}
+
 	if last := rag.KnowledgeLastUpdate(ragSystem.GetDB()); last != "" {
-		color.Cyan("  Last knowledge update: %s", last)
+		fmt.Println(shell.KV("LAST UPDATE", shell.Value(last), w))
 	} else {
-		color.Yellow("  Last knowledge update: never (auto-bootstraps in background when online)")
+		fmt.Println(shell.KV("LAST UPDATE", shell.Badge(shell.StateIdle, "never")+
+			shell.Muted("  auto-bootstraps in the background when online"), w))
 	}
+	fmt.Println(shell.PanelEnd())
 }
 
 func handleVulnCommand(c cmdArgs) {
