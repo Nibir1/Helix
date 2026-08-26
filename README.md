@@ -262,6 +262,8 @@ Local runtimes — Ollama, llama.cpp, whisper.cpp, Piper — have their own guid
 ### First run
 The first boot walks three stages, each skippable: **AI provider**, **system packages**, then the **speech chain**. The package stage detects the host's package manager (brew, apt, dnf, pacman, zypper, apk, winget, choco) and offers to install what Helix needs — `sox` for the microphone, `ffmpeg` for the camera. Nothing installs without a separate yes, and the exact command is shown before it runs. Re-run any stage later with `/setup`.
 
+**A stage failing is survivable too.** If a model download fails or a provider cannot be reached, Helix says what did not finish and starts anyway — you get a working shell with `/doctor` naming exactly what is missing, rather than being returned to your login prompt.
+
 Where Helix does not know a verified package name for your platform, it says so and points at the docs rather than running a guess.
 
 ### Live mode — `/blackbox`

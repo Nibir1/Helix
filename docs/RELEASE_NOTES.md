@@ -146,6 +146,12 @@ everything else: a panel may not report a state the machine cannot deliver.
 - **The wake panel stopped promising phrase detection it does not do.** It printed the
   configured phrase unconditionally, but the default energy detector scores loudness and
   cannot match words; a stored phrase is now reported as stored and unused.
+- **A failed model download no longer ends the session.** First run on a clean machine, with
+  Ollama's registry briefly returning `503`, printed "Setup failed:" and dropped the user back
+  to their login shell — Helix exited because a *download* did not finish. Setup failures are
+  now reported and survivable: the shell starts, `/doctor` names what is missing, and `/setup`
+  finishes the job later. Registry errors are also classified instead of echoed, since "try
+  again shortly" is right when the registry is down and wrong when the tag does not exist.
 - **Text you were meant to read was nearly invisible.** The colour used for secondary
   prose measured **1.44:1** against a dark terminal — WCAG asks 4.5:1 for body text — so
   `/about`'s philosophy, panel labels and table headers rendered as dark grey on dark. One

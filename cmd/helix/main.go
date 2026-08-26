@@ -143,9 +143,21 @@ func main() {
 			}
 		}()
 	} else {
+		// A failed setup must not cost the user their shell.
+		//
+		// This used to `return`, so anything going wrong during first-run
+		// configuration exited Helix to the login prompt. The failure that
+		// exposed it was a model DOWNLOAD — Ollama's registry answered 503 —
+		// and a working terminal became "Setup failed:" and a zsh prompt.
+		//
+		// Everything setup does is configuration. Without it Helix is degraded,
+		// not broken: /help, /doctor, /provider use and every local command
+		// still work, and /doctor now says exactly what is missing. Ejecting the
+		// user is the one outcome from which they cannot recover in place.
 		if err := runNativeSetup(); err != nil {
-			color.Red("Setup failed: %v", err)
-			return
+			color.Red("Setup did not finish: %v", err)
+			fmt.Println(shell.Hint(
+				"Helix is starting anyway · /setup finishes it · /provider use <name> picks a brain"))
 		}
 		cfg.Provider = ai.ActiveProviderName()
 		cfg.ProviderModel = ai.ActiveModel()

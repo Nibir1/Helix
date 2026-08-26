@@ -651,6 +651,30 @@ keys are short names, not the dotted paths from `config.json` — `barge-in`, no
 
 ---
 
+## 4B. When a model download fails
+
+`ollama pull` failures are reported, not fatal. Helix starts anyway: the
+provider is chosen and the config is written, so `/help`, `/doctor` and
+`/provider use <name>` all work — what is missing is a model, and `/setup` or a
+manual `ollama pull` supplies it later. Helix used to exit to your login shell
+when a download failed, which is the one outcome you cannot recover from in
+place.
+
+The registry's own error text is classified rather than echoed, because the two
+common causes need opposite advice:
+
+| What happened | What Helix says |
+| :--- | :--- |
+| `503` / `upstream connect error` / timeout | The registry did not answer — upstream of Helix and of your machine. Retry in a few minutes, or `ollama pull <tag>` yourself |
+| `404` / `file does not exist` on the manifest | No such tag. Check ollama.com/library; retrying will never help |
+| `connection refused` to `127.0.0.1:11434` | Ollama itself is not running — `ollama serve` |
+| `no such host` / network unreachable | No route to the internet |
+
+The raw error is always printed underneath. A diagnosis that hides what actually
+happened cannot be debugged.
+
+---
+
 ## 5. When Ollama cannot see its own models
 
 `ollama list` empty while gigabytes sit in `~/.ollama/models` means the running

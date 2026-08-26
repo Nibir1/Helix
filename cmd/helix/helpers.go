@@ -516,13 +516,52 @@ func selectOllamaModel() error {
 		},
 	)
 	if err != nil {
-		return err
+		reportPullFailure(choice, err)
+		return nil
 	}
 
 	// CRITICAL FIX: Actually activate the pulled model so Helix doesn't
 	// leak the previous provider's model.
 	ai.UseModel(choice)
 	return nil
+}
+
+// reportPullFailure explains a failed download and lets setup continue.
+//
+// Returning the error here used to abort setup, which aborted main, which
+// dropped the user back to their login shell — Helix exited because a DOWNLOAD
+// did not finish. A real first run hit exactly that: Ollama's registry answered
+// 503 through its proxy, and a working terminal became "Setup failed:" and a
+// zsh prompt.
+//
+// Nothing about a missing model justifies that. The provider is chosen, the
+// config is written, and every other command still works; what is missing is a
+// model, which /setup or `ollama pull` can supply later. Helix's own rule for
+// live mode is "degrade, never refuse the whole mode", and it applies here with
+// more force, because this is the first thing a new user ever sees.
+func reportPullFailure(model string, err error) {
+	kind, lines := ollama.DiagnosePull(model, err)
+
+	fmt.Println()
+	fmt.Println(shell.PanelTitle("model not downloaded"))
+	for i, l := range lines {
+		colour := shell.Muted
+		if i == 0 {
+			colour = func(t string) string { return shell.Fg(shell.HexText, t) }
+		}
+		for _, w := range shell.PanelWrap(l, colour) {
+			fmt.Println(w)
+		}
+	}
+	fmt.Println(shell.PanelGap())
+	if ollama.Retryable(kind) {
+		fmt.Println(shell.PanelLine(shell.Muted(
+			"Helix starts anyway. Run /setup to try again once it is back.")))
+	} else {
+		fmt.Println(shell.PanelLine(shell.Muted(
+			"Helix starts anyway. Run /setup to choose a different model or provider.")))
+	}
+	fmt.Println(shell.PanelEnd())
 }
 
 func containsModelID(models []providers.ModelInfo, id string) bool {
@@ -627,7 +666,8 @@ func ensureOllamaModel(model string) error {
 		},
 	)
 	if err != nil {
-		return err
+		reportPullFailure(model, err)
+		return nil
 	}
 
 	// CRITICAL FIX: Activate the pulled model.

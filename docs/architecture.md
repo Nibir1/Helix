@@ -158,6 +158,29 @@ needs a binary and Python; Kokoro is the one optional container-hosted component
 and declares an `Unmet` precondition rather than walking the user toward a pull
 that cannot succeed.
 
+**Setup can fail without costing the user their shell.** Everything first-run
+setup does is configuration, so a failure leaves Helix degraded rather than
+broken: the provider may be unchosen and the model unpulled, but `/help`,
+`/doctor`, `/provider use` and every local command still work, and `/doctor`
+names precisely what is missing. `main` reports what did not finish and starts
+anyway.
+
+That is a correction, not a description. It used to `return`, so any first-run
+error exited to the login shell — and the one that fired in practice was a model
+DOWNLOAD, with Ollama's registry briefly answering `503`. Ejecting the user is
+the single outcome they cannot recover from in place, and it is the first thing
+a new user ever sees. The rule is the same one live mode states as "degrade,
+never refuse the whole mode".
+
+Registry errors are classified rather than echoed (`internal/ollama`
+`DiagnosePull`), because Ollama streams the registry's own proxy text straight
+through and the two common causes need opposite advice: "try again shortly" is
+right when the registry is down and misleading when the tag does not exist. The
+raw error is always kept as the last line — a diagnosis that hides what actually
+happened cannot be debugged. The classifier matches on error TEXT, which is
+Ollama's to change; it fails safe to a generic "pull it yourself" rather than to
+a wrong explanation.
+
 ### 4. RAG & Threat Intelligence (`internal/rag/`)
 - **Vector Store**: TF-IDF and keyword-based search over 900+ indexed MAN pages.
 - **Knowledge Base**: SQLite + FTS5 database hydrated with live feeds from NVD, CISA KEV, Exploit-DB, and MITRE ATT&CK.
