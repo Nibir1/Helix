@@ -391,11 +391,16 @@ func TestE2E_UnknownCommandSuggests(t *testing.T) {
 	h := newHarness(t, commandsNoPlan)
 	defer h.Close()
 
-	if err := h.SendExpect("/permissoins", "UNRECOGNIZED SIGNAL", 15*time.Second); err != nil {
+	// One screen for both routes now: the typed-command error and
+	// "/help <unknown>" render identically, titled UNKNOWN COMMAND.
+	if err := h.SendExpect("/permissoins", "UNKNOWN COMMAND", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("/permissions", 5*time.Second); err != nil {
+	if err := h.Expect("DID YOU MEAN", 5*time.Second); err != nil {
 		t.Fatal("a near-miss must be suggested")
+	}
+	if err := h.Expect("/permissions", 5*time.Second); err != nil {
+		t.Fatal("the suggestion must name the command")
 	}
 }
 
@@ -407,7 +412,8 @@ func TestE2E_HelpDetailForOneCommand(t *testing.T) {
 	if err := h.SendExpect("/help permissions", "Approval posture", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("Aliases:", 5*time.Second); err != nil {
+	// "ALIASES" as a panel row label now, not the "Aliases:" prose prefix.
+	if err := h.Expect("ALIASES", 5*time.Second); err != nil {
 		t.Fatal("the detail view should list aliases")
 	}
 	// Without the slash, and for an alias, must work the same way.
@@ -467,7 +473,7 @@ func TestE2E_FoldedCommandsPointAtBlackBox(t *testing.T) {
 	}
 
 	// A genuinely unknown command keeps the ordinary did-you-mean path.
-	if err := h.SendExpect("/nonsensecommand", "UNRECOGNIZED SIGNAL", 15*time.Second); err != nil {
+	if err := h.SendExpect("/nonsensecommand", "UNKNOWN COMMAND", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -51,53 +51,60 @@ import (
 func handleAbout() {
 	// The banner, the identity zone and its glitch are RenderAbout's, and stay
 	// exactly as they are. Everything below is the part that was a flat wall of
-	// text.
+	// text — and, until now, three closing rules with no opening rule above
+	// them, so each section ended with a horizon that had come from nowhere.
 	shell.RenderAbout(config.HelixVersion)
-	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ THE PHILOSOPHY"))
-	philosophy := []string{
-		"Helix inverts the terminal: instead of forcing humans to speak",
-		"machine, the machine learns to speak human. One prompt accepts",
-		"shell, git, packages, and plain thought - no mode switching.",
-		"",
-		"Every action passes through a safety-first pipeline: validation,",
-		"risk tiers, sandbox confinement, and typed confirmations for the",
-		"dangerous paths. Power without recklessness.",
-		"",
-		"Knowledge is local and explainable - MAN pages, CVEs, MITRE",
-		"ATT&CK - retrieved, cited, and defended. Helix thinks like the",
-		"red team so it can fight for the blue.",
-	}
-	for _, l := range philosophy {
-		if l == "" {
-			fmt.Println(shell.PanelGap())
-			continue
-		}
-		fmt.Println(shell.PanelLine(shell.Fg(shell.HexText, l)))
-	}
-	fmt.Println(shell.PanelEnd())
+
+	aboutSection("the philosophy",
+		"Helix inverts the terminal: instead of forcing humans to speak machine, "+
+			"the machine learns to speak human. One prompt accepts shell, git, "+
+			"packages, and plain thought — no mode switching.",
+		"Every action passes through a safety-first pipeline: validation, risk "+
+			"tiers, sandbox confinement, and typed confirmations for the dangerous "+
+			"paths. Power without recklessness.",
+		"Knowledge is local and explainable — MAN pages, CVEs, MITRE ATT&CK — "+
+			"retrieved, cited, and defended. Helix thinks like the red team so it "+
+			"can fight for the blue.")
 
 	printAboutInstall()
 
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ THE CREATION"))
-	creation := []string{
-		"Helix is designed and built by Nahasat Nibir - an AI Engineer",
-		"crafting intelligent, high-performance developer tools and",
-		"AI-powered systems in Go and Rust.",
-		"",
-		"GitHub      https://github.com/Nibir1",
-		"LinkedIn    https://www.linkedin.com/in/nibir-1/",
-		"ArtStation  https://www.artstation.com/nibir",
+	fmt.Println(shell.PanelTitle("the creation"))
+	for _, l := range shell.PanelWrap(
+		"Helix is designed and built by Nahasat Nibir — an AI Engineer crafting "+
+			"intelligent, high-performance developer tools and AI-powered systems "+
+			"in Go and Rust.", shell.Muted) {
+		fmt.Println(l)
 	}
-	for _, l := range creation {
-		body := shell.Fg(shell.HexText, l)
-		if strings.Contains(l, "http") {
-			body = shell.Fg(shell.HexTertiary, l)
-		}
-		fmt.Println(shell.PanelLine(body))
+	fmt.Println(shell.PanelGap())
+	w := shell.KVWidth("GITHUB", "LINKEDIN", "ARTSTATION")
+	for _, link := range [][2]string{
+		{"GITHUB", "https://github.com/Nibir1"},
+		{"LINKEDIN", "https://www.linkedin.com/in/nibir-1/"},
+		{"ARTSTATION", "https://www.artstation.com/nibir"},
+	} {
+		fmt.Println(shell.KV(link[0], shell.Value(link[1]), w))
 	}
 	fmt.Println(shell.PanelEnd())
 	fmt.Println()
+}
+
+// aboutSection renders one titled block of prose.
+//
+// Wrapped to the panel rather than hand-broken. The paragraphs used to carry
+// their own line breaks at roughly 65 columns, so they were ragged on a wide
+// terminal and unchanged on a narrow one — the one width they were correct at
+// was whichever the author happened to have.
+func aboutSection(title string, paragraphs ...string) {
+	fmt.Println(shell.PanelTitle(title))
+	for i, para := range paragraphs {
+		if i > 0 {
+			fmt.Println(shell.PanelGap())
+		}
+		for _, l := range shell.PanelWrap(para, shell.Muted) {
+			fmt.Println(l)
+		}
+	}
+	fmt.Println(shell.PanelEnd())
 }
 
 // printAboutInstall answers the question /about could not: what is THIS copy of
@@ -108,8 +115,7 @@ func handleAbout() {
 // who has just been told Helix speaks, sees and reasons should be able to see,
 // in the same breath, which of those are switched on here.
 func printAboutInstall() {
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ THIS INSTALL"))
+	fmt.Println(shell.PanelTitle("this install"))
 
 	w := shell.KVWidth("MIND", "HARNESS", "HEARING", "SIGHT", "CONFINEMENT")
 

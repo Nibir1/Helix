@@ -39,18 +39,18 @@ import (
 
 // blackBoxUsage is the one place the subcommand vocabulary is written down.
 var blackBoxUsage = []string{
-	"/blackbox on               live mode — microphone, camera, speech, companion",
-	"/blackbox off              back to the keyboard (also: say \"manual mode\")",
-	"/blackbox status           one report: hearing, sight, wake, context, transcript",
-	"/blackbox setup            configure the STT/TTS providers with live pricing",
+	"/blackbox on               microphone, camera, speech, companion",
+	"/blackbox off              back to the keyboard (or say \"manual mode\")",
+	"/blackbox status           hearing, sight, wake, context, transcript",
+	"/blackbox setup            choose STT/TTS providers, with live pricing",
 	"",
-	"/blackbox look [question]  capture one frame now and answer a question about it",
-	"/blackbox eyes on|off      camera only, without leaving or entering live mode",
-	"/blackbox wake on|off      hands-free between turns; a phrase needs a sidecar",
+	"/blackbox look [question]  capture a frame and answer a question on it",
+	"/blackbox eyes on|off      camera only, without changing the mode",
+	"/blackbox wake on|off      hands-free waking between turns",
 	"/blackbox tts on|off       whether ordinary replies are spoken aloud",
 	"/blackbox say <text>       speak text through the TTS chain",
-	"/blackbox log on|off       keep a local text record of what was heard and said",
-	"/blackbox stats            measured latencies and wake rate against the §10 targets",
+	"/blackbox log on|off       keep a local text record of what was said",
+	"/blackbox stats            measured latencies and wake rate",
 }
 
 // handleBlackBoxCommand implements /blackbox and its subcommands.
@@ -402,9 +402,9 @@ func visionReady() (bool, string) {
 // blackBoxDetail is the /help expansion. It names the safety valve first
 // because that is the thing a user in live mode most urgently needs to know.
 func blackBoxDetail() []string {
+	// No restatement of Summary here: /help <command> prints the summary
+	// directly above this block, and the two said the same sentence twice.
 	out := []string{
-		"Live mode: Helix listens, watches, answers, and speaks up on its own.",
-		"",
 		"Say \"manual mode\" at any time to return to the keyboard. Ctrl+C stops a",
 		"reply mid-sentence. \"Turn off your eyes\" closes the camera without",
 		"leaving the conversation.",

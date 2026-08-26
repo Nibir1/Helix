@@ -138,7 +138,10 @@ cannot be compared, since two frames of a motionless room differ almost
 everywhere. The model is asked to return a sentinel when nothing is worth
 saying. And because capture is half-duplex, the companion never speaks: it
 QUEUES, and the main loop drains the queue only where the microphone is provably
-closed, or Helix would transcribe and answer itself.
+closed, or Helix would transcribe and answer itself. Sentence-boundary barge-in
+does not change that rule — it opens the mic only in the gap where the speaker is
+idle, measures loudness, and never transcribes — so "provably closed" still means
+what it meant.
 
 Pacing adapts by backing OFF — the gap is `max(interval, smoothed last look)` —
 so a slow host never queues behind itself. It deliberately does not speed up on
@@ -171,8 +174,22 @@ that cannot succeed.
 ### 5c. Report Rendering (`internal/shell/panel.go`)
 One visual language for everything Helix reports: a titled panel, a gutter, a
 closing rule, content-measured tables, and state badges. It exists because
-`/help` had that language and nothing else used it, so each report grew its own
+`/help` had *a* language and nothing else used it, so each report grew its own
 flat stack of coloured lines.
+
+The irony took a while to land: `/help` was then the last screen still drawing
+itself by hand, with a hardcoded 76-column rule and a fixed 30-column gutter
+that clamped its padding when a usage line ran long — so nine of fifty-six
+commands started their description at a different column, and the widest row
+was 124 columns against a rule that could not hold it. `/help`,
+`/help <command>`, `/about` and the unknown-command screen now render through
+the same primitives as everything else, which is what the paragraph above
+always claimed.
+
+One trap the shared primitives do not remove, recorded because it looks correct
+in source: `Value(strings.Join(items, Muted(sep)))` puts a colour RESET inside a
+coloured span, so only the first item renders styled. Colour each item, then
+join.
 
 Two properties are load-bearing rather than cosmetic. Widths are measured on
 VISIBLE COLUMNS, because `%-9s` counts ANSI escape bytes and pads a coloured
@@ -185,6 +202,10 @@ Each primitive handles that in the way its content allows: `Table` shaves its
 widest column (`truncateANSI` cuts to a column budget, preserving escape
 sequences), `PanelWrap` wraps prose and splits a word too long to fit, and `KV`
 wraps its value with continuation lines hanging under the value column.
+`Truncate` and `PanelRuleWidth` expose the first and the budget itself, for a
+caller aligning a shared column across several blocks — `/help`'s command index
+is the one that needs it, since per-block auto-sizing would give each category
+its own axis.
 
 All three measured in the wrong unit at some point, in three different ways —
 `KV` did not wrap at all, `PanelWrap` counted bytes, `truncateANSI` counted

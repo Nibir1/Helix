@@ -12,6 +12,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -284,20 +285,48 @@ func handleSlashCommand(input string) bool {
 
 // handleHelp renders the command table, or one command's detail when given an
 // argument. "/help git" and "/help /git" are the same request.
+// helpIndexWidth is the command column in the /help index: the longest command
+// NAME, with no argument syntax in it.
+//
+// The index used to print full usage lines, and the widest —
+// "/blackbox [on|off|status|setup|look|eyes|wake|tts|say|log|stats]" — is 64
+// columns. Sizing a shared column to that is absurd, and the old code instead
+// clamped the padding, so nine commands started their description at a
+// different column from the other forty-seven. That is what looked like
+// overlapping text.
+//
+// Measured before choosing: names-only renders the 56 commands in 70 lines with
+// nothing truncated, while keeping usage and truncating to fit costs the same
+// 70-71 lines AND mangles fifteen signatures mid-syntax. An index answers "what
+// commands exist"; "/help <command>" answers "how is it spelled", and it can be
+// complete because it has the whole width to itself.
+func helpIndexWidth() int {
+	w := 0
+	for _, c := range registry {
+		if c.Hidden {
+			continue
+		}
+		if n := len([]rune(c.Name)); n > w {
+			w = n
+		}
+	}
+	return w
+}
+
 func handleHelp(c cmdArgs) {
 	if !c.Empty() {
 		printCommandDetail(c.Arg(0))
 		return
 	}
 
-	const colWidth = 30
-	rule := "  " + shell.Fg(shell.HexSubtle, strings.Repeat("─", 76))
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexPrimary, "⚡ HELIX NATIVE SHELL") + " " +
-		shell.Fg(shell.HexRectifier, "// SOS PROTOCOL"))
-	fmt.Println(rule)
-	fmt.Println("  " + shell.Fg(shell.HexSubtle,
-		"AI-native shell · agentic harness · natural language · MAN pages · threat intelligence"))
+	fmt.Println(shell.PanelTitle("helix native shell"))
+	for _, l := range shell.PanelWrap(
+		"SOS PROTOCOL · AI-native shell, agentic harness, natural language, MAN "+
+			"pages, threat intelligence. Type a command, a shell line, or plain "+
+			"English. Arguments live in /help <command>.",
+		shell.Muted) {
+		fmt.Println(l)
+	}
 
 	byCategory := map[string][]command{}
 	for _, cmd := range registry {
@@ -311,37 +340,69 @@ func handleHelp(c cmdArgs) {
 		if len(cmds) == 0 {
 			continue
 		}
-		helpSection(cat)
+		fmt.Println(shell.PanelGap())
+		fmt.Println(shell.PanelSection(cat))
 		for _, cmd := range cmds {
-			helpLine(colWidth, cmd.UsageLine(), cmd.Summary)
+			helpLine(cmd.Name, cmd.Summary)
 		}
 	}
 
-	helpSection("GETTING MORE")
-	helpLine(colWidth, "/help <command>", "Full detail for one command, with its arguments")
-	helpLine(colWidth, "Tab", "Complete a slash command or a path at the prompt")
-	helpLine(colWidth, "→ (right arrow)", "Accept the ghost-text suggestion from history")
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelSection("getting more"))
+	helpLine("/help <command>", "Full detail for one command, with its arguments")
+	helpLine("Tab", "Complete a slash command or a path at the prompt")
+	helpLine("→ (right arrow)", "Accept the ghost-text suggestion from history")
 
-	helpSection("TIPS & ACCELERATION")
-	tipLine("⚡ NVD API KEY", "Accelerate knowledge sync from 40min → 10min")
-	tipSub("Get free key: ", "https://nvd.nist.gov/developers/request-an-api-key")
-	tipSub("Set environment: ", "export NVD_API_KEY=\"your-key-here\"")
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
-	tipLine("💡 NATURAL LANGUAGE", "Just type plain English")
-	tipSub("Example: ", "\"find large files and delete them\"")
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
-	tipLine("🤖 AGENTIC MODE", "/agentic on lets Helix observe results and self-correct")
-	tipSub("Preview first: ", "/plan <task>   ·   /permissions plan")
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│"))
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelSection("tips"))
+	for _, tip := range [][2]string{
+		{"PLAIN ENGLISH", "Just type it — \"find large files and delete them\""},
+		{"AGENTIC MODE", "/agentic on lets Helix observe results and self-correct; " +
+			"/plan <task> previews without running"},
+		{"THREAT INTEL", "A free NVD API key cuts knowledge sync from ~40min to ~10min: " +
+			"nvd.nist.gov/developers/request-an-api-key, then export NVD_API_KEY"},
+	} {
+		// Wrapped rather than columnar: these are sentences, and the fixed
+		// two-column layout they used to share with the command index forced
+		// them to be short enough to fit rather than long enough to help.
+		fmt.Println(shell.KV(tip[0], shell.Muted(tip[1]),
+			shell.KVWidth("PLAIN ENGLISH", "AGENTIC MODE", "THREAT INTEL")))
+	}
 
-	helpSection("PROMPT ANATOMY")
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
-		shell.Seg(shell.HexPrimary, shell.HexVoid, " HELIX ") + shell.Fg(shell.HexSubtle, " identity  ") +
-		shell.Seg(shell.HexSecondary, shell.HexText, " ~/path ") + shell.Fg(shell.HexSubtle, " context  ") +
-		shell.Seg(shell.HexGrid, shell.HexTertiary, " main ") + shell.Fg(shell.HexSubtle, " telemetry  ") +
-		shell.Fg(shell.HexRectifier, "❯") + shell.Fg(shell.HexSubtle, " interactive"))
-	fmt.Println(rule)
-	fmt.Println()
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelSection("prompt anatomy"))
+	printPromptAnatomy()
+	fmt.Println(shell.PanelEnd())
+}
+
+// printPromptAnatomy shows what each block of the prompt means.
+//
+// Both halves. It used to describe only the LEFT prompt and label the git
+// branch "telemetry", while the RIGHT prompt — the clock and the
+// Helix/Red Team/name ribbon, which is the most colourful thing on screen —
+// went unexplained entirely. Half an explanation of the one element a user
+// looks at on every single line.
+func printPromptAnatomy() {
+	left := shell.Seg(shell.HexPrimary, shell.HexVoid, " HELIX ") +
+		shell.Muted(" identity  ") +
+		shell.Seg(shell.HexSecondary, shell.HexText, " ~/path ") +
+		shell.Muted(" where you are  ") +
+		shell.Seg(shell.HexGrid, shell.HexTertiary, " main ") +
+		shell.Muted(" git branch")
+	right := shell.Seg(shell.HexGrid, shell.HexTertiary, " 12:00:00 ") +
+		shell.Muted(" clock  ") +
+		shell.Seg(shell.HexPrimary, shell.HexVoid, " Helix ") +
+		shell.Seg(shell.HexRectifier, shell.HexText, " Red Team ") +
+		shell.Muted(" mode  ") +
+		shell.Seg(shell.HexSecondary, shell.HexText, " you ") +
+		shell.Muted(" who is asking")
+
+	w := shell.KVWidth("LEFT", "RIGHT", "PROMPT")
+	fmt.Println(shell.KV("LEFT", left, w))
+	fmt.Println(shell.KV("RIGHT", right, w))
+	fmt.Println(shell.KV("PROMPT", shell.Fg(shell.HexRectifier, "❯")+
+		shell.Muted("  red means Helix is waiting for you; the branch block "+
+			"appears only inside a git repository"), w))
 }
 
 // printCommandDetail renders one command's expanded help.
@@ -351,70 +412,65 @@ func printCommandDetail(name string) {
 	}
 	cmd, ok := lookupCommand(name)
 	if !ok {
-		fmt.Println()
-		fmt.Println("  " + shell.Fg(shell.HexRectifier, "No such command: ") +
-			shell.Fg(shell.HexText, name))
-		if suggestions := suggestCommands(name, 3); len(suggestions) > 0 {
-			fmt.Println("  " + shell.Fg(shell.HexSubtle, "Did you mean: ") +
-				shell.Fg(shell.HexTertiary, strings.Join(suggestions, ", ")))
-		}
-		fmt.Println()
+		// Same screen as a mistyped command at the prompt. It used to be a
+		// separate, plainer one, so the identical mistake looked different
+		// depending on which door you came through.
+		printUnknownCommand(name)
 		return
 	}
 
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexPrimary, cmd.UsageLine()))
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, strings.Repeat("─", 60)))
-	fmt.Println("  " + shell.Fg(shell.HexText, cmd.Summary))
+	// The panel, like every other report. This drew its own 60-column rule
+	// under a title that could be 64 columns wide, so the underline was
+	// visibly shorter than the thing it underlined.
+	fmt.Println(shell.PanelTitle(strings.TrimPrefix(cmd.Name, "/")))
+
+	w := shell.KVWidth("USAGE", "ALIASES", "CATEGORY")
+	fmt.Println(shell.KV("USAGE", shell.Value(cmd.UsageLine()), w))
 	if len(cmd.Aliases) > 0 {
-		fmt.Println("  " + shell.Fg(shell.HexSubtle, "Aliases: ") +
-			shell.Fg(shell.HexTertiary, strings.Join(cmd.Aliases, ", ")))
+		fmt.Println(shell.KV("ALIASES",
+			shell.Muted(strings.Join(cmd.Aliases, "  ·  ")), w))
 	}
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "Category: ") +
-		shell.Fg(shell.HexSubtle, cmd.Category))
+	fmt.Println(shell.KV("CATEGORY", shell.Muted(cmd.Category), w))
+	fmt.Println(shell.PanelGap())
+	for _, l := range shell.PanelWrap(cmd.Summary, func(t string) string {
+		return shell.Fg(shell.HexText, t)
+	}) {
+		fmt.Println(l)
+	}
+
 	if len(cmd.Detail) > 0 {
-		fmt.Println()
+		fmt.Println(shell.PanelGap())
 		for _, line := range cmd.Detail {
 			if line == "" {
-				fmt.Println()
+				fmt.Println(shell.PanelGap())
 				continue
 			}
-			fmt.Println("  " + shell.Fg(shell.HexText, line))
+			// Detail lines are hand-laid tables in several commands
+			// (/blackbox's subcommand list is a padded column), so they are
+			// printed as written rather than re-wrapped, which would destroy
+			// the alignment their author put there.
+			fmt.Println(shell.PanelLine(shell.Fg(shell.HexText, line)))
 		}
 	}
+	fmt.Println(shell.PanelEnd())
 	fmt.Println()
 }
 
-func helpSection(title string) {
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexSecondary, "▸ "+strings.ToUpper(title)))
-}
-
-func helpLine(colWidth int, cmd, desc string) {
-	// Pad on rune count, not byte length: a usage string containing "…" or "→"
-	// would otherwise be over-padded and break the column.
-	pad := colWidth - len([]rune(cmd))
-	if pad < 2 {
-		pad = 2
-	}
-	fmt.Printf("  %s %s%s%s\n",
-		shell.Fg(shell.HexSubtle, "│"),
-		shell.Fg(shell.HexTertiary, cmd),
-		strings.Repeat(" ", pad),
+func helpLine(cmd, desc string) {
+	// Truncate to the shared column, then let KV align and wrap.
+	//
+	// The old version padded to a fixed 30 and clamped the pad at 2 when the
+	// command was longer — so nine commands started their description at a
+	// different column from the other forty-seven, which is what made the index
+	// look like it was overlapping. And nothing wrapped: the widest row was 124
+	// columns against a 76-column rule, so it broke at the terminal edge and
+	// restarted outside the gutter.
+	w := helpIndexWidth()
+	fmt.Println(shell.KV(
+		shell.Fg(shell.HexTertiary, shell.Truncate(cmd, w)),
 		shell.Fg(shell.HexText, desc),
-	)
-}
-
-func tipLine(label, body string) {
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + " " +
-		shell.Fg(shell.HexTertiary, label) + " " +
-		shell.Fg(shell.HexSubtle, "—") + " " +
-		shell.Fg(shell.HexText, body))
-}
-
-func tipSub(label, body string) {
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") + "   " +
-		shell.Fg(shell.HexSubtle, label) + shell.Fg(shell.HexSecondary, body))
+		w,
+	))
 }
 
 // -------------------------------------------------------
@@ -423,29 +479,55 @@ func tipSub(label, body string) {
 
 func handleUnknownSlashCommand(cmd string) {
 	audio.PlayError()
-	fmt.Println()
-	fmt.Println("  " + shell.Fg(shell.HexRectifier, "⚠ UNRECOGNIZED SIGNAL") +
-		" " + shell.Fg(shell.HexSubtle, "::") +
-		" " + shell.Fg(shell.HexText, cmd))
+	printUnknownCommand(cmd)
+}
+
+// printUnknownCommand is the single "no such command" screen.
+//
+// One renderer, because there were two and they disagreed: typing "/nosuch"
+// produced a red "⚠ UNRECOGNIZED SIGNAL" with gutter bars, while
+// "/help nosuch" produced two bare indented lines with no gutter at all — the
+// same error, two presentations, neither framed. The gutter bars were the worse
+// half: a gutter is the inside edge of a panel, and there was no panel, so they
+// were an edge belonging to nothing.
+//
+// Deliberately short. This is the most-printed error in the shell — every typo
+// reaches it — so it says what was not found, the one thing most likely to have
+// been meant, and where the list is. Nothing else.
+func printUnknownCommand(cmd string) {
+	fmt.Println(shell.PanelTitle("unknown command"))
+
+	w := shell.KVWidth("TYPED", "MOVED", "DID YOU MEAN", "ALL COMMANDS")
+	fmt.Println(shell.KV("TYPED", shell.Badge(shell.StateBad, cmd), w))
+
 	// A verb that worked yesterday deserves better than "did you mean". The
 	// eight voice/vision commands folded into /blackbox, and this is where a
 	// user's muscle memory lands.
 	if note, moved := blackBoxMigrationNote(cmd); moved {
-		fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
-			" " + shell.Fg(shell.HexTertiary, note))
-		fmt.Println()
+		fmt.Println(shell.KV("MOVED", shell.Value(note), w))
+		fmt.Println(shell.PanelEnd())
 		return
 	}
-	if suggestions := suggestCommands(cmd, 3); len(suggestions) > 0 {
-		fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
-			" " + shell.Fg(shell.HexText, "Did you mean ") +
-			shell.Fg(shell.HexTertiary, strings.Join(suggestions, "  ")) +
-			shell.Fg(shell.HexText, "?"))
+
+	suggestions := suggestCommands(cmd, 3)
+	if len(suggestions) > 0 {
+		// Colour each item, do NOT wrap the joined string.
+		// shell.Value(strings.Join(items, shell.Muted(sep))) looks right and is
+		// not: the separator's reset terminates the outer colour, so only the
+		// FIRST suggestion renders styled and the rest come out plain.
+		coloured := make([]string, len(suggestions))
+		for i, sg := range suggestions {
+			coloured[i] = shell.Value(sg)
+		}
+		fmt.Println(shell.KV("DID YOU MEAN",
+			strings.Join(coloured, shell.Muted("  ·  ")), w))
 	}
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "│") +
-		" " + shell.Fg(shell.HexTertiary, "Execute /help") +
-		" " + shell.Fg(shell.HexText, "for the SOS protocol and full command menu."))
-	fmt.Println()
+	// Pointing at /help twice is noise when /help is itself the suggestion,
+	// which is exactly what a mistyped "/hel" produces.
+	if !slices.Contains(suggestions, "/help") {
+		fmt.Println(shell.KV("ALL COMMANDS", shell.Muted("/help"), w))
+	}
+	fmt.Println(shell.PanelEnd())
 }
 
 // suggestCommands returns up to max close matches for a mistyped command.

@@ -363,7 +363,7 @@ Samples are local NDJSON under `~/.helix/metrics/`, wiped by `/purge`.
 
 ```text
 /blackbox setup     configure STT and TTS providers, then verify the chain
-/blackbox status    chains, health, endpoints, retained context, spoken vocabulary
+/blackbox status    chains, health, endpoints, retained context, interrupt, vocabulary
 /mictest            3-second check: is the microphone actually being heard?
 /blackbox on        go live — microphone, camera, speech, companion
 /blackbox off       back to the keyboard (also stops a reply mid-sentence)

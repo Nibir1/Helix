@@ -61,6 +61,11 @@ func panelWidth() int {
 	}
 }
 
+// PanelRuleWidth is the current rule width, for callers that must assert their
+// output fits the frame. Exported for tests rather than for layout: inside this
+// package the unexported panelWidth is the one to use.
+func PanelRuleWidth() int { return panelWidth() }
+
 // PanelTitle opens a panel: a coloured chip, the title, and a rule beneath.
 //
 // The chip is what makes a panel findable when scrolling back through a long
@@ -602,6 +607,14 @@ func truncateANSI(s string, width int) string {
 	b.WriteString(ansiReset)
 	return b.String()
 }
+
+// Truncate cuts a possibly-coloured string to a visible width, in columns.
+//
+// Exported for callers that align a column themselves rather than through
+// Table — /help's command index is the case: one shared label width across
+// every category keeps the descriptions on one axis, which per-category
+// auto-sizing cannot do.
+func Truncate(s string, width int) string { return truncateANSI(s, width) }
 
 // Hint renders an actionable suggestion — the thing to type next.
 //

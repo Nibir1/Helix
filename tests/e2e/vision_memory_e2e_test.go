@@ -44,14 +44,20 @@ func TestE2E_HelpRendersBlackBoxCommands(t *testing.T) {
 	h := newHarness(t, unusedPlan)
 	defer h.Close()
 
+	// The INDEX lists names; argument syntax lives in the detail screen, which
+	// has the whole width for it. Both are asserted, and both come from the
+	// registry rather than a second hand-kept copy — that was this test's point
+	// and it still holds, one screen over.
 	h.WriteLine("/help")
-	// Usage strings come from the command registry, so assert on the usage
-	// lines the registry actually publishes rather than a second hand-kept copy.
-	for _, cmd := range []string{
-		"/blackbox [on|off|status|setup|look|eyes|wake|tts|say|log|stats]",
-		"/memory [show|clear]"} {
-		if err := h.Expect(cmd, 10*time.Second); err != nil {
+	for _, name := range []string{"/blackbox", "/memory"} {
+		if err := h.Expect(name, 10*time.Second); err != nil {
 			t.Fatal(err)
 		}
+	}
+
+	h.WriteLine("/help /blackbox")
+	if err := h.Expect("[on|off|status|setup|look|eyes|wake|tts|say|log|stats]",
+		10*time.Second); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -156,7 +156,7 @@ Using an advanced **Input Classification Engine** (`internal/shell/classify.go`)
 
 Helix exposes a rich set of slash commands for system control, the agentic harness, intelligence gathering, and UX tuning. Every command below is defined in one registry (`cmd/helix/registry_tables.go`), which is also what `/help`, Tab completion, and the did-you-mean suggester read — so the menu cannot drift from the code.
 
-At the prompt: **Tab** completes a slash command (or a path), **`/help <command>`** prints one command's full detail, and a mistyped command suggests the closest matches.
+At the prompt: **Tab** completes a slash command (or a path), **`/help <command>`** prints one command's full detail, and a mistyped command suggests the closest matches. `/help` on its own is an index of command *names* — argument syntax lives in the detail screen, which has the whole width for it.
 
 ### Core & Navigation
 | Command | Description |
@@ -275,7 +275,7 @@ Helix has a **persona**, not a default assistant register: it answers first, kee
 
 **Sesame CSM-1B** is the quality local voice: the speech model from Sesame's "uncanny valley" demo, run through a Rust sidecar with **no Python and no Docker**, and — uniquely among Helix's voices — conditioned on the last few turns of the conversation rather than synthesizing each sentence cold. It wants a discrete GPU (~8 GB VRAM); pair it with `piper-local` as the fallback so a machine that cannot keep up simply uses the fast voice. Context retention is opt-in, memory-only and bounded, and `/blackbox status` reports whether the sidecar is *actually* conditioning on it rather than assuming so — an unpatched server accepts the context field and silently discards it. See [docs/local_runtimes.md](docs/local_runtimes.md) §3.5.
 
-See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits (capture is half-duplex — the mic is muted while Helix speaks, so a reply is interrupted with Ctrl+C rather than by talking over it).
+See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits. Capture is half-duplex: the mic is muted while Helix speaks, so you cannot talk *over* a reply. `Ctrl+C` stops one instantly, and `/config barge-in on` lets you stop it by speaking in the pause **between sentences** — the speaker is idle there, so no echo cancellation is needed. That is interruption at the pace of punctuation, not full duplex: a long sentence plays to its end.
 
 | Command | Description |
 | :--- | :--- |
@@ -286,7 +286,7 @@ See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice
 Subcommands:
 
 - **on** / **off** — go live, or return to the keyboard
-- **status** — one report: hearing, sight, wake, initiative, retained context and transcript logging, then the full speech chain
+- **status** — one report: hearing, sight, wake, initiative, retained context, how a reply can be interrupted, and transcript logging, then the full speech chain
 - **setup** — configure the STT/TTS providers with live pricing
 - **look** *[question]* — capture one frame now and answer a question about it
 - **eyes** `on|off` — camera only, without entering or leaving live mode

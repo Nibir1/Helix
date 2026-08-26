@@ -195,6 +195,21 @@ sidecars; the script prints the exact commands for each.
 `--assume-board="..."` forces a board path, which is how you preview the Jetson
 behavior from a laptop.
 
+**Piper needs two things, not one.** Its "binary" is a Python interpreter, so
+`python3` being present says nothing about whether the server can run. Install
+the module *and* flask — `piper.http_server` imports flask, which is not one of
+piper-tts's dependencies, so installing only piper-tts yields a server that dies
+on startup:
+
+```bash
+python3 -m pip install --user piper-tts flask
+```
+
+Helix checks this before anything else: `/blackbox setup` verifies that
+`import piper.http_server` succeeds *before* offering the ~60 MB voice download,
+and re-checks after an install, since `pip` can exit 0 having installed into a
+different interpreter than the one about to be launched.
+
 ## §5.2 Running as a service on a headless board
 
 ```bash
@@ -233,7 +248,7 @@ Run these inside Helix after install:
   in force plus how to fix it if it degraded, recorder presence, each local
   sidecar's reachability, whether the offline-LLM fallback model is pulled, and
   temperature with a throttling verdict.
-- `/blackbox status` — mode, hearing, sight, wake, retained context; then STT/TTS chain health, which keys are set, recorder detection.
+- `/blackbox status` — mode, hearing, sight, wake, retained context, interrupt method; then STT/TTS chain health, which keys are set, recorder detection.
 - `/blackbox stats` — what the board has actually *measured*: wake→execution
   latency, TTS time-to-first-audio, frame-to-insight, wake rate, and daemon
   availability, each judged against the project's targets with local and cloud

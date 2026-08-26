@@ -147,10 +147,14 @@ func TestBlackBoxUsageIsAligned(t *testing.T) {
 		} else if start != col {
 			t.Errorf("description starts at column %d, others at %d: %q", start, col, line)
 		}
-		// 80 columns is the terminal these are printed into; the block is not
-		// inside a panel, so nothing wraps it for us.
-		if len(line) > 84 {
-			t.Errorf("usage line is %d columns, too wide to read at 80: %q", len(line), line)
+		// These lines are printed BOTH flat (unknown subcommand) and inside a
+		// panel gutter (/help /blackbox). The panel is the tighter of the two:
+		// its rule is 72 after a 2-column indent, less 4 for the gutter, so a
+		// line has 70 columns before it starts escaping the frame. PanelLine
+		// does not wrap, and re-wrapping would destroy this block's own column.
+		if len([]rune(line)) > 70 {
+			t.Errorf("usage line is %d columns; it overflows the /help panel at 70: %q",
+				len([]rune(line)), line)
 		}
 	}
 }

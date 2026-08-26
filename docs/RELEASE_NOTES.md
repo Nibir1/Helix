@@ -108,6 +108,25 @@ Full model: `docs/threat_model_voice.md`. Policy summary: `docs/SECURITY.md`.
 
 The report refuses to flatter: it will not print a p95 a small sample cannot support, it says "not measured" rather than implying a pass, and where the median meets a budget but the worst case does not it says **typical only**.
 
+### 🔧 Fixed after real-hardware testing
+
+A live session on a second machine surfaced defects no test had reached:
+
+- **A spoken sentence longer than 12 seconds was cut mid-word**, the truncated half answered,
+  and the remainder delivered as a *separate turn with its own answer*. A stopwatch was doing
+  the endpointing. Silence does it now; the duration cap is a backstop against a stuck mic.
+- **Every plan needing a critic review was quarantined**, so Helix could only chat. The critic's
+  token budget was too small to hold its own verdict, so it returned nothing, and nothing
+  fails closed. Fail-closed is unchanged — but a critic that said nothing no longer reads to
+  the user as a refusal of their request.
+- **piper-local could never have started.** Its presence check tested for `python3`, which
+  exists everywhere, so setup skipped the install, downloaded a 60 MB voice, and died on
+  `ModuleNotFoundError`. It now verifies the module before the download.
+- **"Voice link configured." printed above its own contradiction** — the success line came
+  before the verification that disproved it.
+- `/doctor` suggested `ollama pull <cloud-model-name>`, and the port-collision report named a
+  sidecar's old port after the wizard had moved it. Both fixed.
+
 ### ✨ Interface
 
 The terminal UI is the whole product surface here, so it gets the same honesty rules as
@@ -127,6 +146,16 @@ everything else: a panel may not report a state the machine cannot deliver.
 - **The wake panel stopped promising phrase detection it does not do.** It printed the
   configured phrase unconditionally, but the default energy detector scores loudness and
   cannot match words; a stored phrase is now reported as stored and unused.
+- **`/help` is readable again.** Its index padded commands into a fixed column and gave up
+  when one ran long, so nine of fifty-six descriptions started at a different place — and
+  nothing wrapped, so the widest row ran 124 columns against a 76-column rule. It now lists
+  command *names* against one axis, with argument syntax in `/help <command>`, which has the
+  width to be complete. The prompt diagram also explains the right-hand prompt — the clock and
+  the Helix/Red Team/name ribbon — which it had never mentioned.
+- **`/about`, `/help <command>` and the unknown-command screen** were the last three drawing
+  themselves by hand. `/about` closed three sections with a rule that had no opening rule, and
+  hand-wrapped its prose to one fixed width. A mistyped command and `/help <mistyped>` rendered
+  the *same* error two different ways; they are one screen now.
 - **Panels stay inside their frame.** Over-wide status values wrapped at the terminal edge
   and restarted at column zero, escaping the panel — including a camera message at 95
   columns in a 74-column row. Fixed in the primitive rather than in each caller: `shell.KV`

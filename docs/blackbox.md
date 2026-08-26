@@ -55,7 +55,7 @@ speech services.
 - **Private-by-default:** configure the local sidecars (`whisper-local` STT,
   `piper-local` TTS) to keep audio on your machine. See §5.
 - `/blackbox status` is the one report: mode, hearing, sight, wake, initiative,
-  retained context and transcript logging, followed by chain health, key state
+  retained context, interrupt method and transcript logging, followed by chain health, key state
   and recorder availability.
 - `/blackbox say <text>` speaks text immediately; `/blackbox tts on|off` gates automatic spoken
   responses; `/listen [sec]` records and transcribes one clip (push-to-talk).

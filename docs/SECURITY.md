@@ -69,6 +69,14 @@ structural rather than advisory:
   cannot satisfy them even with a perfect impersonation.
 - **Confirmations fail closed.** Silence, timeout, or an unintelligible answer
   counts as "no".
+- **The microphone opens only for a turn — unless you ask otherwise.** Enabling
+  sentence-boundary barge-in (`/config barge-in on`) lets Helix sample the mic in
+  the pause between its own spoken sentences, so it can be interrupted by voice.
+  That clip follows the same path as every capture — the recorder writes a temp
+  WAV, which is deleted the moment it is read — and then only its loudness is
+  computed. It is never transcribed, never sent to a provider, never logged, and
+  never enters the conversational context. Off by default, scoped to live mode, and shown on the
+  INTERRUPT row of `/blackbox status`.
 - **Spoken input never takes the shell fast path.** A confidently classified
   command line runs as typed when typed; from the microphone it always goes to
   the planner, because the classifier decides on the first token and ordinary

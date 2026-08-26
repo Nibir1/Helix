@@ -638,9 +638,16 @@ Then in Helix:
 /blackbox setup             · pick STT/TTS providers and their endpoints
 /config stt-url <url>       · point local STT somewhere else
 /config tts-url <url>       · point local TTS somewhere else
-/blackbox status               · chains, health, endpoints, and resolved routes
+/config fallback-model <id> · which Ollama model answers when the cloud fails
+/config context-turns <n>   · turns a context-capable voice is conditioned on (0 = off)
+/config barge-in on|off     · stop a reply by speaking between sentences
+/blackbox status            · chains, health, endpoints, and resolved routes
 /doctor                     · everything above plus conflicts, thermals, confinement
 ```
+
+`/config` with no argument lists every settable key with its current value. The
+keys are short names, not the dotted paths from `config.json` — `barge-in`, not
+`speech.tts.barge_in`.
 
 ---
 

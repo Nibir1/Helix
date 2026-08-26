@@ -62,7 +62,12 @@ func TestE2E_DoctorListsAndPurgeRemovesCrashReports(t *testing.T) {
 	}
 
 	h.WriteLine("/doctor")
-	if err := h.Expect("Pending crash reports", 10*time.Second); err != nil {
+	// "CRASH REPORTS" + "1 pending": /doctor renders as a panel now, so the row
+	// label and the count are separate cells rather than one sentence.
+	if err := h.Expect("CRASH REPORTS", 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Expect("1 pending", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
