@@ -168,7 +168,7 @@ func handleSetup() {
 			if currentName == "" {
 				currentName = "Nahasat Nibir"
 			}
-			fmt.Println("  " + shell.Fg(shell.HexSubtle, "Current Identity: ") + shell.Fg(shell.HexPrimary, currentName))
+			fmt.Println("  " + shell.Fg(shell.HexMuted, "Current Identity: ") + shell.Fg(shell.HexPrimary, currentName))
 			newName := strings.TrimSpace(commands.AskLine("  Enter your name (or leave blank to cancel)"))
 			if newName != "" {
 				cfg.UserPrefs.UserName = newName

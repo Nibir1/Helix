@@ -84,19 +84,19 @@ func handlePlanCommand(c cmdArgs) {
 			shell.Fg(shell.HexTertiary, fmt.Sprintf("%d.", i+1)),
 			shell.Fg(shell.HexSecondary, step.Tool+describeStepAction(step)))
 		if step.Command != "" {
-			fmt.Printf("     %s %s\n", shell.Fg(shell.HexSubtle, "$"),
+			fmt.Printf("     %s %s\n", shell.Fg(shell.HexMuted, "$"),
 				shell.Fg(shell.HexText, step.Command))
 			risk, reasons := commands.AnalyzeShellRisk(step.Command)
-			fmt.Printf("     %s\n", shell.Fg(shell.HexSubtle, "risk: "+riskLabel(risk)))
+			fmt.Printf("     %s\n", shell.Fg(shell.HexMuted, "risk: "+riskLabel(risk)))
 			for _, r := range reasons {
-				fmt.Printf("       %s\n", shell.Fg(shell.HexSubtle, "• "+r))
+				fmt.Printf("       %s\n", shell.Fg(shell.HexMuted, "• "+r))
 			}
 		}
 		if step.Message != "" {
 			fmt.Printf("     %s\n", shell.Fg(shell.HexText, truncStr(step.Message, 160)))
 		}
 		for k, v := range step.Args {
-			fmt.Printf("     %s\n", shell.Fg(shell.HexSubtle, fmt.Sprintf("%s = %s", k, truncStr(v, 120))))
+			fmt.Printf("     %s\n", shell.Fg(shell.HexMuted, fmt.Sprintf("%s = %s", k, truncStr(v, 120))))
 		}
 	}
 	fmt.Println()
@@ -144,7 +144,7 @@ func handlePermissionsCommand(c cmdArgs) {
 				marker = shell.Fg(shell.HexSecondary, "▸ ")
 				paint = shell.Fg(shell.HexPrimary, label)
 			}
-			fmt.Printf("  %s%s %s\n", marker, paint, shell.Fg(shell.HexSubtle, m.Describe()))
+			fmt.Printf("  %s%s %s\n", marker, paint, shell.Fg(shell.HexMuted, m.Describe()))
 		}
 		fmt.Println()
 		color.Yellow("The mode layers on top of the risk tiers; it never replaces them.")
@@ -324,18 +324,18 @@ func printTodoList() {
 		paint := shell.HexText
 		switch it.State {
 		case session.TodoDone:
-			paint = shell.HexSubtle
+			paint = shell.HexMuted
 		case session.TodoInProgress:
 			paint = shell.HexSecondary
 		case session.TodoBlocked:
 			paint = shell.HexRectifier
 		}
 		fmt.Printf("  %s %s %s\n",
-			shell.Fg(shell.HexSubtle, fmt.Sprintf("%3d", it.ID)),
+			shell.Fg(shell.HexMuted, fmt.Sprintf("%3d", it.ID)),
 			shell.Fg(paint, it.State.Symbol()),
 			shell.Fg(paint, it.Text))
 		if it.Note != "" {
-			fmt.Printf("      %s\n", shell.Fg(shell.HexSubtle, "note: "+it.Note))
+			fmt.Printf("      %s\n", shell.Fg(shell.HexMuted, "note: "+it.Note))
 		}
 	}
 
@@ -421,7 +421,7 @@ func handleToolsCommand() {
 		// scanned for, and putting it on its own row made the reader's eye
 		// travel down instead of across.
 		fmt.Println(shell.PanelLine(
-			shell.Fg(shell.HexTertiary, fmt.Sprintf("%-9s", r.name)) + " " +
+			shell.Fg(shell.HexAmber, fmt.Sprintf("%-9s", r.name)) + " " +
 				shell.PadVisible(state, 9) + " " + shell.Fg(shell.HexText, r.purpose)))
 		fmt.Println(shell.PanelLine("                    " + shell.Muted("gate: "+r.gate)))
 		if r.detail != "" {
@@ -544,18 +544,18 @@ func printHooks(set *hooks.Set) {
 	for _, h := range set.Hooks {
 		state := shell.Fg(shell.HexSecondary, "on ")
 		if h.Disabled {
-			state = shell.Fg(shell.HexSubtle, "off")
+			state = shell.Fg(shell.HexMuted, "off")
 		}
 		mode := "observe"
 		if h.Blocking {
 			mode = "BLOCKING"
 		}
 		fmt.Printf("  %s %s %s\n", state,
-			shell.Fg(shell.HexTertiary, fmt.Sprintf("%-16s", h.Name)),
-			shell.Fg(shell.HexSubtle, fmt.Sprintf("%s · %s · timeout %s",
+			shell.Fg(shell.HexAmber, fmt.Sprintf("%-16s", h.Name)),
+			shell.Fg(shell.HexMuted, fmt.Sprintf("%s · %s · timeout %s",
 				h.Event, mode, h.Timeout())))
 		if h.Match != "" {
-			fmt.Printf("      %s\n", shell.Fg(shell.HexSubtle, "match: /"+h.Match+"/"))
+			fmt.Printf("      %s\n", shell.Fg(shell.HexMuted, "match: /"+h.Match+"/"))
 		}
 		fmt.Printf("      %s\n", shell.Fg(shell.HexText, "$ "+h.Command))
 	}
@@ -949,9 +949,9 @@ func handleConfigCommand(c cmdArgs) {
 		fmt.Println()
 		for _, k := range keys {
 			fmt.Printf("  %s %s %s\n",
-				shell.Fg(shell.HexTertiary, fmt.Sprintf("%-15s", k.name)),
+				shell.Fg(shell.HexAmber, fmt.Sprintf("%-15s", k.name)),
 				shell.Fg(shell.HexPrimary, fmt.Sprintf("%-22s", truncStr(orNone(k.get()), 22))),
-				shell.Fg(shell.HexSubtle, k.help))
+				shell.Fg(shell.HexMuted, k.help))
 		}
 		fmt.Println()
 		color.Cyan("Set one with /config <key> <value>.")

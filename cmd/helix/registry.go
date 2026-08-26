@@ -467,7 +467,7 @@ func helpLine(cmd, desc string) {
 	// restarted outside the gutter.
 	w := helpIndexWidth()
 	fmt.Println(shell.KV(
-		shell.Fg(shell.HexTertiary, shell.Truncate(cmd, w)),
+		shell.Fg(shell.HexAmber, shell.Truncate(cmd, w)),
 		shell.Fg(shell.HexText, desc),
 		w,
 	))

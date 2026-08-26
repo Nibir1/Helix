@@ -410,6 +410,11 @@ func (e *editor) redrawLocked(regen bool) {
 	// 4) Buffer + ghost text.
 	b.WriteString(e.hlCache)
 	if e.suggestion != "" {
+		// Chrome contrast on purpose, and the one place that is right: ghost
+		// text must be legible enough to read and dim enough that it can never
+		// be mistaken for what you actually typed. Do not promote it to
+		// HexMuted — that is the readable-TEXT tone, and here readability past
+		// a point is the bug.
 		b.WriteString(fgHex(HexSubtle))
 		b.WriteString(e.suggestion)
 		b.WriteString(ansiReset)

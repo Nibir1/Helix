@@ -158,7 +158,7 @@ func exitVoiceMode(persist bool) {
 		cfg.UserPrefs.VoiceMode = false
 		_ = cfg.SavePreferences()
 	}
-	fmt.Println("  " + shell.Fg(shell.HexSubtle, "○ ") +
+	fmt.Println("  " + shell.Fg(shell.HexMuted, "○ ") +
 		shell.Fg(shell.HexText, "keyboard") +
 		shell.Muted("  ·  /blackbox on goes live again"))
 }

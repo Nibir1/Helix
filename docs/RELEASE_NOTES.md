@@ -146,6 +146,13 @@ everything else: a panel may not report a state the machine cannot deliver.
 - **The wake panel stopped promising phrase detection it does not do.** It printed the
   configured phrase unconditionally, but the default energy detector scores loudness and
   cannot match words; a stored phrase is now reported as stored and unused.
+- **Text you were meant to read was nearly invisible.** The colour used for secondary
+  prose measured **1.44:1** against a dark terminal — WCAG asks 4.5:1 for body text — so
+  `/about`'s philosophy, panel labels and table headers rendered as dark grey on dark. One
+  constant was carrying two incompatible jobs: panel rules, which should recede, and prose,
+  which must be read. Split in two, with the new tones drawn from the Tron Legacy palette and
+  lifted until they measure: secondary text at 6.1:1, values at 7.3:1, rules deliberately
+  below. Helix's identity colours are unchanged, and the numbers are now enforced by test.
 - **`/help` is readable again.** Its index padded commands into a fixed column and gave up
   when one ran long, so nine of fifty-six descriptions started at a different place — and
   nothing wrapped, so the widest row ran 124 columns against a 76-column rule. It now lists

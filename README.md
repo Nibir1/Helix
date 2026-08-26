@@ -458,6 +458,7 @@ Helix includes a built-in multi-tool recon orchestrator (`nmap`, `masscan`, `ffu
 - TrueColor animated prompt with git telemetry, glitch effects, and transient history rendering.
 - Width-safe glyphs and in-place resize healing (no duplicate prompt lines on SIGWINCH).
 - Semantic syntax highlighting (`internal/utils/syntax.go`) colorizes 10+ token types in real-time as you type.
+- **A palette split by role, not by taste.** Helix's identity colours (electric cyan, neon magenta, aggressive red) carry the brand; the reading layer is a Tron-inspired teal-and-gold ramp chosen so that text is *measurably* legible — secondary prose at 6.1:1 and values at 7.3:1 against a dark terminal, where WCAG asks 4.5:1. Panel rules sit deliberately below that, because a frame should recede. `internal/shell/contrast_test.go` enforces it.
 
 ### Synthetic Tonal Audio (`internal/audio/`)
 A custom `beep`/`oto` synthesizer generates Tron-style audio feedback:

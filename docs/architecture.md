@@ -191,6 +191,38 @@ in source: `Value(strings.Join(items, Muted(sep)))` puts a colour RESET inside a
 coloured span, so only the first item renders styled. Colour each item, then
 join.
 
+**The palette is split by ROLE, and the split is the point.** Helix's identity
+colours (electric cyan, neon magenta, aggressive red) are the brand and are
+untouched. The *reading* layer is drawn from the Tron Legacy poster palette
+(`#193f4a` / `#2f8ca3` / `#f4af2d` / `#030504`), lifted along its own hue until
+it is legible on a dark terminal:
+
+| Constant | Value | Role | Contrast on `#282C34` |
+| :--- | :--- | :--- | :--- |
+| `HexText` | `#FAFAFA` | primary prose, state words | 13.4:1 |
+| `HexMuted` | `#4FB8D4` | secondary prose, labels, table headers | 6.1:1 |
+| `HexAmber` | `#F4AF2D` | values — model names, ports, paths, commands | 7.3:1 |
+| `HexTertiary` | `#FF9900` | warnings only | 6.5:1 |
+| `HexSubtle` | `#2C6E82` | chrome only — rules, gutters, ghost text | 2.4:1 |
+
+`HexSubtle` used to be `#444444` and carried both jobs. That is a flat grey
+measuring **1.44:1**, against a WCAG floor of 4.5:1 for body text — so `/about`
+rendered its philosophy in something very close to invisible, and nobody could
+point at a rule saying why it was wrong. One value cannot serve both a frame
+that should recede and prose that must be read; at a single setting the readable
+half always loses.
+
+The numbers are measured against `#282C34` — a common dark theme and the
+*lighter* of the plausible backgrounds, so they are the worst case rather than
+the flattering one. `internal/shell/contrast_test.go` holds each constant to the
+standard its role requires, and keeps `#444444` named as a regression so a drift
+back to that neighbourhood fails with the number that explains it.
+
+The one deliberate exception is the ghost-text suggestion in the line editor: it
+stays at chrome contrast because it must be legible enough to read and dim
+enough that it can never be mistaken for what you actually typed. Readability
+past a point is the bug there.
+
 Two properties are load-bearing rather than cosmetic. Widths are measured on
 VISIBLE COLUMNS, because `%-9s` counts ANSI escape bytes and pads a coloured
 cell to nothing, and because a rune is not a column — a CJK character occupies

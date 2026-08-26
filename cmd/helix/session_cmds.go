@@ -228,7 +228,7 @@ func handleResumeCommand(c cmdArgs) {
 	color.Cyan("Resuming %s (%s, %d turns)", snap.ID,
 		snap.CreatedAt.Format("2006-01-02 15:04"), len(snap.Turns))
 	for _, t := range snap.Turns {
-		fmt.Printf("  %s %s\n", shell.Fg(shell.HexSubtle, t.Timestamp.Format("15:04:05")),
+		fmt.Printf("  %s %s\n", shell.Fg(shell.HexMuted, t.Timestamp.Format("15:04:05")),
 			truncStr(t.UserText, 90))
 	}
 	fmt.Println()
@@ -278,8 +278,8 @@ func listSnapshots() {
 			label = "session"
 		}
 		fmt.Printf("  %s  %s  %s\n",
-			shell.Fg(shell.HexTertiary, s.ID),
-			shell.Fg(shell.HexSubtle, fmt.Sprintf("%2d turns · %-18s", s.Turns, label)),
+			shell.Fg(shell.HexAmber, s.ID),
+			shell.Fg(shell.HexMuted, fmt.Sprintf("%2d turns · %-18s", s.Turns, label)),
 			shell.Fg(shell.HexText, s.Preview))
 	}
 	fmt.Println()
@@ -465,12 +465,12 @@ func handleContextCommand() {
 	for _, b := range blocks {
 		est := ai.EstimateTokens(b.text)
 		total += est
-		fmt.Printf("  %-22s %8d   %s\n", b.name, est, shell.Fg(shell.HexSubtle, b.detail))
+		fmt.Printf("  %-22s %8d   %s\n", b.name, est, shell.Fg(shell.HexMuted, b.detail))
 	}
-	fmt.Printf("  %-22s %8s   %s\n", "Retrieved knowledge", "varies", shell.Fg(shell.HexSubtle, ragDetail))
+	fmt.Printf("  %-22s %8s   %s\n", "Retrieved knowledge", "varies", shell.Fg(shell.HexMuted, ragDetail))
 	fmt.Println("  " + strings.Repeat("─", 62))
 	fmt.Printf("  %-22s %8d   %s\n", "Persistent total", total,
-		shell.Fg(shell.HexSubtle, "carried into every planner prompt"))
+		shell.Fg(shell.HexMuted, "carried into every planner prompt"))
 	fmt.Println()
 
 	if len(turns) >= capacity && capacity > 0 {
@@ -583,7 +583,7 @@ func handleHistoryCommand(c cmdArgs) {
 	offset := len(matched) - len(shown)
 	for i, line := range shown {
 		fmt.Printf("  %s %s\n",
-			shell.Fg(shell.HexSubtle, fmt.Sprintf("%5d", offset+i+1)),
+			shell.Fg(shell.HexMuted, fmt.Sprintf("%5d", offset+i+1)),
 			shell.Fg(shell.HexText, line))
 	}
 	fmt.Println()

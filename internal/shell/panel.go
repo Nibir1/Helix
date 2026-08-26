@@ -179,7 +179,7 @@ func KV(label, value string, width int) string {
 	if pad < 0 {
 		pad = 0
 	}
-	head := Fg(HexSubtle, label) + strings.Repeat(" ", pad+2)
+	head := Fg(HexMuted, label) + strings.Repeat(" ", pad+2)
 
 	// The value column starts after the gutter (4 cells, per PanelLine) and the
 	// label block (width + 2), inside the same limit PanelWrap uses.
@@ -374,7 +374,12 @@ func Badge(s State, text string) string {
 	case StateBad:
 		return Fg(HexRectifier, glyphBad+" ") + Fg(HexRectifier, text)
 	default:
-		return Fg(HexSubtle, glyphBullet+" ") + Fg(HexSubtle, text)
+		// Dim glyph, readable word. Every other badge colours its text to match
+		// its glyph, but idle's glyph is chrome — matching it would put the
+		// state word in the same tone as the muted detail that follows it, so
+		// "off  ready when you are" would read as one flat phrase. The quiet
+		// comes from the bullet; the word still has to be legible.
+		return Fg(HexSubtle, glyphBullet+" ") + Fg(HexText, text)
 	}
 }
 
@@ -391,13 +396,13 @@ func PadVisible(s string, width int) string {
 }
 
 // Value highlights a value worth reading — a model name, a port, a path.
-func Value(s string) string { return Fg(HexTertiary, s) }
+func Value(s string) string { return Fg(HexAmber, s) }
 
 // Muted renders secondary detail that should not compete with the value.
-func Muted(s string) string { return Fg(HexSubtle, s) }
+func Muted(s string) string { return Fg(HexMuted, s) }
 
 // Arrow joins the links of a chain (a provider failover chain, a pipeline).
-func Arrow() string { return Fg(HexSubtle, " "+glyphArrow+" ") }
+func Arrow() string { return Fg(HexMuted, " "+glyphArrow+" ") }
 
 // Table renders aligned columns behind the panel gutter.
 //
@@ -455,7 +460,7 @@ func Table(headers []string, rows [][]string) []string {
 	}
 
 	out := []string{
-		PanelLine(render(headers, func(s string) string { return Fg(HexSubtle, strings.ToUpper(s)) })),
+		PanelLine(render(headers, func(s string) string { return Fg(HexMuted, strings.ToUpper(s)) })),
 	}
 	for _, r := range rows {
 		out = append(out, PanelLine(render(r, func(s string) string { return s })))
@@ -492,12 +497,12 @@ func Menu(items []MenuItem) []string {
 	out := make([]string, 0, len(items))
 	for i, it := range items {
 		num := Fg(HexSubtle, fmt.Sprintf("%2d", i+1)) + Fg(HexSubtle, ")")
-		line := num + " " + PadVisible(Fg(HexTertiary, it.Label), labelWidth+2)
+		line := num + " " + PadVisible(Fg(HexAmber, it.Label), labelWidth+2)
 		if it.Note != "" {
 			line += Muted(it.Note)
 		}
 		if it.Tag != "" {
-			colour := HexSubtle
+			colour := HexMuted
 			if it.Good {
 				colour = HexPrimary
 			}

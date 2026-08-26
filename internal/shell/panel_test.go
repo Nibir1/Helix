@@ -194,7 +194,9 @@ func TestKVLeavesFittingValuesAlone(t *testing.T) {
 	if strings.Contains(got, "\n") {
 		t.Errorf("a value that fits must stay on one line, got %q", got)
 	}
-	if want := PanelLine(Fg(HexSubtle, "MODE") +
+	// HexMuted, not HexSubtle: the label is TEXT, so it moved to the readable
+	// tone when the palette split chrome from text.
+	if want := PanelLine(Fg(HexMuted, "MODE") +
 		strings.Repeat(" ", w-len("MODE")+2) + value); got != want {
 		t.Errorf("fitting output changed:\n got %q\nwant %q", got, want)
 	}

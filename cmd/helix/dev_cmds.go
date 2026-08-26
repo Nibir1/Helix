@@ -112,7 +112,7 @@ func handleInitCommand(c cmdArgs) {
 	fmt.Println()
 	color.Cyan("Surveyed %s", wd)
 	for _, line := range strings.Split(strings.TrimRight(survey, "\n"), "\n") {
-		fmt.Println("  " + shell.Fg(shell.HexSubtle, truncStr(line, 100)))
+		fmt.Println("  " + shell.Fg(shell.HexMuted, truncStr(line, 100)))
 	}
 	fmt.Println()
 
@@ -303,7 +303,7 @@ func handleDiffCommand(c cmdArgs) {
 			fmt.Println()
 			color.Yellow("Untracked files (absent from the diff above):")
 			for _, f := range strings.Split(untracked, "\n") {
-				fmt.Println("  " + shell.Fg(shell.HexSubtle, f))
+				fmt.Println("  " + shell.Fg(shell.HexMuted, f))
 			}
 		}
 	}
@@ -361,7 +361,7 @@ func printDiff(body string) {
 		switch {
 		case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"),
 			strings.HasPrefix(line, "diff "), strings.HasPrefix(line, "index "):
-			fmt.Println(shell.Fg(shell.HexSubtle, line))
+			fmt.Println(shell.Fg(shell.HexMuted, line))
 		case strings.HasPrefix(line, "@@"):
 			fmt.Println(shell.Fg(shell.HexTertiary, line))
 		case strings.HasPrefix(line, "+"):

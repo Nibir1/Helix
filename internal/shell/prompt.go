@@ -29,14 +29,38 @@ import (
 
 // Helix Color Palette (Tron / Red Team)
 const (
+	// Helix identity — the brand, unchanged. These are what the banner, the
+	// prompt blocks and the state badges are built from.
 	HexPrimary   = "#04D9FF" // Electric Cyan
 	HexSecondary = "#FF0055" // Neon Magenta
 	HexRectifier = "#FF0000" // Aggressive Red
-	HexVoid      = "#050505" // Deep Black
+	HexVoid      = "#030504" // Near-black (Tron poster black)
 	HexGrid      = "#1A1A1A" // Dim Grey
-	HexTertiary  = "#FF9900" // Orange
 	HexText      = "#FAFAFA" // White
-	HexSubtle    = "#444444" // Grey
+
+	// The reading layer, drawn from the Tron Legacy poster palette
+	// (#193f4a / #2f8ca3 / #f4af2d / #fffffe / #030504) and lifted along its
+	// own hue until it is actually legible on a dark terminal.
+	//
+	// This is a CONTRAST FIX, not a repaint. HexSubtle was #444444 — a flat
+	// grey measuring 1.44:1 against an ordinary dark background, where WCAG's
+	// floor for body text is 4.5:1 and even large text wants 3:1. It was
+	// carrying two incompatible jobs: panel rules and gutters, which SHOULD
+	// recede, and prose and labels, which must be readable. At one value the
+	// readable half lost, so /about rendered its philosophy in text that was
+	// very nearly invisible.
+	//
+	// Split in two, each measured against #282C34 (a common dark theme, and
+	// the lighter of the plausible backgrounds — so these numbers are the
+	// worst case, not the flattering one):
+	HexSubtle = "#2C6E82" // 2.44:1 — chrome only: rules, gutters, list numbers
+	HexMuted  = "#4FB8D4" // 6.09:1 — secondary TEXT: prose, labels, headers
+	HexAmber  = "#F4AF2D" // 7.34:1 — Tron gold, the value colour
+	HexTeal   = "#193F4A" // the poster's deep teal, for filled blocks
+
+	// HexTertiary is kept as the warning hue. It reads at 6.54:1, and orange
+	// carries "caution" in a way the gold does not.
+	HexTertiary = "#FF9900" // Orange
 )
 
 // Width-safe glyphs (render 1-cell in every terminal).

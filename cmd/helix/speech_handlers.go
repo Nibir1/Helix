@@ -140,7 +140,7 @@ func askFallback(kind string, names []string, primary string) []string {
 	for i, name := range options {
 		row := fallbackRow(key, name)
 		cells = append(cells, []string{
-			shell.Fg(shell.HexSubtle, fmt.Sprintf("%2d)", i+1)),
+			shell.Fg(shell.HexMuted, fmt.Sprintf("%2d)", i+1)),
 			shell.Value(name),
 			shell.Muted(row.cost),
 			shell.Badge(row.state, row.ready),
@@ -524,7 +524,7 @@ func printSpeechTable(title string, rows []speech.PricingEntry) {
 			mark = shell.Fg(shell.HexSecondary, "★")
 		}
 		cells = append(cells, []string{
-			shell.Fg(shell.HexSubtle, fmt.Sprintf("%2d)", i+1)),
+			shell.Fg(shell.HexMuted, fmt.Sprintf("%2d)", i+1)),
 			shell.Value(e.Provider),
 			shell.Fg(shell.HexText, truncStr(e.Model, 22)),
 			cost,
