@@ -43,7 +43,7 @@ exact sequence:
    three panel-primitive width bugs — was work no checkbox asked for: a capability the owner
    requested, then defects found by auditing and by *rendering* what the code produced. None of it
    would have been visible from §13. If you are here to write Go and the tracker looks finished,
-   read §9's rules 8-11 and go looking at output rather than at checkboxes.
+   read §9's rules 8-12 and go looking at output rather than at checkboxes.
 4. **Read that phase's section in §6** and every file it lists under "Files touched".
 5. **Verify the baseline is green before changing anything:**
    ```bash
@@ -1920,7 +1920,18 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
     (`internal/shell/contrast_test.go`): text tones must clear AA, chrome must be visible but
     stay BELOW the text it frames, and measure against the LIGHTEST plausible background so
     the figure is the worst case rather than the flattering one.
-11. **Rendered output is verified by RENDERING it.** Reading the code gave a confident wrong answer
+11. **A red test is a message, not an obstacle. Read it before re-running it.**
+    `TestE2E_ManualModeSafetyValve` failed twice in one session; both times it was re-run, came
+    back green, and was written off as "a flake, unrelated — it runs `ls`". It was a real race
+    the harness's own doc comment describes verbatim: `Expect` matches the FIRST occurrence in
+    the accumulated buffer, so a second command printing the SAME marker is satisfied by the
+    previous command's output and returns while this one is still running (`SendExpect` exists
+    for exactly this). Re-running until green is not a diagnosis — it is the absence of one, and
+    it hides precisely the timing bugs that will fail in CI on someone else's machine. When a
+    test does turn out to be flaky, prove it: find the cause, then check whether the pattern is
+    systemic rather than assuming — a script over every e2e function found 21 `WriteLine`+`Expect`
+    pairs and exactly one that repeats a marker.
+12. **Rendered output is verified by RENDERING it.** Reading the code gave a confident wrong answer
    three times in the panel primitives: `KV` overflowing, `PanelWrap` counting bytes,
    `truncateANSI` counting runes. All three look correct in source and break on screen. Print the
    panel (or screenshot the PTY) and measure the visible width; and when the bug is about units,

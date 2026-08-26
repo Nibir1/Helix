@@ -204,7 +204,10 @@ can never instruct it.
 | Task list | open `/todo` items | 10 items |
 | Project context | `HELIX.md` / `AGENTS.md` / `CLAUDE.md` | 16 KB read, 6 KB injected |
 
-`/context` shows the live size of each, with estimated token counts.
+`/context` shows the live size of each, with estimated token counts. `/memory`
+shows the turns themselves, and says on the screen that they are replayed as
+zero-authority data — the property is what makes replaying them safe, so the
+command that displays them is the right place to state it.
 
 Session turns carry provenance as well as text. A turn whose transcript the Voice
 Risk Policy refused to act on — below the confidence gate — is labelled

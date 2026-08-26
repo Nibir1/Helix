@@ -111,6 +111,11 @@ Helix goes quiet in a different way — it hears you and cannot answer. Add an `
   drop flip Helix to the local model with a spoken notice, and a periodic probe switches back.
 - It **health-checks the local model before switching**, so leaving this armed on a board with no
   local runtime changes nothing — it simply never engages.
+- If you have selected the local provider *directly* — the ordinary outcome of choosing Ollama at
+  first run — the primary and the fallback are the same provider and the breaker is inert. There
+  is nothing to fall back to. `/provider-status` says so ("not applicable — ollama is already the
+  local provider") rather than reporting a fallback that cannot help; it used to render the
+  self-referential "armed — will switch to ollama if ollama fails".
 - `ensure_ready: true` additionally lets `helix daemon` pull the Ollama model at startup. Left at
   the default (`false`) the daemon only verifies and warns in the journal — deliberate, because a
   multi-gigabyte download on a metered edge link should be your choice, not a side effect.
