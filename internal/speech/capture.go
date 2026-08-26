@@ -14,6 +14,8 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,9 +23,36 @@ import (
 // ErrNoRecorder is returned when neither sox nor ffmpeg is installed.
 var ErrNoRecorder = errors.New("no audio recorder found — install sox (`brew install sox` / `apt install sox`) or ffmpeg")
 
+// Conversational capture budgets.
+//
+// These are BACKSTOPS, not turn lengths. Endpointing is done by the silence
+// gate below — a turn ends when the speaker stops, which is how a conversation
+// works — and MaxDuration exists only so a stuck-open microphone cannot record
+// forever.
+//
+// The previous conversational cap was 12s, and it was doing the endpointing:
+// sox's `trim 0 12.0` cut mid-word, the truncated clip was transcribed and
+// answered, and the REST of the sentence arrived as a separate turn. A single
+// spoken sentence became two half-turns and two unrelated answers. That is the
+// "walkie-talkie" failure — Helix was not taking turns with the speaker, it was
+// interrupting them on a stopwatch.
+//
+// 45s is well past any conversational utterance (a slow speaker manages ~110
+// words) while still bounding a mic that never goes quiet.
+const (
+	ConversationalMaxDuration = 45 * time.Second
+
+	// DefaultSilenceTail is how long the speaker must be quiet before the turn
+	// is considered finished. Long enough to survive the pause mid-sentence
+	// that ordinary speech is full of; short enough that Helix does not feel
+	// slow to answer. Override with HELIX_SOX_SILENCE_SECS.
+	DefaultSilenceTail = 1.5
+)
+
 // CaptureOptions controls one recording.
 type CaptureOptions struct {
-	// MaxDuration caps the clip length.
+	// MaxDuration caps the clip length. A BACKSTOP against a stuck microphone,
+	// not the length of a turn — see ConversationalMaxDuration.
 	MaxDuration time.Duration
 	// SampleRate is the capture rate (default 16000, ideal for STT).
 	SampleRate int
@@ -31,6 +60,22 @@ type CaptureOptions struct {
 	// gating — for chunk-scanning loops (wake word, ambient) where quiet
 	// chunks are expected and must yield a clip, not an error.
 	NoSilenceStop bool
+}
+
+// silenceTail renders the trailing-silence threshold sox uses to end a turn.
+//
+// Clamped rather than trusted: a zero or negative value makes sox end the turn
+// on the first inter-word gap (every utterance becomes one word), and a very
+// large one makes Helix appear to have stopped listening. Both are worse than
+// ignoring the override.
+func silenceTail() string {
+	secs := DefaultSilenceTail
+	if v := strings.TrimSpace(os.Getenv("HELIX_SOX_SILENCE_SECS")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0.3 && f <= 10 {
+			secs = f
+		}
+	}
+	return fmt.Sprintf("%.1f", secs)
 }
 
 // DetectRecorder returns the concrete recorder binary — "rec", "sox", or
@@ -106,15 +151,18 @@ func RecordClip(ctx context.Context, opts CaptureOptions) (AudioFormat, error) {
 				path}
 		}
 		if !opts.NoSilenceStop {
-			// Stop after 2s below the silence floor (crude VAD for
-			// utterances). 1% by default — sensitive enough to catch quiet
-			// speech, high enough to ignore most room noise; override with
-			// HELIX_SOX_SILENCE_PCT (e.g. "2%") for noisy rooms.
+			// Silence IS the endpointer: stop once the speaker has been below
+			// the floor for the tail duration. 1% by default — sensitive enough
+			// to catch quiet speech, high enough to ignore most room noise;
+			// override with HELIX_SOX_SILENCE_PCT (e.g. "2%") for noisy rooms,
+			// and HELIX_SOX_SILENCE_SECS for how long a pause may run before
+			// Helix treats the turn as finished.
 			sil := os.Getenv("HELIX_SOX_SILENCE_PCT")
 			if sil == "" {
 				sil = "1%"
 			}
-			args = append(args, "silence", "1", "0.1", sil, "1", "2.0", sil)
+			args = append(args, "silence", "1", "0.1", sil,
+				"1", silenceTail(), sil)
 		}
 		args = append(args, "trim", "0", fmt.Sprintf("%.1f", opts.MaxDuration.Seconds()))
 		cmd = exec.CommandContext(ctx, args[0], args[1:]...)

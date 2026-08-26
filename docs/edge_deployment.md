@@ -281,6 +281,9 @@ Useful environment knobs for edge boards:
 
 - `HELIX_AUDIO_DEVICE` — override the capture device when the board's default mic isn't the one you
   want (e.g. a USB mic on a Jetson).
+- `HELIX_SOX_SILENCE_SECS` — how long a pause may run before Helix treats the turn as finished
+  (default `1.5`, clamped to 0.3–10). Lower is snappier and risks cutting you off mid-thought;
+  higher feels slower to answer. This, not a duration cap, is what ends a turn.
 - `HELIX_SOX_SILENCE_PCT` — raise the silence floor (e.g. `2%`) in a noisy room / with a hot mic so
   endpointing doesn't trip early.
 

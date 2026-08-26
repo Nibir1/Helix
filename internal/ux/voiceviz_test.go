@@ -53,3 +53,52 @@ func TestVoiceVizLifecycleIdempotent(t *testing.T) {
 	v.Stop() // stop on idle must not panic
 	v.Stop()
 }
+
+// The HUD redraws one terminal line in place, so anything else printing while
+// it runs lands inside that line. A real session produced
+//
+//	● ● LISTENING |▁▂▃| 7.0sNVD update skipped/failed: context deadline exceeded
+//
+// LineHeld is how a background writer knows to stay quiet. It must be true only
+// while a HUD is actually animating, and must return to false afterwards — a
+// flag that stuck on would silence background diagnostics permanently, trading
+// a cosmetic bug for a silent one.
+func TestLineHeldTracksTheRunningHUD(t *testing.T) {
+	if LineHeld() {
+		t.Fatal("precondition: no HUD should own the line before one starts")
+	}
+
+	v := NewVoiceViz()
+	v.Start(VizListening)
+	held := LineHeld()
+	v.Stop()
+
+	// On a non-TTY (CI, and `go test` without a terminal) the HUD deliberately
+	// does not animate, so it must not claim the line either — there is nothing
+	// to corrupt and background output should flow normally.
+	if v.tty && !held {
+		t.Error("an animating HUD must claim the terminal line")
+	}
+	if !v.tty && held {
+		t.Error("a HUD that does not animate must not silence background output")
+	}
+	if LineHeld() {
+		t.Error("the line must be released when the HUD stops")
+	}
+}
+
+// Stop is called from defers and error paths; releasing twice, or stopping a
+// HUD that never started, must not leave the flag wrong.
+func TestLineHeldSurvivesRedundantStops(t *testing.T) {
+	v := NewVoiceViz()
+	v.Stop()
+	if LineHeld() {
+		t.Fatal("stopping a HUD that never ran must not hold the line")
+	}
+	v.Start(VizListening)
+	v.Stop()
+	v.Stop()
+	if LineHeld() {
+		t.Error("a double Stop must leave the line released")
+	}
+}

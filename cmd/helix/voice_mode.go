@@ -68,6 +68,11 @@ func enterVoiceMode(persist bool) {
 	// conversation is happening, and scoping it here is what makes "leaving live
 	// mode drops the retained audio" true rather than aspirational.
 	speech.EnableConversationContext(cfg.Speech.TTS.ContextTurns, cfg.Speech.TTS.ContextMaxBytes)
+
+	// Scoped to the mode like context is: the probe only makes sense while a
+	// conversation is happening, and it must not keep sampling the microphone
+	// after /blackbox off.
+	speech.EnableBargeIn(cfg.Speech.TTS.BargeIn)
 	if persist {
 		cfg.UserPrefs.VoiceMode = true
 		_ = cfg.SavePreferences()
@@ -143,6 +148,7 @@ func exitVoiceMode(persist bool) {
 	// Drop retained conversation audio with the mode. Nothing here was ever
 	// written to disk, so this is the only place it needs to be released.
 	speech.EnableConversationContext(0, 0)
+	speech.EnableBargeIn(false)
 
 	voiceModeActive = false
 	if ttyPrompter != nil {
@@ -284,17 +290,27 @@ func voiceTurnWithRetry() (input.InputEvent, error) {
 }
 
 // batchVoiceTurn is the original record-whole-clip→transcribe path (Phase 2).
-// A silent room ends the turn after ~25s (ErrNoSpeech → gentle retry) instead
-// of the old 80s dead-air hang.
+//
+// The turn ends when the SPEAKER stops, not when a timer does. It used to cap
+// capture at 12s, which meant a sentence longer than that was cut mid-word,
+// transcribed, answered, and its remainder arrived as a separate turn with a
+// separate answer — one thought, two half-conversations. The cap is now a
+// backstop against a stuck microphone and sits far outside any real utterance.
 func batchVoiceTurn() (input.InputEvent, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	// The context must outlast the capture backstop, or IT becomes the cutter
+	// and we are back to a stopwatch ending turns. Capture stops on silence
+	// long before either fires in any normal turn.
+	ctx, cancel := context.WithTimeout(context.Background(),
+		speech.ConversationalMaxDuration+15*time.Second)
 	unreg := utils.RegisterOperation(cancel)
 	defer unreg()
 	defer cancel()
 
 	viz := ux.NewVoiceViz()
 	viz.Start(ux.VizListening)
-	clip, err := speech.RecordClip(ctx, speech.CaptureOptions{MaxDuration: 12 * time.Second})
+	clip, err := speech.RecordClip(ctx, speech.CaptureOptions{
+		MaxDuration: speech.ConversationalMaxDuration,
+	})
 	if err != nil {
 		viz.Stop()
 		if errors.Is(err, speech.ErrNoSpeech) {
@@ -345,7 +361,13 @@ var errStreamDial = errors.New("stream dial failed")
 // already be finished and settled: voiceTurn owns that ordering
 // (PlayAlertSync + micSettleDelay) for this path and the batch one alike.
 func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Same rule as the batch path: the deadline is a backstop, never the thing
+	// that ends a turn. At 15s a speaker who ran long had the stream closed
+	// under them mid-sentence, and the remainder became a separate turn with a
+	// separate answer. The provider's utterance-final and the silence gap below
+	// do the endpointing.
+	ctx, cancel := context.WithTimeout(context.Background(),
+		speech.ConversationalMaxDuration+15*time.Second)
 	unreg := utils.RegisterOperation(cancel)
 	defer unreg()
 	defer cancel()

@@ -221,6 +221,44 @@ func ProviderKey(provider string) string {
 }
 
 // ProviderStatus returns human-readable provider status lines.
+// ProviderRow is one provider's state, structured.
+//
+// ProviderStatus below returns pre-formatted strings, which meant every caller
+// that wanted to RENDER the state (badges, a table, a colour per key state) had
+// to parse " - " back apart — the same re-parse-your-own-output mistake the
+// metrics reader was created to avoid. New callers use this.
+type ProviderRow struct {
+	Name     string
+	Display  string
+	KeyState string // "configured", "missing", or "" for a keyless local provider
+	Local    bool
+	Active   bool
+}
+
+// ProviderStatusRows reports every registered provider's state.
+func ProviderStatusRows() []ProviderRow {
+	if registry == nil {
+		return nil
+	}
+	out := make([]ProviderRow, 0)
+	for _, name := range registry.Names() {
+		p, err := registry.Get(name)
+		if err != nil {
+			continue
+		}
+		row := ProviderRow{Name: name, Display: p.DisplayName(), Local: !p.RequiresAPIKey()}
+		if p.RequiresAPIKey() {
+			row.KeyState = "missing"
+			if registry.HasAPIKey(name) {
+				row.KeyState = "configured"
+			}
+		}
+		row.Active = activeProvider != nil && activeProvider.Name() == name
+		out = append(out, row)
+	}
+	return out
+}
+
 func ProviderStatus() []string {
 	if registry == nil {
 		return []string{"provider registry not initialized"}

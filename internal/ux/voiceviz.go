@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/term"
@@ -81,6 +82,7 @@ func (v *VoiceViz) Start(state VizState) {
 	v.stop = make(chan struct{})
 	v.mu.Unlock()
 
+	claimTerminalLine()
 	fmt.Print("\033[?25l")
 	go v.loop(v.stop)
 }
@@ -115,7 +117,35 @@ func (v *VoiceViz) Stop() {
 	v.mu.Unlock()
 
 	fmt.Print("\r\033[2K\033[?25h")
+	releaseTerminalLine()
 }
+
+// The HUD owns a single terminal line and redraws it in place, so anything else
+// that prints while it runs lands INSIDE that line. A real session produced
+//
+//	● ● LISTENING |▁▂▃| 7.0sNVD update skipped/failed: context deadline exceeded
+//
+// — a background feed's debug line spliced into the middle of the waveform,
+// with no newline and no way to tell where one ended and the other began.
+//
+// A mutex cannot fix this: the writers are ordinary fmt/color calls scattered
+// across packages, and wrapping every one of them would be a bigger change than
+// the bug deserves. Instead the HUD publishes that it owns the line, and the
+// background writers that are not urgent enough to interrupt a live
+// conversation check LineHeld and stay quiet. A message worth interrupting for
+// (an error the user must act on) simply does not check it.
+var terminalLineHeld atomic.Bool
+
+func claimTerminalLine()   { terminalLineHeld.Store(true) }
+func releaseTerminalLine() { terminalLineHeld.Store(false) }
+
+// LineHeld reports whether an animated HUD currently owns the terminal line.
+//
+// Callers that print progress or debug chatter should skip it while this is
+// true. Deferring rather than dropping would be nicer and is not worth the
+// machinery: these messages are diagnostics about a background feed, and the
+// user is mid-conversation.
+func LineHeld() bool { return terminalLineHeld.Load() }
 
 // Running reports whether the HUD is animating.
 func (v *VoiceViz) Running() bool {

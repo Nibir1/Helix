@@ -1,98 +1,73 @@
 // internal/speech/bargein_test.go
-// Purpose: BlackBox P12.5 — barge-in v2. A spoken reply must be interruptible
-// mid-sentence, and the handle must be safe to call at any time.
+// Purpose: barge-in is the one feature here that can make things WORSE if it
+// misfires — a false trigger silences Helix mid-reply with no signal that it
+// was wrong — so its defaults and its refusal paths are pinned.
 package speech
 
 import (
 	"context"
-	"errors"
-	"sync"
 	"testing"
 	"time"
 )
 
-func TestStopSpeakingIsSafeWhenIdle(t *testing.T) {
-	// Nothing in flight: a barge-in trigger must never panic or block. Wake
-	// events and Ctrl+C can arrive at any moment, including when Helix is not
-	// speaking at all.
-	StopSpeaking()
-	if Speaking() {
-		t.Fatal("no reply in flight must report not speaking")
+// Off unless asked. A probe that ran by default would sample the microphone in
+// every inter-sentence gap of every reply, which is both a latency cost and a
+// privacy surprise nobody opted into.
+func TestBargeInIsOffByDefault(t *testing.T) {
+	if BargeInEnabled() {
+		t.Fatal("barge-in must be off until explicitly enabled")
+	}
+	if BargeInProbe(context.Background()) {
+		t.Error("a disabled probe must never report an interruption")
 	}
 }
 
-func TestBeginSpeakingPublishesAndReleasesHandle(t *testing.T) {
-	if Speaking() {
-		t.Fatal("precondition: nothing should be speaking")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	release := beginSpeaking(cancel)
-	if !Speaking() {
-		t.Fatal("an in-flight reply must be visible to a barge-in trigger")
-	}
-
-	// The published handle must actually cancel the reply's context.
-	StopSpeaking()
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("StopSpeaking did not cancel the in-flight context")
-	}
-	if !errors.Is(ctx.Err(), context.Canceled) {
-		t.Fatalf("expected context.Canceled, got %v", ctx.Err())
-	}
-
-	release()
-	if Speaking() {
-		t.Fatal("a released reply must no longer report speaking")
+// Disabled must also mean FREE: the probe returns before its settle delay, so
+// leaving it off costs nothing per sentence.
+func TestDisabledBargeInAddsNoLatency(t *testing.T) {
+	EnableBargeIn(false)
+	start := time.Now()
+	_ = BargeInProbe(context.Background())
+	if elapsed := time.Since(start); elapsed > bargeSettleDelay {
+		t.Errorf("a disabled probe waited %v; it must return immediately", elapsed)
 	}
 }
 
-func TestStopSpeakingIsRaceSafe(t *testing.T) {
-	// A wake event, a keypress, and Ctrl+C can all fire at once. Run with
-	// -race to make this meaningful.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	release := beginSpeaking(cancel)
-	defer release()
+// A cancelled reply must not be re-interrupted, and a probe that cannot listen
+// must not manufacture an interrupt out of its own failure.
+func TestBargeInFailsSafe(t *testing.T) {
+	EnableBargeIn(true)
+	t.Cleanup(func() { EnableBargeIn(false) })
 
-	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			StopSpeaking()
-			_ = Speaking()
-		}()
-	}
-	wg.Wait()
-
-	if ctx.Err() == nil {
-		t.Fatal("concurrent barge-in triggers must still cancel the reply")
-	}
-}
-
-// An already-cancelled context must short-circuit rather than speak: a reply
-// the user already interrupted should not start playing.
-func TestSpeakStreamRespectsPreCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-
-	err := SpeakStream(ctx, "This reply should never be spoken. Not one word of it.")
-	if err == nil {
-		t.Fatal("a cancelled context must not produce speech")
+	if BargeInProbe(ctx) {
+		t.Error("a cancelled context must not report an interruption")
 	}
 }
 
-// Empty text is a no-op and must not publish a speaking handle.
-func TestSpeakStreamEmptyTextIsNoOp(t *testing.T) {
-	if err := SpeakStream(context.Background(), "   "); err != nil {
-		t.Fatalf("empty text must be a silent no-op, got %v", err)
+// The probe's floor must sit well above the ordinary speech gate. It runs with
+// no transcription behind it, so unlike a captured turn there is no second
+// check to catch a mistake — the cost of a false positive is Helix silencing
+// itself for a chair scrape.
+func TestBargeInThresholdIsStricterThanTheSpeechGate(t *testing.T) {
+	if bargeRMSFloor <= speechRMSFloor {
+		t.Errorf("barge-in floor %v must be stricter than the speech floor %v",
+			bargeRMSFloor, speechRMSFloor)
 	}
-	if Speaking() {
-		t.Fatal("a no-op must not leave a speaking handle published")
+}
+
+// The added gap must stay inside the pause a listener already expects between
+// sentences, or interruption is bought with a stutter in every reply.
+func TestBargeInGapStaysWithinNaturalSentencePause(t *testing.T) {
+	total := bargeSettleDelay + bargeWindow
+	if total > 500*time.Millisecond {
+		t.Errorf("inter-sentence probe costs %v; ordinary speech pauses ~300-500ms "+
+			"between sentences, and past that the gap reads as a stall", total)
+	}
+	// The settle delay is not optional: without it the probe hears the tail of
+	// the sentence Helix just spoke and interrupts on its own voice.
+	if bargeSettleDelay <= 0 {
+		t.Error("the probe must let the speaker ring down before listening")
 	}
 }

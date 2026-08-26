@@ -95,7 +95,18 @@ provider that returns silence hands off to the next fallback in the chain.
 **Is the AI hearing you?** Run `/mictest` — it captures 3s, reports the
 recorder, the captured duration, the measured level (RMS + dBFS), and whether
 that clears the speech gate. A `QUIET` result points at the OS input device,
-not Helix. `HELIX_SOX_SILENCE_PCT` (default `1%`) tunes how quiet a voice can
+not Helix.
+
+**A turn ends when you stop speaking, not when a timer runs out.** sox's silence
+gate does the endpointing: capture begins on speech and ends after
+`HELIX_SOX_SILENCE_SECS` (default `1.5`) below the noise floor. The 45-second cap
+is a backstop against a microphone that never goes quiet — it is not a limit on
+how long you may talk. It used to be 12 seconds and it used to be doing the
+endpointing, which cut long sentences mid-word: the truncated half was
+transcribed and answered, and the remainder arrived as a *separate turn with a
+separate answer*. One thought became two half-conversations.
+
+`HELIX_SOX_SILENCE_PCT` (default `1%`) tunes how quiet a voice can
 be before sox treats it as silence.
 
 ## 3. Hands-free wake word

@@ -89,18 +89,23 @@ const (
 	kokoroDefaultEndpoint  = "http://127.0.0.1:8880/v1"
 )
 
+// localSTTURL and localTTSURL resolve where a sidecar is ACTUALLY configured to
+// answer, which is what sidecarEndpoint already knows.
+//
+// They used to consult only cfg.Speech.*.BaseURL — the PRIMARY provider's URL —
+// and otherwise return the stock default. But the wizard does not write
+// BaseURL when it moves a sidecar off a busy port: it writes the per-provider
+// Endpoints map, which these never read. So after the wizard reassigned
+// whisper-local to a free port and said so on screen, the conflict report two
+// panels later still announced it on 8080 and warned about a collision with
+// llama.cpp that no longer existed. A report whose whole job is naming the
+// right port was reading the wrong field.
 func localSTTURL() string {
-	if cfg.Speech.STT.Provider == "whisper-local" && strings.TrimSpace(cfg.Speech.STT.BaseURL) != "" {
-		return cfg.Speech.STT.BaseURL
-	}
-	return whisperDefaultEndpoint
+	return sidecarEndpoint("stt", "whisper-local", whisperDefaultEndpoint)
 }
 
 func localTTSURL(provider, fallback string) string {
-	if cfg.Speech.TTS.Provider == provider && strings.TrimSpace(cfg.Speech.TTS.BaseURL) != "" {
-		return cfg.Speech.TTS.BaseURL
-	}
-	return fallback
+	return sidecarEndpoint("tts", provider, fallback)
 }
 
 func containsFold(list []string, want string) bool {

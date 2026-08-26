@@ -53,6 +53,21 @@ type voiceSidecar struct {
 	// Args renders the launch arguments for a port.
 	Args func(port int) []string
 
+	// Verify confirms the binary can actually RUN this sidecar, which is not
+	// the same question as the binary existing.
+	//
+	// piper is the case that proves it: its "binary" is python3, so a machine
+	// with any Python at all passed the presence check and Helix concluded
+	// piper was installed. It then skipped the install step, downloaded a 60 MB
+	// voice model, launched the server, and the process died on
+	// ModuleNotFoundError — after three confirmations and a long download, none
+	// of which could ever have led anywhere. Presence of an interpreter says
+	// nothing about the module it is being asked to run.
+	//
+	// Returns a reason when the runtime is unusable. A nil Verify means the
+	// binary is self-sufficient.
+	Verify func(binary string) (reason string, ok bool)
+
 	// Unmet reports a precondition Helix will NOT resolve for the user, and
 	// why. Distinct from a missing binary, which Helix offers to install: this
 	// is for a dependency the project has decided not to require at all.
@@ -206,13 +221,21 @@ func voiceSidecars() map[string]voiceSidecar {
 					"piper's voice IS a model file (~60 MB); this fetches it and its config into ~/.helix",
 					true
 			},
-			Args: func(port int) []string {
-				return []string{
-					"-m", "piper.http_server",
-					"--model", piperVoicePath(),
-					"--port", fmt.Sprint(port),
+			Verify: func(bin string) (string, bool) {
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				// Import the SERVER module, not the package root: piper-tts can
+				// be installed while `piper.http_server` still fails, because
+				// the HTTP server imports flask and flask is not one of its
+				// dependencies. Importing the package root would report success
+				// for exactly the configuration that dies on startup.
+				if err := exec.CommandContext(ctx, bin, "-c", "import piper.http_server").Run(); err != nil {
+					return bin + " runs, but `import piper.http_server` fails — " +
+						"the piper module (or its flask dependency) is not installed for this interpreter", false
 				}
+				return "", true
 			},
+			Args: func(port int) []string { return speech.PiperArgs(port) },
 		},
 	}
 }
@@ -250,10 +273,36 @@ func offerSidecarSetup(kind, provider string) bool {
 	}
 
 	binary, installed := findFirstBinary(spec.Binaries)
+	// A binary on PATH is necessary and not sufficient. Verify runs the real
+	// question — can this interpreter actually serve? — BEFORE the model
+	// download and the three confirmations that follow, so a machine that
+	// cannot run the sidecar is told so first rather than last.
+	if installed && spec.Verify != nil {
+		if reason, ok := spec.Verify(binary); !ok {
+			fmt.Println()
+			for _, l := range shell.PanelWrap(reason, shell.Muted) {
+				fmt.Println(l)
+			}
+			installed = false
+		}
+	}
 	if !installed {
 		binary, installed = offerSidecarInstall(provider, spec)
 		if !installed {
 			return false
+		}
+		// The install claimed success; confirm it actually satisfied the thing
+		// that was missing. pip can exit 0 having installed into a different
+		// interpreter than the one Helix is about to launch.
+		if spec.Verify != nil {
+			if reason, ok := spec.Verify(binary); !ok {
+				fmt.Println()
+				color.Red("%s still cannot start after the install:", provider)
+				for _, l := range shell.PanelWrap(reason, shell.Muted) {
+					fmt.Println(l)
+				}
+				return false
+			}
 		}
 	}
 
@@ -358,8 +407,14 @@ func startVoiceSidecar(kind, provider, binary string, spec voiceSidecar) bool {
 	)
 	if ready != nil {
 		color.Red("%s did not come up: %v", provider, ready)
+		// Wrapped, not truncated. At 160 characters a Python traceback loses
+		// exactly its payload: the real failure printed
+		// "(ModuleNotFoundError: No modul…" and cut off before naming the
+		// module, which is the only part anyone can act on.
 		for _, line := range sidecar.LogTail(proc.LogPath, 8) {
-			color.Yellow("  %s", truncStr(line, 160))
+			for _, l := range shell.PanelWrap(line, shell.Muted) {
+				fmt.Println(l)
+			}
 		}
 		return false
 	}
@@ -476,10 +531,10 @@ func runVisibleCommand(cmdLine string, timeout time.Duration) bool {
 // piperVoiceBaseURL is where the default voice model lives.
 const piperVoiceBaseURL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium"
 
-// piperVoicePath is where Helix keeps the default piper voice.
-func piperVoicePath() string {
-	return helixPath("piper-voices/en_US-lessac-medium.onnx")
-}
+// piperVoicePath is where Helix keeps the default piper voice. Defined in
+// internal/speech so the launcher, the diagnosis and the wizard hint cannot
+// disagree about it again.
+func piperVoicePath() string { return speech.PiperVoicePath() }
 
 // whisperModel is one downloadable speech-recognition model.
 type whisperModel struct {

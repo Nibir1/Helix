@@ -309,12 +309,23 @@ the microphone and camera states.
 Worth stating plainly, because "realtime voice AI" implies things this does not
 yet do:
 
-- **Capture is half-duplex.** The recorder does not run while the speaker does,
-  so you cannot talk over a reply and be heard. Interrupting a spoken reply works
-  via **Ctrl+C**, and leaving voice mode (`/blackbox off`) stops it mid-sentence. True
-  talk-over barge-in needs concurrent capture plus acoustic echo cancellation,
-  which is not implemented — without AEC the microphone would hear Helix's own
-  voice and transcribe it as your input.
+- **Capture is half-duplex, and voice interruption works at sentence
+  boundaries.** The recorder does not run while the speaker does, so you cannot
+  talk *over* a reply. What you can do — after `/config barge-in on` — is
+  speak in the pause **between sentences**: Helix listens in that gap, where the
+  speaker is idle and there is no echo to cancel, and stops if it hears you.
+
+  That is interruption at the pace of punctuation, not full duplex. A long
+  sentence plays to its end before Helix can notice you, and the probe adds
+  ~400 ms per sentence boundary (inside the 300–500 ms pause ordinary speech
+  already has there, so it reads as prosody rather than a stall). Its threshold
+  is deliberately stricter than the normal speech gate: nothing transcribes the
+  probe, so a false positive silences Helix with no way to tell it was wrong.
+
+  **Off by default**, and `Ctrl+C` stops a reply instantly with no microphone
+  involved. True talk-over barge-in still needs concurrent capture plus acoustic
+  echo cancellation, which is not implemented — without AEC the microphone would
+  hear Helix's own voice and transcribe it as your input.
 - **"Stop talking" only lands between turns**, for the same reason.
 - **The companion waits for a closed microphone.** An unprompted remark is
   queued, not spoken on the spot: it lands between a finished turn and the next

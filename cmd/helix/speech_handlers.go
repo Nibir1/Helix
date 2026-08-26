@@ -399,13 +399,16 @@ func commitSpeechSelection(sttCfg config.SpeechSTTConfig, ttsCfg config.SpeechTT
 		return
 	}
 
-	color.Green("Voice link configured.")
-
-	// Verify BEFORE claiming success. The wizard used to print "configured" and
-	// stop, so a selection that could never work — a sidecar that is not running,
-	// or a port owned by something else — only surfaced later as a failed /say,
-	// by which point the wizard looked like it had succeeded.
-	verifySpeechSelection()
+	// Verify BEFORE claiming success, which this had stopped doing: the
+	// "configured" line printed first and the verification contradicted it two
+	// lines later, so a run where piper never started still opened with a green
+	// "Voice link configured." The comment already said to verify first; the
+	// code had drifted from it.
+	if verifySpeechSelection() {
+		color.Green("Voice link configured.")
+	} else {
+		color.Yellow("Voice link saved, but not usable yet — see above.")
+	}
 
 	if rec, rerr := speech.DetectRecorder(); rerr != nil {
 		color.Yellow("Microphone note: %v", rerr)
@@ -415,8 +418,9 @@ func commitSpeechSelection(sttCfg config.SpeechSTTConfig, ttsCfg config.SpeechTT
 	fmt.Println(shell.Hint("/blackbox say voice link online   ·   /blackbox on   ·   /mictest"))
 }
 
-// verifySpeechSelection probes the newly selected chain and reports what it found.
-func verifySpeechSelection() {
+// verifySpeechSelection probes the newly selected chain and reports what it
+// found. Returns whether every selected provider answered.
+func verifySpeechSelection() bool {
 	// Endpoint collisions first: they explain a "reachable" probe that then fails
 	// every request, and no per-provider check can see them.
 	reportEndpointConflicts()
@@ -448,10 +452,11 @@ func verifySpeechSelection() {
 
 	if problems == 0 {
 		color.Green("Chain verified: every selected provider answered.")
-		return
+		return true
 	}
 	color.Yellow("%d selected provider(s) cannot serve a request yet.", problems)
 	color.Yellow("Fix the above, then re-check with /blackbox status — no need to re-run the wizard.")
+	return false
 }
 
 // filterCatalog narrows pricing rows to registered providers of one kind.
@@ -952,7 +957,10 @@ var localSidecarHints = map[string][]string{
 	},
 	"piper-local": {
 		"start it (Piper — docs/edge_deployment.md §5.1):",
-		"  python3 -m piper.http_server -m en_US-lessac-medium.onnx --port 5001",
+		// The canonical form, from internal/speech, with the absolute model
+		// path. The bare filename this used to print exists in no working
+		// directory, so the command was unrunnable as shown.
+		"  " + speech.PiperStartCmd("5001"),
 		"then point Helix at it (macOS AirPlay Receiver owns port 5000):",
 		"  /config tts-url http://127.0.0.1:5001",
 	},

@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -173,9 +175,40 @@ func whisperStartCmd(origin string) string {
 		endpointPort(origin))
 }
 
+// PiperVoicePath is where Helix keeps the default piper voice.
+//
+// Exported and owned here rather than in cmd/helix so the START COMMAND has
+// exactly one definition. It previously had three, and they disagreed: the
+// launcher passed `--model <absolute path>`, while the diagnosis and the
+// wizard hint both printed `-m en_US-lessac-medium.onnx` — a bare filename that
+// exists in no working directory, so the command Helix told a stuck user to run
+// could not work. A user who hit the failure saw two different commands on one
+// screen and no way to tell which was real.
+func PiperVoicePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "en_US-lessac-medium.onnx"
+	}
+	return filepath.Join(home, ".helix", "piper-voices", "en_US-lessac-medium.onnx")
+}
+
+// PiperArgs is the canonical argv (after the interpreter) for the piper server.
+func PiperArgs(port int) []string {
+	return []string{
+		"-m", "piper.http_server",
+		"--model", PiperVoicePath(),
+		"--port", fmt.Sprint(port),
+	}
+}
+
+// PiperStartCmd renders the same invocation as a copy-pasteable line.
+func PiperStartCmd(port string) string {
+	return fmt.Sprintf("python3 -m piper.http_server --model %s --port %s",
+		PiperVoicePath(), port)
+}
+
 func piperStartCmd(origin string) string {
-	return fmt.Sprintf("python3 -m piper.http_server -m en_US-lessac-medium.onnx --port %s",
-		endpointPort(origin))
+	return PiperStartCmd(endpointPort(origin))
 }
 
 // csmStartCmd names the csm.rs server invocation against the configured port.

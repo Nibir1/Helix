@@ -1263,69 +1263,92 @@ func handleKnowledgeReindex() {
 // DOCTOR / PROVIDERS / MODELS
 // -------------------------------------------------------
 
+// handleDoctor renders the full local diagnostic.
+//
+// Panelized like every other report. It was the last flat `=== Helix Doctor ===`
+// stack: twenty-odd cyan lines in which "Database ping failed" and "Shell: zsh"
+// carried identical weight, so the one line a person opened /doctor to find had
+// to be hunted for. State now lives in the badge colour and the label column
+// does the scanning.
 func handleDoctor() {
-	color.Cyan("=== Helix Doctor ===")
-	home, err := os.UserHomeDir()
-	if err != nil {
-		color.Red("Home directory error: %v", err)
+	w := shell.KVWidth("CONFIG", "DATABASE", "PROVIDER", "NETWORK", "CONFINEMENT",
+		"DAEMON", "HOOKS", "PROJECT", "CRASH REPORTS")
+
+	fmt.Println(shell.PanelTitle("doctor"))
+
+	if home, err := os.UserHomeDir(); err != nil {
+		fmt.Println(shell.KV("CONFIG", shell.Badge(shell.StateBad, "unreadable")+
+			shell.Muted("  "+err.Error()), w))
 	} else {
 		helixDir := filepath.Join(home, ".helix")
-		if fi, err := os.Stat(helixDir); err == nil && fi.IsDir() {
-			color.Green("Config directory OK: %s", helixDir)
+		if fi, serr := os.Stat(helixDir); serr == nil && fi.IsDir() {
+			fmt.Println(shell.KV("CONFIG", shell.Badge(shell.StateGood, "ok")+
+				shell.Muted("  "+helixDir), w))
 		} else {
-			color.Red("Config directory missing: %s", helixDir)
+			fmt.Println(shell.KV("CONFIG", shell.Badge(shell.StateBad, "missing")+
+				shell.Muted("  "+helixDir), w))
 		}
 	}
+
 	if ragSystem != nil && ragSystem.GetDB() != nil {
 		db := ragSystem.GetDB()
-
 		pingCtx, pingCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := db.PingContext(pingCtx)
 		pingCancel()
-
 		if err != nil {
-			color.Red("Database ping failed: %v", err)
+			fmt.Println(shell.KV("DATABASE", shell.Badge(shell.StateBad, "ping failed")+
+				shell.Muted("  "+err.Error()), w))
 		} else {
-			color.Green("Database connection OK")
+			fmt.Println(shell.KV("DATABASE", shell.Badge(shell.StateGood, "connected")+
+				shell.Muted(fmt.Sprintf("  knowledge schema v%d", rag.SchemaVersion(db))), w))
 		}
+	}
 
-		color.Cyan("Knowledge schema version: v%d", rag.SchemaVersion(db))
-	}
-	color.Cyan("Provider: %s", ai.GetProvider())
-	color.Cyan("Local model loaded: %v", ai.ModelIsLoaded())
+	fmt.Println(shell.KV("PROVIDER", shell.Value(string(ai.GetProvider()))+
+		shell.Muted(fmt.Sprintf("  ·  local model loaded: %v", ai.ModelIsLoaded())), w))
+
 	if utils.IsOnline(3 * time.Second) {
-		color.Green("Network: online")
+		fmt.Println(shell.KV("NETWORK", shell.Badge(shell.StateGood, "online"), w))
 	} else {
-		color.Yellow("Network: offline")
+		fmt.Println(shell.KV("NETWORK", shell.Badge(shell.StateWarn, "offline")+
+			shell.Muted("  local providers only"), w))
 	}
-	color.Cyan("OS: %s", env.OSName)
-	color.Cyan("Shell: %s", env.Shell)
+
+	host := shell.Value(env.OSName) + shell.Muted("  ·  "+env.Shell)
 	if sandbox != nil {
-		color.Cyan("Sandbox: %s", sandbox.ModeString())
+		host += shell.Muted("  ·  sandbox: " + sandbox.ModeString())
 	}
-	color.Cyan("Confinement backend: %s", confinement.BackendName())
+	fmt.Println(shell.KV("HOST", host, w))
+	fmt.Println(shell.KV("CONFINEMENT", shell.Muted(confinement.BackendName()), w))
+	fmt.Println(shell.PanelEnd())
 
 	// BlackBox P10.3: the edge-appliance picture.
 	printEdgeSection()
 
+	fmt.Println(shell.PanelTitle("environment"))
+
 	// BlackBox Phase 4: Living AI daemon presence.
 	if daemonRunning() {
-		color.Green("Daemon: running (Living AI)")
+		fmt.Println(shell.KV("DAEMON", shell.Badge(shell.StateGood, "running")+
+			shell.Muted("  Living AI"), w))
 	} else {
-		color.Yellow("Daemon: not running — start it with `helix daemon`")
+		fmt.Println(shell.KV("DAEMON", shell.Badge(shell.StateIdle, "not running")+
+			shell.Muted("  helix daemon starts it"), w))
 	}
 
-	// Local policy hooks: a hook file that failed to parse means NO hooks run,
-	// which is invisible until something the user believed was guarded goes
-	// through. State it here rather than only at startup.
+	// A hook file that failed to parse means NO hooks run, which is invisible
+	// until something the user believed was guarded goes through. State it here
+	// rather than only at startup.
 	if set, herr := hooks.Load(); herr != nil {
-		color.Red("Hooks: config failed to load — %v", herr)
-		color.Red("  → NO hooks are active. Fix or remove the file; /hooks shows its path.")
+		fmt.Println(shell.KV("HOOKS", shell.Badge(shell.StateBad, "config failed")+
+			shell.Muted("  NO hooks are active — fix or remove the file; /hooks shows its path"), w))
+		for _, l := range shell.PanelWrap(herr.Error(), shell.Muted) {
+			fmt.Println(l)
+		}
 	} else if len(set.Hooks) == 0 {
-		color.Cyan("Hooks: none configured")
+		fmt.Println(shell.KV("HOOKS", shell.Badge(shell.StateIdle, "none configured"), w))
 	} else {
-		blocking := 0
-		disabled := 0
+		blocking, disabled := 0, 0
 		for _, h := range set.Hooks {
 			if h.Disabled {
 				disabled++
@@ -1335,25 +1358,31 @@ func handleDoctor() {
 				blocking++
 			}
 		}
-		color.Green("Hooks: %d loaded (%d blocking, %d disabled)", len(set.Hooks), blocking, disabled)
+		fmt.Println(shell.KV("HOOKS", shell.Badge(shell.StateGood, fmt.Sprintf("%d loaded", len(set.Hooks)))+
+			shell.Muted(fmt.Sprintf("  %d blocking  ·  %d disabled", blocking, disabled)), w))
 	}
 
 	if _, path, ok := loadProjectContext(); ok {
-		color.Green("Project context: %s", path)
+		fmt.Println(shell.KV("PROJECT", shell.Badge(shell.StateGood, "loaded")+
+			shell.Muted("  "+path), w))
 	} else {
-		color.Cyan("Project context: none in this directory tree (/init writes HELIX.md)")
+		fmt.Println(shell.KV("PROJECT", shell.Badge(shell.StateIdle, "none here")+
+			shell.Muted("  /init writes HELIX.md"), w))
 	}
 
 	if summaries := diagnostics.ListReports(); len(summaries) > 0 {
-		color.Yellow("Pending crash reports (%d):", len(summaries))
-		for _, s := range summaries {
-			color.Yellow("  • %s — %s", s.Time, s.Reason)
-			color.Yellow("    %s", s.Path)
+		fmt.Println(shell.KV("CRASH REPORTS", shell.Badge(shell.StateWarn,
+			fmt.Sprintf("%d pending", len(summaries)))+
+			shell.Muted("  local-only  ·  /purge deletes them"), w))
+		for _, sm := range summaries {
+			fmt.Println(shell.PanelLine(shell.Muted("  " + sm.Time + " — " + sm.Reason)))
+			fmt.Println(shell.PanelLine(shell.Muted("  " + sm.Path)))
 		}
-		color.Yellow("Reports are local-only; run /purge to delete them.")
 	} else {
-		color.Green("Crash diagnostics: no pending reports (telemetry-free)")
+		fmt.Println(shell.KV("CRASH REPORTS", shell.Badge(shell.StateGood, "none")+
+			shell.Muted("  telemetry-free"), w))
 	}
+	fmt.Println(shell.PanelEnd())
 }
 
 // printEdgeSection renders the "edge appliance" diagnostics block (P10.3).
@@ -1448,18 +1477,23 @@ func printEdgeSidecars() {
 			color.Yellow("Offline LLM (ollama): unreachable — %v", herr)
 			return
 		}
-		model := fb.Model
-		if model == "" {
-			model = ai.ActiveModel()
-		}
-		if model == "" {
-			color.Yellow("Offline LLM (ollama): running, but no fallback model configured (llm.fallback.model)")
+		// Deliberately NOT falling back to ai.ActiveModel(): that is the CLOUD
+		// model, and borrowing its name produced the advice
+		// "run `ollama pull deepseek-v4-flash-vision-exp`" — a model id that
+		// exists in no Ollama registry, so the one actionable line in the
+		// offline-brain check was a command guaranteed to fail. An unset
+		// fallback model is unset; say that instead of inventing one.
+		if fb.Model == "" {
+			color.Yellow("Offline LLM (ollama): running, but no fallback model is configured.")
+			suggestOllamaModel(ctx, client)
 			return
 		}
-		if ollamaHasModel(ctx, client, model) {
-			color.Green("Offline LLM (ollama): ready — %s", model)
+		if ollamaHasModel(ctx, client, fb.Model) {
+			color.Green("Offline LLM (ollama): ready — %s", fb.Model)
 		} else {
-			color.Yellow("Offline LLM (ollama): model %q NOT pulled — run `ollama pull %s`", model, model)
+			color.Yellow("Offline LLM (ollama): %q is configured but not pulled — run `ollama pull %s`",
+				fb.Model, fb.Model)
+			suggestOllamaModel(ctx, client)
 		}
 		return
 	}
@@ -1477,6 +1511,29 @@ func printEdgeSidecars() {
 
 // ollamaHasModel reports whether a model tag is installed, tolerating the bare
 // name vs "name:tag" difference so an installed model is not reported missing.
+// suggestOllamaModel names models this Ollama actually has, so the follow-up is
+// a command that can succeed.
+//
+// Reporting what is INSTALLED beats suggesting something to pull: the user with
+// a running Ollama usually already has a model, and the fix is one config line
+// rather than a download.
+func suggestOllamaModel(ctx context.Context, client *ollama.Client) {
+	installed, err := client.ListModels(ctx)
+	if err != nil || len(installed) == 0 {
+		color.Yellow("  → pull one, then set it:  ollama pull llama3.2  ·  /config fallback-model llama3.2")
+		return
+	}
+	names := make([]string, 0, len(installed))
+	for _, m := range installed {
+		names = append(names, m.ID)
+		if len(names) == 4 {
+			break
+		}
+	}
+	color.Yellow("  → this Ollama has: %s", strings.Join(names, ", "))
+	color.Yellow("  → set one:  /config fallback-model %s", names[0])
+}
+
 func ollamaHasModel(ctx context.Context, client *ollama.Client, model string) bool {
 	installed, err := client.ListModels(ctx)
 	if err != nil {
@@ -1510,27 +1567,60 @@ func printEdgeThermals(rep edge.Report) {
 	}
 }
 
+// handleProviderStatus reports every provider and which one is answering.
+//
+// Rendered through the panel system like every other report. It was the last
+// flat `=== Provider Status ===` stack of identical cyan lines, in which the
+// one fact a reader is looking for — which provider is active and whether it
+// can be reached — carried no more visual weight than nine rows of "API key
+// missing" for providers they have never configured.
 func handleProviderStatus() {
-	color.Cyan("=== Provider Status ===")
-	lines := ai.ProviderStatus()
-	for _, line := range lines {
-		color.Cyan(line)
+	rows := ai.ProviderStatusRows()
+
+	fmt.Println(shell.PanelTitle("providers"))
+	cells := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		state := shell.Badge(shell.StateIdle, "no key")
+		switch {
+		case r.Local:
+			state = shell.Badge(shell.StateGood, "local") + shell.Muted("  no key needed")
+		case r.KeyState == "configured":
+			state = shell.Badge(shell.StateGood, "key set")
+		}
+		mark := shell.Muted("")
+		if r.Active {
+			mark = shell.Badge(shell.StateGood, "active")
+		}
+		cells = append(cells, []string{shell.Value(r.Name), shell.Muted(r.Display), state, mark})
 	}
-	color.Cyan("Active Provider: %s", ai.ActiveProviderName())
-	color.Cyan("Active Model: %s", ai.ActiveModel())
-	printActiveProviderHealth()
-	// BlackBox P11.2: when the breaker is engaged the two lines above already
-	// name the LOCAL model, which would otherwise look like the user's own
-	// choice. Say why.
-	if ai.LocalFallbackActive() {
-		color.Yellow("Offline fallback: %s", ai.FailoverStatus())
+	if len(cells) == 0 {
+		fmt.Println(shell.PanelLine(shell.Muted("no providers registered")))
 	} else {
-		color.Cyan("Offline fallback: %s", ai.FailoverStatus())
+		for _, l := range shell.Table([]string{"provider", "name", "key", ""}, cells) {
+			fmt.Println(l)
+		}
 	}
+	fmt.Println(shell.PanelGap())
+
+	w := shell.KVWidth("ACTIVE", "REACHABILITY", "OFFLINE", "PLANNER")
+	fmt.Println(shell.KV("ACTIVE", shell.Value(ai.ActiveProviderName())+
+		shell.Muted("  ·  ")+shell.Value(ai.ActiveModel()), w))
+	fmt.Println(shell.KV("REACHABILITY", activeProviderHealthLine(), w))
+
+	// BlackBox P11.2: when the breaker is engaged the ACTIVE row above already
+	// names the LOCAL model, which would otherwise look like the user's own
+	// choice. Say why.
+	fallback := shell.Muted(ai.FailoverStatus())
+	if ai.LocalFallbackActive() {
+		fallback = shell.Badge(shell.StateWarn, "engaged") + shell.Muted("  "+ai.FailoverStatus())
+	}
+	fmt.Println(shell.KV("OFFLINE", fallback, w))
+
 	// BlackBox P8.7: which mechanism carries the plan. Worth surfacing because
 	// it explains a real behavior difference — native tool calling removes the
 	// JSON-repair retries the prompt path needs.
-	color.Cyan("Planner protocol: %s", ai.PlannerTransport())
+	fmt.Println(shell.KV("PLANNER", shell.Muted(ai.PlannerTransport()), w))
+	fmt.Println(shell.PanelEnd())
 }
 
 // printActiveProviderHealth probes the active provider and says whether it can
@@ -1547,22 +1637,34 @@ func handleProviderStatus() {
 // state instead). The result is recorded, so the next GRID STATUS line agrees
 // with what this printed.
 func printActiveProviderHealth() {
+	fmt.Println(shell.KV("REACHABILITY", activeProviderHealthLine(),
+		shell.KVWidth("REACHABILITY")))
+}
+
+// activeProviderHealthLine probes the active provider and renders one honest
+// line: whether it can actually answer, and what to do when it cannot.
+//
+// The key listing says nothing about this. An llama.cpp with nothing on its
+// port shows as "local/no key (active)" while every request fails — the same
+// readiness lie /blackbox status exists to prevent, one subsystem over.
+func activeProviderHealthLine() string {
 	if ai.ActiveProviderName() == "" {
-		color.Yellow("Reachability: no provider selected — run /provider use <name>")
-		return
+		return shell.Badge(shell.StateWarn, "no provider") +
+			shell.Muted("  /provider use <name>")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := ai.CheckActiveProvider(ctx); err != nil {
-		color.Red("Reachability: UNREACHABLE — %v", err)
-		for _, line := range activeProviderHint(err) {
-			color.Yellow("  %s", line)
+		hint := activeProviderHint(err)
+		detail := err.Error()
+		if len(hint) > 0 {
+			detail = hint[0]
 		}
-		return
+		return shell.Badge(shell.StateBad, "unreachable") + shell.Muted("  "+detail)
 	}
-	color.Green("Reachability: ok")
+	return shell.Badge(shell.StateGood, "ok")
 }
 
 // activeProviderHint returns the actionable follow-up for an unreachable active

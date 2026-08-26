@@ -827,6 +827,68 @@ func configKeys() []configKey {
 			},
 		},
 		{
+			// Added because the status panel was TELLING people to run
+			// "/config speech.tts.barge_in true", and /config takes a fixed
+			// allowlist of short keys — there was no such key, so the one
+			// instruction Helix gave for enabling the feature was a command it
+			// would reject. Either the guidance or the key had to change; a
+			// real key is the better half to add.
+			name: "barge-in", help: "Stop a spoken reply by speaking between sentences",
+			extra: "on | off",
+			get:   func() string { return onOff(cfg.Speech.TTS.BargeIn) },
+			set: func(v string) error {
+				on, err := parseOnOff(v)
+				if err != nil {
+					return err
+				}
+				cfg.Speech.TTS.BargeIn = on
+				// Takes effect now AND persists: a setting that needed a
+				// restart to matter would be a worse answer than the config
+				// file it replaces.
+				speech.EnableBargeIn(on && voiceModeActive)
+				return cfg.SavePreferences()
+			},
+		},
+		{
+			// Same reason as barge-in: /doctor was printing
+			// "/config llm.fallback.model <name>", which is the config.json
+			// path and not a /config key — so the fix it offered for a missing
+			// offline brain was itself unrunnable. Found by the drift test
+			// added alongside, in code written minutes earlier.
+			name: "fallback-model", help: "Offline (Ollama) model used when the cloud provider fails",
+			extra: "an installed Ollama model id",
+			get: func() string {
+				if cfg.LLM.Fallback.Model == "" {
+					return "(unset)"
+				}
+				return cfg.LLM.Fallback.Model
+			},
+			set: func(v string) error {
+				v = strings.TrimSpace(v)
+				if v == "" {
+					return fmt.Errorf("want an Ollama model id, e.g. llama3.2")
+				}
+				cfg.LLM.Fallback.Model = v
+				return cfg.SavePreferences()
+			},
+		},
+		{
+			name: "context-turns", help: "Conversation turns a context-capable voice is conditioned on",
+			extra: "0 (off) - 12",
+			get:   func() string { return fmt.Sprint(cfg.Speech.TTS.ContextTurns) },
+			set: func(v string) error {
+				n, err := strconv.Atoi(strings.TrimSpace(v))
+				if err != nil || n < 0 || n > 12 {
+					return fmt.Errorf("want a whole number between 0 and 12")
+				}
+				cfg.Speech.TTS.ContextTurns = n
+				if voiceModeActive {
+					speech.EnableConversationContext(n, cfg.Speech.TTS.ContextMaxBytes)
+				}
+				return cfg.SavePreferences()
+			},
+		},
+		{
 			name: "provider", help: "Active AI provider", extra: strings.Join(ai.ListProviders(), " | "),
 			get: func() string { return ai.ActiveProviderName() },
 			set: func(v string) error {

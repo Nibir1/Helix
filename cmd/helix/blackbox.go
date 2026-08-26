@@ -184,7 +184,8 @@ func blackBoxStatus() {
 		mode = shell.Badge(shell.StateGood, "LIVE") + shell.Muted("  listening")
 	}
 
-	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "WAKE", "INITIATIVE", "CONTEXT", "TRANSCRIPT")
+	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "WAKE", "INITIATIVE", "CONTEXT",
+		"INTERRUPT", "TRANSCRIPT")
 	fmt.Println(shell.PanelTitle("blackbox"))
 	fmt.Println(shell.KV("MODE", mode, w))
 	fmt.Println(shell.KV("HEARING", blackBoxHearingLine(), w))
@@ -200,6 +201,10 @@ func blackBoxStatus() {
 	// holding on to right now. It retains recent AUDIO in memory, so a user
 	// reading this panel for privacy reasons needs it in the panel.
 	fmt.Println(shell.KV("CONTEXT", blackBoxContextLine(speech.ConversationReport()), w))
+	// Barge-in samples the microphone between sentences, so it belongs on the
+	// panel that answers "what is listening right now" rather than being a
+	// silent config flag.
+	fmt.Println(shell.KV("INTERRUPT", blackBoxBargeInLine(), w))
 	// Whether speech is being written to disk belongs in the same report as
 	// whether the microphone and camera are open: it is the third thing a
 	// privacy-conscious user wants to know, and it had no surface at all.
@@ -279,6 +284,21 @@ func blackBoxEyesLine() string {
 	}
 }
 
+// blackBoxBargeInLine reports how a reply can be stopped.
+//
+// Ctrl+C is listed in both states because it is the one that always works and
+// needs no microphone. Voice interruption is deliberately described by its
+// limit — sentence boundaries — rather than as "barge-in", which promises full
+// duplex that this does not have.
+func blackBoxBargeInLine() string {
+	if speech.BargeInEnabled() {
+		return shell.Badge(shell.StateGood, "voice + Ctrl+C") +
+			shell.Muted("  speak in the gap between sentences")
+	}
+	return shell.Badge(shell.StateIdle, "Ctrl+C") +
+		shell.Muted("  /config barge-in on adds voice")
+}
+
 // blackBoxContextLine reports conversational context without overstating it.
 //
 // Takes the report rather than fetching it so every branch below is reachable
@@ -307,7 +327,7 @@ func blackBoxContextLine(rep speech.ContextReport) string {
 	case !rep.Enabled:
 		return shell.Badge(shell.StateIdle, "off") + shell.Muted("  ") +
 			shell.Value(rep.Provider) +
-			shell.Muted(" can use it  ·  speech.tts.context_turns")
+			shell.Muted(" can use it  ·  /config context-turns 4")
 	case rep.Provider == "":
 		return shell.Badge(shell.StateWarn, "retained, unused") +
 			shell.Muted("  no context-capable voice in the chain")

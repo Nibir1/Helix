@@ -12,6 +12,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"helix/internal/audio"
@@ -124,12 +125,99 @@ func SpeakStream(ctx context.Context, text string) error {
 		}, 1.0); err != nil {
 			return err
 		}
+		// The speaker is idle right here and nowhere else, which is the only
+		// moment a microphone can be trusted without echo cancellation. Opt-in;
+		// a no-op and zero added latency when disabled.
+		if BargeInProbe(ctx) {
+			cancel()
+			return context.Canceled
+		}
 	}
 	// Report interruption rather than nil: the producer exits silently on a
 	// cancelled context (closing the channel with nothing sent), so without
 	// this a barge-in — or a reply cancelled before its first word — would be
 	// indistinguishable from a reply that was spoken in full.
 	return ctx.Err()
+}
+
+// bargeInEnabled gates voice interruption of a spoken reply.
+//
+// OFF by default, and that default is a judgement rather than caution. The
+// detector below is honest but partial (see BargeInProbe), and a false trigger
+// is worse than the problem it solves: Helix cutting itself off because a chair
+// scraped is more disruptive than finishing a sentence you did not want.
+var bargeInEnabled atomic.Bool
+
+// EnableBargeIn turns sentence-boundary voice interruption on or off.
+func EnableBargeIn(on bool) { bargeInEnabled.Store(on) }
+
+// BargeInEnabled reports the current setting, for status output.
+func BargeInEnabled() bool { return bargeInEnabled.Load() }
+
+// Barge-in probe geometry.
+const (
+	// bargeSettleDelay lets the speaker cone, the desk and the microphone's AGC
+	// stop ringing before the probe listens. Same physics as micSettleDelay in
+	// the voice loop: without it the probe hears the tail of the sentence Helix
+	// just finished and interrupts itself on its own voice — the exact failure
+	// the chime/"you" bug was.
+	bargeSettleDelay = 150 * time.Millisecond
+
+	// bargeWindow is how long the probe listens. Long enough to catch the onset
+	// of a word, short enough that the two together stay inside the pause a
+	// listener already expects between sentences (~300-500ms in ordinary
+	// speech), so the gap reads as prosody rather than as a stall.
+	bargeWindow = 250 * time.Millisecond
+
+	// bargeRMSFloor is deliberately well above speechRMSFloor. This probe runs
+	// with no transcription behind it, so a false positive silences Helix with
+	// no way to tell it was wrong. Requiring a clearly-audible level trades
+	// some sensitivity — you may have to speak up to interrupt — for not being
+	// cut off by a room.
+	bargeRMSFloor = 0.02
+)
+
+// BargeInProbe listens in the silence BETWEEN sentences and reports whether
+// someone started talking.
+//
+// This is what makes voice interruption possible without acoustic echo
+// cancellation, which is the reason it was parked: with the speaker playing,
+// the microphone hears Helix, and separating the two needs AEC — which needs
+// CGO, which the default build does not have (guardrail #8). In the gap the
+// speaker is idle, so there is nothing to cancel and an ordinary energy gate is
+// enough.
+//
+// What this genuinely does NOT do, stated plainly because the difference
+// matters: you cannot cut in mid-sentence. The probe runs at sentence
+// boundaries, so a long sentence plays to its end before Helix can notice you.
+// It is interruption at the pace of punctuation, not full duplex.
+//
+// Returns false on any error: a probe that cannot listen must not manufacture
+// an interrupt.
+func BargeInProbe(ctx context.Context) bool {
+	if !bargeInEnabled.Load() {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(bargeSettleDelay):
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, bargeWindow+2*time.Second)
+	defer cancel()
+
+	clip, err := RecordClip(probeCtx, CaptureOptions{
+		MaxDuration: bargeWindow,
+		// No silence gating: the whole point is to sample a window that is
+		// EXPECTED to be quiet and measure it. With gating, a quiet window
+		// returns an error instead of a measurable clip.
+		NoSilenceStop: true,
+	})
+	if err != nil {
+		return false
+	}
+	return ClipRMS(clip) >= bargeRMSFloor
 }
 
 // speakingState tracks the in-flight spoken reply so an external trigger can

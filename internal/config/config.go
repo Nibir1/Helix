@@ -100,6 +100,16 @@ type SpeechTTSConfig struct {
 
 	// ContextMaxBytes caps retained audio (0 → 4 MiB).
 	ContextMaxBytes int `json:"context_max_bytes,omitempty"`
+
+	// BargeIn allows speaking over a reply to stop it, checked in the silence
+	// between sentences.
+	//
+	// Off by default on purpose. The probe is AEC-free precisely because it only
+	// listens while the speaker is idle, which buys two limitations worth
+	// knowing before enabling it: you cannot cut in mid-sentence (a long one
+	// plays to its end), and a loud room can stop a reply that nobody meant to
+	// interrupt. Ctrl+C stops a reply instantly and needs none of this.
+	BargeIn bool `json:"barge_in,omitempty"`
 }
 
 // SpeechWakeConfig controls wake-word listening (BlackBox §7).

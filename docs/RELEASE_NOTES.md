@@ -14,7 +14,7 @@ It remains local-first and telemetry-free. The whole voice stack runs offline if
 - **Recommended chains** — one keystroke in `/blackbox setup` picks cheapest-cloud (Groq + `gpt-4o-mini-tts`), lowest-latency (Deepgram Nova-3 + Aura-2), or fully-local/private (whisper.cpp + Piper). Every cloud chain pre-fills a *local* fallback, because the failure worth surviving is the network.
 - **Hands-free wake word** — energy detector by default (pure Go, works everywhere, honest about detecting onset rather than a phrase) or an openWakeWord-class sidecar for true keyword spotting. Between turns Helix holds in wake-only listening: nothing is transcribed until a wake event fires.
 - **Streaming both ways** — live interim transcripts (Deepgram WebSocket), and sentence-pipelined TTS that starts playing after the first sentence synthesizes instead of the whole paragraph. Time-to-first-audio dropped from a measured 2,280 ms to ~150 ms + network.
-- **Barge-in** — Ctrl+C stops a spoken reply mid-sentence (~50 ms), not at the next sentence boundary.
+- **Barge-in** — Ctrl+C stops a spoken reply mid-sentence (~50 ms), not at the next sentence boundary. Opt-in voice interruption stops it by speaking in the pause between sentences, with no echo cancellation required.
 - **A sci-fi HUD** — listening waveform driven by the real microphone level (log-scaled, because speech RMS on a linear meter barely leaves the floor), decode sweep, speaking wave, wake-standby pulse. Terminal-native; no GUI dependency.
 
 ### 🗣️ Sesame CSM-1B — a local voice that sounds like a conversation
@@ -160,7 +160,7 @@ This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
   servers silently ignore the context field — Helix detects and reports that rather than
   overstating, but the prosody benefit only arrives once `docs/csm-context.patch` (or an
   equivalent upstream change) is in place.
-- **Full-duplex barge-in is parked.** Interrupting by *voice* mid-reply needs acoustic echo cancellation, which conflicts with the CGO-free build unless a headset is assumed.
+- **Full-duplex barge-in is parked; sentence-boundary interruption is not.** You can stop a reply by speaking in the gap *between* sentences (`/config barge-in on`, off by default) — the speaker is idle there, so no echo cancellation is needed. You still cannot talk *over* a sentence: that needs concurrent capture plus AEC, which conflicts with the CGO-free build unless a headset is assumed. `Ctrl+C` remains the instant, microphone-free stop.
 
 ### Upgrading from v1.0.0
 

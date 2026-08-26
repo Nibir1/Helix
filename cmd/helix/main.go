@@ -157,8 +157,10 @@ func main() {
 		defer diagnostics.Guard("rag-bootstrap")() // Guard returns the recovery closure; it must be CALLED
 		_ = ragSystem.Initialize()
 		// FIX: Use the unified debug toggle instead of reading the env var directly.
+		// Same rule as the feed updaters: a boot diagnostic must not splice
+		// itself into a live voice HUD's line.
 		if err := rag.KnowledgeBootstrap(context.Background(), db); err != nil &&
-			utils.IsDebugMode() {
+			utils.IsDebugMode() && !ux.LineHeld() {
 			fmt.Fprintf(os.Stderr, "[boot] knowledge bootstrap: %v\n", err)
 		}
 	}()
