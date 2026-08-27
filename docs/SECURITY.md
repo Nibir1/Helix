@@ -56,6 +56,16 @@ their own CI-enforced grep test proving they import no networking. Code that
 writes down what you said or did cannot send it anywhere. All of it is 0600
 inside a 0700 directory, size-rotated, and wiped by `/purge`.
 
+`/reboot` writes one short-lived file under the same contract, minus the
+rotation it does not need: `~/.helix/reboot.json` carries the state a restart
+needs — mode, working directory, provider and model, and in-progress tasks — plus,
+**for a typed restart only**, a 240-character excerpt of the last thing you
+typed. It is not a second copy of the conversation: duplicating `session.json`
+would put everything you said on disk twice, in a file `/memory clear` does not
+govern. It is **deleted the moment the restarted shell reads it** rather than
+rotated, discarded unread past 12 hours, and wiped by `/purge`. It stores
+provider and model **names**, never a key.
+
 ### 7. Voice Channel Controls
 Speech is an **untrusted input channel**, not a convenient keyboard. Transcribed
 audio arrives with user authority, so a television, a podcast, or a person in the
@@ -67,6 +77,20 @@ structural rather than advisory:
 - **Typed confirmations stay typed.** Force push, hard reset, worktree clean,
   deleting a main branch: the voice prompter refuses these outright, so voice
   cannot satisfy them even with a perfect impersonation.
+- **Voice may restart the shell, and nothing else in the danger category.**
+  `/reboot` is reachable by voice because it destroys nothing: the continuity
+  record is written before the process ends, so the worst a misheard "reboot"
+  costs is a few seconds, after which the same mode, directory and conversation
+  are back. `/purge`, `/rag-reset`, `/commit`, `/config`, `/hooks`, `/init`, `/scan`,
+  `/setup` and `/stealth` — all nine — remain unreachable, and the distinction is
+  data loss, not severity of sound.
+- **A spoken restart never installs software.** `/reboot` self-updates when
+  typed; from the microphone it checks and reports only. Restarting destroys
+  nothing, which is why voice may do it — replacing the running binary is a
+  different act and stays typed.
+- **A spoken restart writes nothing you said.** `/reboot` is voice-reachable, and
+  the continuity record it leaves omits conversation content entirely on the
+  spoken path — so the rule below survives without an exception.
 - **Confirmations fail closed.** Silence, timeout, or an unintelligible answer
   counts as "no".
 - **The microphone opens only for a turn — unless you ask otherwise.** Enabling
@@ -83,16 +107,45 @@ structural rather than advisory:
   sentences begin with command names.
 - **Default-deny command surface.** A command is reachable by voice only if the
   registry marks it so; nine remain unreachable by design (data destruction,
-  scanning, history writes, posture and privacy switches, key entry).
+  scanning, history writes, posture and privacy switches, key entry). One
+  DANGER ZONE command is reachable — `/reboot` — because it destroys nothing;
+  the criterion is data loss, not how alarming the command sounds.
 - **Voice may reduce what is collected, never increase it.** "Turn off your eyes"
   closes the camera and `/blackbox log off` stops transcript recording, both by
   voice; opening the camera is an explicit announced act and starting a
-  transcript log must be typed.
+  transcript log must be typed. The rule has **no exceptions**: `/reboot` is the
+  case that tested it, and the feature was shaped to fit — a spoken restart
+  stores no conversation content — rather than the rule being amended.
 
 Full model, including the residual risk accepted for a voice-first assistant:
 `docs/threat_model_voice.md`.
 
+### 7a. Self-Update Trust Model
+Helix updates itself through `/reboot`. What is verified, and what is not, stated
+plainly because an updater is the highest-consequence code in the project:
+
+- **Verified.** The download's SHA-256 against the checksums file published with
+  that release, matched by filename; the URL and every redirect against a pinned
+  set of GitHub hosts; and the payload's own Go build info, proving it is a Helix
+  binary for this machine before it is installed. Any of these failing is a
+  refusal, never a warning.
+- **Not verified.** The Sigstore signatures the release pipeline produces.
+  Keyless verification with the wrong identity and issuer constraints reports
+  success while proving nothing, under a label that stops anyone looking further
+  — worse than an honest checksum. Helix prints the `cosign verify-blob` command
+  instead of pretending. See ADR-019.
+- **Reversible.** The previous binary is kept, and restored automatically if the
+  new one exits non-zero within ten seconds of starting — the failure a checksum
+  cannot catch, which is an authentic release that does not run on this machine.
+- **Never automatic.** Checking is on by default; installing always requires a
+  typed confirmation, and never happens on the voice path.
+
 ### 8. Camera and Transcript Privacy
+- **A restart is the only thing that puts an excerpt of your words on disk
+  without an opt-in, and only when typed.** `/reboot` stores 240 characters of
+  the last typed message in `~/.helix/reboot.json` so the resumed shell can say
+  what it was doing; the file is 0600, consumed on read, and expires in 12 hours.
+  The spoken path stores none of it.
 - **Camera frames are memory-only, always.** One frame at a time, downscaled,
   held in RAM, never written to disk — enforced by a filesystem-snapshot test.
   Only metadata (provider, count, timestamp) reaches the journal.

@@ -167,9 +167,7 @@ func Bg(hex, s string) string { return bgHex(hex) + s + ansiReset }
 func Seg(bg, fg, s string) string { return bgHex(bg) + fgHex(fg) + s + ansiReset }
 
 // visibleWidth strips ANSI and returns the true terminal cell width.
-func visibleWidth(s string) int {
-	return runewidth.StringWidth(ansiRegex.ReplaceAllString(s, ""))
-}
+func visibleWidth(s string) int { return runewidth.StringWidth(Plain(s)) }
 
 // TerminalWidth returns the current terminal column count.
 // Probes stdout, stdin, and the controlling terminal; keeps the largest

@@ -91,10 +91,10 @@ func askVoiceID(provider string) string {
 	// to correct, rather than at the first paid synthesis.
 	if valid, ok := knownVoices[provider]; ok && !validName(valid, voice) &&
 		!strings.HasPrefix(valid[0], "<") {
-		color.Yellow("%q is not a known %s voice (valid: %s).",
-			voice, provider, strings.Join(valid, ", "))
-		if !commands.AskForConfirmation("Use it anyway?") {
-			color.Cyan("Using the provider default voice.")
+		wizStep(shell.StateWarn, voice, "is not a known "+provider+" voice")
+		wizDetail("valid: " + strings.Join(valid, ", "))
+		if !wizConfirm("use it anyway") {
+			wizStep(shell.StateIdle, provider, "using the provider default voice")
 			return ""
 		}
 	}
@@ -161,18 +161,21 @@ func askFallback(kind string, names []string, primary string) []string {
 	fallback := answer
 	if n, err := strconv.Atoi(answer); err == nil {
 		if n < 1 || n > len(options) {
-			color.Yellow("No option %d — skipping the fallback.", n)
+			wizStep(shell.StateIdle, fmt.Sprintf("option %d", n),
+				"does not exist — skipping the fallback")
 			return nil
 		}
 		fallback = options[n-1]
 	}
 
 	if !validName(names, fallback) {
-		color.Yellow("Unknown fallback %q ignored (valid: %s)", fallback, strings.Join(options, ", "))
+		wizStep(shell.StateIdle, fallback, "is not a registered provider — ignored")
+		wizDetail("valid: " + strings.Join(options, ", "))
 		return nil
 	}
 	if fallback == primary {
-		color.Yellow("Fallback %q is the same as the primary — ignored.", fallback)
+		wizStep(shell.StateIdle, fallback,
+			"is already the primary — a chain cannot fall back to itself")
 		return nil
 	}
 	return []string{fallback}
@@ -289,12 +292,12 @@ func handleVoiceSetup() {
 
 	catalog, err := speech.LoadMergedCatalog()
 	if err != nil {
-		color.Yellow("Pricing catalog notice: %v", err)
+		wizStep(shell.StateWarn, "pricing catalog", err.Error())
 	}
 
 	reg := speech.Default()
 	if reg == nil {
-		color.Red("Speech engine not initialized.")
+		wizStep(shell.StateBad, "speech engine", "not initialized")
 		return
 	}
 
@@ -329,7 +332,7 @@ func handleVoiceSetup() {
 			autoAssignSidecarPort("stt", name, "")
 			prepareSpeechProvider("stt", name)
 		}
-		color.Green("STT: %s", sttCfg.Provider)
+		wizStep(shell.StateGood, sttCfg.Provider, "will hear you")
 	}
 
 	// ---- TTS selection ----
@@ -351,7 +354,7 @@ func handleVoiceSetup() {
 			autoAssignSidecarPort("tts", name, "")
 			prepareSpeechProvider("tts", name)
 		}
-		color.Green("TTS: %s", ttsCfg.Provider)
+		wizStep(shell.StateGood, ttsCfg.Provider, "will answer you")
 	}
 
 	commitSpeechSelection(sttCfg, ttsCfg)
@@ -392,10 +395,10 @@ func commitSpeechSelection(sttCfg config.SpeechSTTConfig, ttsCfg config.SpeechTT
 		cfg.Speech.TTS = ttsCfg
 	}
 	if err := cfg.SavePreferences(); err != nil {
-		color.Red("Failed to save preferences: %v", err)
+		wizStep(shell.StateBad, "preferences", "could not be saved: "+err.Error())
 	}
 	if err := speech.Init(speechConfigFrom(cfg.Speech)); err != nil {
-		color.Red("Speech engine re-init failed: %v", err)
+		wizStep(shell.StateBad, "speech engine", "re-init failed: "+err.Error())
 		return
 	}
 
@@ -404,23 +407,52 @@ func commitSpeechSelection(sttCfg config.SpeechSTTConfig, ttsCfg config.SpeechTT
 	// lines later, so a run where piper never started still opened with a green
 	// "Voice link configured." The comment already said to verify first; the
 	// code had drifted from it.
-	if verifySpeechSelection() {
-		color.Green("Voice link configured.")
+	report, ok := verifySpeechSelection()
+	printVoiceLinkSummary(report, ok)
+}
+
+// printVoiceLinkSummary closes the wizard with what was actually configured.
+//
+// The three facts a wizard owes you at the end — did it work, what will hear
+// you, what will answer — used to arrive as three unrelated flat lines
+// ("Chain verified…", "Voice link configured.", "Recorder detected: rec"),
+// each a different colour, none of them naming the providers that had just been
+// set up. A summary that does not state its own result is not a summary. This
+// is deliberately the same shape as /blackbox status, so the screen the user
+// sees at the end of setup is the screen they will check afterwards.
+func printVoiceLinkSummary(report speech.StatusReport, ok bool) {
+	fmt.Println(shell.PanelTitle("voice link"))
+	if ok {
+		fmt.Println(shell.Step(shell.StateGood, "ready",
+			"every selected provider answered"))
 	} else {
-		color.Yellow("Voice link saved, but not usable yet — see above.")
+		fmt.Println(shell.Step(shell.StateWarn, "saved, not usable yet",
+			"fix the above, then re-check with /blackbox status"))
 	}
 
+	w := shell.KVWidth("HEAR", "SPEAK", "MIC")
+	fmt.Println(shell.KV("HEAR", chainOrNone(report.STTChain), w))
+	fmt.Println(shell.KV("SPEAK", chainOrNone(report.TTSChain), w))
 	if rec, rerr := speech.DetectRecorder(); rerr != nil {
-		color.Yellow("Microphone note: %v", rerr)
+		// A missing recorder is a warning, not a failure of the chain: the TTS
+		// half works without one, and saying so beats a red line that implies
+		// the whole setup failed.
+		fmt.Println(shell.KV("MIC", shell.Badge(shell.StateWarn, "none detected")+
+			shell.Muted("  "+rerr.Error()), w))
 	} else {
-		fmt.Printf("Recorder detected: %s\n", rec)
+		fmt.Println(shell.KV("MIC", shell.Badge(shell.StateGood, rec), w))
 	}
+	fmt.Println(shell.PanelEnd())
 	fmt.Println(shell.Hint("/blackbox say voice link online   ·   /blackbox on   ·   /mictest"))
 }
 
 // verifySpeechSelection probes the newly selected chain and reports what it
-// found. Returns whether every selected provider answered.
-func verifySpeechSelection() bool {
+// found.
+//
+// Returns the probe report as well as the verdict: the closing summary needs the
+// very same chains this just resolved, and probing a second time to render them
+// would be both slower and capable of disagreeing with the line above it.
+func verifySpeechSelection() (speech.StatusReport, bool) {
 	// Endpoint collisions first: they explain a "reachable" probe that then fails
 	// every request, and no per-provider check can see them.
 	reportEndpointConflicts()
@@ -440,23 +472,22 @@ func verifySpeechSelection() bool {
 			// selected a moment ago. Repeating a twelve-line block verbatim in
 			// the summary buries the one thing the summary adds — the count.
 			if verifiedThisRun[row.Name] {
-				color.Red("%s: still not answering (details above).", row.Name)
+				wizStep(shell.StateBad, row.Name, "still not answering (details above)")
 				continue
 			}
-			color.Red("%s is in your chain but not answering.", row.Name)
+			wizStep(shell.StateBad, row.Name, "in your chain, but not answering")
 			for _, line := range providerDetailLines(row) {
-				color.Yellow("  %s", line)
+				wizDetail(line)
 			}
 		}
 	}
 
 	if problems == 0 {
-		color.Green("Chain verified: every selected provider answered.")
-		return true
+		return report, true
 	}
-	color.Yellow("%d selected provider(s) cannot serve a request yet.", problems)
-	color.Yellow("Fix the above, then re-check with /blackbox status — no need to re-run the wizard.")
-	return false
+	wizStep(shell.StateWarn, fmt.Sprintf("%d provider(s)", problems),
+		"cannot serve a request yet — no need to re-run the wizard")
+	return report, false
 }
 
 // filterCatalog narrows pricing rows to registered providers of one kind.
@@ -736,21 +767,44 @@ func handleVoiceStatus() {
 //
 // Without this the spoken command surface is undiscoverable: there is no menu to
 // read when your hands are busy, and guessing at phrasing is a bad experience.
+// It is called from INSIDE the voice-chain panel, between the health rows and
+// the closing rule, so every line has to sit behind the gutter. It did not: a
+// bare heading and a column-zero list ran straight through the frame, and the
+// PanelEnd underneath then looked like a rule belonging to nothing.
 func printVoiceVocabulary() {
-	fmt.Println()
-	color.Cyan("SPOKEN COMMANDS")
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelSection("spoken commands"))
 	for _, line := range voiceCommandVocabulary() {
-		fmt.Println("  " + line)
+		fmt.Println(shell.PanelLine(shell.Muted(line)))
 	}
-	fmt.Println()
-	color.Cyan("  Also: \"slash <command name>\" reaches any voice-enabled command directly,")
-	color.Cyan("  e.g. \"slash provider status\" or \"slash knowledge status\".")
+	fmt.Println(shell.PanelGap())
+	for _, l := range shell.PanelWrap(
+		"\"slash <command name>\" reaches any voice-enabled command directly — "+
+			"e.g. \"slash provider status\" or \"slash knowledge status\".", shell.Muted) {
+		fmt.Println(l)
+	}
+
+	// The two phrases that END a turn rather than being served by it. They are
+	// matched as suffixes and never reach the table above, so a vocabulary list
+	// built only from the routes leaves out the safety valve and the restart —
+	// the two things most worth knowing you can say.
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelSection("said at the end of anything"))
+	vw := shell.KVWidth("\"manual mode\"", "\"reboot\"")
+	fmt.Println(shell.KV("\"manual mode\"",
+		shell.Muted("back to the keyboard  ·  also \"stop listening\""), vw))
+	fmt.Println(shell.KV("\"reboot\"",
+		shell.Muted("restart the shell, coming back listening  ·  also \"please reboot\""), vw))
 	// Read from the registry rather than restated here: the denied set shrank
 	// when live mode arrived, and a hand-kept copy of a security policy is a
 	// copy that goes stale silently.
 	if denied := voiceDeniedCommandNames(); len(denied) > 0 {
-		color.Yellow("  Unreachable by voice by design (these must be typed):")
-		color.Yellow("  %s", strings.Join(denied, "  "))
+		fmt.Println(shell.PanelGap())
+		fmt.Println(shell.Step(shell.StateWarn, "deny-list",
+			"unreachable by voice by design — these must be typed"))
+		for _, l := range shell.StepDetail(strings.Join(denied, "  "), shell.Muted) {
+			fmt.Println(l)
+		}
 	}
 }
 
@@ -1113,7 +1167,7 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 		// A saved key is used, not negotiated over. It was already accepted
 		// once, and re-asking on every wizard run is how a setup flow starts
 		// feeling like an interrogation.
-		color.Green("  Using the saved API key for %s.", provider)
+		wizStep(shell.StateGood, provider, "using the API key you already saved")
 		return true
 	}
 	// Before asking, look at what the user has already typed elsewhere. The AI
@@ -1129,14 +1183,14 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 	key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", provider)))
 	if key == "" {
 		if hasKey {
-			color.Yellow("Nothing entered — keeping the saved key for %s.", provider)
+			wizStep(shell.StateGood, provider, "nothing entered — keeping the saved key")
 			return true
 		}
-		color.Yellow("No key entered — %s will fail until a key is set.", provider)
+		wizStep(shell.StateWarn, provider, "no key entered — it will fail until one is set")
 		return false
 	}
 	if !confirmKeyForProvider(kind+"."+provider, key) {
-		color.Yellow("Key not stored — %s will fail until a key is set.", provider)
+		wizStep(shell.StateWarn, provider, "key not stored — it will fail until one is set")
 		return hasKey
 	}
 
@@ -1147,7 +1201,7 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 		err = speech.SaveTTSKey(provider, key)
 	}
 	if err != nil {
-		color.Red("Key storage failed: %v", err)
+		wizStep(shell.StateBad, provider, fmt.Sprintf("key storage failed: %v", err))
 		return false
 	}
 	return true
@@ -1187,7 +1241,8 @@ func adoptAIKeyForSpeech(kind, provider string) bool {
 		// convenience that did not work out.
 		return false
 	}
-	color.Green("  Reusing the %s API key you already configured for the AI provider.", provider)
+	wizStep(shell.StateGood, provider,
+		"reusing the key you configured for the AI provider")
 	return true
 }
 
@@ -1221,21 +1276,19 @@ func verifySpeechProvider(kind, provider string, requiresKey bool) bool {
 		},
 	)
 	if err == nil {
-		color.Green("  %s verified.", provider)
+		wizStep(shell.StateGood, provider, "verified")
 		return true
 	}
 
 	// Name the likely cause rather than echoing a status code: a credential
 	// problem and an absent sidecar need completely different actions.
 	if requiresKey && isAuthFailure(err) {
-		color.Red("  %s rejected the API key.", provider)
-		color.Yellow("  Check it at the provider's dashboard and re-run /blackbox setup.")
+		wizStep(shell.StateBad, provider, "rejected the API key")
+		wizDetail("Check it at the provider's dashboard and re-run /blackbox setup.")
 		return false
 	}
-	color.Yellow("  %s could not be verified yet:", provider)
-	for _, line := range strings.Split(strings.TrimSpace(err.Error()), "\n") {
-		color.Yellow("    %s", strings.TrimRight(line, " \t"))
-	}
+	wizStep(shell.StateWarn, provider, "not answering yet")
+	wizDetail(strings.TrimSpace(err.Error()))
 	return false
 }
 
@@ -1347,7 +1400,8 @@ func autoAssignSidecarPort(kind, provider, configured string) string {
 	// 465 MB model, and the original orphaned. "Occupied" is not the question;
 	// "occupied by something else" is.
 	if sidecarAnswersAt(kind, provider, endpoint) {
-		color.Green("  %s is already running on port %d — keeping it.", provider, current)
+		wizStep(shell.StateGood, provider,
+			fmt.Sprintf("already running on port %d — keeping it", current))
 		return configured
 	}
 
@@ -1357,15 +1411,16 @@ func autoAssignSidecarPort(kind, provider, configured string) string {
 	}
 
 	assigned := edge.ReplacePort(endpoint, port)
-	fmt.Println()
-	color.Yellow("  Port %d is already %s, so %s cannot bind it.",
-		current, edge.PortOccupant(current), provider)
+	held := fmt.Sprintf("port %d is already %s", current, edge.PortOccupant(current))
 	if occupant := knownOccupant(current); occupant != "" {
-		color.Yellow("  On this platform that is normally %s.", occupant)
+		// Naming the usual culprit turns a puzzling collision into a known one.
+		// On macOS this is nearly always AirPlay Receiver squatting on 5000.
+		held += ", normally " + occupant + " on this platform"
 	}
-	color.Green("  Assigned port %d to %s (verified free just now).", port, provider)
-	color.Cyan("  Start it with exactly this:")
-	color.Cyan("    %s", spec.Launch(port))
+	wizStep(shell.StateWarn, provider, held)
+	wizStep(shell.StateGood, provider,
+		fmt.Sprintf("moved to port %d — verified free just now", port))
+	fmt.Println(shell.StepCommand(spec.Launch(port)))
 
 	// Persist immediately so the endpoint survives even if the wizard is
 	// interrupted before its final save.
@@ -1384,10 +1439,10 @@ func autoAssignSidecarPort(kind, provider, configured string) string {
 		cfg.Speech.TTS.BaseURL = assigned
 	}
 	if err := cfg.SavePreferences(); err != nil {
-		color.Yellow("  (could not save the new endpoint: %v)", err)
+		wizStep(shell.StateWarn, provider, fmt.Sprintf("could not save the new endpoint: %v", err))
 	}
 	if err := speech.Init(speechConfigFrom(cfg.Speech)); err != nil {
-		color.Yellow("  (speech engine rebuild failed: %v)", err)
+		wizStep(shell.StateWarn, provider, fmt.Sprintf("speech engine rebuild failed: %v", err))
 	}
 	return assigned
 }

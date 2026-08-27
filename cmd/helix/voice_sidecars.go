@@ -23,15 +23,12 @@ import (
 	"strings"
 	"time"
 
-	"helix/internal/commands"
 	"helix/internal/edge"
 	"helix/internal/providers/llamacpp"
 	"helix/internal/shell"
 	"helix/internal/sidecar"
 	"helix/internal/speech"
 	"helix/internal/utils"
-
-	"github.com/fatih/color"
 )
 
 // voiceSidecar describes how to obtain, feed, and run one local speech server.
@@ -323,9 +320,9 @@ func offerSidecarSetup(kind, provider string) bool {
 		// interpreter than the one Helix is about to launch.
 		if spec.Verify != nil {
 			if reason, ok := spec.Verify(binary); !ok {
-				fmt.Println()
-				color.Red("%s still cannot start after the install:", provider)
-				for _, l := range shell.PanelWrap(reason, shell.Muted) {
+				fmt.Println(shell.Step(shell.StateBad, provider,
+					"still cannot start after the install"))
+				for _, l := range shell.StepDetail(reason, shell.Muted) {
 					fmt.Println(l)
 				}
 				return false
@@ -341,8 +338,9 @@ func offerSidecarSetup(kind, provider string) bool {
 			fmt.Println(l)
 		}
 		fmt.Println(shell.Hint(cmd))
-		if !commands.AskForConfirmation("Fetch it now?") {
-			color.Yellow("Skipped — %s cannot start without one.", provider)
+		if !wizConfirm("fetch it now") {
+			fmt.Println(shell.Step(shell.StateWarn, provider,
+				"skipped — it cannot start without one"))
 			return false
 		}
 		if !runVisibleCommand(cmd, 30*time.Minute) {
@@ -361,7 +359,9 @@ func offerSidecarSetup(kind, provider string) bool {
 		return true
 	}
 
-	if !commands.AskForConfirmation(fmt.Sprintf("Start %s now?", provider)) {
+	if !wizConfirm("start " + provider + " now") {
+		fmt.Println(shell.Step(shell.StateIdle, provider,
+			"not started — /blackbox setup offers again"))
 		return false
 	}
 	return startVoiceSidecar(kind, provider, binary, spec)
@@ -381,15 +381,18 @@ func offerSidecarInstall(provider string, spec voiceSidecar) (string, bool) {
 
 	cmd, ok := spec.InstallCmd()
 	if !ok {
-		color.Yellow("%s is not installed, and there is no single install command", provider)
-		color.Yellow("for this platform — see docs/local_runtimes.md.")
+		fmt.Println(shell.Step(shell.StateBad, provider, "not installed"))
+		for _, l := range shell.StepDetail(
+			"There is no single install command for this platform — "+
+				"see docs/local_runtimes.md.", shell.Muted) {
+			fmt.Println(l)
+		}
 		return "", false
 	}
 
-	fmt.Println()
-	color.Yellow("%s is not installed.", provider)
-	color.Cyan("  Helix can install it:  %s", cmd)
-	if !commands.AskForConfirmation("Run that now?") {
+	fmt.Println(shell.Step(shell.StateWarn, provider, "not installed — Helix can install it"))
+	fmt.Println(shell.StepCommand(cmd))
+	if !wizConfirm("run that now") {
 		return "", false
 	}
 	if !runVisibleCommand(cmd, 30*time.Minute) {
@@ -400,11 +403,15 @@ func offerSidecarInstall(provider string, spec voiceSidecar) (string, bool) {
 	// putting the binary somewhere this process cannot see yet.
 	binary, found := findFirstBinary(spec.Binaries)
 	if !found {
-		color.Yellow("Install finished but %s is still not on PATH.", provider)
-		color.Yellow("Open a new shell and re-run /blackbox setup.")
+		fmt.Println(shell.Step(shell.StateBad, provider, "installed, but still not on PATH"))
+		for _, l := range shell.StepDetail(
+			"Open a new shell and re-run /blackbox setup.", shell.Muted) {
+			fmt.Println(l)
+		}
 		return "", false
 	}
-	color.Green("Installed: %s", binary)
+	fmt.Println(shell.Step(shell.StateGood, provider, "installed"))
+	fmt.Println(shell.StepCommand(binary))
 	return binary, true
 }
 
@@ -417,14 +424,16 @@ func startVoiceSidecar(kind, provider, binary string, spec voiceSidecar) bool {
 	}
 	reserved := reservedSidecarPorts(provider)
 	if assigned, ok := edge.FreePortAvoiding(provider, port, reserved); !ok || assigned != port {
-		color.Yellow("Port %d is unavailable or claimed by another service; using %d.", port, assigned)
+		fmt.Println(shell.Step(shell.StateWarn, provider,
+			fmt.Sprintf("port %d is claimed by another service — using %d instead", port, assigned)))
 		port = assigned
 		applySidecarEndpoint(kind, provider, edge.ReplacePort(endpoint, port))
 	}
 
 	logPath, err := sidecar.LogPathFor(provider)
 	if err != nil {
-		color.Red("Cannot prepare a log file: %v", err)
+		fmt.Println(shell.Step(shell.StateBad, provider,
+			fmt.Sprintf("cannot prepare a log file: %v", err)))
 		return false
 	}
 
@@ -432,10 +441,11 @@ func startVoiceSidecar(kind, provider, binary string, spec voiceSidecar) bool {
 		Name: provider, Binary: binary, Args: spec.Args(port), LogPath: logPath,
 	})
 	if err != nil {
-		color.Red("Could not start %s: %v", provider, err)
+		fmt.Println(shell.Step(shell.StateBad, provider, fmt.Sprintf("could not start: %v", err)))
 		return false
 	}
-	color.Cyan("Started %s (pid %d) on port %d…", provider, proc.PID, port)
+	fmt.Println(shell.Step(shell.StateIdle, provider,
+		fmt.Sprintf("starting — pid %d, port %d", proc.PID, port)))
 
 	// Containers cold-start slower than a native binary even once pulled.
 	budget := 90 * time.Second
@@ -453,23 +463,27 @@ func startVoiceSidecar(kind, provider, binary string, spec voiceSidecar) bool {
 		},
 	)
 	if ready != nil {
-		color.Red("%s did not come up: %v", provider, ready)
+		fmt.Println(shell.Step(shell.StateBad, provider, fmt.Sprintf("did not come up: %v", ready)))
 		// Wrapped, not truncated. At 160 characters a Python traceback loses
 		// exactly its payload: the real failure printed
 		// "(ModuleNotFoundError: No modul…" and cut off before naming the
 		// module, which is the only part anyone can act on.
 		for _, line := range sidecar.LogTail(proc.LogPath, 8) {
-			for _, l := range shell.PanelWrap(line, shell.Muted) {
+			for _, l := range shell.StepDetail(line, shell.Muted) {
 				fmt.Println(l)
 			}
 		}
 		return false
 	}
 
-	color.Green("%s is answering on port %d.", provider, port)
-	// Detached on purpose, so it must be announced: the user now owns it.
-	color.Yellow("It keeps running after Helix exits. Stop it with:  %s", proc.StopHint())
-	color.Cyan("Log: %s", proc.LogPath)
+	fmt.Println(shell.Step(shell.StateGood, provider, fmt.Sprintf("answering on port %d", port)))
+	// Detached on purpose, so it must be announced: the user now owns it. Two
+	// KV rows rather than two more sentences, because these are facts to come
+	// back to — the command that stops it, and where to read why it died.
+	w := shell.KVWidth("KEEP-ALIVE", "LOG")
+	fmt.Println(shell.KV("KEEP-ALIVE", shell.Muted("runs after Helix exits · stop with  ")+
+		shell.Value(proc.StopHint()), w))
+	fmt.Println(shell.KV("LOG", shell.Value(proc.LogPath), w))
 	return true
 }
 
@@ -551,8 +565,8 @@ func runVisibleCommand(cmdLine string, timeout time.Duration) bool {
 	if len(fields) == 0 {
 		return false
 	}
+	fmt.Println(shell.StepCommand(cmdLine))
 	fmt.Println()
-	color.Cyan("$ %s", cmdLine)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -565,9 +579,9 @@ func runVisibleCommand(cmdLine string, timeout time.Duration) bool {
 	if err := c.Run(); err != nil {
 		fmt.Println()
 		if ctx.Err() != nil {
-			color.Yellow("Cancelled.")
+			fmt.Println(shell.Step(shell.StateWarn, "cancelled", ""))
 		} else {
-			color.Red("Failed: %v", err)
+			fmt.Println(shell.Step(shell.StateBad, "failed", err.Error()))
 		}
 		return false
 	}

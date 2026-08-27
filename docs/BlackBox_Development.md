@@ -58,7 +58,7 @@ exact sequence:
    (`feat(speech): ...`, `refactor(agent): ...`, etc.). Do NOT push to main. Do NOT merge.
 
 > **Note on line numbers:** file:line references in this document were accurate for commit
-> `fd34503` (2026-08-16) and are now **33 commits stale** — treat them as historical, not as
+> `fd34503` (2026-08-16) and are now **43 commits stale** — treat them as historical, not as
 > coordinates. Symbol names are the stable anchor: grep for the function or constant, not the
 > line. This note is not re-pinned on every commit deliberately; a number that is refreshed
 > occasionally is more misleading than one that is openly out of date.
@@ -144,6 +144,9 @@ cmd/helix/registry.go        Command REGISTRY — one table drives dispatch, /he
 cmd/helix/blackbox.go        /blackbox: live mode + every folded voice/vision subcommand
 cmd/helix/companion.go       The initiative loop — samples the camera, speaks unprompted
 cmd/helix/first_run.go       First-boot stages: provider → system packages → speech chain
+cmd/helix/reboot.go          /reboot: capture what Helix was doing, ask the loop to stop, resume
+cmd/helix/reboot_exec.go     The supervisor (ADR-018) — NOT syscall.Exec; see the file comment
+cmd/helix/voice_ui.go        Wizard glue: panel-voiced confirmations and step rendering
 cmd/helix/helpers.go         Provider/model setup wizards (copy this pattern for speech setup)
 cmd/helix/noninteractive.go  `helix -c "..."`, pipes, scripts (shell-only, no AI)
 internal/shell/reader.go     Raw-mode TTY line editor (stdin-only; no alternate input source)
@@ -155,10 +158,12 @@ internal/agent/agent.go      Agent orchestrator: HandleInput → classify → pl
 internal/agent/firewall.go   Instruction Firewall (canary, critic pass, provenance escalation)
 internal/agent/fastpath.go   Deterministic regex fast-path plans
 internal/commands/           Safety pipeline, GitManager, package manager, DirectorySandbox
+                             (ChangeDirectory announces the move; SetDirectory is the silent
+                             form, for anything moving on the user's behalf)
 internal/commands/prompt.go  Prompter INTERFACE (swappable confirmation seam) ← key for voice
 internal/commands/safety/    ValidateAndCleanCommand, AnalyzeShellRisk (Low/Med/High tiers)
 internal/confinement/        Kernel-grade sandbox: Seatbelt (macOS), Landlock/bwrap (Linux)
-internal/providers/          ★ AIProvider interface + Registry + KeyStore + 8 adapters
+internal/providers/          ★ AIProvider interface + Registry + KeyStore + 12 adapters
 internal/providers/types.go  AIProvider, ChatMessage (TEXT-ONLY today), Capabilities{Vision...}
 internal/ollama/             Ollama HTTP client + auto-installer + model pull (sidecar pattern!)
                              DiagnosePull classifies registry failures; a failed pull is
@@ -170,6 +175,10 @@ internal/recon/              Authorized recon engine (nmap/masscan orchestrator)
 internal/stealth/            Memory-only private execution
 internal/diagnostics/        Telemetry-free local crash reports (0600, redacted)
 internal/journal/            One rotating NDJSON writer: daemon journal + opt-in voice log
+internal/session/continuity.go   What /reboot carries across a restart. Small on purpose: NOT a
+                             second copy of the conversation, consumed on read, expires in 12 h
+internal/update/             Self-update: GitHub releases + local builds. Mandatory checksum,
+                             pinned host, build-info proof, atomic install, auto-rollback (ADR-019)
 internal/speech/conversation.go  Bounded in-memory turn history conditioning CSM-1B (ADR-017)
 internal/speech/piper_native.go  Piper without an interpreter: a persistent process holding the
                              voice model resident (model load dominates; pay it once, not per
@@ -177,6 +186,9 @@ internal/speech/piper_native.go  Piper without an interpreter: a persistent proc
 internal/ux/                 Terminal UX: typewriter, PrintAIMessage ← TTS tap-in point
 internal/shell/panel.go      Report rendering: panels, badges, wrapping KV rows, self-fitting tables
                              (one visual language; all widths in VISIBLE columns via visibleWidth)
+internal/shell/wizard.go     The same language for screens that ASK: Step/StepDetail/StepCommand,
+                             PromptDanger (red — a yes that destroys something), Plain (strip ANSI
+                             before text reaches a TTS engine)
 internal/shell/prompt.go     The palette, split by ROLE: identity (brand) · text (must be read)
                              · chrome (must recede). Contrast enforced by contrast_test.go
 internal/agent/persona.go    Who Helix IS — tone for planner/chat/vision replies, never authority
@@ -327,6 +339,29 @@ The principle worth writing down, because it now governs three separate controls
 > be typed. A privacy control should fail toward collecting less — which is also
 > why the eyes-off phrase is matched loosely and may over-trigger.
 
+**Amendment (2026-08-27) — a DANGER ZONE command is voice-reachable, and the
+criterion is destruction rather than category.** `/reboot` restarts the shell; it
+is filed under DANGER ZONE because that is where a command that ends your process
+belongs, and it is `VoiceOK` because **it destroys nothing**. The continuity
+record is written before the process ends, so the worst a misheard "reboot" costs
+is a few seconds, after which the same mode, directory, provider and conversation
+are back. Every other command in the table above loses something that does not
+come back. Stated as the general rule, since the table would otherwise read as
+"category implies denial":
+
+> **A DANGER ZONE command may be voice-reachable if and only if it destroys
+> nothing and its effect is recoverable.** The criterion is data loss, not how
+> alarming the command sounds.
+
+**The reduce-never-increase principle survived this without an exception, and
+that took a code change rather than a doc change.** The continuity record carries
+a short excerpt of the last message so the resumed shell can say what it was
+doing — which, on a spoken restart, would have been the microphone putting your
+words on disk with no opt-in. So it does not: `captureContinuity` omits
+conversation content entirely when the request arrived by voice. The resume is
+very slightly less specific and the rule stands verbatim. Writing the exception
+into four documents would have been faster and would have been the wrong trade.
+
 Rules 1–5 above remain unchanged.
 
 ### ADR-006 — Pricing data is data, not code.
@@ -364,6 +399,29 @@ substring, because "how do I switch to manual mode?" is a question about the
 feature. The valve itself is unchanged in kind: still instant, still reachable
 without the keyboard, and now it also closes the camera and the companion loop,
 because live mode opened them.
+
+**Amendment (2026-08-27) — a SECOND suffix phrase, and mode survives a restart.**
+"reboot" joins "manual mode" as a phrase matched at the end of an utterance and
+handled before spoken-command dispatch, for the same reason: it ENDS a turn
+rather than being served by one, and a spoken "reboot" that reached the planner
+would be answered with a sentence about rebooting instead of a reboot.
+
+It adds one rule the kill phrases do not have. **A question is not an
+instruction:** "what happens when you reboot" ends on the phrase and would
+otherwise fire, and the cost of that false positive is higher here than for the
+safety valve — mishearing "manual mode" stops the microphone, mishearing this
+ends the process. The rule is carried by the utterance's opening word rather than
+by a trailing "?", because speech-to-text punctuation is a guess and several
+providers never emit one. (The kill phrases keep the older, looser rule: a
+privacy control that over-triggers fails in the safe direction.)
+
+The mode itself now round-trips a restart, which is properly this ADR's concern:
+a reboot from live mode comes back in live mode, from the keyboard at the
+keyboard. Most of that already worked — `cfg.UserPrefs.VoiceMode` and
+`initVoiceMode` restore the mode at boot — but the continuity record carries the
+mode explicitly anyway, because the preference records what you last CHOSE and
+the record has to describe what was TRUE at the instant of the restart. The two
+differ exactly when a session entered or left voice mode without persisting.
 
 ### ADR-009 — `main` remains shippable; blackBox is a long-lived integration branch.
 **Decision:** All BlackBox work commits to `blackBox`. Merges to `main` only by explicit owner
@@ -521,6 +579,69 @@ capability, and Piper remains the default local voice.
 
 ---
 
+### ADR-018 — Restarting is a supervisor, not `syscall.Exec`.
+**Decision:** `/reboot` does not replace the process image. The original process
+becomes a supervisor: it spawns a child Helix with `HELIX_REBOOT_SUPERVISED=1`,
+ignores the terminal signals so they reach the child, waits, and exits with the
+child's status. A supervised child that wants to reboot exits with status **86**
+instead of spawning anything, and the supervisor already waiting starts the next
+one — so however many times you reboot, there are exactly two processes.
+
+**Rationale, in the order the alternatives were eliminated:**
+
+1. **`syscall.Exec` crashes this binary.** It is the obvious answer — same PID,
+   same terminal, no second process — and Go's implementation takes the runtime's
+   exec lock, which in a program with live cgo callback threads lands on a thread
+   the runtime cannot park and aborts with `fatal error: notesleep not on g0`.
+   Helix has exactly those threads: the audio engine is CoreAudio through cgo,
+   started at boot, and oto exposes no teardown to call before exec'ing. This was
+   established against the real binary — the goroutine dump names the crash — not
+   reasoned about.
+2. **Spawn-and-exit is worse than the bug.** If the parent exits, the shell that
+   launched Helix sees its foreground job finish and starts reading the terminal
+   while the new Helix is also reading it. Two readers on one tty is a state
+   nobody can type their way out of. And when Helix **is** the login shell, the
+   parent exiting ends the session and hangs up on the child.
+3. **Waiting without a loop nests.** A parent that waits fixes (2), but every
+   reboot would then add another blocked parent. The exit-86 loop is what bounds
+   it at two.
+
+**Consequences, stated rather than discovered later:** the PID changes on every
+restart (nothing depends on it — the TTY active-session lock is timestamp-based
+and the new process refreshes it on its first turn); one idle process persists
+for the life of the session, unmeasured on a small board; and the outgoing
+process must be **quiesced** before it becomes a supervisor, because it does not
+exit — its companion loop would keep sampling the camera and its speech would
+keep talking while a second Helix did the same thing on the same devices.
+
+### ADR-019 — The updater verifies integrity, and says it does not verify signatures.
+**Decision:** `/reboot` installs a downloaded release only when its SHA-256
+matches the checksums file published with that release, the URL never leaves a
+pinned set of GitHub hosts, and the payload proves it is a Helix binary for this
+machine by its Go build info. Sigstore signatures — which the release pipeline
+does produce — are **not** checked; the UI prints the `cosign verify-blob`
+command for verifying a release by hand.
+
+**Rationale.** Keyless signature verification is only as good as the identity and
+issuer constraints it is given. A verification that runs with the wrong ones
+returns success while proving nothing, and it does so under a label that stops
+anyone looking further — which is strictly worse than an honest checksum, because
+it buys confidence it has not earned. The checksum chain that IS implemented is
+end-to-end: the manifest comes from the same release over the same pinned host,
+and the entry is matched by filename so one artifact can never be verified
+against another's hash.
+
+**Consequences.** An attacker who can publish a release to the configured repo
+can ship a binary, and the checksum will match it — integrity is not
+authenticity, and this ADR does not claim otherwise. What the controls do cover
+is everything between GitHub and the disk: a tampered download, a redirected
+download, a truncated download, an archive that is not a Helix binary, and an
+archive that tries to write outside its extraction directory.
+
+**Revisit when** a signature check can be written with pinned identity and issuer
+and tested against a real release, at which point it becomes a second mandatory
+gate rather than a replacement for this one.
+
 ## §4. Target architecture (end state)
 
 ```
@@ -585,6 +706,9 @@ new implementation), `tests/e2e/` (mock speech/vision endpoints).
 | V4c | **Camera intent guessing** (RESOLVED 2026-08-22): a heuristic fired the camera on any spoken sentence containing "this"/"that"/"here" | Removed. It captured frames on ordinary phrasing ("what do we have in *this* directory?") and answered from a vision model with no knowledge of the shell. The camera now has exactly two doors, both explicit: `/blackbox look`, and the planner choosing its `vision` tool. |
 | V5b | **Conversational context retention** (ADR-017). Enabling a context-conditioned voice makes Helix hold recent turns — including captured USER audio — in memory for longer than the turn that produced it, where a clip was previously discarded the moment it was transcribed. | Off by default (`speech.tts.context_turns: 0`). **Memory only** — the store imports no filesystem or network API, enforced by a test, so "captured audio is never written to disk" (guardrail §12 #6) is unchanged and `/purge` has nothing new to reach. Bounded twice, by turn count and total bytes, oldest-first. Scoped to live mode: `/blackbox off` drops it. The audio held was already in memory a moment earlier for transcription; what changed is how long, which is why the bounds are the control rather than a detail |
 | V5c | **Microphone opened during Helix's own reply** (2026-08-26). Sentence-boundary barge-in samples the mic in the pause between spoken sentences, so the recorder runs at moments the user did not initiate a turn. | Off by default (`/config barge-in on`). ~250 ms per sentence boundary; the clip takes the same path as any capture (temp WAV, deleted the moment it is read) and only an RMS value is computed — never transcribed, never sent to a provider, never logged, never entering conversational context. Threshold is 10× the ordinary speech gate. Scoped to live mode; shown on the INTERRUPT row of `/blackbox status`. |
+| V5d | **Voice-triggered persistence of what you just said.** A spoken `/reboot` could have written an excerpt of the last utterance to `~/.helix/reboot.json` on a channel a television can trigger. | **It does not, and that is the control.** `captureContinuity` omits conversation content entirely when the request arrived by voice: a spoken restart carries the mode, working directory, provider/model and in-progress task texts, and nothing you said. ADR-005's reduce-never-increase principle therefore holds **without an exception** — the feature was shaped to fit the rule rather than the rule amended to fit the feature. A TYPED reboot stores a 240-rune excerpt (rune-boundary truncated, because a severed UTF-8 sequence makes the record unparseable and silently dropped), 0600 in 0700, consumed on read, ignored past 12 h, `/purge` wipes. |
+| V5e | **A spoken word installs software.** `/reboot` self-updates — it downloads a release and makes it the program the user runs — and it is voice-reachable, so a television or a bystander could in principle cause an install. | **The spoken path never installs.** It checks, reports that an update is waiting, and stops; the install requires a typed confirmation. Restarting destroys nothing and is therefore allowed by voice (rule 9); replacing the running binary is a different act and is not. Proven by a test whose guard was removed to confirm it fails without it. The verification chain behind a TYPED install is ADR-019. |
+| V5f | **A spoken word ends the process.** `/reboot` is voice-reachable, so a television, a podcast or a person in the room saying "reboot" at the end of a sentence restarts the shell. | Bounded by making the restart CHEAP rather than hard to trigger. The continuity record is written **before** the process ends, so a false positive costs a few seconds and a shell that comes back in the same mode, directory, provider and conversation. Matched as a **suffix**, so it must end the utterance, and **questions are excluded** by their opening word — "what happens when you reboot" is answered, not obeyed — because STT punctuation is a guess and several providers never emit a question mark. Journalled as its own outcome (`reboot`) so an audit can tell a spoken restart from a typed one. |
 | V5 | **Audio/ transcript persistence leakage** | **Shipped 2026-08-23 (P2.8).** Voice log opt-in and default ABSENT — no directory, no file — enforced by a unit test and an e2e test against the real binary (a log opened eagerly at startup would pass the first and fail the second). Text and metadata only, never audio: clips are deleted as soon as they are read, so there is nothing to reference, and a test asserts no entry names an audio file. 0600 in 0700, control characters stripped, entries length-bounded, rotated 1 MiB × 3. `/purge` wipes it. Voice may STOP recording but never start it — enabling moves the privacy posture, so it is typed-only. `internal/journal` imports no networking (grep-enforced) |
 | V6 | **Cloud provider data exposure** (audio/text/frames to STT/TTS/vision vendors) | Explicit per-provider opt-in with key entry; wizard shows exactly what is sent where; local sidecar path documented as the private default |
 | V7 | **Daemon IPC hijack** (local attacker sends commands to socket) | Socket 0600 in `~/.helix/` (0700 dir); optional shared-token file; daemon refuses requests when TTY session is "locked" |
@@ -1827,7 +1951,14 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
   // the whole guarantee: with it off there is no directory and no file. Text
   // only, never audio. Rotation bounds it on a small board.
   "voice_log": { "enabled": false, "max_bytes": 1048576, "keep_files": 3 },
-  "daemon":  { "autostart": false, "journal": true, "session_turns": 20 }
+  "daemon":  { "autostart": false, "journal": true, "session_turns": 20 },
+
+  // ADR-019 — self-update. `check` is whether /reboot looks on every restart;
+  // `channel` is where it looks. Installing is NEVER automatic and never
+  // happens on the voice path, so there is no "auto_install" key to set: that
+  // is a decision, not a setting.
+  "update":  { "channel": "auto", "repo": "Nibir1/Helix", "check": true,
+               "local_paths": [] }
 }
 ```
 
@@ -1840,6 +1971,8 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
 | `helix.db` | RAG/threat-intel SQLite | existing |
 | `daemon.sock` | IPC UDS (Unix) / named pipe (Win) | 0600, daemon-owned |
 | `session.json` | conversation ring buffer | 0600, `/memory clear` wipes |
+| `update-pending` | a note from a child to the restart supervisor that it installed something (so a bad update is rolled back) | 0600, removed when read, `/purge` wipes |
+| `reboot.json` | `/reboot` continuity record — mode, cwd, provider/model, in-progress tasks, and (**typed restarts only**) a 240-rune excerpt of the last message | 0600 in 0700; **consumed on read** (one restart, not every boot); ignored past 12 h; `/purge` wipes. A SPOKEN reboot stores no conversation content — see V5d |
 | `journal/` | append-only interaction journal | redacted, rotated (1 MiB × 3, `internal/journal`), `/purge` wipes |
 | `voice_log/` | opt-in voice interaction log — **transcripts and metadata, no audio** | default absent (no dir, no file); 0600 in 0700; rotated; `/purge` wipes |
 
@@ -2127,8 +2260,12 @@ hardware- or key-gated, not unwritten code**:
 | 12 | P12.6 HUD/latency QA; mic barge-in needs echo cancellation | manual + **deferred** |
 | 13 | real camera frame; end-to-end voice session after the endpoint fix | hardware |
 
-**As of 2026-08-23 there is no unwritten code left in the plan** — but that sentence has now been
-wrong once, so treat it as a claim to re-verify rather than a fact to inherit. P2.8 (voice log),
+**As of 2026-08-23 there was no unwritten code left in the plan** — and the
+sentence has now been wrong twice, which is the reason it is written in the past
+tense. It was wrong once for P1.11 (see below), and wrong again on 2026-08-27
+when `/reboot` shipped: **unplanned code, asked for by the owner, that no row of
+this table anticipated.** A tracker describes what was foreseen, not what the
+project is; treat this as a claim to re-verify rather than a fact to inherit. P2.8 (voice log),
 P9.7 (chain presets) and Phase 6's acceptance measurement were the last three *named* items. Two
 more surfaced only by reading code against this table:
 
@@ -2142,9 +2279,15 @@ more surfaced only by reading code against this table:
 
 Phases 1, 2, 6 and 9 lost their `code` markers above.
 
-The only remaining item that is *code* is full-duplex barge-in, which is **parked rather than
-pending** — it needs acoustic echo cancellation, which conflicts with the CGO-free guarantee
+The only remaining PLANNED item that is *code* is full-duplex barge-in, which is **parked rather
+than pending** — it needs acoustic echo cancellation, which conflicts with the CGO-free guarantee
 (guardrail #8) unless a headset is assumed, and that is a product decision, not a task.
+
+Two rows opened by `/reboot` that are not on any phase: the restart supervisor is
+one extra idle process for the life of the session and nobody has measured what
+it costs on a small board, and `/reboot` has never been run with Helix as a
+**login** shell — which is precisely the case the supervisor exists for, since a
+parent that simply exited would end the session.
 
 Everything now open waits on **hardware, API keys, or an owner decision**. Phase 7 is still the
 last gate before a release tag, and both of its items (P7.8's metrics run, P7.9's tag) are of that
@@ -2295,6 +2438,22 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 - **Instruction Firewall** — existing five-layer prompt-injection defense (`internal/agent/firewall.go`,
   `docs/threat_model.md`).
 - **Prompter seam** — swappable confirmation interface (`internal/commands/prompt.go:13`).
+- **Suffix phrase** — a spoken phrase matched at the END of an utterance rather
+  than as the whole of it, because people do not speak in bare commands ("okay,
+  now switch to manual mode"). There are two: "manual mode" and "reboot". Both
+  END a turn rather than being served by it, so both are handled before
+  spoken-command dispatch. The reboot phrase adds a question exclusion the kill
+  phrases do not have — "what happens when you reboot" is answered, not obeyed.
+- **Continuity record** — `~/.helix/reboot.json`, the state `/reboot` carries
+  across a restart: mode, working directory, provider/model, in-progress tasks,
+  and (typed restarts only) a 240-rune excerpt of the last message. Consumed on
+  read, expires after 12 h. Deliberately NOT a second copy of the conversation,
+  which lives in `session.json`.
+- **Supervisor** — the process `/reboot` leaves behind: the original Helix, which
+  spawns its replacement, ignores the terminal signals so they reach the child,
+  waits, and respawns on exit status 86 (ADR-018). **Distinct from the daemon's
+  supervision**, which is systemd/launchd restarting `helix daemon`; these never
+  interact.
 - **Synthetic transcript injection** — testing technique feeding `InputEvent{Channel:"voice"}`
   programmatically instead of using a microphone.
 - **PTY harness** — pseudo-terminal e2e suite (`tests/e2e/`) driving the real binary against mock
@@ -2326,6 +2485,18 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 ---
 
 | 2026-08-22 | **Roadmap document brought up to date with the surface it describes.** Asked to update this file for the `/blackbox` unification and to be honest about what is left. Both were overdue and one was a structural defect of my own making: the seven dev-log rows appended this session had landed **after §14**, outside the table they belonged to — relocated into the Dev log where they are actually readable in sequence. Corrections, none of them deletions: **§0** gained a command-migration table and a note that phase sections still name the original commands *where they record what was built at the time*, with the rule that current-surface sections win when the two disagree. **§2.2/§2.3** learned the five files and one package that did not exist when they were written (`blackbox.go`, `companion.go`, `persona.go`, `first_run.go`, `panel.go`, `internal/deps/`) and that slash dispatch is now one registry entry rather than a switch. **Three ADRs amended rather than rewritten:** ADR-002 gains "sidecars may not require a container runtime", ADR-005 records the denied set narrowing 20 → 9 with the per-command argument and states plainly that rules 1–5 are unchanged, ADR-008 records `/voice`↔`/manual` becoming `/blackbox on`↔`off` and the suffix-matched safety valve. **§5 threat model** gains V4b (unattended capture by the companion) and V4c (the removed intent heuristic, recorded as RESOLVED rather than erased), with V4 amended to admit that live mode opens the camera. **P5.4 is marked SUPERSEDED, not deleted** — it shipped as specified and the specification was wrong — with P5.7/P5.8/P5.9 recording what replaced it. **§7** gains `companion`, `vision.model` and per-provider `endpoints`. **§10** gains the first real measurements, including the ones that missed: 8.8s warm frame-to-insight against a ≤5s target, and moondream rejected on output quality despite being 20× faster. **New Phase 13** covers the unification, companion, persona, first-run and visual system as its own scope with its own unmet acceptance criteria. **New "What is actually left"** table consolidates all 24 open checkboxes by phase and kind, because "core DONE" on five phases was hiding how much is genuinely unfinished — the honest summary is that little unwritten *code* remains (P2.8 voice log, P9.7 chain presets, P6 acceptance work, full-duplex barge-in), and almost everything else waits on hardware, keys, or an owner decision. Phase 7 is still the last gate before a release tag | Docs only; uncommitted, on branch `blackBox` | Two things need a human: a real camera frame for the companion loop, and one end-to-end voice session confirming the sidecar-endpoint fix by ear |
+
+| 2026-08-27 | **Gemini and Meta added, and every provider's default model moved to one that can see.** Two vendors were missing and the reason to add them is the same reason the rest of this entry exists: **Gemini** (`internal/providers/gemini`, `https://generativelanguage.googleapis.com/v1beta/openai/`, `gemini-3.7-flash`) and **Meta** (`internal/providers/meta`, `https://api.meta.ai/v1`, `muse-spark-1.2`) both publish OpenAI-compatible surfaces, so each is the same thin adapter configuration as xAI — streaming, native tool calling and the Phase 5 image parts come for free. The registry key for Meta is `meta`, **not `llama`**: Helix also runs Llama weights through Ollama and llama.cpp, and a provider named for the old model family would collide with both. Meta's own quickstart exports the uselessly generic `MODEL_API_KEY`, so `envNames` gained a second lookup — `META_API_KEY` wins, Meta's name is honoured as a fallback, and a test pins that it does **not** leak to any other provider. Google's `AIza` prefix joined `keyPrefixOwners`, the same negative-only guard the xai/groq incident produced. **The larger half: four defaults could not process an image.** `SupportsVision` was widened once already because /eyes refused on providers that see perfectly well — but the complementary hole was never closed, because vision is a per-MODEL property and Helix was DEFAULTING to text-only models. `glm-5.2` cannot see (Z.ai say so in as many words), `deepseek-v4-flash` returns a 400 for an image part, and `gpt-4o` — the OpenAI default since the beginning — is scheduled for **API shutdown on 2026-10-23**, so that default was going to stop resolving on its own. Now: `gpt-5.6-sol` (**corrected to `gpt-5.6-luna` later the same day — see the next entry**), `claude-opus-5`, `gemini-3.7-flash`, `muse-spark-1.2`, `deepseek-v4-flash-vision-exp`, `glm-5.3-flash`, with `kimi-k3`, `qwen3.7-plus`, `grok-4.6` and `gemma4:e2b` already multimodal and now documented as chosen for it. The catalogue gained their context windows for the reason the xAI entry gives — a model missing from `contextLimits` is silently clamped to ~4k characters of RAG by `GetSafeContentLimit`, which starves a 1M-token model without a word — and `visionModelSubstrings` gained the natively-multimodal flagships whose names carry **no marker at all** (`muse-spark`, `glm-5.3-flash`, `kimi-k3`). That list is now full of near misses in both directions and the tests say so: `glm-5.3-flash` sees, `glm-5.3` does not; `qwen3.7-plus` sees, `qwen3.7-max` does not; `kimi-k2.6` sees, `kimi-k2.7-code` does not. **The actual deliverable is the drift test**, `TestEveryRegisteredProviderDefaultsToAModelThatCanSee`: it walks the registry and fails on any provider whose default cannot take an image, with llama.cpp the one honest exemption (`local-gguf` is a UI label, not a routing key — Helix cannot know what GGUF was loaded by hand). Verified non-inert by reverting GLM to `glm-5.2` and watching it fail. Model IDs, endpoints and the gpt-4o shutdown date were read from the vendors' live docs, not from memory. Also refreshed the /eyes refusal text, which still suggested gpt-4o. 30 packages green, gofmt clean | Uncommitted, on branch `blackBox` | Nothing here is verified against a live key: `gemini-3.7-flash` and `muse-spark-1.2` have not been called, and `glm-5.3-flash` shipped a day before this entry. Owner: `/setup` → Google Gemini with a real key and run `/blackbox eyes on` against the camera |
+
+| 2026-08-27 | **The voice wizard was the last screen still printing flat colour, and converting it found two real bugs.** `panel.go` converted every STATUS screen; the screens that ASK were left behind, and a screenshot of a real `/blackbox setup` run showed exactly what that costs. The chain menu rendered inside a proper frame, and then — the moment the user answered — output fell to **column zero** for a port reassignment, a pid, a log path, two verification results and a recorder name: six facts about one operation, in four colours, none of them attached to the provider they were about. `whisper-local verified.` was indented two spaces; `Started whisper-local (pid 57271)…` was not; `It keeps running after Helix exits` was yellow next to a cyan `Log:` line. A wizard is the one screen a new user cannot skip, so it was the worst place in Helix to lose the thread. **Three new primitives in `internal/shell/wizard.go`**, because a wizard step is not a report row: it has a SUBJECT (the thing being set up), an OUTCOME, and usually an explanation or a command underneath. `Step` renders the first two behind the gutter with the state glyph, wrapping continuations under the subject; `StepDetail` indents the explanation past the glyph so it reads as subordinate rather than as a second event; `StepCommand` renders a shell command **and is the one thing in a panel deliberately allowed to run wide** — a launch command with a line break in it cannot be pasted. `PanelWrap` and `StepDetail` were extracted onto one body (`panelWrapIndent`) rather than copied, because two wrappers that measure differently is how a frame starts leaking. The wizard now closes with a **VOICE LINK panel** — ready/not-ready, HEAR, SPEAK, MIC — deliberately the same shape as `/blackbox status`, replacing three unrelated flat lines ("Chain verified…", "Voice link configured.", "Recorder detected: rec") that never named the providers just configured. `verifySpeechSelection` returns its probe report so the summary renders the chains it just resolved rather than probing again and being able to disagree with the line above it. **Bug one, caught by rendering the screen rather than reading it.** `wizDetail` trimmed each line before printing — and **indentation is the diagnosis format's marker for "this is a command"** (`internal/speech` emits the statement at column 0, its reasoning at two, the command at four). Trimming destroyed the signal, so the piper launch command came back word-wrapped across two lines: a command nobody can copy. This is the exact defect `providerDetailLines` already carries a comment about, reintroduced through a new door. The two levels are honoured now, and a test pins the command surviving intact. **Bug two, latent and shipped.** Panel-styled prompts carry ANSI, and `VoicePrompter.say` hands whatever it is given straight to the TTS engine — so a wizard run in voice mode would have **read the escape sequences aloud**, and the answer to an unparseable spoken question is a fail-closed "no". `shell.Plain` strips at the last moment, in `say`, rather than asking every caller to remember. **Also fixed while in there:** `printVoiceVocabulary` is called from INSIDE the voice-chain panel and printed a bare heading plus a column-zero list straight through the frame, leaving the `PanelEnd` beneath it looking like a rule belonging to nothing. Confirmations route through `wizConfirm`, so `Start whisper-local now?` became `▸ start whisper-local now [y/N]:` — the same voice as every other prompt. Single-line errors elsewhere keep `color.Red`: the primitives are for screens, and `handlers.go` uses the same convention. 10 new tests, both breakers verified non-inert by mutation. Build + vet + gofmt + full suite incl. e2e + `make lint` 0 issues green | Uncommitted, on branch `blackBox` | Rendered and read at 102 columns only. The wide `StepCommand` line is a deliberate trade — verify it reads acceptably in a narrow terminal, and re-run `/blackbox setup` end to end on a machine where piper is genuinely absent, since the install and model-fetch steps were converted but not exercised |
+
+| 2026-08-27 | **The last two flat screens, and three content bugs that only structure could surface.** Owner screenshots of `/doctor` and `/config`. **`/doctor` printed its appliance block BETWEEN two panels as a flat green stack starting at column zero** — `--- Edge appliance ---` as a heading on a screen where every other heading is a chip, then twelve lines of equal weight: platform, audio, confinement, recorder, four sidecars, the offline brain and thermals, all the same colour, framed by nothing, with `ENVIRONMENT`'s chip opening underneath as if the stack belonged to neither panel. It is an APPLIANCE panel now — `PLATFORM`/`AUDIO`/`RECORDER`/`THERMALS` as labelled rows, a `LOCAL SIDECARS` section, and the offline brain as a row with its fix as a `StepCommand`. **Three things fell out of doing it.** (a) `Confinement in force: seatbelt (…)` was a **verbatim duplicate** of the `CONFINEMENT` row on the DOCTOR panel two lines above; it now appears only when `rep.Note` carries a caveat, because a caveat is news and repeating a row is not. (b) `printEdgeSidecars` **ignored `InChain`**, and `speech.ProviderStatusRow`'s own doc comment says why that is wrong: "Out-of-chain providers are not probed, so their Healthy=false means standby, not down." Every unselected sidecar rendered as a yellow `unreachable`, so a healthy machine that had simply not chosen csm-local or kokoro-local got two warnings about services it was never using — **a warning that fires on the normal case is a warning nobody reads**. Standby is now idle-grey and says why. (c) `reportEndpointConflicts` had three branches and only two were labelled; the harmless third printed bare wrapped prose, which on `/doctor` landed mid-panel between two labelled blocks as an orphaned paragraph. All three share one shape now. **`/config` was hand-padded at `%-15s` and `%-22s`** — the same defect `/cost` carried, and it bit exactly as predicted: `deepseek-v4-flash-vision-exp` came back as `deepseek-v4-flash-vis…` on a 102-column screen with room to spare, **a settings screen truncating the one thing it exists to report**. `shell.Table` measures the content instead. Three help strings were shortened to fit the column rather than be shaved by it. The API-key rule moved inside the frame as a warn step, because where a secret may be typed is a security property of the screen and not a footnote. **And a fourth content bug, visible only once values were coloured by state:** `fallback-model`'s getter returned the literal string `"(unset)"` — **a rendering decision baked into an accessor** — so the table coloured absence in the same amber as a real value, and any caller comparing `get() == ""` was simply wrong. The getter returns the value; absence is the renderer's to describe, in one vocabulary (`orNone` and `settingValue` now agree on the word). **Also: OpenAI's default is `gpt-5.6-luna`**, not `-sol`. Same 1.05M window, same vision the default exists to guarantee, lower cost — and a DEFAULT is what every user pays for before they have decided anything. `/model use gpt-5.6-sol` is one command away. 1 new e2e test asserting nothing escapes the appliance frame (verified non-inert by restoring the flat heading), 5 e2e expectations updated for deliberately changed output. One of those updates is itself a lesson: `Expect("key store")` failed because the sentence WRAPS at the terminal — **any multi-word expectation on wrapped prose is a flake waiting to happen**, so it asserts a single unwrappable token now. Build + vet + gofmt + full suite incl. e2e + `make lint` 0 issues green | Uncommitted, on branch `blackBox` | The `what it does` column still truncates one row at 72 columns; that is Table doing its job on a narrow terminal, but it means the settings help is width-dependent and nobody has read this screen below 80 |
+
+| 2026-08-27 | **`/purge` polished, and its second confirmation turned out to delete nothing.** The manifest was one undifferentiated yellow wall of fourteen paths in which **"provider API keys (all providers, incl. STT/TTS)" carried exactly the weight of "SQLite shared-memory journal"** — so the single irreplaceable line on the screen was the hardest to notice, in a list whose entire job is to be read before an irreversible yes. That is the same flattening the panel conversion has been undoing everywhere else, except here it is a **safety property**. It is grouped now, ordered by irreplaceability rather than by directory layout — CREDENTIALS alone and first, then KNOWLEDGE, SETTINGS, MEMORY AND HISTORY, and the caches — with a per-group count and **one line saying what losing that group actually costs** ("you will have to paste every key again" vs "rebuilt by /update — a download, not a loss"). Paths shorten to `~/`, because repeating a 21-character home prefix on every row pushed each description right and made the part that DIFFERS the hardest thing on the line to compare; the absolute directory is named once, above. **The bug.** The second prompt — "Also delete downloaded model weights (~/.helix/models)?" — offered the llama.cpp GGUF directory **alone**, while every artifact Helix downloads through its own wizard lands somewhere else: `whisper-models` (hundreds of MB of GGML), `piper-voices` (the ONNX voice the setup fetches) and `piper` (the runtime binary it installs). **On a machine set up entirely through `/blackbox setup`, answering YES deleted nothing at all** — and the manifest's "model weights are NOT deleted by default" was right only by accident, while being contradicted two lines later by the prompt that offers to delete them. All four are covered now, `HELIX_MODEL_DIR` is honoured because `config.DefaultConfig` honours it, each is listed **with its size** (the number is the entire reason anyone answers yes), and the prompt is only asked when at least one exists — a prompt whose yes deletes nothing is worse than no prompt. **`shell.PromptDanger`** is new: `Prompt` renders cyan, which is right for "which provider should hear you" and wrong for "permanently delete everything", and a confirmation that looks identical either way asks the reader to supply the stakes from memory. `compactBytes` grew a GB branch and moved to int64 rather than gaining a second copy — "1433.6 MB" is a worse answer than "1.4 GB", and duplicated formatters drift. Failures are collected and reported once instead of interleaved red lines between silent successes. Also corrected the README, which claimed `/purge` **"cryptographically wipes"** local data: it calls `os.RemoveAll`, and a crypto-grade wipe on a journalling filesystem is a promise this code does not make. 5 unit tests + 2 e2e updated, including one asserting that declining the downloads prompt actually leaves the weights on disk — which nothing could have caught before, because the answer made no difference either way. Build + vet + gofmt + full suite incl. e2e + `make lint` 0 issues green | Uncommitted, on branch `blackBox` | `dirSize` walks the weight directories on every `/purge`, before either confirmation; on a spinning disk with tens of GB of GGUFs that is a pause nobody has measured |
+
+| 2026-08-27 | **`/reboot` — the shell can restart itself now, and it remembers what it was doing.** `/purge` has ended with "restart Helix to finish" since it was written, because open SQLite handles only release on exit; the only way to act on that was to quit and relaunch by hand, throwing away the mode, the directory and any sense of what was in progress. **Most of what a restart needs already survived one** and this is worth stating because it shaped the design: `RingStore` writes `session.json` on every turn and reloads it at boot, and `cfg.UserPrefs.VoiceMode` + `initVoiceMode` already restore live mode — the precedent's own comment says so. What did NOT survive is everything between: the working directory, the active provider and model, the task in progress, and the plain fact that a restart happened. So the new `~/.helix/reboot.json` is deliberately **small and not a second copy of the conversation** — duplicating the transcript would mean two stores that can disagree AND a second copy of everything you said on disk, which V5 exists to prevent. It carries a 240-rune excerpt of the last message and nothing more, truncated on a **rune boundary** because a severed UTF-8 sequence makes the JSON unparseable and the record is then silently dropped — losing exactly the long exchange someone wanted back. It is **consumed on read**: a shell that claims to be picking up where it left off every single morning is telling you nothing. **The implementation is not what I first wrote.** `syscall.Exec` is the obvious answer — same PID, same terminal, no second process — and it **crashes this binary**: Go's exec takes the runtime's exec lock, which in a program with live cgo callback threads lands on a thread the runtime cannot park and aborts with `fatal error: notesleep not on g0`. Helix has exactly those threads, because the audio engine is CoreAudio through cgo and oto has no teardown to call. The shell died on `/reboot` and never came back. **I found that by instrumenting the real binary, not by reading code** — and the sequence is worth recording, because three plausible theories were wrong first: `ps` said the process was alive (it was a **zombie**, and my liveness probe was `Signal(nil)`, which always errors), then the pty went silent (the e2e read loop returns on the first error, and a pty master **returns EIO the instant no process holds the slave** — which is exactly what an image replacement produces, so the harness went permanently deaf at the one moment that mattered and the restarted shell would have blocked on its first write). Only a **marker file** — filesystem, not terminal — settled it: one boot, not two. The harness read loop now survives that gap, which is a fix every future test benefits from. **What shipped is a supervisor**, because the naive alternative is worse than the bug: if the parent just exits, the shell that launched Helix sees its foreground job finish and starts reading the terminal while the new Helix is also reading it — two readers on one tty — and when Helix IS the login shell, the parent exiting ends the session. So the parent stays, ignores the terminal signals so they reach the child, waits, and exits with the child's status. **The loop is what stops it nesting:** a supervised child that wants to reboot exits with code 86 rather than spawning anything, and the supervisor already waiting starts the next one. However many times you reboot, there are two processes. **Spoken, it is a suffix phrase like "manual mode"** — people say "okay, please reboot" — with one addition the kill phrases do not have: **a question is not an instruction.** "What happens when you reboot" ends on the phrase and would have fired; the test caught it. Openers carry that rule rather than a trailing "?", because STT punctuation is a guess and several providers never emit one. `/reboot` is the one DANGER ZONE command that is VoiceOK, and it earns that by destroying nothing: the record is written BEFORE the process ends, so a misheard reboot costs seconds and resumes where it was. **Two things fell out.** `DirectorySandbox.ChangeDirectory` printed its own green "📁 Changed directory" line — right for `/cd`, where the user asked, and wrong for anything moving on their behalf: the restore printed it at column zero directly above the panel about to report the same fact properly. Split into `SetDirectory` (silent) and `ChangeDirectory` (announcing). And the resumed panel said `WAS DOING working on: wire up the parser` above `TASKS wire up the parser` — one fact typed twice, visible only by rendering it. `shell.PromptDanger` is new, red, for a confirmation whose yes destroys something. 15 new tests incl. 2 e2e that prove the process genuinely comes back and that the record is consumed | Uncommitted, on branch `blackBox` | The supervisor is one extra idle process for the life of the session; nobody has measured what it costs on a Pi. And `/reboot` has never been run as a LOGIN shell, which is the case the supervisor exists for |
+
+| 2026-08-27 | **Helix updates itself now, and the interesting parts are all refusals.** `/reboot` checks for a newer Helix, offers it, verifies it, installs it and restarts into it — from **GitHub releases** and from a **binary you built yourself**, which is the channel for whoever is working on Helix (`make current` writes `dist/helix`, and until now adopting it meant quitting and relaunching by hand). Default channel is `auto` and prefers whichever is newer, with a **tie going to the local build**: someone with both a checkout and an installed release is developing, and the thing they just compiled is the thing they meant to run. **This package decides which binary the user runs, so every control is structural and each is tested.** (1) **The checksum is mandatory, never best-effort.** A release with no checksums asset, or an asset the manifest does not list, is *not installable* — an updater that falls back to "no checksum available, continuing" has no integrity control, it has a comment. The entry is matched by **filename**, because goreleaser writes one line per artifact in an order nothing guarantees and picking by index would eventually verify one file against another's hash, which passes a checksum check while proving nothing. (2) **The host is PINNED**, not merely HTTPS — "it must be HTTPS" says nothing about *who* answers, and the whole attack is a reply or a redirect that walks the download elsewhere, so `CheckRedirect` refuses a hop off GitHub rather than following it. (3) **The payload must prove it is Helix for this machine**, read from its Go build info as DATA rather than by running it with `--version`: the question at that moment is whether the file can be trusted, and executing it to find out answers that in the worst possible order. `debug/buildinfo` also gives the release version for free, parsed out of the `-ldflags` goreleaser stamps. (4) **Archive entry paths are never used** — only the base name is matched and the output filename is always ours, so `../../etc/cron.d/helix` lands where we put it. (5) **The install is atomic and reversible**: stage on the same filesystem (rename is only atomic within one), keep the previous binary, rename over. **And the control verification cannot provide:** an authentic release that does not run *here*. The supervisor already knows the child's exit status, so a freshly installed binary that dies **non-zero within ten seconds** is rolled back automatically and the previous version started — bounded by both conditions, so quitting the new version normally, or hitting a crash an hour in, is not mistaken for a bad install. **The policy question, decided the same way as the last one:** `/reboot` is voice-reachable because restarting destroys nothing — but downloading and executing a new binary is a different act, and a television saying "reboot" must not cause it. **A spoken reboot checks, reports, and never installs.** Tested, and the test verified non-inert by removing the guard. **What this deliberately does NOT do is verify the Sigstore signatures the release pipeline produces.** Keyless verification needs the right identity and issuer constraints, and a check running with the wrong ones reports "verified" while proving nothing — worse than an honest checksum, because it buys confidence it has not earned. The UI prints the exact `cosign verify-blob` command instead. Also new: `helix --version`, because a CLI has to be able to say what it is without starting a shell. **Verified against the real repository, not a mock**: `Check` resolved `Nibir1/Helix` v1.0.0, `Fetch` downloaded the 5 MB archive through GitHub's redirect, matched the manifest checksum, extracted the 11.5 MB binary, and `Inspect` read `1.0.0 darwin/arm64` out of its build info — then a deliberately wrong checksum was refused against that same real release. 22 new tests | Uncommitted, on branch `blackBox` | The rollback path has never fired for real — a genuinely broken release is the one input nobody can synthesise honestly. And the local channel compares an unstamped `go build` by **file time**, which is the best available answer and still not a version: it is reported as "a newer local build", never as a version number |
 
 *End of BlackBox_Development.md — maintain it as the single source of truth. If reality diverges
 from this document, update the document in the same commit as the code.*

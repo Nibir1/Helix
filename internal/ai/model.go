@@ -421,7 +421,7 @@ func ModelVisionCapable(provider, model string) bool {
 // vision.provider, using each one's default model.
 //
 // It exists so the /eyes refusal can name real options instead of telling the
-// user to "set one first" and leaving them to guess which of nine providers
+// user to "set one first" and leaving them to guess which provider
 // qualifies — the same reasoning that made the voice wizard print valid voices at
 // the moment of asking.
 //

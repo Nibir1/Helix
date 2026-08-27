@@ -34,7 +34,11 @@ A defensive pipeline; each stage can only refuse, never grant:
    `/permissions` mode decides which of those tiers is asked about. It layers on
    top of the tiers and never replaces them — high risk stays blocked in every
    mode, typed confirmations stay typed, and voice-originated plans stay capped.
-4. **Sandbox Confinement**: Prevents write/delete operations outside the allowed directory tree.
+4. **Sandbox Confinement**: Prevents write/delete operations outside the allowed
+   directory tree. Moving is split from announcing the move: `ChangeDirectory`
+   reports where you went (right for `/cd`, where the user asked), `SetDirectory`
+   is silent (right for anything moving on the user's behalf, such as `/reboot`
+   restoring the working directory under a panel that reports it properly).
 5. **Local Policy Hooks** (`internal/hooks/`): user-defined commands from
    `~/.helix/hooks.json`, fired last — after everything above has already
    approved the step. A blocking pre-hook can deny it. Because hooks run at the
@@ -201,11 +205,22 @@ a wrong explanation.
   from the registry via `shell.SetSlashCommands`, so completion cannot become a
   stale second copy of the command list.
 
-### 5c. Report Rendering (`internal/shell/panel.go`)
+### 5c. Report Rendering (`internal/shell/panel.go`, `wizard.go`)
 One visual language for everything Helix reports: a titled panel, a gutter, a
 closing rule, content-measured tables, and state badges. It exists because
 `/help` had *a* language and nothing else used it, so each report grew its own
 flat stack of coloured lines.
+
+`wizard.go` extends it to the screens that ASK rather than report. A wizard step
+is not a report row: it has a SUBJECT, an OUTCOME and usually an explanation or a
+command underneath, which is what `Step`, `StepDetail` and `StepCommand` render.
+`StepCommand` is the one thing in a panel deliberately allowed to run past the
+rule — a launch command with a line break in it cannot be pasted. `PromptDanger`
+is `Prompt` in red, for a question whose YES destroys something, and `Plain`
+strips the colour back off — for text leaving the terminal, which is what stops a
+panel-styled prompt being read aloud as its escape sequences by the TTS engine: a confirmation
+that looks identical whether it picks a voice or wipes the keystore is asking the
+reader to supply the stakes from memory.
 
 The irony took a while to land: `/help` was then the last screen still drawing
 itself by hand, with a hardcoded 76-column rule and a fixed 30-column gutter
@@ -213,8 +228,9 @@ that clamped its padding when a usage line ran long — so nine of fifty-six
 commands started their description at a different column, and the widest row
 was 124 columns against a rule that could not hold it. `/help`,
 `/help <command>`, `/about`, `/status`, `/rag-status`, `/knowledge-status`,
-`/provider-status`, `/doctor`, `/cost`, `/context`, `/memory` and the
-unknown-command screen — every status and report screen in `cmd/helix` — now
+`/provider-status`, `/doctor`, `/cost`, `/context`, `/memory`, `/config`,
+`/purge`, the `/blackbox setup` wizard and the unknown-command screen — every
+status, report and wizard screen in `cmd/helix` — now
 render through the same primitives as everything else, which is what the paragraph above
 always claimed.
 
@@ -323,10 +339,15 @@ command reference against the same table.
 
 ### 5d. Local Logs (`internal/journal/`)
 
-One append-only NDJSON writer behind every on-disk record Helix keeps: the
-daemon's interaction journal and the opt-in voice interaction log. Both wanted
-the same three properties, so they share one implementation rather than two that
-drift.
+One append-only NDJSON writer behind every ROTATING on-disk record Helix keeps:
+the daemon's interaction journal and the opt-in voice interaction log. Both
+wanted the same three properties, so they share one implementation rather than
+two that drift.
+
+It used to say "every on-disk record", which stopped being true when `/reboot`
+added `~/.helix/reboot.json` — a single-shot continuity record that is
+**consumed rather than rotated** (§5f), so it needs none of this machinery and
+correctly does not use it.
 
 - **Permissions and rotation are the package's job, schemas belong to callers.**
   Files are 0600 in a 0700 directory and rotate at 1 MiB keeping three
@@ -378,6 +399,81 @@ voice, speech (TTS first audio), vision and ambient, each an NDJSON file under
   short ones.
 - **Telemetry-free, grep-enforced**, like `diagnostics` and `journal`.
 
+### 5f. Restart Continuity (`internal/session/continuity.go`)
+
+`/reboot` restarts the shell in place. Most of what a restart needs already
+survived one — `RingStore` writes `session.json` on every turn and reloads it at
+boot, and `cfg.UserPrefs.VoiceMode` already carries the mode — so the record
+holds only what would otherwise be lost: the working directory, the active
+provider and model, in-progress task texts, a one-line summary of the work, and
+(for a **typed** restart only) a 240-rune excerpt of the last message.
+
+- **It is not a second copy of the conversation.** Two stores of the same turns
+  can disagree, and a second copy of everything you said on disk is exactly what
+  threat V5 exists to prevent. The excerpt is a reminder; `session.json` is the
+  record, and `/memory clear` governs it.
+- **Consumed on read.** The record describes ONE restart. Left on disk it would
+  announce the same resume on every boot from then on, and a shell that claims
+  to be picking up where it left off every morning is saying nothing. It is
+  deleted before it is trusted, so a corrupt or stale record cannot wedge the
+  greeting permanently.
+- **Bounded by age.** Past 12 hours it describes a machine that has moved on, so
+  it is discarded unread rather than restoring a directory that may not exist.
+- **A spoken restart writes no conversation content.** ADR-005's rule that voice
+  may reduce what is collected but never increase it holds without an exception:
+  the excerpt is omitted entirely when the request arrived through the
+  microphone.
+
+**The restart itself is a supervisor, not `syscall.Exec`.** Go's exec takes the
+runtime's exec lock, which in a binary with live cgo callback threads — Helix's
+audio engine is CoreAudio through cgo — aborts the process with
+`fatal error: notesleep not on g0`. And a parent that simply exits leaves the
+launching shell and the new Helix both reading one terminal, or ends the session
+outright when Helix *is* the login shell. So the original process becomes a
+supervisor: it spawns the child with `HELIX_REBOOT_SUPERVISED=1`, ignores the
+terminal signals so they reach the child, waits, and exits with the child's
+status. A supervised child that wants to reboot exits with code **86** instead of
+spawning anything, and the supervisor already waiting starts the next one — so
+however many times you reboot, there are exactly two processes.
+
+### 5g. Self-Update (`internal/update/`)
+
+`/reboot` is also the update path: it resolves a newer Helix, proves it, installs
+it and restarts into it. Two sources — the project's GitHub releases and a binary
+built locally (`dist/helix`) — with the newer winning and a tie going to the
+local build, because someone holding both is developing.
+
+This package decides which binary the user runs, so its controls are structural
+and each one is a refusal rather than a warning:
+
+- **The checksum is mandatory.** A release with no checksums asset, or an asset
+  the manifest does not list, is not installable. The entry is matched by
+  FILENAME — goreleaser writes one line per artifact in an order nothing
+  guarantees, and matching by position would eventually verify one file against
+  another's hash, which passes a check while proving nothing.
+- **The host is pinned, not merely HTTPS.** "It must be HTTPS" says nothing about
+  who answers, and the attack this guards against is a reply or a redirect that
+  walks the download elsewhere — so a redirect off GitHub is refused rather than
+  followed.
+- **The payload proves itself, without being run.** `debug/buildinfo` reads the
+  module path, the target platform and the goreleaser-stamped version out of the
+  file as DATA. Asking a binary its version by executing it answers the question
+  "can this be trusted" in the worst possible order.
+- **Archive entry paths are never used.** Only the base name is matched and the
+  output filename is always ours, so a `../../` entry lands where we put it.
+- **The install is atomic and reversible.** Stage on the same filesystem (rename
+  is atomic only within one), keep the previous binary, rename over.
+
+And the control verification cannot provide: an authentic release that does not
+run *here*. The supervisor (5f) already knows the child's exit status, so a
+freshly installed binary that exits non-zero within ten seconds is rolled back
+and the previous one started — bounded by both conditions, so a normal quit or a
+crash an hour later is not mistaken for a bad install.
+
+Sigstore signatures are published by the release pipeline and deliberately not
+checked here; see ADR-019 in `docs/BlackBox_Development.md` for why a
+wrongly-constrained verification is worse than an honest checksum.
+
 ## Data Flow
 ```text
 User Input → Classifier → [Shell Command] → Safety Pipeline → Sandbox → OS Shell
@@ -408,6 +504,23 @@ anything unphrased. Reachability is default-deny and declared in the command
 registry (`VoiceOK`, `VoiceReadOnly`), so the whole voice policy is one readable,
 testable table rather than a guard inside each handler — and a refusal is spoken,
 never silent. See `docs/voice.md`.
+
+**Two phrases are matched as a SUFFIX and never reach the table**, because they
+END a turn rather than being served by it: `"manual mode"` returns to the
+keyboard and `"reboot"` restarts the shell. Both are checked before dispatch —
+a spoken "reboot" that fell through to the planner would be answered with a
+sentence about rebooting instead of a reboot, which is the failure "manual mode"
+had before it became a kill phrase. Suffix rather than substring, so the phrase
+has to end the utterance; and the reboot check adds a rule the kill phrases do
+not have — **a question is not an instruction**. "What happens when you reboot"
+ends on the phrase and would otherwise fire. Openers carry that rule rather than
+a trailing "?", because speech-to-text punctuation is a guess and several
+providers never emit one.
+
+This is not a bypass of the classify → plan → firewall pipeline (guardrail #3):
+neither phrase produces a plan or executes anything the pipeline would rate. They
+change the shell's own mode, which is the same reason the safety valve is allowed
+to short-circuit.
 
 **Voice never takes the direct-shell bypass** (`Agent.directShellAllowed`). A
 confidently-classified command line runs as typed when typed; on the voice

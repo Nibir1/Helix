@@ -1431,45 +1431,61 @@ func handleDoctor() {
 	fmt.Println(shell.PanelEnd())
 }
 
-// printEdgeSection renders the "edge appliance" diagnostics block (P10.3).
+// printEdgeSection renders the appliance diagnostics as its own panel (P10.3).
 //
 // It exists because the two Linux edge gotchas fail SILENTLY: a CGO-free build
 // is structurally mute however the TTS provider is configured, and kernel
 // confinement degrades to none on an old kernel without stopping anything. On a
 // headless board those are invisible until something important does not happen,
 // so /doctor states them outright, with the fix attached.
+//
+// It used to print between two panels as a flat green stack starting at column
+// zero — twelve lines of equal weight, framed by nothing, with a `--- Edge
+// appliance ---` heading in the middle of a screen where every other heading is
+// a chip. Panelling it also removed a duplication that the flat layout hid: the
+// confinement backend is already a row on the DOCTOR panel directly above, so
+// it is repeated here ONLY when there is a caveat attached to it.
 func printEdgeSection() {
 	rep := edge.Collect()
 
-	color.Cyan("--- Edge appliance ---")
-	color.Cyan("Platform: %s/%s", rep.OS, rep.Arch)
+	fmt.Println(shell.PanelTitle("appliance"))
+	w := shell.KVWidth("PLATFORM", "AUDIO", "CONFINEMENT", "RECORDER", "THERMALS")
+
+	platform := shell.Value(rep.OS + "/" + rep.Arch)
 	if rep.Board != "" {
-		color.Cyan("Board: %s", rep.Board)
+		platform += shell.Muted("  ·  " + rep.Board)
 	}
+	fmt.Println(shell.KV("PLATFORM", platform, w))
 
 	// Build flavor — the audio_cgo gotcha (docs/edge_deployment.md §3.1).
 	if rep.SpeechSupported {
-		color.Green("Audio output: %s", rep.AudioBackend)
+		fmt.Println(shell.KV("AUDIO", shell.Badge(shell.StateGood, rep.AudioBackend), w))
 	} else {
-		color.Yellow("Audio output: %s", rep.AudioBackend)
-		color.Yellow("  → Helix cannot speak on this build. To hear TTS: " +
-			"sudo apt install -y libasound2-dev && CGO_ENABLED=1 go build -tags audio_cgo ./cmd/helix")
+		fmt.Println(shell.KV("AUDIO", shell.Badge(shell.StateWarn, rep.AudioBackend)+
+			shell.Muted("  no config change will produce sound — this needs a rebuild"), w))
+		fmt.Println(shell.StepCommand("sudo apt install -y libasound2-dev && " +
+			"CGO_ENABLED=1 go build -tags audio_cgo ./cmd/helix"))
 	}
 
-	// Confinement actually in force, not what the config hopes for.
-	if rep.Note == "" {
-		color.Green("Confinement in force: %s", rep.Confinement)
-	} else {
-		color.Yellow("Confinement in force: %s", rep.Confinement)
-		color.Yellow("  → %s", rep.Note)
+	// Only when it is not simply the backend name the DOCTOR panel already
+	// carried. A caveat is news; repeating a row verbatim two lines later is not.
+	if rep.Note != "" {
+		fmt.Println(shell.KV("CONFINEMENT", shell.Badge(shell.StateWarn, rep.Confinement), w))
+		for _, l := range shell.StepDetail(rep.Note, shell.Muted) {
+			fmt.Println(l)
+		}
 	}
 
 	// Microphone capture (CGO-free; sox/ffmpeg shell-out per ADR-003).
 	if rec, err := speech.DetectRecorder(); err == nil {
-		color.Green("Recorder: %s", rec)
+		fmt.Println(shell.KV("RECORDER", shell.Badge(shell.StateGood, rec), w))
 	} else {
-		color.Yellow("Recorder: none found — install sox (`sudo apt install -y sox`) for voice input")
+		fmt.Println(shell.KV("RECORDER", shell.Badge(shell.StateWarn, "none found")+
+			shell.Muted("  install sox for voice input"), w))
+		fmt.Println(shell.StepCommand("sudo apt install -y sox"))
 	}
+
+	printEdgeThermals(rep, w)
 
 	// Endpoint collisions BEFORE the reachability probes below: a probe that
 	// reports "reachable" on a port owned by a different service is the most
@@ -1477,39 +1493,74 @@ func printEdgeSection() {
 	reportEndpointConflicts()
 
 	printEdgeSidecars()
-	printEdgeThermals(rep)
+	fmt.Println(shell.PanelEnd())
 }
 
 // printEdgeSidecars probes the local services this device is configured to
 // depend on. Only LOCAL providers are listed: a cloud endpoint being reachable
 // is a network fact, already covered by the Network line above.
+//
+// It distinguishes a sidecar that is DOWN from one that is merely STANDBY, which
+// it did not before — and speech.ProviderStatusRow's own doc comment says why
+// that matters: "Out-of-chain providers are not probed, so their Healthy=false
+// means standby, not down." This printer ignored InChain and rendered every one
+// of them as a yellow "unreachable", so a perfectly healthy machine that had
+// simply not chosen csm-local or kokoro-local got two warnings about services it
+// was never using. A warning that fires on the normal case is a warning nobody
+// reads.
 func printEdgeSidecars() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	report := speech.Status(ctx)
+	var rows []speech.ProviderStatusRow
 	for _, group := range [][]speech.ProviderStatusRow{report.STTStatus, report.TTSStatus} {
 		for _, row := range group {
-			if !row.Local {
-				continue
-			}
-			if row.Healthy {
-				color.Green("Sidecar %s: reachable", row.Name)
-			} else {
-				color.Yellow("Sidecar %s: unreachable (%s)", row.Name, row.HealthDetail)
+			if row.Local {
+				rows = append(rows, row)
 			}
 		}
 	}
+	if len(rows) == 0 {
+		return
+	}
 
-	// The offline brain (P11.2/P11.3): configured but unreachable or unpulled
-	// is the failure that only shows up during an outage, when it is too late.
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelSection("local sidecars"))
+
+	labels := make([]string, 0, len(rows))
+	for _, r := range rows {
+		labels = append(labels, r.Name)
+	}
+	w := shell.KVWidth(labels...)
+	for _, r := range rows {
+		switch {
+		case r.Healthy:
+			fmt.Println(shell.KV(r.Name, shell.Badge(shell.StateGood, "reachable"), w))
+		case !r.InChain:
+			fmt.Println(shell.KV(r.Name, shell.Badge(shell.StateIdle, "standby")+
+				shell.Muted("  not in the active chain"), w))
+		default:
+			fmt.Println(shell.KV(r.Name, shell.Badge(shell.StateWarn, "unreachable")+
+				shell.Muted("  "+r.HealthDetail), w))
+		}
+	}
+
+	printOfflineBrain(ctx, w)
+}
+
+// printOfflineBrain reports the local model that answers when the cloud does not.
+//
+// P11.2/P11.3: configured but unreachable or unpulled is the failure that only
+// shows up during an outage, when it is too late to discover it.
+func printOfflineBrain(ctx context.Context, w int) {
 	cfg, err := config.DefaultConfig()
 	if err != nil {
 		return
 	}
 	fb := cfg.LLM.Fallback
 	if !fb.FallbackEnabled() {
-		color.Cyan("Offline LLM fallback: disabled")
+		fmt.Println(shell.KV("offline llm", shell.Badge(shell.StateIdle, "disabled"), w))
 		return
 	}
 	provider := fb.Provider
@@ -1517,42 +1568,50 @@ func printEdgeSidecars() {
 		provider = config.LLMDefaults().Fallback.Provider
 	}
 
-	if provider == "ollama" {
-		client := ollama.NewClient()
-		if herr := client.Health(ctx); herr != nil {
-			color.Yellow("Offline LLM (ollama): unreachable — %v", herr)
+	if provider != "ollama" {
+		// llama.cpp is a user-managed sidecar with no pull API; reachability is
+		// the only thing Helix can honestly assert.
+		p, gerr := ai.GetProviderByName(provider)
+		if gerr != nil {
 			return
 		}
-		// Deliberately NOT falling back to ai.ActiveModel(): that is the CLOUD
-		// model, and borrowing its name produced the advice
-		// "run `ollama pull deepseek-v4-flash-vision-exp`" — a model id that
-		// exists in no Ollama registry, so the one actionable line in the
-		// offline-brain check was a command guaranteed to fail. An unset
-		// fallback model is unset; say that instead of inventing one.
-		if fb.Model == "" {
-			color.Yellow("Offline LLM (ollama): running, but no fallback model is configured.")
-			suggestOllamaModel(ctx, client)
-			return
-		}
-		if ollamaHasModel(ctx, client, fb.Model) {
-			color.Green("Offline LLM (ollama): ready — %s", fb.Model)
+		if herr := p.HealthCheck(ctx); herr == nil {
+			fmt.Println(shell.KV("offline llm", shell.Badge(shell.StateGood, "reachable")+
+				shell.Muted("  "+provider), w))
 		} else {
-			color.Yellow("Offline LLM (ollama): %q is configured but not pulled — run `ollama pull %s`",
-				fb.Model, fb.Model)
-			suggestOllamaModel(ctx, client)
+			fmt.Println(shell.KV("offline llm", shell.Badge(shell.StateWarn, "unreachable")+
+				shell.Muted("  "+provider+"  ·  "+herr.Error()), w))
 		}
 		return
 	}
 
-	// llama.cpp is a user-managed sidecar with no pull API; reachability is
-	// the only thing Helix can honestly assert.
-	if p, gerr := ai.GetProviderByName(provider); gerr == nil {
-		if herr := p.HealthCheck(ctx); herr == nil {
-			color.Green("Offline LLM (%s): reachable", provider)
-		} else {
-			color.Yellow("Offline LLM (%s): unreachable — %v", provider, herr)
-		}
+	client := ollama.NewClient()
+	if herr := client.Health(ctx); herr != nil {
+		fmt.Println(shell.KV("offline llm", shell.Badge(shell.StateWarn, "unreachable")+
+			shell.Muted("  ollama  ·  "+herr.Error()), w))
+		return
 	}
+	// Deliberately NOT falling back to ai.ActiveModel(): that is the CLOUD
+	// model, and borrowing its name produced the advice
+	// "run `ollama pull deepseek-v4-flash-vision-exp`" — a model id that
+	// exists in no Ollama registry, so the one actionable line in the
+	// offline-brain check was a command guaranteed to fail. An unset
+	// fallback model is unset; say that instead of inventing one.
+	if fb.Model == "" {
+		fmt.Println(shell.KV("offline llm", shell.Badge(shell.StateWarn, "no model set")+
+			shell.Muted("  ollama is running, but nothing will answer offline"), w))
+		suggestOllamaModel(ctx, client)
+		return
+	}
+	if ollamaHasModel(ctx, client, fb.Model) {
+		fmt.Println(shell.KV("offline llm", shell.Badge(shell.StateGood, "ready")+
+			shell.Muted("  ollama  ·  "+fb.Model), w))
+		return
+	}
+	fmt.Println(shell.KV("offline llm", shell.Badge(shell.StateWarn, "not pulled")+
+		shell.Muted("  "+fb.Model+" is configured but absent"), w))
+	fmt.Println(shell.StepCommand("ollama pull " + fb.Model))
+	suggestOllamaModel(ctx, client)
 }
 
 // ollamaHasModel reports whether a model tag is installed, tolerating the bare
@@ -1566,7 +1625,8 @@ func printEdgeSidecars() {
 func suggestOllamaModel(ctx context.Context, client *ollama.Client) {
 	installed, err := client.ListModels(ctx)
 	if err != nil || len(installed) == 0 {
-		color.Yellow("  → pull one, then set it:  ollama pull llama3.2  ·  /config fallback-model llama3.2")
+		fmt.Println(shell.StepCommand("ollama pull llama3.2"))
+		fmt.Println(shell.StepCommand("/config fallback-model llama3.2"))
 		return
 	}
 	names := make([]string, 0, len(installed))
@@ -1576,8 +1636,10 @@ func suggestOllamaModel(ctx context.Context, client *ollama.Client) {
 			break
 		}
 	}
-	color.Yellow("  → this Ollama has: %s", strings.Join(names, ", "))
-	color.Yellow("  → set one:  /config fallback-model %s", names[0])
+	for _, l := range shell.StepDetail("this Ollama has: "+strings.Join(names, ", "), shell.Muted) {
+		fmt.Println(l)
+	}
+	fmt.Println(shell.StepCommand("/config fallback-model " + names[0]))
 }
 
 func ollamaHasModel(ctx context.Context, client *ollama.Client, model string) bool {
@@ -1595,22 +1657,26 @@ func ollamaHasModel(ctx context.Context, client *ollama.Client, model string) bo
 
 // printEdgeThermals reports temperature and throttling. Sustained throttling is
 // the usual explanation for an appliance that "got slow" after working fine.
-func printEdgeThermals(rep edge.Report) {
+func printEdgeThermals(rep edge.Report, w int) {
 	if rep.ThermalC <= 0 {
 		if rep.ThermalErr != "" {
-			color.Cyan("Thermals: %s", rep.ThermalErr)
+			// Not a warning: "sensors are Linux-only" is the expected answer on
+			// a Mac, and colouring it like a problem is why the flat version had
+			// three shades of nothing-is-wrong.
+			fmt.Println(shell.KV("THERMALS", shell.Badge(shell.StateIdle, rep.ThermalErr), w))
 		}
 		return
 	}
-	line := fmt.Sprintf("Thermals: %.1f°C (%s)", rep.ThermalC, edge.ThermalVerdict(rep.ThermalC))
+	reading := fmt.Sprintf("%.1f°C", rep.ThermalC)
+	state := shell.StateGood
 	if rep.ThermalC >= 80 {
-		color.Yellow(line)
-	} else {
-		color.Green(line)
+		state = shell.StateWarn
 	}
+	value := shell.Badge(state, reading) + shell.Muted("  "+edge.ThermalVerdict(rep.ThermalC))
 	if rep.Throttled {
-		color.Yellow("  → firmware reports a throttle event; sustained load is being capped")
+		value += shell.Muted("  ·  firmware is capping sustained load")
 	}
+	fmt.Println(shell.KV("THERMALS", value, w))
 }
 
 // handleProviderStatus reports every provider and which one is answering.

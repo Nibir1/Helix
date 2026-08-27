@@ -16,9 +16,11 @@ import (
 )
 
 const (
-	baseURL      = "https://api.anthropic.com"
-	apiVersion   = "2023-06-01"
-	defaultModel = "claude-opus-4-8"
+	baseURL    = "https://api.anthropic.com"
+	apiVersion = "2023-06-01"
+	// defaultModel is the current GA flagship: 1M context, and image input, so
+	// the camera path is live without picking a different model first.
+	defaultModel = "claude-opus-5"
 )
 
 // Provider implements Anthropic.

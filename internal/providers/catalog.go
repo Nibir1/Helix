@@ -18,6 +18,8 @@ var contextLimits = []contextLimitEntry{
 	// OpenAI
 	{prefix: "gpt-5.6-luna", limit: 1_050_000},
 	{prefix: "gpt-5.6-sol", limit: 1_050_000}, // Added for standard API alias
+	{prefix: "gpt-5.6-terra", limit: 1_050_000},
+	{prefix: "gpt-5.6", limit: 1_050_000}, // bare alias for -sol
 	{prefix: "gpt-5.5", limit: 1_000_000},
 	{prefix: "gpt-5.4-pro", limit: 1_050_000},
 	{prefix: "gpt-5.4-mini", limit: 400_000},
@@ -38,8 +40,24 @@ var contextLimits = []contextLimitEntry{
 	{prefix: "deepseek-reasoner", limit: 1_000_000}, // Public API alias for R1/V4-Pro
 
 	// GLM
+	{prefix: "glm-5.3-flash", limit: 1_048_576},
+	{prefix: "glm-5.3", limit: 1_000_000},
 	{prefix: "glm-5.2", limit: 1_000_000},
 	{prefix: "glm-5.1", limit: 200_000},
+	{prefix: "glm-4.6v", limit: 128_000},
+
+	// Google Gemini — context windows from ai.google.dev. Without these the 8k
+	// default applies and GetSafeContentLimit clamps RAG context to ~4k chars,
+	// which is the silent-starvation bug the xAI entry below was added for.
+	{prefix: "gemini-3.7", limit: 1_000_000},
+	{prefix: "gemini-3.6", limit: 1_000_000},
+	{prefix: "gemini-3.5", limit: 1_000_000},
+	{prefix: "gemini-3.1-pro", limit: 1_000_000},
+	{prefix: "gemini-3", limit: 1_000_000},
+	{prefix: "gemini-2.5", limit: 1_000_000},
+
+	// Meta (Meta Model API)
+	{prefix: "muse-spark", limit: 1_048_576},
 
 	// Kimi
 	{prefix: "kimi-k3", limit: 1_000_000},
@@ -130,6 +148,8 @@ var toolUseProviders = map[string]bool{
 	"qwen":      true,
 	"glm":       true,
 	"xai":       true, // docs.x.ai lists function calling
+	"gemini":    true, // OpenAI-compatible surface forwards tools/tool_choice
+	"meta":      true, // Muse Spark lists tool calling
 	"anthropic": true, // P8.7b: tool_use blocks + input_schema
 	"ollama":    true, // P8.7b: /api/chat tools — but MODEL-gated, see below
 }
@@ -237,8 +257,13 @@ var visionModelSubstrings = []string{
 	"claude-3", "claude-4", "claude-sonnet", "claude-opus", "claude-haiku",
 	"gemini", "gemma3", "gemma4",
 	"pixtral", "grok-2-vision", "grok-4",
-	"qwen2.5-vl", "qwen3-vl", "glm-4v", "glm-4.5v",
+	"qwen2.5-vl", "qwen3-vl", "qwen3.7-plus", "glm-4v", "glm-4.5v", "glm-4.6v",
 	"internvl", "phi-3.5-vision", "phi-4-multimodal",
+	// Natively multimodal flagships whose names carry no "vision"/"vl" marker
+	// at all. Each is somebody's DEFAULT model, so missing one here is the
+	// difference between /eyes working and refusing on a stock install.
+	"glm-5.3-flash", "muse-spark",
+	"kimi-k3", "kimi-k2.6", "kimi-k2.5",
 }
 
 // SupportsVision reports whether a provider/model pair can process images.

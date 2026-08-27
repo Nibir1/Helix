@@ -43,6 +43,58 @@ func TestFirstRunMenuExcludesHandManagedRuntimes(t *testing.T) {
 	}
 }
 
+// TestNewCloudProvidersAreSelectableEndToEnd walks the path a first-run user
+// takes: the menu offers a label, normalizeProviderName has to keep the id,
+// setupProvider has to accept it, and the registry has to know it. Any one of
+// those four missing produces a menu entry that is rejected the moment it is
+// chosen — the drift that shipped llamacpp broken once already.
+func TestNewCloudProvidersAreSelectableEndToEnd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := ai.InitProviders(ai.ProviderSettings{}); err != nil {
+		t.Fatalf("init providers: %v", err)
+	}
+
+	for _, id := range []string{"gemini", "meta"} {
+		t.Run(id, func(t *testing.T) {
+			var inMenu bool
+			for _, opt := range providerOptions {
+				if opt.ID == id {
+					inMenu = true
+					if strings.TrimSpace(opt.Label) == "" {
+						t.Errorf("%s has no menu label", id)
+					}
+				}
+			}
+			if !inMenu {
+				t.Errorf("%s is registered but absent from the first-run menu", id)
+			}
+			if got := normalizeProviderName(id); got != id {
+				t.Errorf("normalizeProviderName(%q) = %q", id, got)
+			}
+			if !ai.HasProvider(id) {
+				t.Errorf("%s must be registered", id)
+			}
+			// It is a keyed cloud provider, so it must NOT fall through to the
+			// keyless "registered is enough" branch of setupProvider.
+			p, err := ai.GetProviderByName(id)
+			if err != nil {
+				t.Fatalf("%s: %v", id, err)
+			}
+			if !p.RequiresAPIKey() {
+				t.Errorf("%s should require an API key", id)
+			}
+		})
+	}
+
+	// A provider in the menu must never also be announced as "also available
+	// after setup" — the existing invariant, re-checked now that two were added.
+	for _, name := range advancedProviderNames() {
+		if name == "gemini" || name == "meta" {
+			t.Errorf("%s is in the menu AND listed as extra", name)
+		}
+	}
+}
+
 // TestDemotedProviderStaysUsable is the other half: demoted is not deleted. The
 // edge case llama.cpp exists for (hardware Ollama cannot serve — see
 // docs/edge_deployment.md) depends on it still being selectable.

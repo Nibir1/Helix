@@ -83,12 +83,22 @@ Having installed the binary and found your models, the wizard offers to start
 llama-server too, waits for the model to load, and only then reports success.
 Nothing starts implicitly and nothing is restarted for you — ADR-002 still holds
 — but making you copy a command back into the shell you are already in was the
-step that left the flow feeling unfinished.
+step that left the flow feeling unfinished. `/reboot` restarts **Helix**, never a
+sidecar, so the rule is not weakened by it.
 
 The started process is **detached on purpose**: tying it to Helix's lifetime
 would reload several gigabytes of weights on every restart, which defeats the
 point of a local runtime. So it keeps running after Helix exits, and Helix tells
-you its PID and how to stop it. Output goes to `~/.helix/llama-server.log`; when
+you its PID and how to stop it.
+
+That property stopped being theoretical when `/reboot` arrived — and more so now
+that `/reboot` self-updates, since installing a new Helix is a thing you might do
+weekly rather than never. Restarting the
+shell is now a routine thing to do — after a `/purge`, after a provider change,
+after repointing a sidecar — and every sidecar survives it untouched:
+llama-server keeps its weights resident, whisper.cpp keeps its model, and the
+persistent Piper process keeps its voice loaded. A restart costs the shell, not
+the gigabytes behind it. Output goes to `~/.helix/llama-server.log`; when
 a load fails, the last lines of that log are printed with the error.
 
 The readiness wait scales its budget with the model size, and distinguishes
@@ -302,10 +312,11 @@ Route walking treats **any 4xx** as "not on this route" — 404 for a missing pa
 the search before the other is tried. A **5xx** does stop it: that is the right
 endpoint failing, and looking elsewhere would report the wrong cause.
 
-`/blackbox setup` now verifies the chain before declaring success. It used to print
-"Voice link configured" and stop, so a selection that could never work only
-surfaced later as a failed `/blackbox say` — by which point the wizard appeared to have
-succeeded.
+`/blackbox setup` verifies the chain before declaring success, and closes with a
+VOICE LINK panel naming what will hear you, what will answer, and whether every
+selected provider actually responded. It used to print a flat "Voice link
+configured" and stop, so a selection that could never work only surfaced later as
+a failed `/blackbox say` — by which point the wizard appeared to have succeeded.
 
 ---
 

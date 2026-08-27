@@ -17,7 +17,7 @@
 Helix is an **AI-powered command‑line assistant and adversarial cybersecurity platform** that turns natural language into **safe, executable actions**. It bridges the gap between human intent and machine execution, combining local LLM inference, retrieval-augmented generation (RAG), live threat intelligence, and strict safety pipelines.
 
 It combines:
-- **Multi-Provider AI** (OpenAI, Anthropic, DeepSeek, Ollama and more)
+- **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more)
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
 - **A Multi-Layer Safety & Sandbox Engine** around shell, git, packages, and recon
@@ -148,7 +148,8 @@ Using an advanced **Input Classification Engine** (`internal/shell/classify.go`)
 ### 5. Enterprise Security & Privacy
 - `/sandbox strict` *(Enforces kernel-grade write confinement via Landlock/Seatbelt)*
 - `/doctor` *(Surfaces local, telemetry-free crash diagnostics and system health)*
-- `/purge` *(Cryptographically wipes all local Helix data, keys, and crash reports)*
+- `/reboot` *(Self-updates from GitHub releases or a local build — checksum-verified, atomically installed, automatically rolled back if the new binary cannot start — then restarts and resumes what it was doing)*
+- `/purge` *(Deletes all local Helix data — keys, databases, caches, transcripts and crash reports — after a grouped manifest and an explicit confirmation)*
 
 ---
 
@@ -267,7 +268,7 @@ The first boot walks three stages, each skippable: **AI provider**, **system pac
 Where Helix does not know a verified package name for your platform, it says so and points at the docs rather than running a guess.
 
 ### Live mode — `/blackbox`
-`/blackbox on` is Helix awake: microphone open, camera on, replies spoken, and a companion loop that looks at the scene on its own and speaks up when something is worth saying. Say **"manual mode"** at any time to return to the keyboard, or **"turn off your eyes"** to close the camera without ending the conversation.
+`/blackbox on` is Helix awake: microphone open, camera on, replies spoken, and a companion loop that looks at the scene on its own and speaks up when something is worth saying. Say **"manual mode"** at any time to return to the keyboard, **"turn off your eyes"** to close the camera without ending the conversation, or **"reboot"** to restart the shell — which comes back listening, in the same directory, on the same provider, with the conversation intact. A spoken reboot restarts but never **installs**: it will tell you an update is waiting and leave the decision to the keyboard.
 
 Eight commands (`/voice`, `/manual`, `/voice-setup`, `/voice-status`, `/wake`, `/say`, `/tts`, `/eyes`) folded into this one; typing an old name prints where it went.
 
@@ -307,6 +308,14 @@ replies, the STT provider and its confidence — never audio, because captured
 clips are deleted the moment they are read. Voice can always stop the log and
 never start it: turning recording on has to be typed.
 
+That rule — *voice may reduce what is collected but never increase it* — is why a
+**spoken** `/reboot` writes no conversation content at all. A typed one leaves a
+240-character excerpt of your last message in `~/.helix/reboot.json` so the
+restarted shell can say what it was doing; a spoken one carries the mode, the
+directory, the provider and your open tasks and stops there. Either way the
+record is 0600, deleted the moment it is read, ignored if it is more than 12
+hours old, and wiped by `/purge`.
+
 ### Utilities
 | Command | Description |
 | :--- | :--- |
@@ -316,7 +325,8 @@ never start it: turning recording on has to be typed.
 ### DANGER ZONE
 | Command | Description |
 | :--- | :--- |
-| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start |
+| `/reboot [now\|check]` | **Self-update and restart.** Checks GitHub releases and locally built binaries, installs with your confirmation, and comes back in the same mode, directory, provider and conversation. A download is installed only if its SHA-256 matches the release's checksums file; the previous binary is kept and restored automatically if the new one cannot start. `now` skips the check, `check` only reports. Say **"reboot"** in live mode — a spoken reboot restarts but never installs |
+| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, and the piper runtime binary) with their sizes, and closes by pointing at `/reboot` — open database handles only release when the process exits |
 
 ### Aliases
 `/?` `/h` `/sos` → `/help` · `/v` → `/version` · `/reset` → `/clear` · `/usage` → `/cost` · `/mode` → `/permissions` · `/intel` → `/vuln`
@@ -541,14 +551,59 @@ Helix/
 
 ---
 
+## Keeping Helix current
+
+`/reboot` is the update path. It checks for a newer Helix, offers it, verifies
+it, installs it and restarts into it — coming back in the same mode, directory,
+provider and conversation.
+
+| | |
+| :--- | :--- |
+| `/reboot` | check, offer, install with your confirmation, restart |
+| `/reboot check` | only report whether an update exists |
+| `/reboot now` | restart immediately, no check |
+
+Two sources, and by default whichever is newer wins:
+
+- **GitHub releases** — the project's published tags. A download is installed
+  **only** if its SHA-256 matches the checksums file published with that release,
+  the URL never leaves GitHub (redirects off it are refused, not followed), and
+  the binary proves it is Helix for this machine by its Go build info.
+- **A Helix you built yourself** — `make current` writes `dist/helix`, and the
+  local channel adopts it. A tie between the two goes to the local build: if you
+  have both, you are developing, and the binary you just compiled is the one you
+  meant to run.
+
+**The previous binary is kept.** If the new one cannot start — an authentic
+release that simply does not run here, which no checksum can catch — the
+supervisor restores it automatically and starts it.
+
+**A spoken reboot never installs.** `/reboot` is voice-reachable because
+restarting destroys nothing; replacing the program you run is a different act,
+so the microphone can check and report and nothing else.
+
+**Signatures are published but not checked by the updater.** Keyless
+verification with the wrong identity constraints reports success while proving
+nothing, so Helix does not pretend to do it — it prints the `cosign verify-blob`
+command instead. Integrity is verified end to end; authenticity is yours to
+confirm if you want it.
+
+Configure under `update` in `~/.helix/config.json`: `channel`
+(`auto` · `github` · `local` · `off`), `repo`, `check`, and `local_paths` to
+override where a locally built binary is looked for.
+
+---
+
 ## AI Backends & Provider Support
 
 Helix supports a massive array of AI providers out of the box, managed via `/setup` or `/provider`:
 
-1. **Remote APIs:** OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM.
-2. **Local Runtimes:** Ollama (auto-installs and pulls models).
+1. **Remote APIs:** OpenAI, Anthropic, Google Gemini, Meta (Muse Spark), DeepSeek, Kimi, Qwen, GLM, xAI (Grok).
+2. **Local Runtimes:** Ollama (auto-installs and pulls models), llama.cpp via `/provider use llamacpp`.
 
-API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions, or passed via environment variables.
+API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions, or passed via environment variables — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `META_API_KEY` (Meta's own `MODEL_API_KEY` is also accepted), `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `XAI_API_KEY`.
+
+**Every provider's default model can see.** Helix picks a multimodal default for each one — `gpt-5.6-luna`, `claude-opus-5`, `gemini-3.7-flash`, `muse-spark-1.2`, `deepseek-v4-flash-vision-exp`, `kimi-k3`, `qwen3.7-plus`, `glm-5.3-flash`, `grok-4.6`, and `gemma4:e2b` locally — so the Phase 5 camera path (`/blackbox eyes on`) works on a fresh key instead of refusing with "No vision-capable model is configured". Switch to a text-only model any time with `/model use <id>`.
 
 ---
 

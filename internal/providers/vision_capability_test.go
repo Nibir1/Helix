@@ -25,6 +25,18 @@ func TestSupportsVisionRecognizesMainstreamMultimodalModels(t *testing.T) {
 		"pixtral":        "pixtral-12b",
 		"glm-v":          "glm-4v-plus",
 		"moondream":      "moondream:latest",
+		// Natively multimodal flagships whose names carry no marker at all.
+		// Each of these is some provider's DEFAULT, so a miss here is /eyes
+		// refusing on a stock install.
+		"gemini-default": "gemini-3.7-flash",
+		"meta-default":   "muse-spark-1.2",
+		"glm-default":    "glm-5.3-flash",
+		"glm-4.6v":       "glm-4.6v",
+		"kimi-default":   "kimi-k3",
+		"kimi-k2.6":      "kimi-k2.6",
+		"qwen-default":   "qwen3.7-plus",
+		"openai-56":      "gpt-5.6-luna",
+		"deepseek-vl":    "deepseek-v4-flash-vision-exp",
 	}
 	for label, model := range capable {
 		t.Run(label, func(t *testing.T) {
@@ -46,6 +58,13 @@ func TestSupportsVisionRejectsTextOnlyModels(t *testing.T) {
 		"empty":             "",
 		// Embedding endpoints share provider names but take no images.
 		"embedding": "text-embedding-3-large",
+		// Same vendor, same generation, one letter of difference — these are
+		// the near misses the substring list must NOT swallow. glm-5.3 is text
+		// only while glm-5.3-flash sees; qwen3.7-max is text only while
+		// qwen3.7-plus sees; kimi-k2.7-code is text only while k2.6 and k3 see.
+		"glm-5.3 text":   "glm-5.3",
+		"qwen3.7-max":    "qwen3.7-max",
+		"kimi k2.7 code": "kimi-k2.7-code",
 	}
 	for label, model := range textOnly {
 		t.Run(label, func(t *testing.T) {

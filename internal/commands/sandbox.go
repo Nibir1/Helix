@@ -285,7 +285,25 @@ func (ds *DirectorySandbox) isCommonNonFileArgument(arg string) bool {
 // Directory control
 // ================================================================
 
+// ChangeDirectory moves and announces the move, for callers acting on a
+// request the user just typed.
 func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
+	if err := ds.SetDirectory(newDir); err != nil {
+		return err
+	}
+	color.Green("📁 Changed directory: %s", ds.GetCurrentDirectory())
+	return nil
+}
+
+// SetDirectory moves WITHOUT announcing it.
+//
+// The announcement and the move were one function, which is right for /cd — the
+// user asked, so telling them is the answer — and wrong for anything that moves
+// on the user's behalf. /reboot restoring the working directory printed a green
+// "📁 Changed directory" line at column zero, ahead of the panel that was about
+// to report the same fact properly. A function that reports on its caller's
+// behalf leaves that caller no way to say it better.
+func (ds *DirectorySandbox) SetDirectory(newDir string) error {
 	if ds.mode == SandboxDisabled {
 		return os.Chdir(newDir)
 	}
@@ -294,13 +312,7 @@ func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
 	if err != nil {
 		return fmt.Errorf("directory change outside sandbox: %s", newDir)
 	}
-
-	if err := os.Chdir(safePath); err != nil {
-		return err
-	}
-
-	color.Green("📁 Changed directory: %s", safePath)
-	return nil
+	return os.Chdir(safePath)
 }
 
 // buildArgv converts a command + detected shell into an argv slice.

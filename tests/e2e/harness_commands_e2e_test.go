@@ -342,18 +342,30 @@ func TestE2E_ConfigShowsAndSets(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Secrets must be excluded, and the reason said out loud.
-	if err := h.Expect("API keys are NOT settable here", 5*time.Second); err != nil {
+	if err := h.Expect("are NOT settable here", 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.SendExpect("/config agentic on", "agentic = on", 15*time.Second); err != nil {
+	// One token, deliberately: the sentence around it wraps to the terminal, so
+	// any multi-word expectation on wrapped prose is a flake waiting to happen.
+	if err := h.Expect("/setup", 5*time.Second); err != nil {
+		t.Fatal("the settings screen must point at where a secret goes instead")
+	}
+	// The ack is a step row — "✔ agentic  on" — so the pair is contiguous once
+	// the harness has stripped the colour.
+	if err := h.SendExpect("/config agentic on", "agentic  on", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.SendExpect("/config agentic", "agentic = on", 15*time.Second); err != nil {
+	// Reading one back is a report rather than an event, and renders as a
+	// labelled row in its own panel.
+	if err := h.SendExpect("/config agentic", "AGENTIC  on", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// An invalid value must be refused with the accepted set, not coerced.
-	if err := h.SendExpect("/config agentic maybe", "Cannot set agentic", 15*time.Second); err != nil {
+	if err := h.SendExpect("/config agentic maybe", "agentic  not set", 15*time.Second); err != nil {
 		t.Fatal(err)
+	}
+	if err := h.Expect("accepts: on | off", 5*time.Second); err != nil {
+		t.Fatal("a refusal must name the accepted values")
 	}
 	if err := h.SendExpect("/config no-such-key", "Unknown setting", 15*time.Second); err != nil {
 		t.Fatal(err)

@@ -334,7 +334,7 @@ func blackBoxContextLine(rep speech.ContextReport) string {
 	}
 
 	held := shell.Muted(fmt.Sprintf("  %d turn%s  ·  %s",
-		rep.Turns, plural(rep.Turns), compactBytes(rep.Bytes)))
+		rep.Turns, plural(rep.Turns), compactBytes(int64(rep.Bytes))))
 
 	switch {
 	case rep.Rejected:
@@ -354,17 +354,30 @@ func blackBoxContextLine(rep speech.ContextReport) string {
 	}
 }
 
-// compactBytes renders a retained-audio size in the shortest honest unit.
+// compactBytes renders a size in the shortest honest unit.
 //
-// The default budget is 4 MiB, so a KB-only format spends six digits saying
-// "4096.0 KB" for the ordinary full buffer — wider than the column and harder
-// to read than the number it stands for.
-func compactBytes(n int) string {
-	const kb = 1024
-	if n < 1024*kb {
+// A KB-only format spends six digits saying "4096.0 KB" for the ordinary full
+// audio buffer — wider than the column and harder to read than the number it
+// stands for. GB matters for the other caller: /purge weighs model-weight
+// directories, where the whole point of the number is deciding whether the disk
+// space is worth reclaiming, and "1433.6 MB" is a worse answer than "1.4 GB".
+//
+// One formatter rather than two, on int64 so a multi-gigabyte directory cannot
+// overflow it on a 32-bit board.
+func compactBytes(n int64) string {
+	const (
+		kb = 1024
+		mb = 1024 * kb
+		gb = 1024 * mb
+	)
+	switch {
+	case n >= gb:
+		return fmt.Sprintf("%.1f GB", float64(n)/gb)
+	case n >= mb:
+		return fmt.Sprintf("%.1f MB", float64(n)/mb)
+	default:
 		return fmt.Sprintf("%.1f KB", float64(n)/kb)
 	}
-	return fmt.Sprintf("%.1f MB", float64(n)/(1024*kb))
 }
 
 // cameraDeliveredNothing reports whether every capture attempt so far has

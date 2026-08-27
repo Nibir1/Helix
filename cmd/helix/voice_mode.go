@@ -523,6 +523,25 @@ func finishVoiceTranscript(text string, transcript speech.Transcript, audio spee
 		return input.InputEvent{}, errVoiceStopped
 	}
 
+	// Restart, recognized in the same place and for the same reason as the
+	// kill phrases: it ENDS the turn rather than being served by it, so the
+	// planner must never see it. A spoken "reboot" that fell through to the
+	// planner would be answered with a sentence about rebooting instead of a
+	// reboot — the same failure "manual mode" had before it was a kill phrase.
+	//
+	// Deliberately BEFORE dispatchVoiceCommand even though /reboot is VoiceOK
+	// and would eventually route: the route form only matches the phrase at the
+	// START of an utterance, and people say "okay, please reboot".
+	if isVoiceRebootPhrase(text) {
+		logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeReboot)
+		handleRebootSpoken()
+		// errVoiceHandled, not errVoiceStopped: the turn is complete and the
+		// loop takes the next iteration, where rebootRequested breaks it. Voice
+		// mode stays ACTIVE on the way out, which is what makes the record say
+		// "voice" and the restart come back listening.
+		return input.InputEvent{}, errVoiceHandled
+	}
+
 	// Vision privacy kill switch (threat V4): "turn off your eyes" deactivates
 	// the camera immediately WITHOUT leaving live mode.
 	if isEyesOffPhrase(text) {

@@ -31,6 +31,7 @@ type Config struct {
 	Ambient               AmbientConfig          `json:"ambient"`
 	Companion             CompanionConfig        `json:"companion"`
 	VoiceLog              VoiceLogConfig         `json:"voice_log"`
+	Update                UpdateConfig           `json:"update"`
 	ModelConfig           ai.ModelConfig         `json:"model_config"`
 	ExecuteConfig         commands.ExecuteConfig `json:"execute_config"`
 }
@@ -415,6 +416,7 @@ func DefaultConfig() (*Config, error) {
 		ModelConfig:   ai.DefaultModelConfig(),
 		ExecuteConfig: commands.DefaultExecuteConfig(),
 		Companion:     CompanionDefaults(),
+		Update:        UpdateDefaults(),
 	}
 	_ = cfg.LoadPreferences()
 	return cfg, nil
@@ -496,7 +498,75 @@ func (cfg *Config) LoadPreferences() error {
 	} else {
 		cfg.Companion = prefs.Companion
 	}
+	// Same shape of problem as Companion: the update section's zero value is
+	// not its default. A config written before self-update existed has an
+	// absent section, and reading that as channel="" / repo="" would leave the
+	// updater pointed at nothing rather than at the project.
+	mergeUpdate(&cfg.Update, prefs.Update)
 	return nil
+}
+
+// UpdateConfig controls how Helix updates itself (`/reboot`).
+type UpdateConfig struct {
+	// Channel is "auto", "github", "local" or "off".
+	//
+	// Default "auto": check published releases AND locally built binaries, and
+	// prefer whichever is newer. It is not "github", because someone running a
+	// source build in a checkout is the person most likely to have a newer
+	// binary sitting in dist/, and a channel that ignored it would tell them
+	// they were up to date while a build they had just made went unnoticed.
+	Channel string `json:"channel"`
+
+	// Repo is the "owner/name" releases are read from.
+	//
+	// Configurable so a fork can update from itself, and pinned to one host by
+	// the updater regardless of what is written here — the field chooses a
+	// repository, never a server.
+	Repo string `json:"repo"`
+
+	// Check controls whether /reboot looks for an update at all.
+	//
+	// Separate from Channel so "do not check on every restart" and "never
+	// update" stay different settings: a restart is something you may want to
+	// be instant, without giving up `/reboot check`.
+	Check bool `json:"check"`
+
+	// LocalPaths overrides where a locally built binary is looked for.
+	LocalPaths []string `json:"local_paths,omitempty"`
+}
+
+// UpdateDefaults returns the shipped update policy.
+//
+// Checking is ON and installing is never automatic. The check costs one HTTPS
+// request on a restart the user asked for; the install always requires a typed
+// confirmation, because replacing the program someone is running is not
+// something to do because they wanted a fresh process.
+func UpdateDefaults() UpdateConfig {
+	return UpdateConfig{
+		Channel: "auto",
+		Repo:    "Nibir1/Helix",
+		Check:   true,
+	}
+}
+
+// mergeUpdate applies a config file's update section over the defaults.
+func mergeUpdate(dst *UpdateConfig, src UpdateConfig) {
+	if src.Channel != "" {
+		dst.Channel = src.Channel
+	}
+	if src.Repo != "" {
+		dst.Repo = src.Repo
+	}
+	if len(src.LocalPaths) > 0 {
+		dst.LocalPaths = src.LocalPaths
+	}
+	// Check is a bool whose default is true, so "absent" and "false" look
+	// identical in the decoded struct. Absence of the WHOLE section means
+	// defaults; a section that says anything at all is taken at its word,
+	// including its silence about Check.
+	if src.Channel != "" || src.Repo != "" || len(src.LocalPaths) > 0 || src.Check {
+		dst.Check = src.Check
+	}
 }
 
 // WakeWordDefaults are the safe, everywhere-works defaults for hands-free

@@ -103,50 +103,7 @@ func PanelLine(text string) string {
 // Returns: the wrapped lines, each already gutter-prefixed; nil for blank input.
 // Complexity: O(len(text)).
 func PanelWrap(text string, colour func(string) string) []string {
-	if colour == nil {
-		colour = func(s string) string { return s }
-	}
-	limit := panelWidth() - 2
-	if limit < 20 {
-		limit = 20
-	}
-	var out []string
-	var line string
-	flush := func() {
-		if line != "" {
-			out = append(out, PanelLine(colour(line)))
-			line = ""
-		}
-	}
-	for _, word := range strings.Fields(text) {
-		// A word too long for any line is split rather than allowed to run past
-		// the frame. A URL, an absolute path or an endpoint is the realistic
-		// case, and letting one escape defeats the point of wrapping at all.
-		if visibleWidth(word) > limit {
-			flush()
-			for _, part := range wrapANSI(word, limit) {
-				out = append(out, PanelLine(colour(part)))
-			}
-			continue
-		}
-		switch {
-		case line == "":
-			line = word
-		// Measured on VISIBLE width, not bytes. len() counts a multi-byte rune
-		// once per byte, so prose containing "·", "—" or "→" — which this
-		// codebase's panels are full of — wrapped up to three columns early per
-		// such rune. Harmless in the sense that it never overflowed, but it
-		// broke lines that had room, and it is the same class of bug as
-		// measuring ANSI escapes as content.
-		case visibleWidth(line)+1+visibleWidth(word) <= limit:
-			line += " " + word
-		default:
-			flush()
-			line = word
-		}
-	}
-	flush()
-	return out
+	return panelWrapIndent(text, colour, "")
 }
 
 // PanelGap is an empty gutter line — vertical breathing room that keeps the

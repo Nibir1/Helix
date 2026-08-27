@@ -71,6 +71,19 @@ Say **"manual mode"** to leave without touching the keyboard — matched at the
 end of a sentence, so "okay, now switch to manual mode" works and is not
 confused with a question about the feature.
 
+Say **"reboot"** (or "please reboot") to restart the shell itself. It is matched
+the same way and, like the safety valve, ends the turn rather than being answered
+by it — a question such as "what happens when you reboot" is answered instead.
+The restart comes back **in live mode**, in the same directory, on the same
+provider and model, with the conversation intact and whatever you were working on
+named on the way in. Rebooting from the keyboard comes back at the keyboard.
+
+`/reboot` also **self-updates** — but never from the microphone. A spoken reboot
+checks, says an update is waiting, and restarts the version you already have;
+installing a downloaded binary requires a typed confirmation. Restarting destroys
+nothing, which is why voice may do it. Replacing the program you run is a
+different act.
+
 Live mode replaces the typed line with a record→transcribe cycle. Transcripts
 are stamped `Channel=voice` and pass through the **Voice Risk Policy** (ADR-005):
 
@@ -167,6 +180,18 @@ an interactive TTY session holds the active-session lock.
   and injects them into the planner as *data-only* context. `/memory show|clear`.
 - **Undo:** after a `git commit`, say or type `"undo that"` — Helix offers
   `git reset --soft HEAD~1` through the full safety pipeline.
+
+### Restarting Helix is not restarting the daemon
+
+`/reboot` restarts the **interactive shell** and supervises the replacement from
+inside its own process — the launching terminal sees one job throughout, and
+systemd or launchd sees nothing at all. The daemon's supervision is the opposite
+shape: a service manager restarting `helix daemon`, which has no terminal. The
+two never interact, and a `/reboot` leaves a running daemon alone.
+
+Local sidecars are also left alone: whisper.cpp, llama-server and the persistent
+Piper process all survive a restart with their models resident, so rebooting the
+shell costs seconds rather than gigabytes of reloading.
 
 ## 5. Local sidecars (private default)
 
@@ -359,6 +384,16 @@ Samples live in `~/.helix/metrics/` (0600, local only, never transmitted) and
 
 - **Keys:** `~/.helix/secrets.json` (0600), namespaced `stt.*` / `tts.*`.
 - **Session:** `~/.helix/session.json` (0600) — `/memory clear` wipes it.
+- **Update marker:** `~/.helix/update-pending` (0600) — a note from a restarting
+  Helix to the supervisor waiting on it, saying a new binary was just installed
+  so a bad one can be rolled back. Removed as soon as it is read.
+- **Reboot record:** `~/.helix/reboot.json` (0600) — written only by `/reboot`,
+  **deleted the moment the restarted shell reads it**, ignored past 12 hours.
+  Holds the mode, working directory, provider/model and in-progress tasks —
+  plus, **for a TYPED restart only**, a 240-character excerpt of your last
+  message. A spoken reboot stores no conversation content at all, which is what
+  lets "voice may reduce what is collected, never increase it" hold without an
+  exception. Never a copy of the conversation either way.
 - **Journals:** `~/.helix/journal/` (interactions, undo, vision metadata) —
   append-only, redacted, rotated at 1 MiB × 3 generations, `/purge` wipes all of it.
 - **Voice log:** `~/.helix/voice_log/` — **absent unless you enable it** (§8);
@@ -369,5 +404,6 @@ Samples live in `~/.helix/metrics/` (0600, local only, never transmitted) and
   entered; the pricing catalog is embedded data + a local override
   (`~/.helix/pricing.json`).
 
-`/purge` wipes keys, DBs, session memory, journals, the voice log, metrics, and
-the daemon socket for a clean slate.
+`/purge` wipes keys, DBs, session memory, the reboot record and update marker,
+journals, the voice log, metrics, and the daemon socket for a clean slate — then `/reboot` finishes
+the job, because open database handles only release when the process exits.

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"helix/internal/shell"
 	"helix/internal/speech"
 )
 
@@ -93,13 +94,19 @@ func (v *VoicePrompter) AskTypedConfirmation(label, requiredPhrase string) bool 
 func (v *VoicePrompter) say(text string) {
 	// Terminal echo FIRST: if TTS is down (no key, silent build, no speaker)
 	// the user must still SEE the question — otherwise confirmations become
-	// invisible auto-declines with zero explanation.
+	// invisible auto-declines with zero explanation. The echo keeps whatever
+	// styling the caller applied; the SPOKEN copy must not.
 	fmt.Printf("[voice] %s\n", text)
 	speaker := v.Speak
 	if speaker == nil {
 		return
 	}
-	speaker(text)
+	// Questions now arrive rendered in the panel language — shell.Prompt wraps
+	// them in colour so a typed wizard reads as one screen. Handing that
+	// straight to a TTS engine would have it pronounce the escape sequences,
+	// which is a question nobody can answer. Strip to plain text at the last
+	// moment, here, rather than asking every caller to remember.
+	speaker(shell.Plain(text))
 }
 
 func (v *VoicePrompter) listen() (speech.Transcript, bool) {

@@ -17,9 +17,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"helix/internal/commands"
+	"helix/internal/config"
 	"helix/internal/shell"
 	"helix/internal/utils"
 	"helix/internal/ux"
@@ -60,7 +62,20 @@ func maybeRunNonInteractive() (bool, int) {
 		return true, exitCode(runNonInteractiveShell(string(data)))
 	}
 
-	// Case 2: explicit command execution.
+	// Case 2: --version / -V.
+	//
+	// A CLI has to be able to say what it is without starting a shell — the
+	// self-updater's own local channel is the second consumer, since knowing a
+	// binary's version by asking it is the obvious thing to reach for. (It does
+	// not, in the end: internal/update reads the build info as DATA rather than
+	// executing a file it is deciding whether to trust. This flag exists for
+	// the person at the keyboard.)
+	if args[0] == "--version" || args[0] == "-V" {
+		fmt.Printf("helix %s %s/%s\n", config.HelixVersion, runtime.GOOS, runtime.GOARCH)
+		return true, 0
+	}
+
+	// Case 3: explicit command execution.
 	// Example:
 	//   helix -c "ls -la"
 	//   helix --command "git status"

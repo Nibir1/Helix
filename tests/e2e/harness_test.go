@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -196,6 +197,19 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 }
 
 // readLoop continuously drains the PTY into an in-memory buffer.
+//
+// A read error does NOT end the loop, and that is not defensive programming —
+// it is required for /reboot to be observable at all. On both macOS and Linux a
+// pty master returns EIO the moment no process has the slave open, and there is
+// such a moment whenever the shell replaces its own image: syscall.Exec tears
+// the old image down before the new one is scheduled. The loop used to return
+// on the first error, so it went permanently deaf at exactly that instant — and
+// then the restarted Helix blocked forever on its very first write, because
+// nobody was draining the pty and its buffer filled. The symptom was a reboot
+// that appeared to hang, when what had actually hung was the observer.
+//
+// It stops when the process is genuinely gone, so a finished test does not
+// leave a goroutine spinning.
 func (h *harness) readLoop() {
 	buf := make([]byte, 4096)
 	for {
@@ -204,11 +218,31 @@ func (h *harness) readLoop() {
 			h.outMu.Lock()
 			h.outBuf.Write(buf[:n])
 			h.outMu.Unlock()
+			continue
 		}
-		if err != nil {
+		if err == nil {
+			continue
+		}
+		if !h.processAlive() {
 			return
 		}
+		// Alive but momentarily unreadable: back off rather than spin, and try
+		// again. The gap across an exec is measured in milliseconds.
+		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// processAlive reports whether the shell under test still exists.
+//
+// Signal 0 asks the kernel without delivering anything. It stays true across a
+// re-exec, which is the point: the PID survives, so "the pty went quiet" and
+// "Helix is gone" are different questions and the read loop must not confuse
+// them.
+func (h *harness) processAlive() bool {
+	if h.cmd == nil || h.cmd.Process == nil {
+		return false
+	}
+	return syscall.Kill(h.cmd.Process.Pid, 0) == nil
 }
 
 // stripped returns the ANSI-free snapshot of all captured output.
@@ -452,11 +486,11 @@ func TestE2E_PurgeCancelled(t *testing.T) {
 
 	cfgPath := filepath.Join(h.home, ".helix", "config.json")
 	h.WriteLine("/purge")
-	if err := h.Expect("FULL PURGE", 15*time.Second); err != nil {
+	if err := h.Expect("permanent", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	h.WriteLine("n")
-	if err := h.Expect("Purge cancelled", 10*time.Second); err != nil {
+	if err := h.Expect("nothing was deleted", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(cfgPath); err != nil {

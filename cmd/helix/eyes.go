@@ -108,7 +108,7 @@ func visionRouteDescription() string {
 //
 // The old single line — "No vision-capable model is configured (active model or
 // vision.provider) — set one first." — is accurate and useless: it names neither
-// which model was rejected, nor which of the nine registered providers would
+// which model was rejected, nor which of the registered providers would
 // qualify, nor where the setting lives. Helix knows all three.
 //
 // Args: none.
@@ -126,7 +126,8 @@ func visionUnavailableHelp() []string {
 		return append(lines,
 			"None of the registered providers offers a vision-capable default model.",
 			"Switch to a multimodal model with /provider use <name> then /model <id>",
-			"(e.g. gpt-4o, a claude-* model, or an Ollama llava/gemma3 build).")
+			"(e.g. gemini-3.7-flash, gpt-5.6-luna, a claude-* model, or an Ollama",
+			"llava/gemma build).")
 	}
 	return append(lines,
 		"Vision-capable providers registered here: "+strings.Join(capable, ", "),

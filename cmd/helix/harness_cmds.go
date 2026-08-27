@@ -833,7 +833,7 @@ func configKeys() []configKey {
 			// instruction Helix gave for enabling the feature was a command it
 			// would reject. Either the guidance or the key had to change; a
 			// real key is the better half to add.
-			name: "barge-in", help: "Stop a spoken reply by speaking between sentences",
+			name: "barge-in", help: "Interrupt a spoken reply between sentences",
 			extra: "on | off",
 			get:   func() string { return onOff(cfg.Speech.TTS.BargeIn) },
 			set: func(v string) error {
@@ -855,14 +855,14 @@ func configKeys() []configKey {
 			// path and not a /config key — so the fix it offered for a missing
 			// offline brain was itself unrunnable. Found by the drift test
 			// added alongside, in code written minutes earlier.
-			name: "fallback-model", help: "Offline (Ollama) model used when the cloud provider fails",
+			name: "fallback-model", help: "Offline model used when the cloud fails",
 			extra: "an installed Ollama model id",
-			get: func() string {
-				if cfg.LLM.Fallback.Model == "" {
-					return "(unset)"
-				}
-				return cfg.LLM.Fallback.Model
-			},
+			// Returns the value and nothing else. It used to return the literal
+			// string "(unset)" for an empty model — a rendering decision baked
+			// into an accessor, so every reader saw a configured-looking value
+			// where there was none, and the settings table coloured it like a
+			// real one. Absence is the renderer's to describe.
+			get: func() string { return cfg.LLM.Fallback.Model },
 			set: func(v string) error {
 				v = strings.TrimSpace(v)
 				if v == "" {
@@ -873,7 +873,7 @@ func configKeys() []configKey {
 			},
 		},
 		{
-			name: "context-turns", help: "Conversation turns a context-capable voice is conditioned on",
+			name: "context-turns", help: "Turns of context given to a voice model",
 			extra: "0 (off) - 12",
 			get:   func() string { return fmt.Sprint(cfg.Speech.TTS.ContextTurns) },
 			set: func(v string) error {
@@ -943,21 +943,7 @@ func handleConfigCommand(c cmdArgs) {
 	keys := configKeys()
 
 	if c.Empty() {
-		fmt.Println()
-		color.Cyan("⚡ SETTINGS")
-		color.Cyan("Stored in %s", cfg.ConfigPath)
-		fmt.Println()
-		for _, k := range keys {
-			fmt.Printf("  %s %s %s\n",
-				shell.Fg(shell.HexAmber, fmt.Sprintf("%-15s", k.name)),
-				shell.Fg(shell.HexPrimary, fmt.Sprintf("%-22s", truncStr(orNone(k.get()), 22))),
-				shell.Fg(shell.HexMuted, k.help))
-		}
-		fmt.Println()
-		color.Cyan("Set one with /config <key> <value>.")
-		color.Yellow("API keys are NOT settable here — they go through /setup and the key store,")
-		color.Yellow("so a secret never lands in shell history.")
-		fmt.Println()
+		printSettingsPanel(keys)
 		return
 	}
 
@@ -976,27 +962,80 @@ func handleConfigCommand(c cmdArgs) {
 	}
 
 	if c.Count() == 1 {
-		color.Cyan("%s = %s", target.name, orNone(target.get()))
-		color.Cyan("  %s", target.help)
+		// The KEY is the label, so the row reads "AGENTIC  on" rather than
+		// putting the value in front of the thing it belongs to.
+		key := strings.ToUpper(target.name)
+		w := shell.KVWidth(key, "DOES", "ACCEPTS")
+		fmt.Println(shell.PanelTitle("setting"))
+		fmt.Println(shell.KV(key, settingValue(target.get()), w))
+		fmt.Println(shell.KV("DOES", shell.Muted(target.help), w))
 		if target.extra != "" {
-			color.Cyan("  accepts: %s", target.extra)
+			fmt.Println(shell.KV("ACCEPTS", shell.Muted(target.extra), w))
 		}
+		fmt.Println(shell.PanelEnd())
 		return
 	}
 
 	value := c.From(1)
 	if err := target.set(value); err != nil {
-		color.Red("Cannot set %s: %v", target.name, err)
+		fmt.Println(shell.Step(shell.StateBad, target.name, "not set — "+err.Error()))
 		if target.extra != "" {
-			color.Yellow("Accepted values: %s", target.extra)
+			for _, l := range shell.StepDetail("accepts: "+target.extra, shell.Muted) {
+				fmt.Println(l)
+			}
 		}
 		return
 	}
 	if err := cfg.SavePreferences(); err != nil {
-		color.Yellow("Applied for this session, but saving failed: %v", err)
+		fmt.Println(shell.Step(shell.StateWarn, target.name,
+			"applied for this session, but saving failed: "+err.Error()))
 		return
 	}
-	color.Green("%s = %s", target.name, orNone(target.get()))
+	fmt.Println(shell.Step(shell.StateGood, target.name, orNone(target.get())))
+}
+
+// printSettingsPanel renders every settable key as one self-fitting table.
+//
+// The old rendering hand-padded three columns at %-15s and %-22s. That is the
+// same defect /cost carried: a width chosen in source cannot know the terminal,
+// so `deepseek-v4-flash-vision-exp` came back as `deepseek-v4-flash-vis…` on a
+// 102-column screen with room to spare — a settings screen truncating the value
+// it exists to report. shell.Table measures the content and shrinks the widest
+// column only when the panel genuinely cannot hold it.
+func printSettingsPanel(keys []configKey) {
+	rows := make([][]string, 0, len(keys))
+	for _, k := range keys {
+		rows = append(rows, []string{k.name, settingValue(k.get()), shell.Muted(k.help)})
+	}
+
+	fmt.Println(shell.PanelTitle("settings"))
+	for _, l := range shell.Table([]string{"setting", "value", "what it does"}, rows) {
+		fmt.Println(l)
+	}
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.KV("STORED IN", shell.Muted(cfg.ConfigPath), shell.KVWidth("STORED IN")))
+	fmt.Println(shell.PanelGap())
+
+	// Not a footnote. Where a secret is allowed to be typed is a security
+	// property of this screen, and it was previously two yellow lines outside
+	// the frame that read like a caveat rather than a rule.
+	fmt.Println(shell.Step(shell.StateWarn, "api keys",
+		"are NOT settable here — /setup puts them in the key store, "+
+			"so a secret never lands in shell history"))
+	fmt.Println(shell.PanelEnd())
+	fmt.Println(shell.Hint("/config <setting> <value>"))
+}
+
+// settingValue renders a value, distinguishing "not set" from a real one.
+//
+// An unset setting rendered in the same amber as a configured one is how a
+// screen full of values hides the two that are blank — which on this screen are
+// the two most consequential (the offline fallback model, and the STT endpoint).
+func settingValue(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return shell.Muted("unset")
+	}
+	return shell.Value(v)
 }
 
 // applySpeechEndpoint validates and stores a sidecar base URL, then rebuilds the
@@ -1055,9 +1094,13 @@ func onOff(b bool) string {
 	return "off"
 }
 
+// orNone is the plain-text form of settingValue, for output that carries no
+// colour of its own. Both say the same word, because two vocabularies for the
+// same state is how a screen ends up reporting "(unset)" in one row and "unset"
+// in the next.
 func orNone(s string) string {
 	if strings.TrimSpace(s) == "" {
-		return "(unset)"
+		return "unset"
 	}
 	return s
 }

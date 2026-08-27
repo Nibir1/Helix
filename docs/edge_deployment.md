@@ -43,7 +43,7 @@ older distros (notably JetPack 4.x / Ubuntu 18.04 on the Jetson Nano).
 
 That protection covers **Helix**, not the sidecars it talks to. Piper's standalone binary is one of
 those prebuilt binaries, and on old boards it is `libstdc++` rather than glibc that stops it — see
-§4.1.
+§4.2.
 
 ---
 
@@ -129,7 +129,7 @@ Verify with `/provider status` (an "Offline fallback" line) or `helix remote sta
 
 ---
 
-### §4.1 Piper on edge boards: `libstdc++`, not glibc
+### 4.2 Piper on edge boards: `libstdc++`, not glibc
 
 Helix runs Piper as a **persistent process** with the voice model resident, which
 matters more here than on a laptop: Piper's cost is dominated by *loading* the
@@ -262,6 +262,15 @@ The emitted unit is edge-aware: it pulls in `network-online.target` (with
 crash loop cannot hammer a small board, and carries commented `Environment=`
 lines for the knobs in §6.
 
+`/reboot` and this are **different kinds of supervision and do not interact**.
+The unit supervises `helix daemon`, a background service with no terminal;
+`/reboot` restarts an *interactive* shell and supervises it from inside its own
+process, so systemd sees one unit that never exits and never restarts. Exit
+status **86** is the interactive shell's private signal to its own supervisor and
+never reaches systemd — but if you write a unit of your own around an interactive
+Helix, do not add it to `RestartPreventExitStatus=`, and do not treat it as a
+failure code.
+
 **The step that catches people out** is lingering. A `systemd --user` service
 stops at logout and does **not** start at boot unless the account has lingering
 enabled — so on an appliance nobody logs into, a perfectly installed daemon
@@ -297,6 +306,13 @@ Run these inside Helix after install:
   fast enough here", replacing a guess with the numbers from your own hardware.
 - `/mictest` — 3-second capture self-test: proves the mic is actually being heard (level + dBFS +
   speech-gate verdict). The fastest way to catch a wrong input device on a headless board.
+- `/reboot check` — reports whether a newer Helix exists without installing or
+  restarting anything. On an appliance, knowing is often the whole question.
+- `/reboot` — worth running once on a headless board, because "does it come back"
+  is a question with a real answer here: the shell restarts itself and should
+  return in the same mode, in the same directory, with the conversation intact. On
+  an appliance you cannot easily reach, finding out that it does *not* while you
+  are still standing next to it is the point.
 
 ### A note on CSM-1B for edge boards
 
@@ -319,9 +335,25 @@ deployment raises, and it now has an answer instead of an assurance.
 | :--- | :--- | :--- |
 | Wake-word detection (energy engine) | 21 µs, zero allocations | **0.0014 %** |
 | Ambient analysis (when `ambient.enabled`) | 571 µs, 852 KB allocated | **0.038 %** |
+| Restart supervisor (after one `/reboot`) | idle, blocked in `wait` | **not measured** |
 
-Both are pure Go on the CPU and both are tee'd off one capture stream, so
-enabling ambient awareness does not add a second microphone reader. The ambient
+`/reboot` also self-updates, which has two consequences on a small board.
+It replaces the binary **in place** and keeps the previous one beside it as
+`helix.prev`, so budget for two copies on a constrained filesystem. And it
+refuses when the install directory is not writable by the user running Helix —
+the normal state for a package-manager install under `/usr/local/bin` — checked
+BEFORE the download rather than after, so the refusal costs nothing.
+
+The supervisor row is listed rather than omitted because the section promises an
+answer instead of an assurance, and this one is honestly unknown. Using `/reboot`
+once leaves the original process alive for the life of the session, blocked
+waiting on its replacement — it holds no database handle and does no work, but it
+is a second Go heap on a board with little to spare, and nobody has put a number
+on it. It never becomes a third: a supervised child asking to reboot exits with a
+status the supervisor already waiting recognises, rather than spawning anything.
+
+Both microphone figures are pure Go on the CPU and both are tee'd off one capture
+stream, so enabling ambient awareness does not add a second microphone reader. The ambient
 figure includes a WAV decode and an FFT padded to 32768 points; it scales
 superlinearly with chunk length, so raising `speech.wake_word.chunk_ms` costs more
 than proportionally.

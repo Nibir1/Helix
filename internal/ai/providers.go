@@ -13,9 +13,11 @@ import (
 	"helix/internal/providers"
 	anthropicprovider "helix/internal/providers/anthropic"
 	deepseekprovider "helix/internal/providers/deepseek"
+	geminiprovider "helix/internal/providers/gemini"
 	glmprovider "helix/internal/providers/glm"
 	kimiprovider "helix/internal/providers/kimi"
 	llamacppprovider "helix/internal/providers/llamacpp"
+	metaprovider "helix/internal/providers/meta"
 	ollamaprovider "helix/internal/providers/ollama"
 	openaiprovider "helix/internal/providers/openai"
 	openaicompatible "helix/internal/providers/openai_compatible"
@@ -61,6 +63,8 @@ func InitProviders(settings ProviderSettings) error {
 	registry.Register(openaiprovider.New(keys.Get("openai"), client))
 	registry.Register(anthropicprovider.New(keys.Get("anthropic"), client))
 	registry.Register(deepseekprovider.New(keys.Get("deepseek"), client))
+	registry.Register(geminiprovider.New(keys.Get("gemini"), client))
+	registry.Register(metaprovider.New(keys.Get("meta"), client))
 	registry.Register(kimiprovider.New(keys.Get("kimi"), client))
 	registry.Register(qwenprovider.New(keys.Get("qwen"), client))
 	registry.Register(glmprovider.New(keys.Get("glm"), client))

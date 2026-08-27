@@ -6,7 +6,7 @@ BlackBox turns Helix from a reactive text tool into an always-on multimodal comp
 
 It remains local-first and telemetry-free. The whole voice stack runs offline if you want it to — whisper.cpp for ears, Piper for a voice, Ollama or llama.cpp for a brain — and **no component requires Docker**. Keys stay in a 0600 file. Nothing you say is written to disk unless you ask for it, and camera frames are never written at all.
 
-**56,000 lines across 12 new packages, one unchanged moat.**
+**56,000 lines across 13 new packages, one unchanged moat.**
 
 ### 🎙️ Voice
 
@@ -68,7 +68,7 @@ per-machine expectation table are in `docs/local_runtimes.md` §3.5–3.6.
 
 ### 🔌 Providers & offline resilience
 
-- **Ten LLM providers**: OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM, xAI (Grok), Ollama, llama.cpp, and any OpenAI-compatible custom endpoint.
+- **Twelve LLM providers**: OpenAI, Anthropic, Google Gemini, Meta (Muse Spark), DeepSeek, Kimi, Qwen, GLM, xAI (Grok), Ollama, llama.cpp, and any OpenAI-compatible custom endpoint. Every one of them **defaults to a model that can see**, so the camera path works on a fresh key.
 - **Circuit-breaker failover** (CLOSED → OPEN → HALF-OPEN) keeps Helix *thinking* when the cloud disappears, not merely hearing and speaking. It health-checks the local brain before every switch, so a machine with no local runtime never degrades onto a dead endpoint, and an explicit `/provider use` always outranks it.
 - **Misdirected-key guard** — a pasted key whose prefix unambiguously belongs to another vendor is caught before it is stored. GroqCloud and xAI are different companies one letter apart.
 
@@ -86,8 +86,10 @@ Voice is treated as an **untrusted input channel**, because a television, a podc
 - **Typed confirmations stay typed** — force push, hard reset, worktree clean, deleting main. The voice prompter refuses them outright, so a perfect impersonation still cannot satisfy one.
 - **Confirmations fail closed** — silence, timeout or an unintelligible answer counts as "no".
 - **Spoken input never takes the shell fast path.** The classifier decides on the first token and English sentences start with command names, so "make a new branch called test" now reaches the planner that produces `git checkout -b test` instead of being executed verbatim.
-- **Voice may reduce what is collected, never increase it.** "Turn off your eyes" and `/blackbox log off` work by voice; opening the camera is an explicit announced act and starting a transcript log must be typed.
+- **Voice may reduce what is collected, never increase it.** "Turn off your eyes" and `/blackbox log off` work by voice; opening the camera is an explicit announced act and starting a transcript log must be typed. The rule has **no exceptions**: `/reboot` is voice-reachable and its continuity record stores no conversation content on the spoken path, because the feature was shaped to fit the rule rather than the rule amended to fit it.
 - **Opt-in transcript log** (`/blackbox log on`) — off by default, and off means *no directory and no file*. Text and metadata only, never audio. 0600, rotated, `/purge`-able.
+- **`/reboot` self-updates.** It checks the project's GitHub releases and any locally built binary, installs with your confirmation, and restarts into the new version. A download is installed only if its SHA-256 matches the release's checksums file, the URL never leaves GitHub, and the payload proves it is a Helix binary for this machine. The previous binary is kept and restored automatically if the new one cannot start. **A spoken reboot never installs** — it reports that an update is waiting and leaves the decision to the keyboard. Sigstore signatures are published and deliberately not checked by the updater; the `cosign verify-blob` command is printed instead (ADR-019).
+- **`/reboot` restarts the shell in place** and comes back in the same mode, directory, provider and conversation, naming what you were in the middle of. Its continuity record (`~/.helix/reboot.json`) is 0600, **consumed on read** rather than rotated, expires after 12 hours, and is `/purge`-able. One DANGER ZONE command reachable by voice, because it destroys nothing.
 - **Three packages are provably network-free** (diagnostics, journal, metrics), each grep-enforced in CI.
 
 Full model: `docs/threat_model_voice.md`. Policy summary: `docs/SECURITY.md`.
@@ -203,7 +205,7 @@ everything else: a panel may not report a state the machine cannot deliver.
 
 ### ⌨️ New commands
 
-`/blackbox` (`on·off·status·setup·look·eyes·wake·tts·say·log·stats`) replaces eight separate voice verbs — typing an old name tells you where it went. Plus `/agentic`, `/memory`, `/undo`, `/listen`, `/mictest`, `/web`, `/todo`, `/plan`, `/review`, `/diff`, `/context`, `/cost`, `/tools`, `/hooks`, `/permissions`, `/export`, `/resume`, `/compact`, and `helix daemon` / `helix remote`.
+`/blackbox` (`on·off·status·setup·look·eyes·wake·tts·say·log·stats`) replaces eight separate voice verbs — typing an old name tells you where it went. Plus `/agentic`, `/memory`, `/undo`, `/listen`, `/mictest`, `/web`, `/todo`, `/plan`, `/review`, `/diff`, `/context`, `/cost`, `/tools`, `/hooks`, `/permissions`, `/export`, `/resume`, `/compact`, `/reboot`, `helix --version`, and `helix daemon` / `helix remote`.
 
 ### 🚧 Known limits, stated plainly
 
@@ -219,6 +221,8 @@ This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
   servers silently ignore the context field — Helix detects and reports that rather than
   overstating, but the prosody benefit only arrives once `docs/csm-context.patch` (or an
   equivalent upstream change) is in place.
+- **The updater does not check signatures**, only checksums — a deliberate refusal rather than an omission (ADR-019), and the rollback path has never fired against a genuinely broken release, which is the one input nobody can synthesise honestly.
+- **The restart supervisor is one extra idle process** for the life of the session, and nobody has measured what that costs on a Pi. `/reboot` also has never been run with Helix as a **login** shell — which is precisely the case the supervisor exists for, since a parent that simply exited would end the session.
 - **Full-duplex barge-in is parked; sentence-boundary interruption is not.** You can stop a reply by speaking in the gap *between* sentences (`/config barge-in on`, off by default) — the speaker is idle there, so no echo cancellation is needed. You still cannot talk *over* a sentence: that needs concurrent capture plus AEC, which conflicts with the CGO-free build unless a headset is assumed. `Ctrl+C` remains the instant, microphone-free stop.
 
 ### Upgrading from v1.0.0
@@ -230,7 +234,7 @@ Nothing is required. Voice is entirely opt-in: existing configs keep working, ev
 /blackbox on        # go live
 ```
 
-Say **"manual mode"** to get back to the keyboard.
+Say **"manual mode"** to get back to the keyboard, or **"reboot"** to restart the shell without losing your place.
 
 ---
 

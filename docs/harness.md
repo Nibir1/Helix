@@ -238,10 +238,13 @@ context.
 | `/resume [id]` | list archives, or load one (archiving the current first) |
 | `/export [path]` | write a Markdown transcript |
 | `/cost` | model traffic, by purpose |
+| `/reboot` | update if there is one, then restart — the conversation is **kept**, not archived |
 
 Every wipe archives to `~/.helix/sessions/<timestamp>.json` (0600) first. A
 transcript is cheap to keep and impossible to get back, and `/clear` is exactly
-what people reach for when a session has gone wrong.
+what people reach for when a session has gone wrong. Nothing in this table
+destroys a transcript, `/reboot` included: a restart reloads the same ring from
+`session.json` rather than archiving and starting over.
 
 Exported transcripts quote the conversation as Markdown blockquotes, so content
 containing its own headings or fences cannot restructure the document around
@@ -280,10 +283,23 @@ it keeps that path's confirmations, journalling, and hooks.
 | :--- | :--- | :--- |
 | `~/.helix/config.json` | preferences, provider, posture | 0644 |
 | `~/.helix/session.json` | live conversation ring | 0600 |
+| `~/.helix/reboot.json` | `/reboot` continuity record — consumed on read, ignored past 12 h | 0600 |
+| `~/.helix/update-pending` | a note to the restart supervisor that a binary was just installed | 0600 |
 | `~/.helix/sessions/` | archived conversations | 0600 |
 | `~/.helix/exports/` | exported transcripts | 0600 |
 | `~/.helix/todo.json` | task list | 0600 |
 | `~/.helix/hooks.json` | local policy hooks | 0600 |
 | `<repo>/HELIX.md` | project context | 0644 |
 
-`/purge` removes all of them.
+`/purge` removes everything under `~/.helix/` above, plus `~/.helix_history`. It
+does **not** touch `HELIX.md`: that file lives in your repository, not in Helix's
+state directory, and a wipe of Helix's own data has no business reaching into a
+checkout. `/reboot` is what makes the removal take
+effect — open database handles only release when the process exits, so "blank
+slate" is true one restart later.
+
+An open task survives a `/reboot` by two independent paths: `todo.json` is
+reloaded like any other boot, and the continuity record separately carries the
+**in-progress** task texts so the resume can name what you were in the middle of.
+The resumed panel prints each task once — it deliberately does not also print the
+one-line summary when that summary is just the single task restated.

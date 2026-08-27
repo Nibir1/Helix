@@ -611,6 +611,43 @@ func dangerCommands() []command {
 			},
 			Handler: func(cmdArgs) { handlePurgeCommand() },
 		},
+		{
+			Name: "/reboot", Category: catDanger, Usage: "/reboot [now|check]",
+			Summary: "Update if there is one, then restart where and how you left it",
+			Detail: []string{
+				"Checks for a newer Helix, offers to install it, and restarts. The",
+				"process is replaced, so open database handles, loaded models and",
+				"cached provider state are genuinely gone — which is what /purge and",
+				"a provider change ask you to restart for.",
+				"",
+				"/reboot        check for an update, then restart",
+				"/reboot now    restart immediately, no update check",
+				"/reboot check  only check — do not install, do not restart",
+				"",
+				"Updates come from the project's GitHub releases and from a Helix you",
+				"built yourself (dist/helix). A download is installed ONLY if its",
+				"SHA-256 matches the release's own checksums file and the binary is",
+				"really Helix for this machine. The previous binary is kept, and is",
+				"restored automatically if the new one cannot start.",
+				"",
+				"What survives a restart: the conversation, your in-progress tasks, the",
+				"working directory, the active provider and model, and the mode.",
+				"Rebooting from live mode comes back in live mode; from the keyboard,",
+				"at the keyboard.",
+				"",
+				"Voice-reachable: say \"reboot\" or \"please reboot\". A SPOKEN reboot",
+				"never installs — it restarts and tells you an update is waiting.",
+				"",
+				"Configure with the \"update\" section of ~/.helix/config.json:",
+				"channel (auto|github|local|off), repo, check, local_paths.",
+			},
+			// VoiceOK by owner decision, alongside the "manual mode" safety
+			// valve. It is the one DANGER ZONE command that destroys nothing:
+			// the record is written BEFORE the process ends, so a misheard
+			// reboot costs a few seconds and resumes exactly where it was.
+			VoiceOK: true,
+			Handler: handleRebootCommand,
+		},
 	}
 }
 

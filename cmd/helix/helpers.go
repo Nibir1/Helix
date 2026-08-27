@@ -44,6 +44,8 @@ type providerOption struct {
 var providerOptions = []providerOption{
 	{ID: "openai", Label: "OpenAI"},
 	{ID: "anthropic", Label: "Anthropic"},
+	{ID: "gemini", Label: "Google Gemini"},
+	{ID: "meta", Label: "Meta (Muse Spark)"},
 	{ID: "deepseek", Label: "DeepSeek"},
 	{ID: "kimi", Label: "Kimi"},
 	{ID: "qwen", Label: "Qwen"},
@@ -55,7 +57,8 @@ var providerOptions = []providerOption{
 func normalizeProviderName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch name {
-	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "xai", "ollama":
+	case "openai", "anthropic", "gemini", "meta",
+		"deepseek", "kimi", "qwen", "glm", "xai", "ollama":
 		return name
 	default:
 		return name
@@ -65,7 +68,8 @@ func normalizeProviderName(name string) string {
 func setupProvider(provider string) error {
 	provider = normalizeProviderName(provider)
 	switch provider {
-	case "openai", "anthropic", "deepseek", "kimi", "qwen", "glm", "xai":
+	case "openai", "anthropic", "gemini", "meta",
+		"deepseek", "kimi", "qwen", "glm", "xai":
 		return ensureRemoteAPIKey(provider)
 	case "ollama":
 		return setupOllamaProvider()

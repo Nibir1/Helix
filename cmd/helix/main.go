@@ -62,6 +62,16 @@ func main() {
 	diagnostics.Version = config.HelixVersion
 	diagnostics.Install()
 	defer diagnostics.RecoverMain() // first defer => runs last on panic unwind
+	// Registered SECOND, so it runs second-to-LAST: after the deferred
+	// db.Close() and the SessionEnd hook, before RecoverMain. That ordering is
+	// the whole reason /reboot sets a flag instead of exec'ing from its handler
+	// — replacing the process image with SQLite's handle still open leaves the
+	// WAL and SHM files hot, which is exactly the state /purge warns about.
+	//
+	// syscall.Exec does not return, so RecoverMain never runs on this path.
+	// That is correct: rebootRequested is only ever true on a clean return, and
+	// a panic unwinding through here leaves it false.
+	defer maybeReboot()
 	diagnostics.SelftestPanicIfRequested()
 
 	// FIX (command-not-found): When Helix is the login shell or launched
@@ -358,6 +368,13 @@ func main() {
 		color.Cyan("Project context loaded from %s", path)
 	}
 
+	// A restart left a note. Read it here — after the banner, and after the
+	// session ring, task list, permission posture and voice mode are all live —
+	// so everything it reports is state that HAS been restored rather than state
+	// it intends to restore. It also consumes the record, so this announces one
+	// reboot rather than every boot from now on.
+	restoreContinuity(time.Now())
+
 	fireSessionHook(hooks.SessionStart)
 	defer fireSessionHook(hooks.SessionEnd)
 
@@ -365,7 +382,17 @@ func main() {
 	// when a wake event fires, measured at dispatch of the next voice turn.
 	var lastWakeAt time.Time
 
-	for {
+	// The loop condition carries the reboot check, so a restart asked for during
+	// the previous turn stops the shell before another line is read or another
+	// capture is opened.
+	//
+	// It is checked in two places, because the two channels leave a turn by
+	// different doors: a TYPED /reboot returns from HandleInputEvent below and
+	// must not fall through into the post-turn wake hold, while a SPOKEN one
+	// ends its turn with errVoiceHandled and `continue`s straight back to the
+	// top — where, without this condition, voiceTurnWithRetry would open the
+	// microphone again and the restart would wait for the user to speak.
+	for !rebootRequested {
 		// TTY heartbeat: the daemon's voice loop yields the microphone to
 		// the foreground session while this lock stays fresh.
 		daemon.Heartbeat()
@@ -432,6 +459,13 @@ func main() {
 			lastWakeAt = time.Time{}
 		}
 		agentCore.HandleInputEvent(ev)
+		if rebootRequested {
+			// /reboot is a slash command, so the flag is set INSIDE the turn
+			// above, not before it — checking next to exit/quit would let the
+			// loop ask for another line first. Leaving here is what lets main's
+			// deferred teardown run before the process image is replaced.
+			break
+		}
 		// Derived from state the subsystems already recorded, never from a probe:
 		// this is the hot loop. An unconditional CLEAR here used to claim the
 		// grid was fine while the STT chain was falling back to a sidecar that

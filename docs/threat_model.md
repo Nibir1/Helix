@@ -50,6 +50,15 @@ decision rather than a voice one: spoken input never takes the
 high-confidence-shell fast path, so a sentence whose first word happens to be a
 command name reaches the planner instead of the OS.
 
+One command in the DANGER ZONE category is deliberately reachable by voice:
+`/reboot`, which restarts the shell. It qualifies because it destroys nothing —
+the continuity record is written before the process ends, so a misheard trigger
+costs seconds rather than data. Everything else in that category remains
+unreachable, and the criterion is data loss rather than how alarming the command
+sounds. Its self-update half is typed-only: restarting destroys nothing, while
+downloading and executing a new binary is a different act. See
+`threat_model_voice.md` rules 9 and V5e.
+
 ## Residual Risk (honest statement)
 Distinguishing instruction from data in natural language is undecidable in the
 general case; a sufficiently subtle injection can still pass all five controls.

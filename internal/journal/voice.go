@@ -42,6 +42,7 @@ const (
 	OutcomeKillPhrase = "kill_phrase" // "manual mode" — left live mode
 	OutcomeEyesOff    = "eyes_off"    // "turn off your eyes" — closed the camera
 	OutcomeRefused    = "refused"     // Voice Risk Policy declined it (ADR-005)
+	OutcomeReboot     = "reboot"      // "reboot" — restarted the shell in place
 )
 
 // VoiceEntry is one recorded utterance in either direction.

@@ -119,6 +119,12 @@ func containsFold(list []string, want string) bool {
 
 // reportEndpointConflicts prints any address claimed by more than one local
 // service. Returns the number of conflicts that involve an active service.
+//
+// All three branches render the same shape — a labelled state row, then its
+// explanation indented beneath. They did not: the harmless third branch printed
+// bare wrapped prose with no label, so on /doctor it landed mid-panel between
+// two labelled blocks as an orphaned paragraph, reading like a fragment of the
+// row above it rather than a note of its own.
 func reportEndpointConflicts() int {
 	conflicts := edge.FindConflicts(localSidecarEndpoints())
 	active := 0
@@ -127,11 +133,11 @@ func reportEndpointConflicts() int {
 		case c.Involves():
 			// Two SELECTED services on one address: this breaks as configured.
 			active++
-			fmt.Println(shell.PanelLine(shell.Badge(shell.StateBad, "endpoint conflict")))
-			for _, l := range shell.PanelWrap(c.Describe(), shell.Value) {
+			fmt.Println(shell.Step(shell.StateBad, "endpoint conflict", ""))
+			for _, l := range shell.StepDetail(c.Describe(), shell.Value) {
 				fmt.Println(l)
 			}
-			for _, l := range shell.PanelWrap(
+			for _, l := range shell.StepDetail(
 				"one process owns a port; the other's requests get a 404, which reads as broken",
 				shell.Muted) {
 				fmt.Println(l)
@@ -141,8 +147,8 @@ func reportEndpointConflicts() int {
 		case c.Occupied:
 			// One selected, one not, but something IS on the port: worth saying,
 			// because the selected service cannot bind it.
-			fmt.Println(shell.PanelLine(shell.Badge(shell.StateWarn, "endpoint overlap")))
-			for _, l := range shell.PanelWrap(c.Describe(), shell.Value) {
+			fmt.Println(shell.Step(shell.StateWarn, "endpoint overlap", ""))
+			for _, l := range shell.StepDetail(c.Describe(), shell.Value) {
 				fmt.Println(l)
 			}
 			fmt.Println(shell.Hint(fmt.Sprintf(
@@ -152,7 +158,8 @@ func reportEndpointConflicts() int {
 			// Purely theoretical: shared configuration, empty port, at most one
 			// selected. A red warning with a six-line remedy here was noise on a
 			// machine where the port was simply free.
-			for _, l := range shell.PanelWrap(
+			fmt.Println(shell.Step(shell.StateIdle, "endpoints shared", ""))
+			for _, l := range shell.StepDetail(
 				c.Describe()+" — nothing is on that address right now", shell.Muted) {
 				fmt.Println(l)
 			}

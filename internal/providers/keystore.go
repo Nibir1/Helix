@@ -41,8 +41,10 @@ func NewKeyStoreAt(path string) (*KeyStore, error) {
 func (k *KeyStore) Get(provider string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 
-	if env := os.Getenv(k.envName(provider)); strings.TrimSpace(env) != "" {
-		return strings.TrimSpace(env)
+	for _, name := range k.envNames(provider) {
+		if env := os.Getenv(name); strings.TrimSpace(env) != "" {
+			return strings.TrimSpace(env)
+		}
 	}
 
 	m, err := k.load()
@@ -112,6 +114,23 @@ func (k *KeyStore) save(m map[string]string) error {
 	return nil
 }
 
+// envNames returns the environment variables consulted for a provider, in
+// precedence order.
+//
+// Almost every provider has exactly one, and envName remains the single place
+// that mapping lives. Meta is the exception: its own documentation tells people
+// to export MODEL_API_KEY, a name too generic for Helix to adopt as the primary
+// (it says nothing about which vendor it belongs to), so Helix's own
+// META_API_KEY wins and Meta's documented name is honoured as a fallback.
+// Someone following Meta's quickstart should not have to re-export their key.
+func (k *KeyStore) envNames(provider string) []string {
+	primary := k.envName(provider)
+	if provider == "meta" {
+		return []string{primary, "MODEL_API_KEY"}
+	}
+	return []string{primary}
+}
+
 func (k *KeyStore) envName(provider string) string {
 	switch provider {
 	case "openai":
@@ -128,6 +147,10 @@ func (k *KeyStore) envName(provider string) string {
 		return "GLM_API_KEY"
 	case "xai":
 		return "XAI_API_KEY"
+	case "gemini":
+		return "GEMINI_API_KEY"
+	case "meta":
+		return "META_API_KEY"
 	case "custom":
 		return "CUSTOM_API_KEY"
 	// Speech providers share the vendor account key of their chat sibling
@@ -156,6 +179,9 @@ var keyPrefixOwners = []struct{ Prefix, Owner string }{
 	{"sk-ant-", "anthropic"},
 	{"xai-", "xai"},
 	{"gsk_", "groq"},
+	// Google issues API keys with an "AIza" prefix across all its APIs; no other
+	// provider in the registry uses it, so it identifies Gemini unambiguously.
+	{"AIza", "gemini"},
 }
 
 // MisdirectedKey reports that a key was plainly issued by a DIFFERENT provider

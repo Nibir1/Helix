@@ -24,6 +24,7 @@ wake event (optional)
   └─▶ capture ──▶ transcribe ──▶ confidence gate
                                    │
                                    ├─▶ kill phrase?        → leave voice mode
+                                   ├─▶ "reboot"?           → save state, restart the shell
                                    ├─▶ "turn off your eyes"→ camera off, stay in voice
                                    ├─▶ spoken COMMAND?     → dispatch, speak the answer
                                    └─▶ otherwise           → planner → safety pipeline
@@ -78,6 +79,13 @@ sample:
 | "run diagnostics" | `/doctor` |
 | "turn on agentic mode" | `/agentic on` |
 | "stop talking" | `/blackbox tts off` |
+| "reboot" · "please reboot" | `/reboot` |
+
+Two phrases are matched at the **end** of anything you say rather than at the
+start, because they end the turn instead of being served by it: **"manual
+mode"** returns you to the keyboard, and **"reboot"** restarts the shell. Both
+work mid-sentence — "okay, please reboot" — and neither fires on a question, so
+"what happens when you reboot" is answered rather than obeyed.
 
 Anything without a phrase is reachable by saying **"slash \<command name\>"** —
 "slash provider status", "slash knowledge status", "slash dry run". Hyphens are
@@ -91,17 +99,37 @@ the same request.
 Default-deny: a command is voice-reachable only if it is marked so in the
 registry. Unreachable by design:
 
-- **Irreversible**: `/purge`, `/rag-reset`, `/rag-rebuild`, `/knowledge-update`
-- **Changes what runs unattended**: `/permissions <mode>`, `/sandbox <mode>`,
-  `/config <key> <value>`, `/hooks add`, `/stealth`
-- **Mutates the repository or config**: `/commit`, `/init`, `/setup`,
-  `/provider use`, `/model use`, `/resume`
-- **Authorizes scanning**: `/scan authorize`
+- **Destroys data**: `/purge`, `/rag-reset`
+- **Changes what runs unattended**: `/config`, `/stealth`, `/hooks`
+- **Writes history or planner context**: `/commit`, `/init`
+- **Would have you dictate an API key aloud**: `/setup`
+- **Authorizes scanning**: `/scan`
 
-`/permissions` and `/sandbox` are *readable* by voice and not settable — you can
-ask what the posture is, and changing it has to be typed. The refusal is spoken,
-never silent: a misheard phrase tells you it was refused rather than quietly
-doing something else.
+That is the whole set — nine commands — and it is read from the registry rather
+than restated anywhere, because a hand-kept copy of a security policy had
+already gone stale once. This list used to name `/rag-rebuild`,
+`/knowledge-update`, `/resume`, `/provider use` and `/model use` as unreachable;
+they are all `VoiceOK`, and the copy was simply wrong. `/blackbox status` prints
+the live set.
+
+Two commands are *readable* by voice and not settable (`VoiceReadOnly`):
+`/permissions` and `/sandbox`. You can ask what the posture is; changing it has
+to be typed.
+
+A spoken reboot **restarts and never installs**. `/reboot` also self-updates, and
+downloading and executing a new binary is a different act from restarting one —
+a television saying "reboot" must not be able to replace the program you run. The
+spoken path checks, says an update is waiting, and leaves the decision to the
+keyboard.
+
+`/reboot` is the one DANGER ZONE command that voice **can** reach, and the
+carve-out is argued rather than assumed: it destroys nothing. The continuity
+record is written before the process ends, so a misheard "reboot" costs a few
+seconds and comes back in the same mode, the same directory and the same
+conversation. Every other command in that category loses data.
+
+The refusal is spoken, never silent: a misheard phrase tells you it was refused
+rather than quietly doing something else.
 
 One rule lands on a *subcommand* rather than a command: **voice can stop the
 transcript log but never start it.** `/blackbox log on` has to be typed, for the
@@ -306,6 +334,21 @@ rotates at 1 MiB keeping three generations, and `/purge` wipes it. `/blackbox
 log show` reads it back; `/blackbox status` says whether it is recording, beside
 the microphone and camera states.
 
+`/reboot` writes one more thing, and only for the seconds between two processes:
+`~/.helix/reboot.json` holds the mode, the working directory, the provider and
+model, and any in-progress tasks. It is 0600 in a 0700 directory, **deleted the
+moment the restarted shell reads it**, ignored if it is more than 12 hours old,
+and wiped by `/purge`.
+
+**A spoken reboot stores no conversation content.** A typed one adds a
+240-character excerpt of your last message, so the resumed panel can say what was
+being discussed — but the microphone never puts that on disk, because ADR-005's
+standing rule is that voice may reduce what is collected and never increase it,
+and a convenience is not a reason to carve an exception into it. Even typed, the
+excerpt is a reminder rather than a transcript: the conversation itself lives in
+`session.json`, where `/memory clear` governs it, and a second unbounded copy
+here would be a privacy surface with no control attached.
+
 ---
 
 ## 7. Honest limits
@@ -341,6 +384,11 @@ yet do:
   seconds on a CPU-bound local chain. `/blackbox status` reports the measured
   time-to-first-audio against the budget, and labels whether the streamed or
   buffered path served it.
+- **Voice can restart Helix but cannot update it.** "Reboot" restarts the shell;
+  installing a downloaded binary is typed-only. That is a deliberate asymmetry,
+  not a missing feature — restarting destroys nothing, while replacing the
+  program you run is an act a television saying "reboot" must not be able to
+  cause.
 - **Spoken command matching is phrase-based, not model-based.** It is
   predictable and costs no tokens, but it only knows the phrases in the table.
   Anything else goes to the planner — which is the correct fallback, not a
