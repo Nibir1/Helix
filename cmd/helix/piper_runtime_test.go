@@ -43,13 +43,20 @@ func TestPiperVerifyChecksTheModuleNotTheInterpreter(t *testing.T) {
 		t.Skip("no python3 on PATH to verify against")
 	}
 
-	// An interpreter that cannot import anything at all stands in for the
-	// machine without piper — the mechanism is what is under test, not this
-	// host's package list.
-	if reason, ok := spec.Verify("definitely-not-an-interpreter-xyz"); ok {
+	// A python-NAMED binary that does not exist stands in for the machine
+	// without piper installed: the module check runs and fails. The name
+	// matters — Verify now applies the import check only to interpreters.
+	if reason, ok := spec.Verify("python3-definitely-not-here-xyz"); ok {
 		t.Error("a missing interpreter must not verify as usable")
 	} else if reason == "" {
 		t.Error("a failed verification must say why")
+	}
+
+	// The native binary IS the runtime, so it must not be asked whether it can
+	// import a Python module it does not use. Asking would fail a working piper
+	// for missing something irrelevant to it.
+	if _, ok := spec.Verify("/opt/piper/piper"); !ok {
+		t.Error("a native piper binary must not be subjected to the Python module check")
 	}
 }
 

@@ -41,6 +41,10 @@ Because the binary is statically linked, it does **not** care about the device's
 this sidesteps the classic `GLIBC_2.xx not found` failure that breaks most prebuilt binaries on
 older distros (notably JetPack 4.x / Ubuntu 18.04 on the Jetson Nano).
 
+That protection covers **Helix**, not the sidecars it talks to. Piper's standalone binary is one of
+those prebuilt binaries, and on old boards it is `libstdc++` rather than glibc that stops it — see
+§4.1.
+
 ---
 
 ## §3. The two Linux gotchas (they hit the core, not just sidecars)
@@ -124,6 +128,38 @@ Verify with `/provider status` (an "Offline fallback" line) or `helix remote sta
 (`llm_fallback`, `llm_local_mode`).
 
 ---
+
+### §4.1 Piper on edge boards: `libstdc++`, not glibc
+
+Helix runs Piper as a **persistent process** with the voice model resident, which
+matters more here than on a laptop: Piper's cost is dominated by *loading* the
+model, and that is the part that scales with CPU. Paying it once per session
+instead of once per sentence is a bigger win on a Pi than on an M4 Air, where it
+already measured 4× (513 ms → 128 ms per utterance).
+
+Architecture coverage is complete — `aarch64` (Pi 4/5 on a 64-bit OS, all
+Jetsons) and `armv7l` (32-bit Pi OS, Pi Zero 2) — and **glibc is a non-issue**:
+the aarch64 build needs only `GLIBC_2.17`, from 2012.
+
+The gate is the C++ runtime. `libpiper_phonemize.so` imports `GLIBCXX_3.4.26`
+(GCC 9) and the archive does **not** bundle libstdc++, so the system must supply
+it:
+
+| Board / OS | Native Piper |
+| :--- | :--- |
+| Pi OS Bookworm (GCC 12), Bullseye (GCC 10) | works |
+| Pi OS Buster (GCC 8 → `GLIBCXX_3.4.25`) | **fails** |
+| Jetson Nano 1st-gen, JetPack 4.x (Ubuntu 18.04, GCC 7.5) | **fails** |
+
+Helix probes the system libstdc++ **before** offering the ~50 MB download and
+names the missing version rather than fetching something that cannot start. On
+the Nano this is consistent with the guidance above rather than a new limit —
+that board is already the cloud-path recommendation, and Ollama does not support
+it either. The Python `piper.http_server` still works there if you want local
+TTS on it.
+
+Budget roughly **150–250 MB RSS** for the resident model: fine on a Pi 4/5 or a
+Jetson (4 GB+), too tight on a Pi Zero 2 W (512 MB).
 
 ## §5. Per-device notes
 

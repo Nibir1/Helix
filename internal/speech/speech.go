@@ -81,6 +81,20 @@ func sttEndpointFor(cfg Config, provider string) string {
 	return ""
 }
 
+// newPiperProvider chooses how Piper will be reached.
+//
+// The native binary wins when it is present: no interpreter, no server, no port
+// — and therefore none of the macOS AirPlay-on-5000 collision the HTTP path
+// spends a wizard step avoiding. The Python server remains supported because
+// people already run it, and because the standalone binaries are frozen at the
+// 2023.11.14 release while Piper's own development moved on.
+func newPiperProvider(cfg Config) TTSProvider {
+	if bin, err := FindPiperBinary(); err == nil {
+		return NewPiperNativeTTS(bin, PiperVoicePath())
+	}
+	return NewPiperTTS(ttsEndpointFor(cfg, "piper-local"))
+}
+
 // ttsEndpointFor is the TTS counterpart of sttEndpointFor.
 func ttsEndpointFor(cfg Config, provider string) string {
 	if url, ok := cfg.TTS.Endpoints[provider]; ok && strings.TrimSpace(url) != "" {
@@ -126,7 +140,11 @@ func registerBuiltins(reg *Registry, cfg Config) {
 	reg.RegisterTTS(NewElevenLabsTTS(ttsModel("elevenlabs"), ttsVoice("elevenlabs"), ttsEndpointFor(cfg, "elevenlabs")))
 	reg.RegisterTTS(NewKokoroLocalTTS(ttsModel("kokoro-local"), ttsVoice("kokoro-local"), ttsEndpointFor(cfg, "kokoro-local")))
 	reg.RegisterTTS(NewCSMLocalTTS(ttsModel("csm-local"), ttsVoice("csm-local"), ttsEndpointFor(cfg, "csm-local")))
-	reg.RegisterTTS(NewPiperTTS(ttsEndpointFor(cfg, "piper-local")))
+	// Piper: prefer the interpreter-free native binary, fall back to the Python
+	// HTTP server. Same provider NAME either way, so every preset, pricing row
+	// and failover chain that already names "piper-local" keeps working — the
+	// transport is an implementation detail the user did not ask to care about.
+	reg.RegisterTTS(newPiperProvider(cfg))
 
 	reg.SetConfig(cfg)
 }

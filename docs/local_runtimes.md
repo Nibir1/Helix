@@ -604,6 +604,89 @@ non-numeric falls back to `0` rather than failing.
 
 ---
 
+## 3.7 Piper without Python
+
+Piper's HTTP server is a Python module, and for a long time it was the one thing
+in Helix that required an interpreter — in a project built around a CGO-free Go
+binary, whose CSM integration exists in Rust specifically to avoid PyTorch.
+Piper also publishes standalone executables, so Helix uses those where they work.
+
+### It is a persistent process, and that is the whole point
+
+Piper's cost is dominated by **loading** the voice model, not by speaking.
+Measured on an M4 Air:
+
+| | per utterance |
+| :--- | ---: |
+| One process, five utterances | **128 ms** |
+| One process per utterance | 513 ms |
+
+So a naive "shell out per sentence" adapter is a **4× regression** against the
+HTTP server it replaces — the server is fast precisely because it keeps the
+model warm. Helix therefore holds one piper process open and feeds it
+utterances, which gets the server's speed with no port, no HTTP hop and no
+interpreter:
+
+| | |
+| :--- | ---: |
+| First utterance (loads the model) | 800 ms |
+| Every utterance after | **55–66 ms** |
+| HTTP server, for comparison | 103 ms |
+
+The margin is **wider on weak hardware**, not narrower: model load is the part
+that scales with CPU, so a Pi pays more per reload than a laptop does.
+
+Framing is by filesystem rather than by log parsing. Piper announces each
+finished file on stderr, but the C++ binary and the Python module word it
+differently, so Helix spawns with `--output-dir` and watches for *a file that was
+not there before*. It also waits for the file size to settle before reading: a
+WAV appears when piper creates it, not when it finishes writing it, and reading
+on first sight yields a clip that decodes to a fraction of the sentence.
+
+### macOS does not get it, and the reason is upstream
+
+Both macOS archives in Piper's `2023.11.14-2` release — the last one to ship
+standalone binaries at all — contain the `libonnxruntime` `.dSYM` debug bundle
+and **no `.dylib` files**. The extracted binary dies immediately:
+
+```
+dyld: Library not loaded: @rpath/libespeak-ng.1.dylib
+```
+
+Verified by downloading and running it, not inferred from a file listing. The
+Linux archives carry `libespeak-ng.so` and `libpiper_phonemize.so`; the Windows
+zip carries the four matching DLLs. Only macOS is broken, and the successor
+project (`OHF-Voice/piper1-gpl`) publishes **Python wheels only**, so there is no
+newer standalone build to move to.
+
+On macOS, Helix keeps the Python server and says so, rather than fetching 19 MB
+that cannot start. There is no Homebrew formula either.
+
+### Edge boards: libstdc++ is the gate, not glibc
+
+The binaries cover every architecture Helix targets — `aarch64` (Pi 4/5 on a
+64-bit OS, all Jetsons) and `armv7l` (32-bit Pi OS, Pi Zero 2). glibc is a
+non-issue: the aarch64 build needs only `GLIBC_2.17`, from 2012.
+
+**`libstdc++` is what actually decides it.** `libpiper_phonemize.so` imports
+`GLIBCXX_3.4.26` (GCC 9) and the archive does **not** bundle libstdc++:
+
+| Board / OS | Native binary |
+| :--- | :--- |
+| Pi OS Bookworm (GCC 12), Bullseye (GCC 10) | works |
+| Pi OS Buster (GCC 8 → 3.4.25) | **fails** |
+| Jetson Nano 1st-gen, JetPack 4.x (Ubuntu 18.04, GCC 7.5) | **fails** |
+
+Helix checks the system libstdc++ **before offering the 50 MB download**, and on
+a board that cannot run it says which version is missing instead. That is
+consistent with §4's existing guidance rather than a new limitation: the Jetson
+Nano was already the cloud-path board, and Ollama does not support it either.
+
+One running cost to plan for: the resident model is roughly 150–250 MB of RSS.
+Comfortable on a Pi 4/5 or a Jetson (4 GB+), too tight on a Pi Zero 2 W (512 MB).
+
+---
+
 ## 4. Setup commands
 
 ```bash
@@ -624,9 +707,9 @@ python3 -m piper.http_server -m en_US-lessac-medium.onnx --port 5001
 docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu
 ```
 
-**Helix never requires Docker.** whisper.cpp and Piper cover the whole local
-voice chain with nothing but a binary and Python, and they are what setup
-offers. Kokoro is the one component that ships as a container: Helix will not
+**Helix never requires Docker, and on Linux and Windows it no longer requires
+Python either** — see §3.7. whisper.cpp and Piper cover the whole local voice
+chain with nothing but a binary, and they are what setup offers. Kokoro is the one component that ships as a container: Helix will not
 install a container runtime, will not pull the image when no daemon is
 answering, and marks Kokoro `needs docker` in the provider table so the
 constraint is visible before you pick it rather than after.

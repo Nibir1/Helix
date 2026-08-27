@@ -72,7 +72,8 @@ See `docs/local_runtimes.md`.
 **Sesame CSM-1B** joins the same pattern as the quality local voice
 (`internal/speech/adapter_csm_tts.go`). Two things about it shaped the
 integration. Its reference implementation is PyTorch, so Helix speaks to the Rust
-`csm.rs` server instead — the CGO-free binary and the no-Python rule both hold,
+`csm.rs` server instead — the CGO-free binary and the no-Python rule both hold
+(a rule Piper was the last exception to, and now only on macOS),
 and the OpenAI-shaped `/v1/audio/speech` contract meant no new transport. And its
 default port is 8080, which whisper.cpp and llama.cpp also claim, so Helix
 defaults it to 28195: the person running a local chain is exactly the person who
@@ -154,7 +155,13 @@ by CAPABILITY, not package — `rec` satisfies sox — and no install command is
 emitted for a package name that has not been verified for that manager.
 
 Helix never requires Docker. The whole local voice chain (whisper.cpp, Piper)
-needs a binary and Python; Kokoro is the one optional container-hosted component
+needs only a binary on Linux and Windows — Piper runs as a persistent process
+holding its voice model resident, which is interpreter-free and faster than the
+HTTP server it replaces, since model load dominates its cost and is paid once
+rather than per sentence. macOS is the exception and it is upstream's: Piper's
+published macOS archives omit the dylibs they link against, so the binary cannot
+start and the Python server remains the path there. Kokoro is the one optional
+container-hosted component
 and declares an `Unmet` precondition rather than walking the user toward a pull
 that cannot succeed.
 

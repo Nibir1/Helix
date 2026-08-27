@@ -194,10 +194,33 @@ func voiceSidecars() map[string]voiceSidecar {
 			},
 		},
 		"piper-local": {
-			// piper installs as a Python module, so the "binary" is the
-			// interpreter and the module is the argument.
-			Binaries: []string{"python3", "python"},
+			// The native binary first, then the Python interpreter. Order is
+			// the preference: a machine with the standalone piper needs no
+			// interpreter at all, which is the whole point of shipping it.
+			Binaries: []string{"piper", "piper-tts", "python3", "python"},
 			InstallCmd: func() (string, bool) {
+				// The interpreter-free binary first, where the published build
+				// actually works — see speech.PiperReleaseAsset for why macOS is
+				// excluded (its archive ships no dylibs, verified by running it).
+				if cmd, ok := piperBinaryInstallCmd(); ok {
+					return cmd, true
+				}
+				// Offer the Python install ONLY to a machine that has Python.
+				//
+				// It used to be offered unconditionally, so a host with no
+				// interpreter was told to run
+				// `python3 -m pip install --user piper-tts flask` — a command
+				// beginning with the thing that is missing. Helix walked the
+				// user into an install that could not run, which is the exact
+				// failure `Unmet` was introduced to prevent one sidecar over.
+				//
+				// Without Python, the honest answer is the standalone binary,
+				// and offerPiperBinary below handles that path.
+				if _, err := exec.LookPath("python3"); err != nil {
+					if _, err := exec.LookPath("python"); err != nil {
+						return "", false
+					}
+				}
 				// Flask is NOT a dependency of piper-tts, but piper.http_server
 				// imports it — installing only piper-tts yields a server that
 				// dies on startup with ModuleNotFoundError.
@@ -222,6 +245,10 @@ func voiceSidecars() map[string]voiceSidecar {
 					true
 			},
 			Verify: func(bin string) (string, bool) {
+				// The native binary needs no module check: it IS the runtime.
+				if !isPythonInterpreter(bin) {
+					return "", true
+				}
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
 				// Import the SERVER module, not the package root: piper-tts can
@@ -321,6 +348,17 @@ func offerSidecarSetup(kind, provider string) bool {
 		if !runVisibleCommand(cmd, 30*time.Minute) {
 			return false
 		}
+	}
+
+	// The native piper needs no server: it is a CLI Helix runs per synthesis, so
+	// there is no port to bind, nothing to leave running after Helix exits, and
+	// nothing for the macOS AirPlay-on-5000 collision to collide with. Offering
+	// to "start" it would be offering to start nothing.
+	if provider == "piper-local" && !isPythonInterpreter(binary) {
+		fmt.Println()
+		fmt.Println(shell.PanelLine(shell.Badge(shell.StateGood, "ready") +
+			shell.Muted("  piper runs on demand — no server, no port")))
+		return true
 	}
 
 	if !commands.AskForConfirmation(fmt.Sprintf("Start %s now?", provider)) {
@@ -656,4 +694,46 @@ func dockerImagePresent(image string) bool {
 
 	out, err := exec.CommandContext(ctx, docker, "image", "inspect", image).Output()
 	return err == nil && len(out) > 0
+}
+
+// isPythonInterpreter reports whether a resolved binary is a Python, as opposed
+// to Piper's own standalone executable.
+//
+// Matters because the two need completely different readiness checks: the
+// interpreter must be able to import `piper.http_server`, while the native
+// binary simply has to run. Asking the module question of a native piper would
+// fail it for missing something it does not use.
+func isPythonInterpreter(bin string) bool {
+	base := strings.ToLower(filepath.Base(bin))
+	return strings.HasPrefix(base, "python")
+}
+
+// piperBinaryInstallCmd renders the download for Piper's standalone binary.
+//
+// Extracted into ~/.helix/piper with --strip-components=1, because the archive
+// wraps everything in a top-level piper/ directory and the executable needs its
+// espeak-ng data and shared libraries sitting BESIDE it — extracting only the
+// binary produces one that cannot start.
+func piperBinaryInstallCmd() (string, bool) {
+	asset, ok := speech.PiperReleaseAsset()
+	if !ok {
+		return "", false
+	}
+	// Do not download 50 MB onto a board that cannot run it. The binary needs a
+	// libstdc++ from GCC 9+, which JetPack 4.x and Pi OS Buster do not have.
+	if _, usable := speech.PiperBinaryUsableHere(); !usable {
+		return "", false
+	}
+	dir := helixPath("piper")
+	url := fmt.Sprintf("https://github.com/rhasspy/piper/releases/download/%s/%s",
+		speech.PiperReleaseVersion, asset)
+
+	if strings.HasSuffix(asset, ".zip") {
+		return fmt.Sprintf(
+			"mkdir -p %s && curl -fL %s -o %s/piper.zip && unzip -o -j %s/piper.zip -d %s",
+			dir, url, dir, dir, dir), true
+	}
+	return fmt.Sprintf(
+		"mkdir -p %s && curl -fL %s | tar -xz -C %s --strip-components=1",
+		dir, url, dir), true
 }

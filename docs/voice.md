@@ -276,8 +276,12 @@ loosen a gate, and every safety control runs downstream of the text it produces.
 
 ### Docker is never required
 
-whisper.cpp (STT) and Piper (TTS) are the local chain, and both need only a
-binary and Python. Kokoro is the single optional component distributed as a
+whisper.cpp (STT) and Piper (TTS) are the local chain. Both need only a binary
+on Linux and Windows — Piper runs as a persistent process with its voice model
+resident, so there is no interpreter and no HTTP server in the path. On macOS
+Piper still needs Python, because its published standalone build is missing its
+own libraries (see `local_runtimes.md`). Kokoro is the single optional component
+distributed as a
 container: Helix will not install a container runtime, will not attempt a pull
 when no daemon answers, and shows `needs docker` in the provider table so the
 constraint is visible before the choice rather than after it.

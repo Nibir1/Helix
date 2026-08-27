@@ -146,6 +146,14 @@ everything else: a panel may not report a state the machine cannot deliver.
 - **The wake panel stopped promising phrase detection it does not do.** It printed the
   configured phrase unconditionally, but the default energy detector scores loudness and
   cannot match words; a stored phrase is now reported as stored and unused.
+- **The local voice chain no longer needs Python on Linux or Windows.** Piper was the one
+  component that did. Helix now runs its standalone binary as a *persistent process* with the
+  voice model resident — which is not only interpreter-free but **faster than the HTTP server it
+  replaces**: ~55–66 ms per sentence once warm, against the server's 103 ms, because there is no
+  HTTP hop and no per-sentence model reload. macOS keeps the Python server, because Piper's
+  published macOS archives are missing the libraries they link against and its successor project
+  ships Python wheels only. On edge boards the gate is `libstdc++` rather than glibc, and Helix
+  checks before downloading rather than after.
 - **Every status and report screen renders as a panel.** `/status`, `/rag-status`,
   `/knowledge-status`, `/cost`, `/context` and `/memory` were the last flat ones. `/cost` was
   also 92 columns wide against an 80-column terminal, so it wrapped at the edge and destroyed

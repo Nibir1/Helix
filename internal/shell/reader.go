@@ -548,10 +548,10 @@ func (e *editor) printCompletions(matches []string) {
 		if i > 0 && i%6 == 0 {
 			b.WriteString("\r\n")
 		}
-		b.WriteString(fmt.Sprintf("  %-18s", m))
+		fmt.Fprintf(&b, "  %-18s", m)
 	}
 	if extra > 0 {
-		b.WriteString(fmt.Sprintf("\r\n  ... and %d more", extra))
+		fmt.Fprintf(&b, "\r\n  ... and %d more", extra)
 	}
 	b.WriteString("\r\n")
 	_, _ = os.Stdout.WriteString(b.String())

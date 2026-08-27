@@ -32,7 +32,7 @@ func writeModel(t *testing.T, root, namespace, model, tag string, blobBytes int,
 	seed := model + tag
 	var hex strings.Builder
 	for _, r := range seed {
-		hex.WriteString(fmt.Sprintf("%02x", byte(r)))
+		fmt.Fprintf(&hex, "%02x", byte(r))
 	}
 	digestHex := (hex.String() + strings.Repeat("0", 64))[:64]
 	digest := "sha256:" + digestHex
