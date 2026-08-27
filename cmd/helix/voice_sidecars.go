@@ -199,12 +199,12 @@ func voiceSidecars() map[string]voiceSidecar {
 			// interpreter at all, which is the whole point of shipping it.
 			Binaries: []string{"piper", "piper-tts", "python3", "python"},
 			InstallCmd: func() (string, bool) {
-				// The interpreter-free binary first, where the published build
-				// actually works — see speech.PiperReleaseAsset for why macOS is
-				// excluded (its archive ships no dylibs, verified by running it).
-				if cmd, ok := piperBinaryInstallCmd(); ok {
-					return cmd, true
-				}
+				// The binary install is NOT expressible here: runVisibleCommand
+				// execs this string directly with no shell, so a download +
+				// checksum + extract pipeline would be split on spaces and
+				// handed to mkdir as arguments. offerSidecarInstall calls
+				// offerPiperBinary first instead, which does it in Go.
+				//
 				// Offer the Python install ONLY to a machine that has Python.
 				//
 				// It used to be offered unconditionally, so a host with no
@@ -370,6 +370,15 @@ func offerSidecarSetup(kind, provider string) bool {
 // offerSidecarInstall offers the one unambiguous install command, if there is
 // one.
 func offerSidecarInstall(provider string, spec voiceSidecar) (string, bool) {
+	// Piper's interpreter-free binary is installed in Go — downloaded, checksum
+	// verified against a pinned digest, then extracted — because there is no
+	// shell here to express those three steps as one command.
+	if provider == "piper-local" {
+		if bin, ok := offerPiperBinary(); ok {
+			return bin, true
+		}
+	}
+
 	cmd, ok := spec.InstallCmd()
 	if !ok {
 		color.Yellow("%s is not installed, and there is no single install command", provider)
@@ -714,26 +723,3 @@ func isPythonInterpreter(bin string) bool {
 // wraps everything in a top-level piper/ directory and the executable needs its
 // espeak-ng data and shared libraries sitting BESIDE it — extracting only the
 // binary produces one that cannot start.
-func piperBinaryInstallCmd() (string, bool) {
-	asset, ok := speech.PiperReleaseAsset()
-	if !ok {
-		return "", false
-	}
-	// Do not download 50 MB onto a board that cannot run it. The binary needs a
-	// libstdc++ from GCC 9+, which JetPack 4.x and Pi OS Buster do not have.
-	if _, usable := speech.PiperBinaryUsableHere(); !usable {
-		return "", false
-	}
-	dir := helixPath("piper")
-	url := fmt.Sprintf("https://github.com/rhasspy/piper/releases/download/%s/%s",
-		speech.PiperReleaseVersion, asset)
-
-	if strings.HasSuffix(asset, ".zip") {
-		return fmt.Sprintf(
-			"mkdir -p %s && curl -fL %s -o %s/piper.zip && unzip -o -j %s/piper.zip -d %s",
-			dir, url, dir, dir, dir), true
-	}
-	return fmt.Sprintf(
-		"mkdir -p %s && curl -fL %s | tar -xz -C %s --strip-components=1",
-		dir, url, dir), true
-}

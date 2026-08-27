@@ -176,7 +176,7 @@ external HTTP services — the same pattern Helix already uses for Ollama:
 | Component | Service | Default endpoint | Route |
 |-----------|---------|------------------|-------|
 | Local STT | whisper.cpp `whisper-server` | `http://127.0.0.1:8080` | `/inference`, or `/v1/audio/transcriptions` on an OpenAI-shaped server — **discovered, not assumed** |
-| Local TTS | Piper `http_server` | `http://127.0.0.1:5000` | `/`, or `/api/tts` on older Rhasspy builds — likewise discovered |
+| Local TTS | Piper — a persistent local process on Linux/Windows, `http_server` on macOS | none (no port) / `http://127.0.0.1:5000` | n/a for the binary; `/`, or `/api/tts` on older Rhasspy builds — likewise discovered |
 | Local TTS (natural) | Sesame CSM-1B via `csm.rs` | `http://127.0.0.1:28195` | `/v1/audio/speech` (OpenAI-shaped) |
 | Wake word | openWakeWord-class (`/predict`) | configured in `speech.wake_word.sidecar_url` | `/predict` |
 

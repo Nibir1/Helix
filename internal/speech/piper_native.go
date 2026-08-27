@@ -111,17 +111,44 @@ const PiperReleaseVersion = "2023.11.14-2"
 // something that cannot work" failure the sidecar preconditions exist to
 // prevent, so on macOS Helix says so instead.
 func PiperReleaseAsset() (string, bool) {
+	name, _, ok := piperAsset()
+	return name, ok
+}
+
+// PiperReleaseSHA256 is the pinned digest of this host's archive.
+//
+// Pinned because threat V8 (sidecar supply chain) says Helix's installers
+// "pin versions and publish checksums", and the Ollama installer already
+// refuses to run a script whose SHA-256 does not match. A download piped
+// straight into tar would have made that claim false the moment it shipped —
+// the archive is a 26 MB executable payload fetched over the network and then
+// run, which is precisely the thing a checksum is for.
+//
+// GitHub publishes no digest field for these assets, so each was downloaded and
+// hashed directly. Byte counts are recorded alongside as a second, cheaper
+// signal that the right file arrived.
+func PiperReleaseSHA256() (string, bool) {
+	_, sum, ok := piperAsset()
+	return sum, ok
+}
+
+// piperAsset resolves the archive name and its pinned digest for this host.
+func piperAsset() (name, sha256 string, ok bool) {
 	switch runtime.GOOS + "/" + runtime.GOARCH {
 	case "linux/amd64":
-		return "piper_linux_x86_64.tar.gz", true
+		return "piper_linux_x86_64.tar.gz",
+			"a50cb45f355b7af1f6d758c1b360717877ba0a398cc8cbe6d2a7a3a26e225992", true
 	case "linux/arm64":
-		return "piper_linux_aarch64.tar.gz", true
+		return "piper_linux_aarch64.tar.gz",
+			"fea0fd2d87c54dbc7078d0f878289f404bd4d6eea6e7444a77835d1537ab88eb", true
 	case "linux/arm":
-		return "piper_linux_armv7l.tar.gz", true
+		return "piper_linux_armv7l.tar.gz",
+			"c6946fcd57c705ed1d4666ea880f80ba0bbbd14de62ecbdd13460baf3bac8e37", true
 	case "windows/amd64":
-		return "piper_windows_amd64.zip", true
+		return "piper_windows_amd64.zip",
+			"f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea", true
 	}
-	return "", false
+	return "", "", false
 }
 
 // PiperNativeUnavailableReason explains why this host gets no binary offer.
