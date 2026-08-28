@@ -10,13 +10,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
 
 func TestDaemonIPCCrossPlatform(t *testing.T) {
-	home := crossTmpHome(t)
+	home := tmpHome(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir() on Windows reads %USERPROFILE%
 
@@ -87,20 +86,4 @@ func TestDaemonIPCCrossPlatform(t *testing.T) {
 		t.Fatalf("stop failed: %+v err=%v", resp, err)
 	}
 	time.Sleep(300 * time.Millisecond) // allow transport teardown
-}
-
-// crossTmpHome returns a temp HOME that keeps the macOS Unix-socket path under
-// the ~104-char sun_path limit; Windows can use the normal (long) t.TempDir().
-func crossTmpHome(t *testing.T) string {
-	t.Helper()
-	restoreCwd(t) // registered first, so it runs LAST-in/first-out: before removal
-	if runtime.GOOS == "windows" {
-		return t.TempDir()
-	}
-	dir, err := os.MkdirTemp("/tmp", "hxc")
-	if err != nil {
-		t.Fatalf("short tmp home: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
 }

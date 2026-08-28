@@ -19,7 +19,7 @@ import (
 )
 
 func TestDaemonIPCRoundTrip(t *testing.T) {
-	home := shortTmpHome(t)
+	home := tmpHome(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 	t.Setenv("HELIX_DAEMON_TEST", "1")
@@ -111,7 +111,7 @@ func TestDaemonIPCRoundTrip(t *testing.T) {
 }
 
 func TestSecondDaemonRefuses(t *testing.T) {
-	home := shortTmpHome(t)
+	home := tmpHome(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
@@ -142,7 +142,7 @@ func TestSecondDaemonRefuses(t *testing.T) {
 }
 
 func TestSubmitRefusedWhileTTYActive(t *testing.T) {
-	home := shortTmpHome(t)
+	home := tmpHome(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
@@ -199,7 +199,7 @@ func TestSubmitRefusedWhileTTYActive(t *testing.T) {
 }
 
 func TestTTYLockHeartbeat(t *testing.T) {
-	home := shortTmpHome(t)
+	home := tmpHome(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
@@ -244,17 +244,4 @@ func TestJournalRedaction(t *testing.T) {
 	if len(entries[1].Text) > 600 {
 		t.Fatalf("long text must be bounded, got %d runes", len(entries[1].Text))
 	}
-}
-
-// shortTmpHome returns a SHORT temp HOME: macOS sun_path limits Unix socket
-// paths to ~104 chars, and t.TempDir() paths are far longer.
-func shortTmpHome(t *testing.T) string {
-	t.Helper()
-	restoreCwd(t)
-	dir, err := os.MkdirTemp("/tmp", "hxd")
-	if err != nil {
-		t.Fatalf("short tmp home: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
 }

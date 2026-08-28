@@ -19,37 +19,65 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
-// restoreCwd puts the process's working directory back when the test ends.
+// tmpHome creates a temporary HOME for a daemon test and owns its teardown.
 //
-// daemon.New() calls os.Chdir(os.UserHomeDir()) on purpose — a service started
-// by launchd or systemd has no meaningful launch directory, so it gives itself
-// a stable one. In a test that redirects HOME to a temporary directory, the
-// TEST PROCESS therefore ends up sitting inside the directory the test is
-// about to delete.
+// It exists because the teardown has a REQUIRED ORDER, and expressing that
+// through two separate t.Cleanup registrations is a trap I already fell into:
+// t.Cleanup is LIFO, so the LAST thing registered runs FIRST. Registering a
+// chdir-restore before t.TempDir() therefore runs it AFTER the removal — the
+// exact opposite of the intent, and invisible on Unix.
 //
-// Unix does not care: a directory can be removed while it is someone's cwd.
-// Windows refuses outright — "The process cannot access the file because it is
-// being used by another process", reported against the DIRECTORY rather than
-// any file in it. That is how this surfaced: a daemon test that passed and
-// then failed in cleanup.
+// Why the order matters at all: daemon.New() calls os.Chdir(os.UserHomeDir())
+// on purpose, because a service started by launchd or systemd has no
+// meaningful launch directory. With HOME redirected here, that moves the TEST
+// PROCESS into the directory the test is about to delete. Unix removes a
+// directory that is someone's cwd without complaint; Windows refuses with
+// "The process cannot access the file because it is being used by another
+// process", reported against the DIRECTORY rather than any file in it.
 //
-// Call it immediately after creating the temporary home, so that LIFO cleanup
-// ordering runs the restore BEFORE the removal.
-func restoreCwd(t *testing.T) {
+// So both steps live in ONE cleanup, in explicit order, with no LIFO reasoning
+// required — and the removal is asserted rather than ignored, so a failure is
+// attributed here instead of arriving from the testing framework.
+func tmpHome(t *testing.T) string {
 	t.Helper()
+
 	orig, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
+	dir, err := os.MkdirTemp("", "hxhome")
+	if err != nil {
+		t.Fatalf("temp home: %v", err)
+	}
+	// Resolve symlinks so comparisons against os.Getwd() hold: macOS hands out
+	// /var/... which resolves to /private/var/...
+	if resolved, rerr := filepath.EvalSymlinks(dir); rerr == nil {
+		dir = resolved
+	}
+
 	t.Cleanup(func() {
-		if err := os.Chdir(orig); err != nil {
-			t.Errorf("could not restore the working directory: %v", err)
+		// 1. Leave the directory before trying to delete it.
+		if cerr := os.Chdir(orig); cerr != nil {
+			t.Errorf("could not restore the working directory: %v", cerr)
+		}
+		// 2. Prove nothing is still standing in it.
+		if cwd, werr := os.Getwd(); werr == nil && strings.HasPrefix(cwd, dir) {
+			t.Errorf("the process is still inside the temporary home (%s); "+
+				"Windows cannot remove a directory that is a process's cwd", cwd)
+		}
+		// 3. Remove it, and SAY SO if that fails.
+		if rerr := os.RemoveAll(dir); rerr != nil {
+			t.Errorf("temporary home was not removable: %v\n"+
+				"something still holds a handle to it or to a file inside it", rerr)
 		}
 	})
+	return dir
 }
 
 // runDaemon starts d and registers the shutdown wait.
