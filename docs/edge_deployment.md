@@ -293,6 +293,11 @@ colour switches itself off when stdout is not a terminal, so the journal holds
 no escape sequences. `NO_COLOR` disables it everywhere; `CLICOLOR_FORCE=1`
 re-enables it when you are piping into something that renders ANSI.
 
+**Updating a board** is `/reboot`, which self-updates from the project's GitHub
+releases. The release itself is published from a workstation with `make release`
+(see the README's Releasing section) — a board never builds its own, and the
+binary it installs is the same signed artifact everyone else gets.
+
 ## §6. Post-deploy verification (any device)
 
 Run these inside Helix after install:

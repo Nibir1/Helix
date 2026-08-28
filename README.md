@@ -699,6 +699,54 @@ Ideas, issues, and PRs are welcome:
 3. Run your changes locally with `make start`
 4. Open a PR with a clear description and demo steps
 
+Before opening a PR, `make work` runs the whole gate — lint, vulnerability scan,
+fuzzing, e2e, build, tests. `make release-check` runs everything a release
+checks without tagging anything. It works from a feature branch — the
+repository-state checks (branch, clean tree, in sync with origin) report as
+deferred rather than stopping it — so the release itself has nothing left to
+find.
+
+---
+
+## Releasing
+
+Releases are tagged from `main` after the merge, and the tag is what triggers
+everything: `.github/workflows/release.yml` runs GoReleaser, which builds six
+binaries, generates SBOMs, and signs every artifact with Sigstore.
+
+```bash
+make release-check          # every check, tags nothing
+make release                # tag v<HelixVersion> and publish
+make release ARGS=--force   # replace an existing tag — read the warning first
+```
+
+The tag defaults to `v` + the `HelixVersion` constant in
+`internal/config/config.go`, so there is **one** place to edit when the version
+changes. The script refuses to publish if the two disagree, because GoReleaser
+overrides that constant with ldflags for the published binaries but `go build`
+and `go install` do not — a mismatch ships a source build that misreports its
+own version, and the self-updater compares against exactly that constant.
+
+Three things it will stop you doing, each for a reason:
+
+- **Releasing a dirty tree or a branch that is not `main`.** A release tags what
+  has already been reviewed and merged. (Under `--dry-run` these are reported
+  and deferred instead, so the pre-merge check is actually usable; the summary
+  says how many were deferred rather than claiming everything passed.)
+- **Re-tagging a published version** without `--force`. `/reboot` verifies
+  downloads against the checksums file published with a release, so replacing
+  the artifacts under a tag someone already fetched makes their update fail with
+  a checksum mismatch — which is indistinguishable from an attack. Prefer a new
+  patch version.
+- **Publishing without the checks passing** — gofmt, vet, build, the full suite,
+  e2e, lint, and a cross-compile of all five release targets.
+
+Afterwards it verifies something easy to miss: that the published release
+actually carries a **checksums file** and a per-platform archive. Without them
+every `/reboot` self-update refuses, because a release that cannot be verified is
+treated as uninstallable rather than installed unverified — and you would
+otherwise learn that from a user.
+
 ---
 
 ## License

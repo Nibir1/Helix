@@ -174,12 +174,26 @@ e2e:
 	@echo "Running E2E TTY harness..."
 	go test ./tests/e2e/... -v -count=1 -timeout 300s
 
-git-tag-push:
-	@echo "Tagging and pushing to GitHub..."
-	@./$(SCRIPTS_DIR)/git-push.sh
+# Tag and publish a release. Run AFTER merging into main.
+#
+# The tag defaults to `v` + the HelixVersion constant, so there is one place to
+# edit when the version changes. Override or add flags with ARGS:
+#
+#   make release                      tag v<HelixVersion>
+#   make release ARGS=--dry-run       run every check, tag nothing
+#   make release ARGS="v1.5.1 --force"
+release:
+	@./$(SCRIPTS_DIR)/release.sh $(ARGS)
+
+# Everything the release script checks, without tagging anything. Usable from a
+# feature branch: the repository-state checks (branch, clean tree, in sync with
+# origin) are reported and deferred rather than stopping the run, so this can be
+# used before the merge, when it is most useful.
+release-check:
+	@./$(SCRIPTS_DIR)/release.sh --dry-run $(ARGS)
 
 # Run all tasks: lint, sec-scan, fuzz-ci, e2e, build, test, install
 work: lint sec-scan fuzz-ci e2e build test install
 
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci e2e git-tag-push
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci e2e release release-check
