@@ -9,7 +9,6 @@ package daemon
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"net"
 	"os"
@@ -30,19 +29,7 @@ func TestDaemonIPCRoundTrip(t *testing.T) {
 		t.Fatalf("new daemon: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = d.Run(ctx) }()
-	defer func() {
-		cancel()
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			if _, err := os.Stat(d.Addr()); os.IsNotExist(err) {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-	}()
+	runDaemon(t, d)
 
 	// Wait for the socket.
 	deadline := time.Now().Add(5 * time.Second)
@@ -132,9 +119,7 @@ func TestSecondDaemonRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first daemon: %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = d.Run(ctx) }()
+	cancel := runDaemon(t, d)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -165,9 +150,7 @@ func TestSubmitRefusedWhileTTYActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = d.Run(ctx) }()
+	runDaemon(t, d)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

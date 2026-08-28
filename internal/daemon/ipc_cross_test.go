@@ -7,7 +7,6 @@ package daemon
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -25,9 +24,10 @@ func TestDaemonIPCCrossPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = d.Run(ctx) }()
+	// Registered after crossTmpHome, so the shutdown wait is ordered ahead of
+	// that directory's removal — Windows cannot delete files the daemon still
+	// holds open.
+	runDaemon(t, d)
 
 	send := func(req Request) (Response, error) {
 		conn, err := Dial()
