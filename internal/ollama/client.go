@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -165,13 +166,27 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 		return nil, fmt.Errorf("ollama model is empty")
 	}
 
-	messages := make([]map[string]string, 0, len(req.Messages))
+	messages := make([]map[string]any, 0, len(req.Messages))
 
 	for _, msg := range req.Messages {
-		messages = append(messages, map[string]string{
+		m := map[string]any{
 			"role":    msg.Role,
 			"content": msg.Content,
-		})
+		}
+		// BlackBox Phase 5: attach base64 image parts for vision models
+		// (llava / gemma3). Ollama takes raw base64 (no data: prefix).
+		if msg.HasImages() {
+			var images []string
+			for _, p := range msg.Parts {
+				if p.Type == providers.PartImage && len(p.ImageData) > 0 {
+					images = append(images, base64.StdEncoding.EncodeToString(p.ImageData))
+				}
+			}
+			if len(images) > 0 {
+				m["images"] = images
+			}
+		}
+		messages = append(messages, m)
 	}
 
 	body := map[string]interface{}{
@@ -194,6 +209,15 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 		body["options"] = options
 	}
 
+	// Native tool calling (P8.7b). Ollama takes the OpenAI-shaped definition
+	// envelope but has NO tool_choice equivalent — a tool call cannot be
+	// forced, only offered. ChatRequest.ToolChoice is therefore accepted and
+	// ignored here rather than faked; callers that need a guaranteed call
+	// (the planner) already fall back when no call comes back.
+	if len(req.Tools) > 0 {
+		body["tools"] = providers.ToolsToOpenAIWire(req.Tools)
+	}
+
 	resp, err := c.post(ctx, "/api/chat", body)
 	if err != nil {
 		return nil, err
@@ -209,6 +233,15 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 		buf := make([]byte, 0, 64*1024)
 		scanner.Buffer(buf, 4*1024*1024)
 
+		// Tool calls are collected across frames and delivered on the final
+		// one, matching the contract every other adapter honors: consumers
+		// see complete calls exactly once.
+		var pending []providers.ToolCall
+
+		// Tracked to tell "the model said nothing" apart from "the model spent
+		// its whole budget thinking and never got to an answer".
+		var sawContent, sawThinking bool
+
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -218,6 +251,20 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 			var event struct {
 				Message struct {
 					Content string `json:"content"`
+					// Reasoning models stream their scratchpad here, NOT in
+					// content. Reading only content made a thinking model that
+					// exhausted its budget indistinguishable from a model that
+					// answered with nothing — see the exhaustion check below.
+					Thinking string `json:"thinking"`
+					// Ollama delivers COMPLETE tool calls in one message —
+					// no cross-frame accumulation — and its arguments are a
+					// JSON object, not the string every other provider sends.
+					ToolCalls []struct {
+						Function struct {
+							Name      string          `json:"name"`
+							Arguments json.RawMessage `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
 				} `json:"message"`
 				Done  bool   `json:"done"`
 				Error string `json:"error"`
@@ -232,12 +279,46 @@ func (c *Client) Chat(ctx context.Context, req providers.ChatRequest) (<-chan pr
 				return
 			}
 
+			for _, tc := range event.Message.ToolCalls {
+				if tc.Function.Name == "" {
+					continue
+				}
+				// json.RawMessage keeps the object's exact bytes, so handing
+				// it on as a string needs no re-encoding round trip.
+				pending = append(pending, providers.ToolCall{
+					Name:      tc.Function.Name,
+					Arguments: string(tc.Function.Arguments),
+				})
+			}
+
+			if event.Message.Thinking != "" {
+				sawThinking = true
+			}
 			if event.Message.Content != "" {
+				sawContent = true
 				ch <- providers.StreamChunk{Content: event.Message.Content}
 			}
 
 			if event.Done {
-				ch <- providers.StreamChunk{Done: true}
+				// A reasoning model can burn every token of num_predict on its
+				// scratchpad and emit no answer at all. Ollama reports that as
+				// a perfectly successful stream of empty content, so without
+				// this the caller sees "" and no error — which surfaced as
+				// "The vision model returned nothing" against Helix's own
+				// default local model (gemma4:e2b is a thinking build, and the
+				// default 512-token budget is not enough for it to think AND
+				// answer about an image).
+				//
+				// Reported as an error rather than swallowed: the planner
+				// already retries on "empty output", and the vision path can
+				// say something true instead of shrugging.
+				if !sawContent && sawThinking && len(pending) == 0 {
+					ch <- providers.StreamChunk{Error: fmt.Errorf(
+						"model spent its entire token budget reasoning and produced no answer "+
+							"(raise max_tokens above %d, or use a non-reasoning model)", req.MaxTokens)}
+					return
+				}
+				ch <- providers.StreamChunk{Done: true, ToolCalls: pending}
 				return
 			}
 		}

@@ -29,9 +29,16 @@ type LocalModelRecommendation struct {
 	Runtime     string
 	OllamaTag   string
 	GGUFURL     string
-	SHA256      string
-	MinRAMGB    int
-	Reason      string
+
+	// HFRepo is the Hugging Face repo id for llama.cpp's own downloader
+	// (`llama-server -hf <repo>`), which fetches AND caches the GGUF with no
+	// separate download step. Preferred over GGUFURL for llama.cpp: it is one
+	// command, it resumes, and the result is reusable by later launches.
+	HFRepo string
+
+	SHA256   string
+	MinRAMGB int
+	Reason   string
 }
 
 // DetectHardware detects CPU/RAM/GPU/disk heuristically.
@@ -116,6 +123,7 @@ func RecommendLocalModels(h HardwareProfile) []LocalModelRecommendation {
 			DisplayName: "Gemma 4 E2B Q4_K_M (llama.cpp)",
 			Runtime:     "llamacpp",
 			GGUFURL:     "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-e2b-it-Q4_K_M.gguf",
+			HFRepo:      "ggml-org/gemma-4-E2B-it-GGUF",
 			SHA256:      "",
 			MinRAMGB:    8,
 			Reason:      "Google's latest efficient edge model for llama.cpp.",
@@ -125,6 +133,7 @@ func RecommendLocalModels(h HardwareProfile) []LocalModelRecommendation {
 			DisplayName: "Gemma 4 E4B Q4_K_M (llama.cpp)",
 			Runtime:     "llamacpp",
 			GGUFURL:     "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf",
+			HFRepo:      "unsloth/gemma-4-E4B-it-GGUF",
 			SHA256:      "",
 			MinRAMGB:    16,
 			Reason:      "Larger Gemma 4 edge variant for llama.cpp.",

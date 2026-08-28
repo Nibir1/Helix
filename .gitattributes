@@ -1,0 +1,34 @@
+# Normalise line endings.
+#
+# Without this, a Windows checkout converts every text file to CRLF, and Go
+# source is text. Three consequences, one of which was a red CI job:
+#
+#   - Tests that read a source file and look for a literal snippet containing
+#     "\n" stop matching, because the file now has "\r\n". That is exactly how
+#     TestPullFailureDoesNotAbortSetup failed on windows-latest while passing
+#     everywhere else.
+#   - gofmt disagrees with the checkout, so a Windows contributor's first
+#     commit reformats every file it touches.
+#   - Shell scripts and testdata fixtures with CRLF fail in ways that read as
+#     logic bugs rather than encoding ones.
+#
+# LF in the repository, LF in the working tree, on every platform.
+* text=auto eol=lf
+
+# Except where the platform genuinely requires CRLF.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary, never touched.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.wav  binary
+*.bin  binary
+*.onnx binary

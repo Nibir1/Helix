@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mattn/go-runewidth"
@@ -29,14 +30,38 @@ import (
 
 // Helix Color Palette (Tron / Red Team)
 const (
+	// Helix identity — the brand, unchanged. These are what the banner, the
+	// prompt blocks and the state badges are built from.
 	HexPrimary   = "#04D9FF" // Electric Cyan
 	HexSecondary = "#FF0055" // Neon Magenta
 	HexRectifier = "#FF0000" // Aggressive Red
-	HexVoid      = "#050505" // Deep Black
+	HexVoid      = "#030504" // Near-black (Tron poster black)
 	HexGrid      = "#1A1A1A" // Dim Grey
-	HexTertiary  = "#FF9900" // Orange
 	HexText      = "#FAFAFA" // White
-	HexSubtle    = "#444444" // Grey
+
+	// The reading layer, drawn from the Tron Legacy poster palette
+	// (#193f4a / #2f8ca3 / #f4af2d / #fffffe / #030504) and lifted along its
+	// own hue until it is actually legible on a dark terminal.
+	//
+	// This is a CONTRAST FIX, not a repaint. HexSubtle was #444444 — a flat
+	// grey measuring 1.44:1 against an ordinary dark background, where WCAG's
+	// floor for body text is 4.5:1 and even large text wants 3:1. It was
+	// carrying two incompatible jobs: panel rules and gutters, which SHOULD
+	// recede, and prose and labels, which must be readable. At one value the
+	// readable half lost, so /about rendered its philosophy in text that was
+	// very nearly invisible.
+	//
+	// Split in two, each measured against #282C34 (a common dark theme, and
+	// the lighter of the plausible backgrounds — so these numbers are the
+	// worst case, not the flattering one):
+	HexSubtle = "#2C6E82" // 2.44:1 — chrome only: rules, gutters, list numbers
+	HexMuted  = "#4FB8D4" // 6.09:1 — secondary TEXT: prose, labels, headers
+	HexAmber  = "#F4AF2D" // 7.34:1 — Tron gold, the value colour
+	HexTeal   = "#193F4A" // the poster's deep teal, for filled blocks
+
+	// HexTertiary is kept as the warning hue. It reads at 6.54:1, and orange
+	// carries "caution" in a way the gold does not.
+	HexTertiary = "#FF9900" // Orange
 )
 
 // Width-safe glyphs (render 1-cell in every terminal).
@@ -133,19 +158,89 @@ func bgHex(hex string) string {
 const ansiReset = "\033[0m"
 const bold = "\033[1m"
 
+// colorEnabled reports whether ANSI colour should be emitted at all.
+//
+// Computed once, at first use, because it depends on the process's stdout and
+// environment and neither changes underneath a running shell.
+//
+// This exists because of an asymmetry that was about to cause a regression.
+// github.com/fatih/color disables itself when stdout is not a terminal, so
+// every `color.Cyan` in the codebase has silently been doing the right thing
+// when Helix is piped, redirected, or run as a systemd service. shell.Fg did
+// not: it emitted escapes unconditionally. Converting the daemon's output to
+// the panel language without this would have written control codes into
+// journald where none appear today — the conversion making things worse in the
+// one place nobody looks until something breaks.
+//
+// The rules are the de-facto standard ones: NO_COLOR disables regardless
+// (no-color.org), CLICOLOR_FORCE overrides in the other direction for
+// pipelines that DO want colour, TERM=dumb means a terminal that cannot render
+// it, and otherwise it follows whether stdout is a terminal.
+var colorEnabled = sync.OnceValue(func() bool {
+	_, forced := os.LookupEnv("CLICOLOR_FORCE")
+	_, off := os.LookupEnv("NO_COLOR")
+	return shouldColorize(term.IsTerminal(int(os.Stdout.Fd())), forced, off, os.Getenv("TERM"))
+})
+
+// shouldColorize is the RULE, taking its inputs as arguments rather than
+// reading the environment itself.
+//
+// Two reasons, and the second is the one that bit. colorEnabled is a OnceValue
+// because the answer cannot change under a running process — correct in
+// production, and untestable by construction. And a test that reached the rule
+// by MUTATING the environment could not put it back: os.Unsetenv has no
+// automatic restore, so clearing CLICOLOR_FORCE for one subtest silently turned
+// colour off for every test that ran afterwards in the package, which is
+// exactly what happened. A pure function has neither problem.
+func shouldColorize(isTTY, forceSet, noColorSet bool, termName string) bool {
+	switch {
+	case forceSet:
+		// The user asked for it more specifically than any opt-out, which is
+		// how every other tool resolves this pair.
+		return true
+	case noColorSet:
+		return false // no-color.org: honoured however it is set, including empty
+	case termName == "dumb":
+		return false
+	default:
+		return isTTY
+	}
+}
+
+// fgIf, bgIf and segIf are the colour-gated bodies, exposed to the test so the
+// primitives can be checked in both states without a second process.
+func fgIf(on bool, hex, s string) string {
+	if !on {
+		return s
+	}
+	return fgHex(hex) + s + ansiReset
+}
+
+func bgIf(on bool, hex, s string) string {
+	if !on {
+		return s
+	}
+	return bgHex(hex) + s + ansiReset
+}
+
+func segIf(on bool, bg, fg, s string) string {
+	if !on {
+		return s
+	}
+	return bgHex(bg) + fgHex(fg) + s + ansiReset
+}
+
 // Fg wraps s in an exact-hex foreground color.
-func Fg(hex, s string) string { return fgHex(hex) + s + ansiReset }
+func Fg(hex, s string) string { return fgIf(colorEnabled(), hex, s) }
 
 // Bg wraps s in an exact-hex background color.
-func Bg(hex, s string) string { return bgHex(hex) + s + ansiReset }
+func Bg(hex, s string) string { return bgIf(colorEnabled(), hex, s) }
 
 // Seg renders s with an exact-hex background AND foreground panel.
-func Seg(bg, fg, s string) string { return bgHex(bg) + fgHex(fg) + s + ansiReset }
+func Seg(bg, fg, s string) string { return segIf(colorEnabled(), bg, fg, s) }
 
 // visibleWidth strips ANSI and returns the true terminal cell width.
-func visibleWidth(s string) int {
-	return runewidth.StringWidth(ansiRegex.ReplaceAllString(s, ""))
-}
+func visibleWidth(s string) int { return runewidth.StringWidth(Plain(s)) }
 
 // TerminalWidth returns the current terminal column count.
 // Probes stdout, stdin, and the controlling terminal; keeps the largest

@@ -6,11 +6,14 @@ package ollama
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -128,7 +131,7 @@ func Install(ctx context.Context) error {
 
 		return fmt.Errorf("homebrew was not found; install Ollama from https://ollama.com/download/mac")
 	case "linux":
-		return runInstallCommand(ctx, "bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
+		return installOllamaLinux(ctx)
 	case "windows":
 		return runInstallCommand(
 			ctx,
@@ -151,6 +154,18 @@ func Install(ctx context.Context) error {
 //
 // Returns: error when Ollama cannot be made healthy.
 // Complexity: O(service startup + health polling time).
+// Health reports whether an Ollama server is already answering, WITHOUT
+// starting one.
+//
+// The distinction from EnsureRunning is the whole point: EnsureRunning spawns a
+// detached, system-wide `ollama serve` that binds port 11434 and outlives the
+// caller. That is correct when the user asked for it and wrong as the side
+// effect of a readiness check — see the consent gate in the daemon's
+// ensureLocalBrainReady.
+func Health(ctx context.Context) error {
+	return NewClient().Health(ctx)
+}
+
 func EnsureRunning(ctx context.Context) error {
 	return EnsureRunningWithProgress(ctx, nil)
 }
@@ -255,6 +270,64 @@ func EnsureRunningWithProgress(ctx context.Context, progress ProgressFunc) error
 			}
 		}
 	}
+}
+
+// ollamaInstallScriptSHA256 pins the upstream Linux install script, verified
+// at release time (supply-chain hardening, roadmap P7.7). Never pipe an
+// unverified remote script into sh.
+const ollamaInstallScriptSHA256 = "25f64b810b947145095956533e1bdf56eacea2673c55a7e586be4515fc882c9f"
+
+// installOllamaLinux downloads the upstream install script, verifies its
+// SHA-256 against the pinned value, then runs it — fail-closed on mismatch.
+// HELIX_OLLAMA_INSTALL_SHA256 overrides the pin when upstream changes between
+// releases.
+func installOllamaLinux(ctx context.Context) error {
+	tmp, err := os.CreateTemp("", "ollama-install-*.sh")
+	if err != nil {
+		return fmt.Errorf("create installer temp: %w", err)
+	}
+	path := tmp.Name()
+	_ = tmp.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	dl := exec.CommandContext(ctx, "curl", "-fsSL", "https://ollama.com/install.sh", "-o", path)
+	dl.Stdout = os.Stdout
+	dl.Stderr = os.Stderr
+	if err := dl.Run(); err != nil {
+		return fmt.Errorf("download ollama installer: %w", err)
+	}
+
+	want := strings.ToLower(strings.TrimSpace(os.Getenv("HELIX_OLLAMA_INSTALL_SHA256")))
+	if want == "" {
+		want = ollamaInstallScriptSHA256
+	}
+	got, err := fileSHA256(path)
+	if err != nil {
+		return fmt.Errorf("read ollama installer: %w", err)
+	}
+	if got != want {
+		return fmt.Errorf("ollama install script checksum mismatch: got %s, want %s — refusing to run. "+
+			"Set HELIX_OLLAMA_INSTALL_SHA256 to the new value if upstream changed (https://ollama.com/install.sh)", got, want)
+	}
+
+	run := exec.CommandContext(ctx, "sh", path)
+	run.Stdout = os.Stdout
+	run.Stderr = os.Stderr
+	run.Stdin = os.Stdin
+	if err := run.Run(); err != nil {
+		return fmt.Errorf("run ollama installer: %w", err)
+	}
+	return nil
+}
+
+// fileSHA256 returns the lowercase hex SHA-256 of a file.
+func fileSHA256(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // runInstallCommand runs an installer command with inherited output.

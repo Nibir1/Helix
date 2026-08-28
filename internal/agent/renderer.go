@@ -1,0 +1,122 @@
+// internal/agent/renderer.go
+// Purpose: Renderer — the Agent's output seam (BlackBox Phase 4A). The
+// Agent no longer renders to the terminal directly: TTYRenderer adapts the
+// classic *ux.UX, HeadlessRenderer no-ops for the daemon. The PTY e2e suite
+// staying green is the proof that interactive behavior is byte-identical.
+package agent
+
+import (
+	"helix/internal/ux"
+)
+
+// Renderer is every output primitive the Agent uses. Confirmations do NOT
+// belong here — they route through commands.Prompter (Phase 2) so voice and
+// daemon prompters can intercept them.
+type Renderer interface {
+	PrintSystemMessage(text string)
+	PrintAIMessage(text string, useTypingEffect bool)
+	PrintCommand(command string)
+	PrintData(data string)
+	PrintSuccess(message string)
+	PrintError(message string)
+	PrintWarning(message string)
+	PrintInfo(message string)
+	PrintDebug(message string)
+
+	// Interactive reports whether terminal animations (spinners) should
+	// run. Headless renderers return false.
+	Interactive() bool
+}
+
+// AIStream renders an AI response incrementally (BlackBox P8.8).
+type AIStream interface {
+	// Chunk renders one streamed fragment.
+	Chunk(text string)
+
+	// Started reports whether any content was rendered.
+	Started() bool
+
+	// Close terminates the streamed output.
+	Close()
+}
+
+// StreamingRenderer is the OPTIONAL half of the Renderer contract: renderers
+// that can display a response as it arrives implement it, and the Agent type-
+// asserts for it.
+//
+// It is deliberately not part of Renderer. Live rendering is meaningful only
+// for a human watching a terminal, and the daemon's renderer captures the
+// reply text by overriding PrintAIMessage — an override that embedding would
+// NOT dispatch to from inside a HeadlessRenderer method. Keeping streaming
+// opt-in means the daemon keeps the buffered path unchanged and cannot
+// silently lose its IPC reply.
+type StreamingRenderer interface {
+	StreamAIMessage() AIStream
+}
+
+// TTYRenderer adapts the interactive terminal UX.
+type TTYRenderer struct{ UX *ux.UX }
+
+// StreamAIMessage implements StreamingRenderer for the interactive terminal.
+func (r TTYRenderer) StreamAIMessage() AIStream { return r.UX.StreamAIMessage() }
+
+func (r TTYRenderer) PrintSystemMessage(t string)          { r.UX.PrintSystemMessage(t) }
+func (r TTYRenderer) PrintAIMessage(t string, typing bool) { r.UX.PrintAIMessage(t, typing) }
+func (r TTYRenderer) PrintCommand(c string)                { r.UX.PrintCommand(c) }
+func (r TTYRenderer) PrintData(d string)                   { r.UX.PrintData(d) }
+func (r TTYRenderer) PrintSuccess(m string)                { r.UX.PrintSuccess(m) }
+func (r TTYRenderer) PrintError(m string)                  { r.UX.PrintError(m) }
+func (r TTYRenderer) PrintWarning(m string)                { r.UX.PrintWarning(m) }
+func (r TTYRenderer) PrintInfo(m string)                   { r.UX.PrintInfo(m) }
+func (r TTYRenderer) PrintDebug(m string)                  { r.UX.PrintDebug(m) }
+func (r TTYRenderer) Interactive() bool                    { return true }
+
+// HeadlessRenderer swallows output for the daemon path. Debug lines can be
+// surfaced for daemon diagnostics; everything else is silent (the journal
+// and IPC responses carry the information instead).
+type HeadlessRenderer struct {
+	// OnDebug, when set, receives debug lines (daemon diagnostics hook).
+	OnDebug func(string)
+}
+
+func (r HeadlessRenderer) PrintSystemMessage(string)       {}
+func (r HeadlessRenderer) PrintAIMessage(t string, _ bool) { r.note(t) }
+func (r HeadlessRenderer) PrintCommand(string)             {}
+func (r HeadlessRenderer) PrintData(string)                {}
+func (r HeadlessRenderer) PrintSuccess(string)             {}
+func (r HeadlessRenderer) PrintError(string)               {}
+func (r HeadlessRenderer) PrintWarning(string)             {}
+func (r HeadlessRenderer) PrintInfo(string)                {}
+func (r HeadlessRenderer) PrintDebug(m string)             { r.note(m) }
+func (r HeadlessRenderer) Interactive() bool               { return false }
+
+func (r HeadlessRenderer) note(text string) {
+	if r.OnDebug != nil && text != "" {
+		r.OnDebug(text)
+	}
+}
+
+// thinkerShim makes spinner usage safe in headless mode without touching
+// every Start/Stop site: a nil real thinker is a no-op.
+type thinkerShim struct{ real *ux.Thinker }
+
+func (t thinkerShim) Start() {
+	if t.real != nil {
+		t.real.Start()
+	}
+}
+
+func (t thinkerShim) Stop() {
+	if t.real != nil {
+		t.real.Stop()
+	}
+}
+
+// newThinkerFor returns the animated spinner for interactive renderers and
+// a no-op for headless ones.
+func newThinkerFor(r Renderer, label string) thinkerShim {
+	if r.Interactive() {
+		return thinkerShim{real: ux.NewThinker(label)}
+	}
+	return thinkerShim{}
+}

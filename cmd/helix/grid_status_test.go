@@ -1,0 +1,173 @@
+// cmd/helix/grid_status_test.go
+// Purpose: the per-turn status line must describe reality. The QA session
+// printed "GRID STATUS :: CLEAR" after every turn while whisper-local was
+// unreachable and TTS was over budget, because the line was a constant.
+package main
+
+import (
+	"strings"
+	"testing"
+
+	"helix/internal/ai"
+	"helix/internal/speech"
+)
+
+func TestGridStatusClearWhenEverythingUsedPrimaries(t *testing.T) {
+	got := evaluateGridStatus(gridSignals{
+		STT: speech.ChainHealth{Attempted: true, OK: true, Used: "groq"},
+		TTS: speech.ChainHealth{Attempted: true, OK: true, Used: "openai"},
+	})
+
+	if got.Degraded {
+		t.Errorf("a clean turn must not be degraded: %q", got.Line)
+	}
+	if !strings.HasSuffix(got.Line, "CLEAR") {
+		t.Errorf("line = %q, want it to end in CLEAR", got.Line)
+	}
+}
+
+// A fresh session has run no chains yet. That is "unused", not "broken" — the
+// zero ChainHealth must not paint every first turn red.
+func TestGridStatusUnusedChainsAreClear(t *testing.T) {
+	if got := evaluateGridStatus(gridSignals{}); got.Degraded {
+		t.Errorf("an untouched session must report CLEAR, got %q", got.Line)
+	}
+}
+
+func TestGridStatusDegradedOnSTTFallback(t *testing.T) {
+	got := evaluateGridStatus(gridSignals{
+		// The QA shape: the primary answered only after whisper-local refused.
+		STT: speech.ChainHealth{
+			Attempted: true, OK: true, Used: "groq", Failed: []string{"whisper-local"},
+		},
+	})
+
+	if !got.Degraded {
+		t.Fatalf("a chain that needed a fallback is degraded, got %q", got.Line)
+	}
+	if !strings.Contains(got.Line, "DEGRADED") {
+		t.Errorf("line = %q, want DEGRADED", got.Line)
+	}
+	for _, want := range []string{"stt", "whisper-local", "groq"} {
+		if !strings.Contains(got.Line, want) {
+			t.Errorf("line = %q, want it to name %q", got.Line, want)
+		}
+	}
+}
+
+func TestGridStatusDegradedOnTotalChainFailure(t *testing.T) {
+	got := evaluateGridStatus(gridSignals{
+		STT: speech.ChainHealth{Attempted: true, Failed: []string{"groq", "whisper-local"}},
+	})
+
+	if !got.Degraded {
+		t.Fatal("a chain where every provider failed must be degraded")
+	}
+	if !strings.Contains(got.Line, "chain failed") {
+		t.Errorf("line = %q, want it to say the chain failed outright", got.Line)
+	}
+}
+
+// The brief's headline case: a degraded STT chain plus offline mode reports both
+// reasons on one line.
+func TestGridStatusReportsEveryReasonOnOneLine(t *testing.T) {
+	got := evaluateGridStatus(gridSignals{
+		STT:      speech.ChainHealth{Attempted: true, OK: true, Used: "whisper-local", Failed: []string{"groq"}},
+		Offline:  true,
+		LocalLLM: true,
+	})
+
+	if !got.Degraded {
+		t.Fatal("expected DEGRADED")
+	}
+	if strings.Contains(got.Line, "\n") {
+		t.Errorf("the status must stay one line, got:\n%s", got.Line)
+	}
+	for _, want := range []string{"brain: local model", "offline mode", "stt fallback"} {
+		if !strings.Contains(got.Line, want) {
+			t.Errorf("line = %q, want it to mention %q", got.Line, want)
+		}
+	}
+}
+
+// The prefix is the branding — the change is the verdict, not the layout.
+func TestGridStatusKeepsThePrefix(t *testing.T) {
+	for _, sig := range []gridSignals{{}, {Offline: true}} {
+		if got := evaluateGridStatus(sig); !strings.HasPrefix(got.Line, gridStatusPrefix) {
+			t.Errorf("line = %q, want the %q prefix", got.Line, gridStatusPrefix)
+		}
+	}
+}
+
+func TestChainHealthReasonIsEmptyWhenClean(t *testing.T) {
+	cases := map[string]speech.ChainHealth{
+		"never ran":     {},
+		"clean primary": {Attempted: true, OK: true, Used: "groq"},
+	}
+	for name, h := range cases {
+		t.Run(name, func(t *testing.T) {
+			if h.Degraded() {
+				t.Errorf("%v must not be degraded", h)
+			}
+			if r := h.Reason(); r != "" {
+				t.Errorf("reason = %q, want empty", r)
+			}
+		})
+	}
+}
+
+// The screenshot case: llama.cpp selected with nothing listening, the startup
+// banner already saying "every planner and chat request will fail" — and the
+// per-turn line reporting CLEAR, because the failover breaker needs two failed
+// model CALLS and a session of slash commands never supplies them.
+func TestGridStatusDegradedWhenBrainIsUnreachable(t *testing.T) {
+	got := evaluateGridStatus(gridSignals{
+		Brain: ai.BrainHealth{
+			Attempted: true, Provider: "llamacpp",
+			Detail: "dial tcp 127.0.0.1:8080: connect: connection refused",
+		},
+	})
+
+	if !got.Degraded {
+		t.Fatalf("a shell that cannot reach its model is not CLEAR: %q", got.Line)
+	}
+	for _, want := range []string{"DEGRADED", "brain", "llamacpp"} {
+		if !strings.Contains(got.Line, want) {
+			t.Errorf("line = %q, want it to mention %q", got.Line, want)
+		}
+	}
+}
+
+// An unknown brain (nothing called, nothing probed) is not a failure.
+func TestGridStatusUnknownBrainIsClear(t *testing.T) {
+	if got := evaluateGridStatus(gridSignals{Brain: ai.BrainHealth{}}); got.Degraded {
+		t.Errorf("an unprobed provider must not read as broken: %q", got.Line)
+	}
+	healthy := evaluateGridStatus(gridSignals{
+		Brain: ai.BrainHealth{Attempted: true, OK: true, Provider: "llamacpp"},
+	})
+	if healthy.Degraded {
+		t.Errorf("a reachable provider must be CLEAR: %q", healthy.Line)
+	}
+}
+
+// Once the breaker has moved to the local model the failure it is covering is
+// history: reporting both would read as two separate problems.
+func TestGridStatusFailoverReportsOneBrainReason(t *testing.T) {
+	got := evaluateGridStatus(gridSignals{
+		LocalLLM: true,
+		Brain: ai.BrainHealth{
+			Attempted: true, Provider: "openai", Detail: "i/o timeout",
+		},
+	})
+
+	if !got.Degraded {
+		t.Fatal("running on the fallback brain is degraded")
+	}
+	if n := strings.Count(got.Line, "brain:"); n != 1 {
+		t.Errorf("want exactly one brain reason, got %d: %q", n, got.Line)
+	}
+	if !strings.Contains(got.Line, "local model") {
+		t.Errorf("line = %q, want it to say the local model is in force", got.Line)
+	}
+}

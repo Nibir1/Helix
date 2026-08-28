@@ -22,6 +22,7 @@ import (
 
 	"helix/internal/ai"
 	"helix/internal/utils"
+	"helix/internal/ux"
 
 	"github.com/fatih/color"
 )
@@ -247,7 +248,7 @@ func UpdateAll(ctx context.Context, db *sql.DB, interactive bool) error {
 		return ctx.Err()
 	}
 	notifyStage("FETCHING MITRE ATT&CK")
-	if err := updateMITRE(ctx, db); err != nil && utils.IsDebugMode() {
+	if err := updateMITRE(ctx, db); err != nil && utils.IsDebugMode() && !ux.LineHeld() {
 		color.Yellow("MITRE update failed: %v", err)
 	}
 	if ctx.Err() != nil {
@@ -257,7 +258,10 @@ func UpdateAll(ctx context.Context, db *sql.DB, interactive bool) error {
 	// NVD last: it is the slowest feed (rate-limited) and checkpoints itself,
 	// so a cancellation resumes on the next run.
 	notifyStage("FETCHING NVD CVES")
-	if err := updateNVD(ctx, db); err != nil && utils.IsDebugMode() {
+	// Not while a voice HUD owns the terminal line: this is a background feed's
+	// debug note, and spliced into a live waveform it corrupts the one line the
+	// user is actually reading.
+	if err := updateNVD(ctx, db); err != nil && utils.IsDebugMode() && !ux.LineHeld() {
 		color.Yellow("NVD update skipped/failed: %v", err)
 	}
 	if ctx.Err() != nil {

@@ -82,17 +82,17 @@ func backendPlayTick() {
 	speaker.Play(tick)
 }
 
-// backendPlayAlert renders the strong 880Hz high-tech ping.
+// alertStreamer builds the 880Hz high-tech ping (~200ms plus decay tail).
 //
 // Args: none.
-// Returns: none.
-// Complexity: O(1), plus audio scheduling time.
-func backendPlayAlert() {
+// Returns: the decaying alert streamer.
+// Complexity: O(1) to build; O(samples) to stream.
+func alertStreamer() beep.Streamer {
 	sine := &SineWave{Freq: 880, Phase: 0}
 	beepSound := beep.Take(SampleRate/5, sine)
 	start := time.Now()
 
-	alert := beep.StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
+	return beep.StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
 		n, ok = beepSound.Stream(samples)
 		for i := range samples[:n] {
 			elapsed := time.Since(start).Seconds()
@@ -103,8 +103,27 @@ func backendPlayAlert() {
 		}
 		return n, ok
 	})
+}
 
-	speaker.Play(alert)
+// backendPlayAlert renders the strong 880Hz high-tech ping.
+//
+// Args: none.
+// Returns: none.
+// Complexity: O(1), plus audio scheduling time.
+func backendPlayAlert() {
+	speaker.Play(alertStreamer())
+}
+
+// backendPlayAlertSync renders the alert ping and blocks until the last sample
+// has been played, using the same done-channel pattern as backendPlaySpeech.
+//
+// Args: none.
+// Returns: none.
+// Complexity: O(duration).
+func backendPlayAlertSync() {
+	done := make(chan struct{})
+	speaker.Play(beep.Seq(alertStreamer(), beep.Callback(func() { close(done) })))
+	<-done
 }
 
 // backendPlayError renders the 110Hz sawtooth buzz.
@@ -130,6 +149,20 @@ func backendPlayError() {
 	})
 
 	speaker.Play(errorSound)
+}
+
+// backendPlaySpeech plays a decoded speech streamer to completion.
+//
+// Args:
+//   - s: fully decoded (and resampled) speech streamer.
+//
+// Returns: error if playback cannot be scheduled.
+// Complexity: O(duration).
+func backendPlaySpeech(s beep.Streamer) error {
+	done := make(chan struct{})
+	speaker.Play(beep.Seq(s, beep.Callback(func() { close(done) })))
+	<-done
+	return nil
 }
 
 // SineWave generates a simple sine tone.
@@ -210,3 +243,9 @@ func (s *SawWave) Stream(samples [][2]float64) (int, bool) {
 // Returns: nil.
 // Complexity: O(1).
 func (s *SawWave) Err() error { return nil }
+
+// backendName identifies this build's audio backend for /doctor (P10.3).
+func backendName() string { return "beep/oto (speaker output available)" }
+
+// backendSpeechSupported reports whether TTS audio can actually be heard.
+func backendSpeechSupported() bool { return true }

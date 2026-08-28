@@ -2,8 +2,10 @@
 package agent
 
 import (
+	"errors"
 	"helix/internal/ai"
 	"helix/internal/commands"
+	"helix/internal/input"
 	"helix/internal/shell"
 	"helix/internal/stealth"
 	"helix/internal/ux"
@@ -169,5 +171,56 @@ func TestPrepareSafePlanAutoGitAddForMultipleFiles(t *testing.T) {
 	}
 	if !strings.Contains(paths, "README.md") {
 		t.Errorf("git add paths must include README.md, got: %q", paths)
+	}
+}
+
+// TestBrainFailureUtterance covers the spoken form of a model failure.
+//
+// The gap it closes: a voice turn against an unreachable model printed the error
+// and a DEGRADED status line and said nothing at all. To someone speaking to the
+// shell that is indistinguishable from a microphone that stopped working.
+func TestBrainFailureUtterance(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{nil, "could not reach"},
+		{errors.New("context deadline exceeded"), "timed out"},
+		{errors.New("no AI provider configured"), "slash setup"},
+		{errors.New("HTTP 401: invalid api key"), "API key"},
+		{errors.New(`HTTP 400: {"code":"unsupported_parameter"}`), "rejected the request"},
+		{errors.New("dial tcp: connection refused"), "could not reach"},
+	}
+	for _, tc := range cases {
+		got := brainFailureUtterance(tc.err)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("brainFailureUtterance(%v) = %q, want it to mention %q", tc.err, got, tc.want)
+		}
+		// Spoken text must not read out a JSON blob or a stack of provider
+		// detail — the terminal has that, and it is unlistenable.
+		if strings.ContainsAny(got, "{}\n") {
+			t.Errorf("spoken text must stay prose, got %q", got)
+		}
+		if len(got) > 160 {
+			t.Errorf("spoken text is %d chars; keep it short: %q", len(got), got)
+		}
+	}
+}
+
+// TestSpeakBrainFailureIsVoiceOnly: a typed session already sees the error, and
+// speaking it there would be noise.
+func TestSpeakBrainFailureIsVoiceOnly(t *testing.T) {
+	ag, spoken := newTestAgent(t)
+
+	ag.channel = input.ChannelText
+	ag.speakBrainFailure(errors.New("boom"))
+	if len(*spoken) != 0 {
+		t.Errorf("a typed turn must not speak the error, said %v", *spoken)
+	}
+
+	ag.channel = input.ChannelVoice
+	ag.speakBrainFailure(errors.New("boom"))
+	if len(*spoken) != 1 {
+		t.Fatalf("a voice turn must speak the failure, said %v", *spoken)
 	}
 }

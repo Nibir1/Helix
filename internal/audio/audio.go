@@ -174,6 +174,26 @@ func PlayAlert() {
 	time.Sleep(50 * time.Millisecond)
 }
 
+// PlayAlertSync generates the alert ping and returns only once the last sample
+// has left the speaker.
+//
+// The voice loop needs this: PlayAlert merely SCHEDULES the tone, so the
+// recorder used to arm while the 880Hz ping (200ms plus decay) was still
+// sounding. sox's silence gate then opened on Helix's own chime and the STT
+// provider hallucinated a word out of a 0.1s clip of it — a full reply to a
+// turn nobody spoke. Blocking here removes the overlap at its source.
+//
+// Args: none.
+// Returns: none.
+// Complexity: O(tone duration) — blocks for roughly 200ms plus decay.
+func PlayAlertSync() {
+	if !playbackAllowed() {
+		return
+	}
+
+	backendPlayAlertSync()
+}
+
 // PlayError generates the low buzz (Sawtooth-ish).
 //
 // Args: none.

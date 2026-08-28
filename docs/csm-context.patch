@@ -1,0 +1,305 @@
+From: Helix <https://github.com/Nibir1/Helix>
+Subject: [PATCH] feat: condition generation on prior conversation turns
+
+CSM's distinguishing capability is that its prosody is conditioned on how the
+conversation has been going. The model card says it "sounds best when provided
+with context", and the reference Python API takes prior turns as
+Segment(text, speaker, audio). csm.rs currently tokenizes only the current
+utterance, so a local CSM sounds like a very good single-shot voice rather than
+a participant in a dialogue.
+
+This adds optional context to both the library and the HTTP server.
+
+Everything needed is already present: `audio_tokens_and_mask(frame)` turns one
+Mimi frame into model tokens+mask, and `self.audio_tokenizer` is a `mimi::Mimi`
+which encodes as well as decodes. Context is therefore token assembly, not new
+model loading — no extra weights, no extra VRAM beyond the KV cache the longer
+prompt occupies.
+
+Design notes for review:
+
+* Segments are interleaved text-then-audio, oldest first, exactly as the
+  reference implementation orders them, and the current utterance's prompt is
+  appended last.
+* A segment with no audio is valid and useful: CSM conditions on text too, and a
+  caller that streamed a turn may have the transcript without one contiguous clip.
+* Audio is expected as 24 kHz mono f32 — the tokenizer's own sample rate, read
+  from `audio_tokenizer.config().sample_rate` rather than assumed.
+* Context is truncated from the FRONT to `max_seq_len` before generation, so a
+  long history degrades to recent history instead of erroring.
+* **`X-CSM-Context-Segments` is returned on every response.** Serde ignores
+  unknown fields by default, so an unpatched server accepts a `context` field and
+  silently drops it — a client cannot tell conditioning from no conditioning.
+  The header makes support observable rather than assumed. This is the one part
+  of the patch that exists for clients rather than for the model, and it is the
+  part that stops "conversational" from being an unverifiable claim.
+
+---
+ csm-core/lib.rs      | 118 +++++++++++++++++++++++++++++++++++++++--
+ csm-server/main.rs   |  74 +++++++++++++++++++++++--
+ 2 files changed, 186 insertions(+), 6 deletions(-)
+
+diff --git a/csm-core/lib.rs b/csm-core/lib.rs
+--- a/csm-core/lib.rs
++++ b/csm-core/lib.rs
+@@
+ use moshi::mimi;
++
++/// One prior turn of the conversation.
++///
++/// `audio` is 24 kHz mono f32 at the tokenizer's sample rate. `None` is valid:
++/// the model conditions on text as well, and a caller that streamed a turn may
++/// hold its transcript without one contiguous clip.
++#[derive(Clone, Debug, Default)]
++pub struct ContextSegment {
++    pub speaker_id: u32,
++    pub text: String,
++    pub audio: Option<Vec<f32>>,
++}
+
+ impl Generator {
++    /// Encodes raw samples into Mimi frames.
++    ///
++    /// Uses the same codebook count as `decode_frames`, so the frames handed to
++    /// the backbone match the ones it was trained to see coming back out.
++    fn encode_audio(&mut self, samples: &[f32]) -> Result<Vec<Vec<u32>>> {
++        if samples.is_empty() {
++            return Ok(Vec::new());
++        }
++        let n = samples.len();
++        // Mimi expects (batch, channels, samples).
++        let pcm = Tensor::from_vec(samples.to_vec(), (1, 1, n), &self.device)?
++            .to_dtype(self.dtype)?;
++
++        let codes = self.audio_tokenizer.encode(&pcm)?;
++        // codes: (batch, codebooks, frames) -> per-frame Vec<u32>
++        let codes = codes.i(0)?.to_dtype(DType::U32)?;
++        let (num_codebooks, num_frames) = codes.dims2()?;
++
++        let flat: Vec<u32> = codes.transpose(0, 1)?.flatten_all()?.to_vec1()?;
++        let mut frames = Vec::with_capacity(num_frames);
++        for f in 0..num_frames {
++            frames.push(flat[f * num_codebooks..(f + 1) * num_codebooks].to_vec());
++        }
++        Ok(frames)
++    }
++
++    /// Builds the token/mask prefix for prior turns, oldest first.
++    ///
++    /// Returns `(tokens, mask)` shaped like the prompt so the caller can simply
++    /// concatenate along dim 1, or `None` when there is no usable context.
++    fn build_context_prefix(
++        &mut self,
++        context: &[ContextSegment],
++        tokenizer_template: Option<&str>,
++    ) -> Result<Option<(Tensor, Tensor)>> {
++        let mut parts: Vec<(Tensor, Tensor)> = Vec::new();
++
++        for seg in context {
++            if !seg.text.trim().is_empty() {
++                let (t, m) = self.tokenize_text(&seg.text, seg.speaker_id, tokenizer_template)?;
++                parts.push((t, m));
++            }
++            if let Some(samples) = seg.audio.as_ref() {
++                for frame in self.encode_audio(samples)? {
++                    let (t, m) = self.model.audio_tokens_and_mask(frame)?;
++                    parts.push((t, m));
++                }
++            }
++        }
++        if parts.is_empty() {
++            return Ok(None);
++        }
++
++        let tokens: Vec<Tensor> = parts.iter().map(|(t, _)| t.clone()).collect();
++        let masks: Vec<Tensor> = parts.iter().map(|(_, m)| m.clone()).collect();
++        Ok(Some((Tensor::cat(&tokens, 1)?, Tensor::cat(&masks, 1)?)))
++    }
++
++    /// Prepends context to a prompt, trimming the OLDEST tokens if the result
++    /// exceeds the model's window.
++    ///
++    /// Trimming rather than erroring is deliberate: a caller that sends a long
++    /// history should get recent history, not a failed request.
++    fn prepend_context(
++        &mut self,
++        prompt: (Tensor, Tensor),
++        context: &[ContextSegment],
++        tokenizer_template: Option<&str>,
++    ) -> Result<(Tensor, Tensor)> {
++        let (p_tokens, p_mask) = prompt;
++        let prefix = match self.build_context_prefix(context, tokenizer_template)? {
++            Some(p) => p,
++            None => return Ok((p_tokens, p_mask)),
++        };
++
++        let mut tokens = Tensor::cat(&[prefix.0, p_tokens], 1)?;
++        let mut mask = Tensor::cat(&[prefix.1, p_mask], 1)?;
++
++        let seq_len = tokens.dim(1)?;
++        if seq_len > self.max_seq_len {
++            let start = seq_len - self.max_seq_len;
++            tokens = tokens.narrow(1, start, self.max_seq_len)?;
++            mask = mask.narrow(1, start, self.max_seq_len)?;
++            log::info!("context trimmed to the most recent {} tokens", self.max_seq_len);
++        }
++        Ok((tokens, mask))
++    }
++
+     pub fn generate_to_channel(
+         &mut self,
+         text: &str,
+         speaker_id: u32,
+         max_audio_len_ms: f32,
+         temperature: f64,
+         top_k: usize,
+         buffer_size: usize,
+         tokenizer_template: Option<String>,
++        context: Vec<ContextSegment>,
+         tx: std_mpsc::SyncSender<Result<Tensor>>,
+     ) {
+@@ generate_to_channel
+-        let (prompt_tokens, prompt_mask) = match self.tokenize_text(text, speaker_id, tokenizer_template.as_deref()) {
+-            Ok(t) => t,
+-            Err(e) => { let _ = tx.send(Err(e)); return; }
+-        };
++        let prompt = match self.tokenize_text(text, speaker_id, tokenizer_template.as_deref()) {
++            Ok(t) => t,
++            Err(e) => { let _ = tx.send(Err(e)); return; }
++        };
++        let (prompt_tokens, prompt_mask) =
++            match self.prepend_context(prompt, &context, tokenizer_template.as_deref()) {
++                Ok(t) => t,
++                Err(e) => { let _ = tx.send(Err(e)); return; }
++            };
+
+diff --git a/csm-server/main.rs b/csm-server/main.rs
+--- a/csm-server/main.rs
++++ b/csm-server/main.rs
+@@
++use base64::Engine as _;
++use csm_core::ContextSegment;
++
++/// One prior turn on the wire.
++///
++/// Mirrors the reference `Segment(text, speaker, audio)` so a client written
++/// against the Python API has an obvious mapping. `audio_b64` is optional.
++#[derive(Deserialize, Debug, Clone)]
++struct ContextSegmentDto {
++    #[serde(default)]
++    speaker: u32,
++    #[serde(default)]
++    text: String,
++    #[serde(default)]
++    audio_b64: Option<String>,
++    /// "wav" (default) or "pcm" — raw little-endian 16-bit mono.
++    #[serde(default)]
++    format: Option<String>,
++}
++
+ #[derive(Deserialize, Debug)]
+ struct SpeechRequest {
+     input: String,
+     #[serde(default)]
+     speaker_id: u32,
+@@
+     buffer_size: usize,
+-    tokenizer_template: Option<String>
++    tokenizer_template: Option<String>,
++    /// Prior turns, oldest first. Absent means single-utterance synthesis.
++    #[serde(default)]
++    context: Vec<ContextSegmentDto>,
+ }
++
++/// Decodes one wire segment into samples at the tokenizer's rate.
++///
++/// WAV is parsed for its data chunk rather than assumed to be 44 bytes of
++/// header: encoders emit LIST/INFO chunks and a fixed offset silently shifts
++/// the audio, which is audible as a click and a wrong start.
++fn decode_segment(dto: &ContextSegmentDto) -> anyhow::Result<ContextSegment> {
++    let mut audio = None;
++    if let Some(b64) = dto.audio_b64.as_ref() {
++        if !b64.is_empty() {
++            let raw = base64::engine::general_purpose::STANDARD.decode(b64)?;
++            let pcm = match dto.format.as_deref().unwrap_or("wav") {
++                "pcm" => raw,
++                _ => wav_data_chunk(&raw)?,
++            };
++            let mut samples = Vec::with_capacity(pcm.len() / 2);
++            for c in pcm.chunks_exact(2) {
++                samples.push(i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0);
++            }
++            audio = Some(samples);
++        }
++    }
++    Ok(ContextSegment { speaker_id: dto.speaker, text: dto.text.clone(), audio })
++}
++
++/// Returns the bytes of a RIFF/WAVE `data` chunk.
++fn wav_data_chunk(raw: &[u8]) -> anyhow::Result<Vec<u8>> {
++    if raw.len() < 12 || &raw[0..4] != b"RIFF" || &raw[8..12] != b"WAVE" {
++        anyhow::bail!("context audio is not RIFF/WAVE");
++    }
++    let mut i = 12;
++    while i + 8 <= raw.len() {
++        let id = &raw[i..i + 4];
++        let size = u32::from_le_bytes([raw[i + 4], raw[i + 5], raw[i + 6], raw[i + 7]]) as usize;
++        let body = i + 8;
++        if id == b"data" {
++            let end = (body + size).min(raw.len());
++            return Ok(raw[body..end].to_vec());
++        }
++        i = body + size + (size & 1); // chunks are word-aligned
++    }
++    anyhow::bail!("no data chunk in context audio")
++}
+@@ speech_handler
++    // Decode context before spawning: a malformed segment should be a 400, not
++    // a failure discovered halfway through a streamed response whose header has
++    // already been sent.
++    let mut context = Vec::with_capacity(payload.context.len());
++    for dto in &payload.context {
++        match decode_segment(dto) {
++            Ok(seg) => context.push(seg),
++            Err(e) => {
++                return (
++                    StatusCode::BAD_REQUEST,
++                    Json(ErrorResponse { error: format!("invalid context segment: {e}") }),
++                ).into_response();
++            }
++        }
++    }
++    let applied_segments = context.len();
++
+     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(16);
+@@
+         generator.generate_to_channel(
+             &input,
+             speaker_id,
+             max_audio_len_ms,
+             temperature,
+             top_k,
+             buffer_size,
+             tokenizer_template,
++            context,
+             audio_tx,
+         );
+@@ response construction
+-    Body::from_stream(ReceiverStream::new(rx))
++    // Advertise what was actually conditioned on. Serde ignores unknown fields
++    // by default, so an unpatched server accepts `context` and silently drops
++    // it; without this header a client cannot distinguish a conditioned reply
++    // from an unconditioned one.
++    let mut response = Response::new(Body::from_stream(ReceiverStream::new(rx)));
++    response.headers_mut().insert(
++        "X-CSM-Context-Segments",
++        applied_segments.to_string().parse().unwrap(),
++    );
++    response
+
+diff --git a/csm-server/Cargo.toml b/csm-server/Cargo.toml
+--- a/csm-server/Cargo.toml
++++ b/csm-server/Cargo.toml
+@@
+ serde = { version = "1", features = ["derive"] }
++base64 = "0.22"

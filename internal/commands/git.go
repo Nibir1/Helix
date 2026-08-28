@@ -58,6 +58,13 @@ type GitOperation struct {
 	Risks        []string
 }
 
+// SetDryRun toggles execution preview for git operations. The manager receives
+// its ExecuteConfig by value at construction, so a later change to the caller's
+// copy is invisible to it without this.
+func (gm *GitManager) SetDryRun(on bool) {
+	gm.execConfig.DryRun = on
+}
+
 // HandleGitRequest processes natural language git requests from /git
 func (gm *GitManager) HandleGitRequest(request string) error {
 	request = strings.ToLower(strings.TrimSpace(request))
@@ -410,6 +417,21 @@ func (gm *GitManager) executeCommitWithMessage(message string) error {
 
 	commitCmd := fmt.Sprintf("git commit -F %s", relPath)
 	return gm.sandbox.WrapCommand(commitCmd, gm.execConfig, gm.env)
+}
+
+// HeadCommit returns the current HEAD commit hash, or "" when the working
+// directory is not a git repository (or has no commits yet). Callers use it
+// to detect whether an action actually created a commit (undo journaling
+// must never record a no-op commit — reversing one would soft-reset a
+// pre-existing commit).
+func (gm *GitManager) HeadCommit() string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = gm.getCurrentDir()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // parseMultiCommands splits a multi-command string into individual commands

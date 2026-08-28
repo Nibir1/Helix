@@ -18,6 +18,8 @@ var contextLimits = []contextLimitEntry{
 	// OpenAI
 	{prefix: "gpt-5.6-luna", limit: 1_050_000},
 	{prefix: "gpt-5.6-sol", limit: 1_050_000}, // Added for standard API alias
+	{prefix: "gpt-5.6-terra", limit: 1_050_000},
+	{prefix: "gpt-5.6", limit: 1_050_000}, // bare alias for -sol
 	{prefix: "gpt-5.5", limit: 1_000_000},
 	{prefix: "gpt-5.4-pro", limit: 1_050_000},
 	{prefix: "gpt-5.4-mini", limit: 400_000},
@@ -38,8 +40,24 @@ var contextLimits = []contextLimitEntry{
 	{prefix: "deepseek-reasoner", limit: 1_000_000}, // Public API alias for R1/V4-Pro
 
 	// GLM
+	{prefix: "glm-5.3-flash", limit: 1_048_576},
+	{prefix: "glm-5.3", limit: 1_000_000},
 	{prefix: "glm-5.2", limit: 1_000_000},
 	{prefix: "glm-5.1", limit: 200_000},
+	{prefix: "glm-4.6v", limit: 128_000},
+
+	// Google Gemini — context windows from ai.google.dev. Without these the 8k
+	// default applies and GetSafeContentLimit clamps RAG context to ~4k chars,
+	// which is the silent-starvation bug the xAI entry below was added for.
+	{prefix: "gemini-3.7", limit: 1_000_000},
+	{prefix: "gemini-3.6", limit: 1_000_000},
+	{prefix: "gemini-3.5", limit: 1_000_000},
+	{prefix: "gemini-3.1-pro", limit: 1_000_000},
+	{prefix: "gemini-3", limit: 1_000_000},
+	{prefix: "gemini-2.5", limit: 1_000_000},
+
+	// Meta (Meta Model API)
+	{prefix: "muse-spark", limit: 1_048_576},
 
 	// Kimi
 	{prefix: "kimi-k3", limit: 1_000_000},
@@ -47,6 +65,15 @@ var contextLimits = []contextLimitEntry{
 
 	// Qwen
 	{prefix: "qwen3.7-plus", limit: 1_000_000},
+
+	// xAI (Grok) — context windows from docs.x.ai/docs/models. Without these
+	// the default 8k applies and GetSafeContentLimit clamps RAG context to a
+	// fraction of what Grok can actually take.
+	{prefix: "grok-4.6", limit: 500_000},
+	{prefix: "grok-4.5", limit: 500_000},
+	{prefix: "grok-4.3", limit: 1_000_000},
+	{prefix: "grok-4.20", limit: 1_000_000},
+	{prefix: "grok-build", limit: 256_000},
 
 	// Gemma
 	{prefix: "gemma4", limit: 128_000},
@@ -101,6 +128,182 @@ func GetSafeContentLimit(modelID string) int {
 	return availableTokens * 4
 }
 
+// toolUseProviders are the providers whose Helix adapter actually implements
+// native function calling AND whose current chat models support it.
+//
+// This deliberately describes the ADAPTER's ability, not just the vendor's:
+// the flag is consumed as "can Helix use tool calling here", so listing a
+// provider Helix cannot yet drive (Anthropic, Ollama — both have their own
+// non-OpenAI wire formats) would cost a wasted round trip on every planner
+// call before the fallback kicked in.
+//
+// "custom" is excluded on purpose: an arbitrary OpenAI-compatible endpoint may
+// or may not implement /tools, and guessing wrong is worse than not trying.
+// llama.cpp is excluded for the same reason — llama-server's tool support
+// depends on the loaded GGUF and a --jinja launch flag Helix cannot detect.
+var toolUseProviders = map[string]bool{
+	"openai":    true,
+	"deepseek":  true,
+	"kimi":      true,
+	"qwen":      true,
+	"glm":       true,
+	"xai":       true, // docs.x.ai lists function calling
+	"gemini":    true, // OpenAI-compatible surface forwards tools/tool_choice
+	"meta":      true, // Muse Spark lists tool calling
+	"anthropic": true, // P8.7b: tool_use blocks + input_schema
+	"ollama":    true, // P8.7b: /api/chat tools — but MODEL-gated, see below
+}
+
+// ollamaToolModels are the local model families whose Ollama builds ship a
+// tool-calling template.
+//
+// This gate is not pedantry. Helix's own default local model is `gemma4:e2b`,
+// and Gemma has NO tool template — advertising tool support for every Ollama
+// model would make the planner attempt a tool call, get prose back, and fall
+// through to the prompt ladder on EVERY plan, burning a wasted round trip on
+// exactly the low-powered hardware that can least afford one.
+var ollamaToolModels = []string{
+	"llama3.1", "llama3.2", "llama3.3",
+	"qwen2.5", "qwen3",
+	"mistral-nemo", "mistral-small", "mistral-large",
+	"command-r", "firefunction", "hermes3",
+}
+
+// SupportsToolUse reports whether native function calling can be used for a
+// provider/model pair (BlackBox P8.7/P8.7b).
+func SupportsToolUse(provider, model string) bool {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if !toolUseProviders[p] {
+		return false
+	}
+	m := strings.ToLower(strings.TrimSpace(model))
+
+	// Embedding endpoints share the provider name but have no tool support.
+	if strings.Contains(m, "embedding") {
+		return false
+	}
+
+	// Cloud providers ship tool support across their current chat models;
+	// Ollama's depends entirely on the individual model's template.
+	if p != "ollama" {
+		return true
+	}
+	for _, family := range ollamaToolModels {
+		if strings.HasPrefix(m, family) {
+			return true
+		}
+	}
+	return false
+}
+
+// MaxTokensField is the request field that bounds a completion.
+const (
+	// FieldMaxTokens is the original OpenAI parameter, and what every
+	// OpenAI-COMPATIBLE server understands (llama.cpp, Ollama, Groq, DeepSeek,
+	// xAI, GLM, Kimi, Qwen). It stays the default for that reason.
+	FieldMaxTokens = "max_tokens"
+
+	// FieldMaxCompletionTokens is OpenAI's replacement. Reasoning models
+	// (GPT-5.x, o1, o3, o4) REJECT max_tokens outright with an
+	// unsupported_parameter 400, because that bound could not account for the
+	// internal reasoning tokens they generate.
+	FieldMaxCompletionTokens = "max_completion_tokens"
+)
+
+// maxCompletionTokensModels are the model-name prefixes that require
+// FieldMaxCompletionTokens.
+//
+// Prefix matching on the MODEL, not the provider: an OpenAI-compatible proxy
+// ("custom") may well be serving gpt-5, and OpenAI itself still serves older
+// models that only accept max_tokens. Note that gpt-4-turbo accepts ONLY
+// max_tokens, so this cannot be widened to "everything OpenAI".
+var maxCompletionTokensModels = []string{
+	"gpt-5", "o1", "o1-mini", "o1-preview", "o3", "o3-mini", "o4", "o4-mini",
+}
+
+// PreferredMaxTokensField returns the completion-bound field to send first.
+//
+// It is a starting guess, not a verdict: the adapter recovers from a wrong guess
+// by reading the server's own correction and retrying once, then remembering the
+// answer. That matters because this list ages — a model released tomorrow will
+// not be in it, and a hardcoded table alone would fail closed on exactly the
+// newest models.
+func PreferredMaxTokensField(provider, model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	for _, prefix := range maxCompletionTokensModels {
+		if m == prefix || strings.HasPrefix(m, prefix+"-") || strings.HasPrefix(m, prefix+".") {
+			return FieldMaxCompletionTokens
+		}
+	}
+	return FieldMaxTokens
+}
+
+// AlternateMaxTokensField returns the other field, for the retry.
+func AlternateMaxTokensField(field string) string {
+	if field == FieldMaxCompletionTokens {
+		return FieldMaxTokens
+	}
+	return FieldMaxCompletionTokens
+}
+
+// visionModelSubstrings are model-name fragments that mark a multimodal model
+// regardless of provider. Substring, not prefix: vendors bury the marker
+// mid-name ("qwen2.5-vl-7b", "llama-3.2-11b-vision-instruct").
+var visionModelSubstrings = []string{
+	// Explicitly-named multimodal builds.
+	"vision", "llava", "-vl", "vl-", "moondream", "minicpm-v", "bakllava",
+	// Families that are multimodal across the board.
+	"gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4-mini",
+	"claude-3", "claude-4", "claude-sonnet", "claude-opus", "claude-haiku",
+	"gemini", "gemma3", "gemma4",
+	"pixtral", "grok-2-vision", "grok-4",
+	"qwen2.5-vl", "qwen3-vl", "qwen3.7-plus", "glm-4v", "glm-4.5v", "glm-4.6v",
+	"internvl", "phi-3.5-vision", "phi-4-multimodal",
+	// Natively multimodal flagships whose names carry no "vision"/"vl" marker
+	// at all. Each is somebody's DEFAULT model, so missing one here is the
+	// difference between /eyes working and refusing on a stock install.
+	"glm-5.3-flash", "muse-spark",
+	"kimi-k3", "kimi-k2.6", "kimi-k2.5",
+}
+
+// SupportsVision reports whether a provider/model pair can process images.
+//
+// It replaces a three-substring test (`vision`, `gemma3`, `llava`) that missed
+// essentially every mainstream multimodal model — gpt-4o, every Claude 3/4, all
+// Gemini, and Ollama's own shipped default `gemma4:e2b`. The consequence was not
+// subtle: /eyes on refused with "No vision-capable model is configured" on
+// providers that see perfectly well, so the whole Phase 5 camera path was
+// unreachable on a normal cloud setup.
+//
+// Matching is on the MODEL name, deliberately: vision is a per-model property,
+// and a provider-level allowlist would claim vision for a text-only model from a
+// vendor that also ships multimodal ones.
+//
+// Args:
+//   - provider: registry provider name (currently advisory; kept for symmetry
+//     with SupportsToolUse and for future provider-level carve-outs).
+//   - model: the model that will actually be called.
+//
+// Returns: true when images can be sent.
+// Complexity: O(len(visionModelSubstrings)).
+func SupportsVision(provider, model string) bool {
+	_ = provider
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" {
+		return false
+	}
+	// Embedding endpoints share provider names but take no images.
+	if strings.Contains(m, "embedding") {
+		return false
+	}
+	for _, frag := range visionModelSubstrings {
+		if strings.Contains(m, frag) {
+			return true
+		}
+	}
+	return false
+}
+
 // CapabilitiesFor returns capability flags for a provider/model pair.
 func CapabilitiesFor(provider, model string) Capabilities {
 	model = strings.ToLower(model)
@@ -111,10 +314,10 @@ func CapabilitiesFor(provider, model string) Capabilities {
 		Chat:       true,
 		Planner:    GetContextLimit(model) >= 8_192,
 		Embeddings: provider == "openai" || provider == "ollama",
-		Vision:     strings.Contains(model, "vision") || strings.Contains(model, "gemma3"),
+		Vision:     SupportsVision(provider, model),
 		Local:      local,
 		Remote:     !local,
 		Streaming:  true,
-		ToolUse:    false,
+		ToolUse:    SupportsToolUse(provider, model),
 	}
 }

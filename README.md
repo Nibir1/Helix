@@ -17,9 +17,10 @@
 Helix is an **AI-powered command‑line assistant and adversarial cybersecurity platform** that turns natural language into **safe, executable actions**. It bridges the gap between human intent and machine execution, combining local LLM inference, retrieval-augmented generation (RAG), live threat intelligence, and strict safety pipelines.
 
 It combines:
-- **Multi-Provider AI** (OpenAI, Anthropic, DeepSeek, Ollama and more)
+- **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more)
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
+- **One visual language across all 57 commands** — panels, badges and aligned rows, never a flat stack of coloured lines. Colour honours `NO_COLOR` and switches itself off when the output is not a terminal, so piping Helix or running it as a service produces clean text
 - **A Multi-Layer Safety & Sandbox Engine** around shell, git, packages, and recon
 - **Enterprise-Grade Hardening** (Kernel confinement, instruction firewalls, and signed supply chains)
 - **Synthetic Tonal Audio** for immersive, synchronized terminal feedback
@@ -148,68 +149,188 @@ Using an advanced **Input Classification Engine** (`internal/shell/classify.go`)
 ### 5. Enterprise Security & Privacy
 - `/sandbox strict` *(Enforces kernel-grade write confinement via Landlock/Seatbelt)*
 - `/doctor` *(Surfaces local, telemetry-free crash diagnostics and system health)*
-- `/purge` *(Cryptographically wipes all local Helix data, keys, and crash reports)*
+- `/reboot` *(Self-updates from GitHub releases or a local build — checksum-verified, atomically installed, automatically rolled back if the new binary cannot start — then restarts and resumes what it was doing)*
+- `/purge` *(Deletes all local Helix data — keys, databases, caches, transcripts and crash reports — after a grouped manifest and an explicit confirmation)*
 
 ---
 
 ## Comprehensive Command Reference
 
-Helix exposes a rich set of slash commands for system control, intelligence gathering, and UX tuning.
+Helix exposes a rich set of slash commands for system control, the agentic harness, intelligence gathering, and UX tuning. Every command below is defined in one registry (`cmd/helix/registry_tables.go`), which is also what `/help`, Tab completion, and the did-you-mean suggester read — so the menu cannot drift from the code.
+
+At the prompt: **Tab** completes a slash command (or a path), **`/help <command>`** prints one command's full detail, and a mistyped command suggests the closest matches. `/help` on its own is an index of command *names* — argument syntax lives in the detail screen, which has the whole width for it.
 
 ### Core & Navigation
 | Command | Description |
 | :--- | :--- |
-| `/help` | Show the SOS protocol and command menu. |
-| `/about` | Display the Helix philosophy, ASCII banner, and creator info. |
-| `/setup` | Unified setup wizard (Identity, AI Provider configuration). |
-| `/status` | Check background RAG indexing, AI provider, and audio engine status. |
-| `/doctor` | Run full system diagnostics (DB ping, network, confinement backend, and local crash reports). |
-| `/online` | Check internet connectivity for remote AI and threat feeds. |
-| `/debug <on\|off>` | Toggle verbose byte-level debug logging. |
-| `/cd <dir>` | Change directory (sandbox-aware). |
+| `/help [command]` | Show this menu, or full detail for one command |
+| `/about` | Helix philosophy, banner & creator |
+| `/version` | Version, build flavor, and platform |
+| `/setup` | Unified setup wizard (identity, AI provider) |
+| `/config [key [value]]` | Show or change persisted settings |
+| `/cd [dir]` | Change directory (sandbox-aware) |
+| `/status` | Session state: RAG, provider, harness, sandbox, hooks |
+| `/doctor` | Full system diagnostics, including edge and sidecar checks |
+| `/online` | Check internet connectivity |
+| `/debug <on\|off>` | Toggle verbose debug logging |
+
+### Session & Context
+| Command | Description |
+| :--- | :--- |
+| `/context` | What the model is being told, and how big it is |
+| `/cost` | Model traffic for this session, by purpose |
+| `/memory [show\|clear]` | Show or wipe conversation memory |
+| `/clear` | Archive and clear the conversation, then clear the screen |
+| `/compact [focus]` | Summarize the conversation into one dense turn |
+| `/resume [id]` | List archived conversations, or reload one |
+| `/export [path]` | Write the conversation to a Markdown transcript |
+| `/history [pattern]` | Search this machine's Helix command history |
+
+Nothing here destroys a transcript. `/clear`, `/compact`, `/memory clear`, and `/resume` all archive the conversation to `~/.helix/sessions/` (0600) before replacing it, and `/resume` lists the archive.
+
+`/cost` and `/context` report **estimated** token counts (~4 characters per token). No provider in the registry returns a usage block on the streaming path Helix uses, so an exact count is not available to report — call counts, failures, byte counts, and latency are exact. Helix ships no price table: rates change without notice, and a stale hardcoded rate is worse than an honest token count.
+
+### Agentic Harness
+| Command | Description |
+| :--- | :--- |
+| `/agentic [on\|off\|steps <n>]` | Iterative harness: observe step results and self-correct |
+| `/plan <request>` | Show the plan for a request without executing anything |
+| `/permissions [mode]` | Approval posture: plan, cautious, ask, or auto |
+| `/todo [add\|start\|done\|rm\|...]` | Task list the planner can see |
+| `/tools` | The harness tool vocabulary and each tool's gate |
+| `/hooks [list\|add\|rm\|test\|...]` | Run your own commands around tool execution |
+| `/undo` | Reverse the most recent journalled action |
+| `/dry-run` | Toggle command execution preview mode |
+
+**Approval posture** (`/permissions`) layers on top of the risk tiers and never replaces them:
+
+| Mode | Behavior |
+| :--- | :--- |
+| `plan` | Nothing executes. Steps are printed as a plan with their risk tier. |
+| `cautious` | Every command asks first, including low risk. |
+| `ask` | Default: low runs, medium asks, high is blocked. |
+| `auto` | Medium risk is auto-approved. |
+
+High-risk commands stay blocked in **every** mode, typed confirmations stay typed, the sandbox still validates every command, and the Voice Risk Policy still caps anything arriving by voice. The mode can only change the question Helix asks about commands it was already willing to consider.
+
+**Hooks** (`/hooks`) run your own commands around tool execution — the escape hatch for policy Helix cannot know about ("never touch the prod kubeconfig", "gofmt after any write", "log every push"). See [docs/harness.md](docs/harness.md) for the security model; in short: hooks come only from `~/.helix/hooks.json`, they run *after* every built-in gate, and a blocking pre-hook can subtract permission but never grant it.
+
+### Code & Repository
+| Command | Description |
+| :--- | :--- |
+| `/init [--force]` | Study this repository and write HELIX.md project context |
+| `/diff [--staged] [path...]` | Show the working tree diff with a summary |
+| `/review [--staged] [path...]` | AI review of the current diff |
+| `/commit [message]` | Commit staged work, writing the message from the diff |
+| `/git <request>` | Natural-language git operations with safety gates |
+| `/web <query\|url>` | Guarded web search or page fetch |
+| `/explain <command\|technique>` | Defensive analysis: techniques, detections, mitigations |
+
+`/init` writes a `HELIX.md` that Helix then loads on every turn in that directory tree (`AGENTS.md` and `CLAUDE.md` are recognized too). Like retrieved knowledge and conversation memory, it is injected as a **zero-authority** fenced block: it can inform the planner and can never command it.
+
+`/commit` never stages anything for you — what you staged is what gets committed.
 
 ### AI & Providers
-| Command | Description |
-| :--- | :--- |
-| `/provider <name>` | Switch AI provider (openai, anthropic, ollama etc.). |
-| `/provider-status` | Show detailed provider health and API key status. |
-| `/model <id>` | Switch the active AI model. |
-| `/test-basic-ai` | Smoke test the active AI model with a simple prompt. |
-| `/explain <cmd>` | AI-powered defensive analysis of a command or technique. |
+Local runtimes — Ollama, llama.cpp, whisper.cpp, Piper — have their own guide: [docs/local_runtimes.md](docs/local_runtimes.md). **Ollama is the local default**; llama.cpp is registered and selectable with `/provider use llamacpp` but is not offered in the first-run menu, since it needs a hand-managed server. It covers which to use, how llama.cpp serves models Ollama already pulled, the llama.cpp/whisper.cpp port collision on 8080, and what the `local-gguf` placeholder was doing wrong.
 
-### Threat Intelligence & RAG
 | Command | Description |
 | :--- | :--- |
-| `/knowledge-update` | Fetch latest CVEs, CISA KEV, Exploits, and MITRE data. |
-| `/knowledge-status` | Show knowledge database row counts. |
-| `/knowledge-reindex` | Rebuild FTS5 search index. |
-| `/rag-status` | Show RAG indexing progress and vector stats. |
-| `/rag-reindex` | Trigger background RAG reindex. |
-| `/rag-rebuild` | Force full RAG knowledge base rebuild (with live progress). |
-| `/rag-reset` | Wipe all RAG vector data. |
+| `/provider [status\|list\|use <name>\|<name>]` | Switch or inspect the AI provider |
+| `/provider-status` | Provider health, keys, failover state, planner transport |
+| `/model [list\|use <id>\|<id>]` | Switch or list models on the active provider |
+| `/models` | List models the active provider offers |
+| `/test-basic-ai` | Smoke test the active AI model |
+
+### RAG & Knowledge Base
+| Command | Description |
+| :--- | :--- |
+| `/rag-status` | RAG indexing progress and vector stats |
+| `/rag-reindex` | Trigger a background RAG reindex |
+| `/rag-rebuild` | Force a full RAG knowledge base rebuild |
+| `/rag-reset` | Wipe all RAG vector data |
+| `/knowledge-update` | Fetch latest CVEs, CISA KEV, exploits, MITRE ATT&CK |
+| `/knowledge-status` | Knowledge database row counts and last update |
+| `/knowledge-reindex` | Rebuild the FTS5 search index |
 
 ### Security, Recon & Stealth
 | Command | Description |
 | :--- | :--- |
-| `/vuln <query>` | Defensive vulnerability intel (CVE/EDB/MITRE lookup). |
-| `/scan authorize <ip>` | Authorize recon target with a written scope/reason. |
-| `/scan <ip>` | Run nmap/masscan on an authorized target. |
-| `/sandbox <mode>` | Directory confinement (`off`, `current`, `strict` [kernel-enforced]). |
-| `/stealth <on\|off>` | Private history mode (suppresses shell history, memory-only). |
-| `/crash <list\|view 1\|clear>` | Inspect and manage local crash diagnostics. |
-| `/dry-run` | Toggle command execution preview mode. |
+| `/vuln <CVE\|EDB\|T-ID\|query>` | Defensive vulnerability intelligence lookup |
+| `/scan [authorize\|revoke\|status] <target>` | Reconnaissance against an authorized target |
+| `/sandbox [off\|current\|strict]` | Directory confinement for every executed command |
+| `/stealth <on\|off>` | Private history mode (suppresses shell history) |
+| `/crash [list\|view <n>\|clear]` | Inspect and manage local crash diagnostics |
 
-### Git & Utilities
+### First run
+The first boot walks three stages, each skippable: **AI provider**, **system packages**, then the **speech chain**. The package stage detects the host's package manager (brew, apt, dnf, pacman, zypper, apk, winget, choco) and offers to install what Helix needs — `sox` for the microphone, `ffmpeg` for the camera. Nothing installs without a separate yes, and the exact command is shown before it runs. Re-run any stage later with `/setup`.
+
+**A stage failing is survivable too.** If a model download fails or a provider cannot be reached, Helix says what did not finish and starts anyway — you get a working shell with `/doctor` naming exactly what is missing, rather than being returned to your login prompt.
+
+Where Helix does not know a verified package name for your platform, it says so and points at the docs rather than running a guess.
+
+### Live mode — `/blackbox`
+`/blackbox on` is Helix awake: microphone open, camera on, replies spoken, and a companion loop that looks at the scene on its own and speaks up when something is worth saying. Say **"manual mode"** at any time to return to the keyboard, **"turn off your eyes"** to close the camera without ending the conversation, or **"reboot"** to restart the shell — which comes back listening, in the same directory, on the same provider, with the conversation intact.
+
+Eight commands (`/voice`, `/manual`, `/voice-setup`, `/voice-status`, `/wake`, `/say`, `/tts`, `/eyes`) folded into this one; typing an old name prints where it went.
+
+Helix has a **persona**, not a default assistant register: it answers first, keeps replies short because most of them are read aloud, says "I ran it" about things it ran, and will tell you when it thinks you are about to do something unwise. The persona shapes tone only — every safety gate sits downstream of it.
+
+**No Docker required, anywhere — and, on Linux and Windows, no Python either.** whisper.cpp is a native binary. Piper ships one too: Helix runs it as a **persistent process** with the voice model held resident, which is both interpreter-free and *faster* than the HTTP server it replaces (measured: ~55–66 ms per sentence once warm, against the server's 103 ms, because there is no HTTP hop and no model reload). Kokoro is the one optional component that ships as a container; Helix will not install a runtime for it, and marks it `needs docker` rather than walking you into a failed pull.
+
+**macOS is the exception, and it is upstream's.** Piper's published macOS archives ship the debug bundle but none of the `.dylib` files they need, so the binary cannot start — verified by downloading and running it. On macOS Helix keeps the Python server (still 103 ms) and says why rather than fetching 19 MB that fails on first use. Its successor project publishes Python wheels only, so there is no newer standalone build to move to.
+
+**Sesame CSM-1B** is the quality local voice: the speech model from Sesame's "uncanny valley" demo, run through a Rust sidecar with **no Python and no Docker**, and — uniquely among Helix's voices — conditioned on the last few turns of the conversation rather than synthesizing each sentence cold. It wants a discrete GPU (~8 GB VRAM); pair it with `piper-local` as the fallback so a machine that cannot keep up simply uses the fast voice. Context retention is opt-in, memory-only and bounded, and `/blackbox status` reports whether the sidecar is *actually* conditioning on it rather than assuming so — an unpatched server accepts the context field and silently discards it. See [docs/local_runtimes.md](docs/local_runtimes.md) §3.5.
+
+See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits. Capture is half-duplex: the mic is muted while Helix speaks, so you cannot talk *over* a reply. `Ctrl+C` stops one instantly, and `/config barge-in on` lets you stop it by speaking in the pause **between sentences** — the speaker is idle there, so no echo cancellation is needed. That is interruption at the pace of punctuation, not full duplex: a long sentence plays to its end.
+
 | Command | Description |
 | :--- | :--- |
-| `/git <request>` | Natural language git operations with safety confirmations. |
-| `/audio <on\|off>` | Toggle synthetic tonal audio feedback. |
-| `/typewrite-all <on\|off>` | Toggle typewriter effect for ALL output. |
+| `/blackbox [on\|off\|status\|setup\|look\|eyes\|wake\|tts\|say\|log\|stats]` | Live mode — Helix listens, watches, answers, and speaks up |
+| `/listen [seconds]` | Record and transcribe one clip (max 60s) |
+| `/mictest` | 3s self-test: is the mic actually being heard? |
+
+Subcommands:
+
+- **on** / **off** — go live, or return to the keyboard
+- **status** — one report: hearing, sight, wake, initiative, retained context, how a reply can be interrupted, and transcript logging, then the full speech chain
+- **setup** — configure the STT/TTS providers with live pricing
+- **look** *[question]* — capture one frame now and answer a question about it
+- **eyes** `on|off` — camera only, without entering or leaving live mode
+- **wake** `on|off` — hands-free waking between turns (the default detector wakes on any speech; true phrase spotting needs a sidecar)
+- **tts** `on|off` — whether ordinary replies are spoken aloud
+- **say** *text* — speak text through the TTS chain
+- **log** `on|off|status|show` — keep a local text record of what was heard and said
+- **stats** — measured latencies and wake rate, judged against the §10 targets
+
+Nothing you say is stored unless you ask for it. `/blackbox log on` starts a
+transcript log at `~/.helix/voice_log/` (0600, rotated, wiped by `/purge`); with
+it off there is no directory and no file. It records **text only** — transcripts,
+replies, the STT provider and its confidence — never audio, because captured
+clips are deleted the moment they are read. Voice can always stop the log and
+never start it: turning recording on has to be typed.
+
+That rule — *voice may reduce what is collected but never increase it* — is why a
+**spoken** `/reboot` writes no conversation content at all. A typed one leaves a
+240-character excerpt of your last message in `~/.helix/reboot.json` so the
+restarted shell can say what it was doing; a spoken one carries the mode, the
+directory, the provider and your open tasks and stops there. Either way the
+record is 0600, deleted the moment it is read, ignored if it is more than 12
+hours old, and wiped by `/purge`.
+
+### Utilities
+| Command | Description |
+| :--- | :--- |
+| `/audio <on\|off>` | Toggle tonal audio feedback |
+| `/typewrite-all <on\|off>` | Typewriter effect for ALL output, not just AI replies |
 
 ### DANGER ZONE
 | Command | Description |
 | :--- | :--- |
-| `/purge` | Wipe ALL Helix data (keys, DBs, caches, crash reports) for a fresh start. |
+| `/reboot [now\|check]` | **Self-update and restart.** Checks GitHub releases and locally built binaries, installs automatically, and comes back in the same mode, directory, provider and conversation. A download is installed only if its SHA-256 matches the release's checksums file; the previous binary is kept and restored automatically if the new one cannot start. `now` skips the check, `check` only reports. Say **"reboot"** in live mode |
+| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, and the piper runtime binary) with their sizes, and closes by pointing at `/reboot` — open database handles only release when the process exits |
+
+### Aliases
+`/?` `/h` `/sos` → `/help` · `/v` → `/version` · `/reset` → `/clear` · `/usage` → `/cost` · `/mode` → `/permissions` · `/intel` → `/vuln`
 
 ---
 
@@ -225,7 +346,7 @@ The planner always returns a JSON `Plan`:
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package" | "recon",
+      "tool": "response" | "shell" | "git" | "package" | "recon" | "web",
       "message": "...",
       "command": "...",
       "action": "...",
@@ -352,6 +473,7 @@ Helix includes a built-in multi-tool recon orchestrator (`nmap`, `masscan`, `ffu
 - TrueColor animated prompt with git telemetry, glitch effects, and transient history rendering.
 - Width-safe glyphs and in-place resize healing (no duplicate prompt lines on SIGWINCH).
 - Semantic syntax highlighting (`internal/utils/syntax.go`) colorizes 10+ token types in real-time as you type.
+- **A palette split by role, not by taste.** Helix's identity colours (electric cyan, neon magenta, aggressive red) carry the brand; the reading layer is a Tron-inspired teal-and-gold ramp chosen so that text is *measurably* legible — secondary prose at 6.1:1 and values at 7.3:1 against a dark terminal, where WCAG asks 4.5:1. Panel rules sit deliberately below that, because a frame should recede. `internal/shell/contrast_test.go` enforces it.
 
 ### Synthetic Tonal Audio (`internal/audio/`)
 A custom `beep`/`oto` synthesizer generates Tron-style audio feedback:
@@ -430,14 +552,64 @@ Helix/
 
 ---
 
+## Keeping Helix current
+
+`/reboot` is the update path. It checks for a newer Helix, offers it, verifies
+it, installs it and restarts into it — coming back in the same mode, directory,
+provider and conversation.
+
+| | |
+| :--- | :--- |
+| `/reboot` | check, offer, install with your confirmation, restart |
+| `/reboot check` | only report whether an update exists |
+| `/reboot now` | restart immediately, no check |
+
+Two sources, and by default whichever is newer wins:
+
+- **GitHub releases** — the project's published tags. A download is installed
+  **only** if its SHA-256 matches the checksums file published with that release,
+  the URL never leaves GitHub (redirects off it are refused, not followed), and
+  the binary proves it is Helix for this machine by its Go build info.
+- **A Helix you built yourself** — `make current` writes `dist/helix`, and the
+  local channel adopts it. A tie between the two goes to the local build: if you
+  have both, you are developing, and the binary you just compiled is the one you
+  meant to run.
+
+**The previous binary is kept.** If the new one cannot start — an authentic
+release that simply does not run here, which no checksum can catch — the
+supervisor restores it automatically and starts it.
+
+**Installing is automatic — no confirmation, and voice may do it too.** Owner
+decision: the release comes from a repository you control and tag on purpose, so
+"is this build wanted?" is already answered by the act of publishing it. What
+that shifts, stated plainly: whoever can publish a release to the configured repo
+can replace your binary without a human present. The controls that remain are the
+checksum, the host pin, the build-info check and the automatic rollback.
+`/reboot check` reports without installing, and `update.check: false` turns the
+check off entirely.
+
+**Signatures are published but not checked by the updater.** Keyless
+verification with the wrong identity constraints reports success while proving
+nothing, so Helix does not pretend to do it — it prints the `cosign verify-blob`
+command instead. Integrity is verified end to end; authenticity is yours to
+confirm if you want it.
+
+Configure under `update` in `~/.helix/config.json`: `channel`
+(`auto` · `github` · `local` · `off`), `repo`, `check`, and `local_paths` to
+override where a locally built binary is looked for.
+
+---
+
 ## AI Backends & Provider Support
 
 Helix supports a massive array of AI providers out of the box, managed via `/setup` or `/provider`:
 
-1. **Remote APIs:** OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM.
-2. **Local Runtimes:** Ollama (auto-installs and pulls models).
+1. **Remote APIs:** OpenAI, Anthropic, Google Gemini, Meta (Muse Spark), DeepSeek, Kimi, Qwen, GLM, xAI (Grok).
+2. **Local Runtimes:** Ollama (auto-installs and pulls models), llama.cpp via `/provider use llamacpp`.
 
-API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions, or passed via environment variables.
+API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions, or passed via environment variables — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `META_API_KEY` (Meta's own `MODEL_API_KEY` is also accepted), `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `XAI_API_KEY`.
+
+**Every provider's default model can see.** Helix picks a multimodal default for each one — `gpt-5.6-luna`, `claude-opus-5`, `gemini-3.7-flash`, `muse-spark-1.2`, `deepseek-v4-flash-vision-exp`, `kimi-k3`, `qwen3.7-plus`, `glm-5.3-flash`, `grok-4.6`, and `gemma4:e2b` locally — so the Phase 5 camera path (`/blackbox eyes on`) works on a fresh key instead of refusing with "No vision-capable model is configured". Switch to a text-only model any time with `/model use <id>`.
 
 ---
 
@@ -453,7 +625,7 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 * **Instruction Firewall** with canary honeypots and fail-closed critic passes
 
 ### Planner, Agent System & Tool Protocol
-* Unified multi-tool agent system: response, shell, git, package, recon
+* Unified multi-tool agent system: response, shell, git, package, recon, web
 * Ultra-strict JSON planner protocol with schema enforcement and truncation-resistance
 * Dual-provider inference: local Ollama + remote APIs
 * Argument normalization (array flattening, trimming, synonym resolution)
@@ -526,6 +698,54 @@ Ideas, issues, and PRs are welcome:
 2. Create a feature branch
 3. Run your changes locally with `make start`
 4. Open a PR with a clear description and demo steps
+
+Before opening a PR, `make work` runs the whole gate — lint, vulnerability scan,
+fuzzing, e2e, build, tests. `make release-check` runs everything a release
+checks without tagging anything. It works from a feature branch — the
+repository-state checks (branch, clean tree, in sync with origin) report as
+deferred rather than stopping it — so the release itself has nothing left to
+find.
+
+---
+
+## Releasing
+
+Releases are tagged from `main` after the merge, and the tag is what triggers
+everything: `.github/workflows/release.yml` runs GoReleaser, which builds six
+binaries, generates SBOMs, and signs every artifact with Sigstore.
+
+```bash
+make release-check          # every check, tags nothing
+make release                # tag v<HelixVersion> and publish
+make release ARGS=--force   # replace an existing tag — read the warning first
+```
+
+The tag defaults to `v` + the `HelixVersion` constant in
+`internal/config/config.go`, so there is **one** place to edit when the version
+changes. The script refuses to publish if the two disagree, because GoReleaser
+overrides that constant with ldflags for the published binaries but `go build`
+and `go install` do not — a mismatch ships a source build that misreports its
+own version, and the self-updater compares against exactly that constant.
+
+Three things it will stop you doing, each for a reason:
+
+- **Releasing a dirty tree or a branch that is not `main`.** A release tags what
+  has already been reviewed and merged. (Under `--dry-run` these are reported
+  and deferred instead, so the pre-merge check is actually usable; the summary
+  says how many were deferred rather than claiming everything passed.)
+- **Re-tagging a published version** without `--force`. `/reboot` verifies
+  downloads against the checksums file published with a release, so replacing
+  the artifacts under a tag someone already fetched makes their update fail with
+  a checksum mismatch — which is indistinguishable from an attack. Prefer a new
+  patch version.
+- **Publishing without the checks passing** — gofmt, vet, build, the full suite,
+  e2e, lint, and a cross-compile of all five release targets.
+
+Afterwards it verifies something easy to miss: that the published release
+actually carries a **checksums file** and a per-platform archive. Without them
+every `/reboot` self-update refuses, because a release that cannot be verified is
+treated as uninstallable rather than installed unverified — and you would
+otherwise learn that from a user.
 
 ---
 

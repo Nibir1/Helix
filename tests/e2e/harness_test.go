@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -27,30 +28,6 @@ import (
 
 	"helix/internal/rag"
 )
-
-// binPath is the compiled helix binary built once in TestMain.
-var binPath string
-
-// TestMain builds the helix binary once for all e2e tests.
-func TestMain(m *testing.M) {
-	tmp, err := os.MkdirTemp("", "helix-e2e-bin-*")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "e2e: temp dir:", err)
-		os.Exit(1)
-	}
-	binPath = filepath.Join(tmp, "helix")
-	build := exec.Command("go", "build", "-o", binPath, "helix/cmd/helix")
-	build.Stdout = os.Stdout
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "e2e: build failed: %v\n", err)
-		_ = os.RemoveAll(tmp)
-		os.Exit(1)
-	}
-	code := m.Run()
-	_ = os.RemoveAll(tmp)
-	os.Exit(code)
-}
 
 // ansiRe strips CSI color/cursor sequences and OSC shell-integration sequences
 // so assertions can match on plain text.
@@ -65,9 +42,17 @@ type harness struct {
 	home      string
 	project   string
 	chatHits  *int32
+	ttsHits   *int32
 	outMu     sync.Mutex
 	outBuf    bytes.Buffer
 	closeOnce sync.Once
+
+	// plannerPrompts returns the prompts the mock provider actually received.
+	// Assertions about CONTEXT (what Helix told the model) cannot be made from
+	// terminal output — the prompt is the only place session memory, RAG blocks
+	// and directives are visible. It is a closure over the handler's own state
+	// rather than a copy, so there is one source of truth.
+	plannerPrompts func() []string
 }
 
 // newHarness boots helix under a PTY with an isolated HOME and a mock provider
@@ -79,6 +64,9 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 	project := t.TempDir()
 
 	hits := new(int32)
+	ttsHits := new(int32)
+	var promptMu sync.Mutex
+	var prompts []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/chat/completions":
@@ -88,6 +76,9 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 			// plan with shell steps. Answer it with a well-formed "yes" so the
 			// pre-firewall scenarios keep their original behavior.
 			promptText := extractPromptFromRequest(r)
+			promptMu.Lock()
+			prompts = append(prompts, promptText)
+			promptMu.Unlock()
 			if strings.Contains(promptText, "safety critic") || strings.Contains(promptText, "plan critic") {
 				reply = `{"verdict":"yes"}`
 			}
@@ -102,6 +93,11 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		case "/models":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"test-model","owned_by":"e2e"}]}`)
+		case "/v1/audio/speech":
+			// Mock TTS (OpenAI-shaped binary WAV response) for BlackBox /say.
+			atomic.AddInt32(ttsHits, 1)
+			w.Header().Set("Content-Type", "audio/wav")
+			_, _ = w.Write(mockWAV)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -122,6 +118,14 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 			"typing_effect": false,
 			"user_name":     "E2E",
 		},
+	}
+	if os.Getenv("HELIX_E2E_SPEECH") != "" {
+		cfg["speech"] = map[string]interface{}{
+			"tts": map[string]interface{}{
+				"provider": "openai",
+				"base_url": srv.URL + "/v1",
+			},
+		}
 	}
 	cfgBytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -156,6 +160,7 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		"HOME=" + home,
 		"PATH=" + os.Getenv("PATH"),
 		"CUSTOM_API_KEY=test",
+		"OPENAI_API_KEY=test", // speech TTS chain ("tts.openai" env mapping)
 		"HELIX_MODEL_DIR=" + filepath.Join(home, "models"),
 		"TERM=xterm-256color",
 	}
@@ -173,6 +178,12 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 		home:     home,
 		project:  project,
 		chatHits: hits,
+		ttsHits:  ttsHits,
+		plannerPrompts: func() []string {
+			promptMu.Lock()
+			defer promptMu.Unlock()
+			return append([]string(nil), prompts...)
+		},
 	}
 	go h.readLoop()
 
@@ -186,6 +197,19 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 }
 
 // readLoop continuously drains the PTY into an in-memory buffer.
+//
+// A read error does NOT end the loop, and that is not defensive programming —
+// it is required for /reboot to be observable at all. On both macOS and Linux a
+// pty master returns EIO the moment no process has the slave open, and there is
+// such a moment whenever the shell replaces its own image: syscall.Exec tears
+// the old image down before the new one is scheduled. The loop used to return
+// on the first error, so it went permanently deaf at exactly that instant — and
+// then the restarted Helix blocked forever on its very first write, because
+// nobody was draining the pty and its buffer filled. The symptom was a reboot
+// that appeared to hang, when what had actually hung was the observer.
+//
+// It stops when the process is genuinely gone, so a finished test does not
+// leave a goroutine spinning.
 func (h *harness) readLoop() {
 	buf := make([]byte, 4096)
 	for {
@@ -194,11 +218,31 @@ func (h *harness) readLoop() {
 			h.outMu.Lock()
 			h.outBuf.Write(buf[:n])
 			h.outMu.Unlock()
+			continue
 		}
-		if err != nil {
+		if err == nil {
+			continue
+		}
+		if !h.processAlive() {
 			return
 		}
+		// Alive but momentarily unreadable: back off rather than spin, and try
+		// again. The gap across an exec is measured in milliseconds.
+		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// processAlive reports whether the shell under test still exists.
+//
+// Signal 0 asks the kernel without delivering anything. It stays true across a
+// re-exec, which is the point: the PID survives, so "the pty went quiet" and
+// "Helix is gone" are different questions and the read loop must not confuse
+// them.
+func (h *harness) processAlive() bool {
+	if h.cmd == nil || h.cmd.Process == nil {
+		return false
+	}
+	return syscall.Kill(h.cmd.Process.Pid, 0) == nil
 }
 
 // stripped returns the ANSI-free snapshot of all captured output.
@@ -261,6 +305,38 @@ func (h *harness) ExpectFile(t *testing.T, path string, timeout time.Duration) {
 // ChatHits returns the number of planner/chat requests the mock has served.
 func (h *harness) ChatHits() int32 {
 	return atomic.LoadInt32(h.chatHits)
+}
+
+// TTSHits returns the number of mock TTS synthesis requests served.
+func (h *harness) TTSHits() int32 {
+	return atomic.LoadInt32(h.ttsHits)
+}
+
+// mockWAV is a minimal 16-bit mono 8kHz WAV (2 frames) for the mock TTS.
+var mockWAV = buildMockWAV()
+
+func buildMockWAV() []byte {
+	samples := []int16{1000, -1000}
+	data := make([]byte, len(samples)*2)
+	for i, s := range samples {
+		data[i*2] = byte(s)
+		data[i*2+1] = byte(s >> 8)
+	}
+	var buf []byte
+	buf = append(buf, "RIFF"...)
+	buf = append(buf, 0x24, 0x00, 0x00, 0x00)
+	buf = append(buf, "WAVE"...)
+	buf = append(buf, "fmt "...)
+	buf = append(buf, 16, 0x00, 0x00, 0x00)
+	buf = append(buf, 1, 0x00)                // PCM
+	buf = append(buf, 1, 0x00)                // mono
+	buf = append(buf, 0x40, 0x1F, 0x00, 0x00) // 8000 Hz
+	buf = append(buf, 0x80, 0x3E, 0x00, 0x00) // byte rate
+	buf = append(buf, 2, 0x00)                // block align
+	buf = append(buf, 16, 0x00)               // bits
+	buf = append(buf, "data"...)
+	buf = append(buf, byte(len(data)), 0x00, 0x00, 0x00)
+	return append(buf, data...)
 }
 
 // Close terminates the helix process and releases the PTY and mock server.
@@ -410,11 +486,11 @@ func TestE2E_PurgeCancelled(t *testing.T) {
 
 	cfgPath := filepath.Join(h.home, ".helix", "config.json")
 	h.WriteLine("/purge")
-	if err := h.Expect("FULL PURGE", 15*time.Second); err != nil {
+	if err := h.Expect("permanent", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	h.WriteLine("n")
-	if err := h.Expect("Purge cancelled", 10*time.Second); err != nil {
+	if err := h.Expect("nothing was deleted", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(cfgPath); err != nil {

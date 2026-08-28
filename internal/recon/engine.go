@@ -105,6 +105,24 @@ func (re *ReconEngine) IsTargetAuthorized(target string) bool {
 	return ok
 }
 
+// RevokeTarget withdraws an authorization, reporting whether one existed.
+//
+// Authorization is the record that a scan was permitted; being able to grant it
+// without being able to withdraw it means a target mistyped into scope stays in
+// scope for the life of the process.
+func (re *ReconEngine) RevokeTarget(target string) bool {
+	target = strings.TrimSpace(target)
+
+	re.authMu.Lock()
+	defer re.authMu.Unlock()
+
+	if _, ok := re.authorizedTargets[target]; !ok {
+		return false
+	}
+	delete(re.authorizedTargets, target)
+	return true
+}
+
 // AuthorizedTargets returns a copy of authorized targets.
 func (re *ReconEngine) AuthorizedTargets() map[string]string {
 	re.authMu.Lock()

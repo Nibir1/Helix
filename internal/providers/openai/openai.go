@@ -13,8 +13,19 @@ import (
 )
 
 const (
-	baseURL      = "https://api.openai.com/v1"
-	defaultModel = "gpt-4o"
+	baseURL = "https://api.openai.com/v1"
+
+	// defaultModel is the cost-optimised member of OpenAI's current flagship
+	// family, and it is chosen for vision: like its siblings it takes text and
+	// image input, so /eyes works on a stock key. It also replaces gpt-4o,
+	// which OpenAI has scheduled for API shutdown — a default that stops
+	// resolving is a first-run failure with no diagnosis attached.
+	//
+	// Luna rather than Sol deliberately: a DEFAULT is what every user pays for
+	// before they have decided anything, and all three share the 1.05M context
+	// window and the vision the default exists to guarantee. Anyone who wants
+	// the frontier tier is one `/model use gpt-5.6-sol` away.
+	defaultModel = "gpt-5.6-luna"
 )
 
 // Provider implements OpenAI.

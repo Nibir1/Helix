@@ -80,6 +80,16 @@ func (r *Registry) HasAPIKey(provider string) bool {
 	return r.keys.Has(provider)
 }
 
+// APIKey returns the stored key for a provider, or "".
+//
+// Exists so the speech wizard can adopt a key the user already entered for the
+// same vendor on the AI side. The two keystores are separate files by design
+// (speech can run without an LLM), but a person who typed their OpenAI key once
+// should not be asked for it again three screens later.
+func (r *Registry) APIKey(provider string) string {
+	return r.keys.Get(provider)
+}
+
 // Client returns the shared HTTP client.
 func (r *Registry) Client() *HTTPClient {
 	return r.client

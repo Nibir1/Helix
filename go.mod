@@ -6,6 +6,7 @@ go 1.25.1
 toolchain go1.26.6
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	github.com/fatih/color v1.18.0
 	github.com/gopxl/beep/v2 v2.1.1

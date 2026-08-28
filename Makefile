@@ -41,7 +41,11 @@ build-all: all
 # Lint the codebase using golangci-lint
 lint:
 	@echo "Running golangci-lint..."
-	@golangci-lint run ./... --timeout=5m || (echo "Install golangci-lint: https://golangci-lint.run/usage/install/" && exit 1)
+	@golangci-lint run ./... --timeout=5m || (echo "" && \
+	 echo "If this failed to RUN (rather than reporting issues), your golangci-lint" && \
+	 echo "is probably v1 — it cannot read the v2 .golangci.yml. Install the version" && \
+	 echo "CI uses, so local and CI enforce the same rules:" && \
+	 echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0" && exit 1)
 
 # Clean build artifacts AND generated data (but keep models)
 clean:
@@ -129,6 +133,11 @@ fuzz:
 	@go test ./internal/ai -run=^$$ -fuzz=FuzzParsePlanFromModelOutput -fuzztime=$(FUZZTIME)
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=$(FUZZTIME)
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=$(FUZZTIME)
+	@go test ./internal/speech -run=^$$ -fuzz=FuzzWAVHeaderInfo -fuzztime=$(FUZZTIME)
+	@go test ./internal/speech -run=^$$ -fuzz=FuzzPricingMerge -fuzztime=$(FUZZTIME)
+	@go test ./internal/ambient -run=^$$ -fuzz=FuzzAnalyzer -fuzztime=$(FUZZTIME)
+	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=$(FUZZTIME)
+	@go test ./internal/journal -run=^$$ -fuzz=FuzzRedact -fuzztime=$(FUZZTIME)
 
 # CI smoke test: shorter duration to keep the pipeline fast.
 fuzz-ci:
@@ -139,18 +148,52 @@ fuzz-ci:
 	@go test ./internal/ai -run=^$$ -fuzz=FuzzParsePlanFromModelOutput -fuzztime=20s
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=20s
 	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=20s
+	@go test ./internal/speech -run=^$$ -fuzz=FuzzWAVHeaderInfo -fuzztime=20s
+	@go test ./internal/speech -run=^$$ -fuzz=FuzzPricingMerge -fuzztime=20s
+	@go test ./internal/ambient -run=^$$ -fuzz=FuzzAnalyzer -fuzztime=20s
+	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=20s
+	@go test ./internal/journal -run=^$$ -fuzz=FuzzRedact -fuzztime=20s
+
+# Run the live sidecar measurements: real whisper.cpp + Piper servers, driven
+# through Helix's own adapters. Needs the binaries and a downloaded model/voice;
+# skips loudly with the reason when any is missing, so this is safe anywhere.
+# Covers the §10 local STT accuracy row (see docs/BlackBox_Development.md §10A).
+live-sidecar:
+	@echo "Running live sidecar measurements (whisper.cpp + Piper)..."
+	HELIX_LIVE_SIDECAR=1 go test ./internal/speech/ -run 'TestLive' -v -count=1 -timeout 600s
+
+# Measure a running Sesame CSM-1B sidecar (csm.rs) and report its real-time
+# factor — the number that decides whether conversation flows or stutters.
+# Skips loudly when no sidecar is listening. HELIX_CSM_URL overrides the port.
+live-csm:
+	@echo "Measuring CSM-1B sidecar (skips if none is running)..."
+	HELIX_LIVE_SIDECAR=1 go test ./internal/speech/ -run 'TestLiveCSM' -v -count=1 -timeout 300s
 
 # Run the end-to-end TTY harness (Linux/macOS; the build tag skips Windows)
 e2e:
 	@echo "Running E2E TTY harness..."
 	go test ./tests/e2e/... -v -count=1 -timeout 300s
 
-git-tag-push:
-	@echo "Tagging and pushing to GitHub..."
-	@./$(SCRIPTS_DIR)/git-push.sh
+# Tag and publish a release. Run AFTER merging into main.
+#
+# The tag defaults to `v` + the HelixVersion constant, so there is one place to
+# edit when the version changes. Override or add flags with ARGS:
+#
+#   make release                      tag v<HelixVersion>
+#   make release ARGS=--dry-run       run every check, tag nothing
+#   make release ARGS="v1.5.1 --force"
+release:
+	@./$(SCRIPTS_DIR)/release.sh $(ARGS)
+
+# Everything the release script checks, without tagging anything. Usable from a
+# feature branch: the repository-state checks (branch, clean tree, in sync with
+# origin) are reported and deferred rather than stopping the run, so this can be
+# used before the merge, when it is most useful.
+release-check:
+	@./$(SCRIPTS_DIR)/release.sh --dry-run $(ARGS)
 
 # Run all tasks: lint, sec-scan, fuzz-ci, e2e, build, test, install
 work: lint sec-scan fuzz-ci e2e build test install
 
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci e2e git-tag-push
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci e2e release release-check

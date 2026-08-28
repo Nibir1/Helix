@@ -17,6 +17,7 @@ func FuzzParsePlanFromModelOutput(f *testing.F) {
 		`{"intent":"shell","steps":[{"tool":"shell","command":"rm -rf /"}]}`,
 		`{"intent":"package","steps":[{"tool":"package","action":"install","args":{"name":"vim"}}]}`,
 		`{"intent":"recon","steps":[{"tool":"recon","action":"nmap","args":{"target":"127.0.0.1"}}]}`,
+		`{"intent":"chat","steps":[{"tool":"vision","action":"look","args":{"prompt":"what is this"}}]}`,
 		"{\n  \"intent\": \"shell\",\n  \"steps\": [\n    {\n      \"tool\": \"shell\",\n      \"command\": \"echo \\\"nested \\\\\\\"quotes\\\\\\\"\\\"\"\n    }\n  ]\n}",
 	}
 	for _, seed := range seeds {
@@ -32,6 +33,7 @@ func FuzzParsePlanFromModelOutput(f *testing.F) {
 			// Invariant: tools must be in allowed set.
 			validTools := map[string]bool{
 				"response": true, "shell": true, "git": true, "package": true, "recon": true,
+				"web": true, "vision": true,
 			}
 			for _, step := range plan.Steps {
 				if !validTools[step.Tool] {

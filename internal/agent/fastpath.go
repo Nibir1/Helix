@@ -444,16 +444,16 @@ func fastRunCommand(filename string) string {
 func (a *Agent) runFastPlan(plan *ai.Plan) {
 	for i, step := range plan.Steps {
 		if len(plan.Steps) > 1 {
-			a.ux.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
+			a.render.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
 		}
 
 		if step.Tool != "shell" {
-			a.ux.PrintWarning(fmt.Sprintf("Fast path produced unsupported tool: %s", step.Tool))
+			a.render.PrintWarning(fmt.Sprintf("Fast path produced unsupported tool: %s", step.Tool))
 			return
 		}
 
 		if err := a.handleShellStep(step); err != nil {
-			a.ux.PrintError(fmt.Sprintf("Fast-path step failed: %v", err))
+			a.render.PrintError(fmt.Sprintf("Fast-path step failed: %v", err))
 			return
 		}
 	}

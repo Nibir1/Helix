@@ -3,6 +3,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,35 +100,58 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 	}
 	commandLower := strings.ToLower(command)
 
-	// Phase 15 Hardening: Explicitly check for absolute paths outside the sandbox
-	// for ANY command that contains a path-like argument, not just "dangerous" ones.
-	// This closes the gap where extractFileArguments might miss certain path patterns.
-	words := strings.Fields(commandLower)
-	for _, w := range words {
-		if strings.HasPrefix(w, "-") {
+	// Whether this is a write/delete/edit operation is a property of the whole
+	// command, not of any one word, so it is decided ONCE, here.
+	//
+	// It used to be re-decided inside the loop below — and, worse, *after* the
+	// filesystem work whose result it gated. Every read-only command therefore
+	// paid for a full symlink resolution of every absolute-looking word and
+	// then threw the answer away. A fuzzer found it as a stall rather than a
+	// wrong answer: ValidateSafePath is one lstat chain per path, so cost grew
+	// linearly with the command string, reaching seconds for inputs a model can
+	// plausibly emit. Hoisting the invariant is behaviour-preserving — if it is
+	// false the loop could never have returned anything.
+	if !ds.isDangerousWriteOperation(commandLower) {
+		// 2. Directory escape is the only check that still applies.
+		if ds.containsDirectoryEscape(commandLower) {
+			return false, "command attempts directory escape"
+		}
+		return true, ""
+	}
+
+	// Resolution is a pure function of the path, so the same word is never
+	// resolved twice, and the total number of distinct resolutions is capped.
+	// Both matter on the slow storage this project targets at the edge.
+	checker := &pathChecker{sandbox: ds, seen: make(map[string]error)}
+
+	// Phase 15 Hardening: check absolute paths outside the sandbox for any
+	// path-like argument. This closes the gap where extractFileArguments
+	// might miss certain path patterns.
+	for _, w := range strings.Fields(commandLower) {
+		if strings.HasPrefix(w, "-") || !filepath.IsAbs(w) {
 			continue
 		}
-		if filepath.IsAbs(w) {
-			if _, err := ds.ValidateSafePath(w); err != nil {
-				// If it's a write operation, block it
-				if ds.isDangerousWriteOperation(commandLower) {
-					return false, fmt.Sprintf("sandbox violation: write/delete/edit operation outside sandbox: %s", w)
-				}
-			}
+		err, ok := checker.validate(w)
+		if !ok {
+			return false, pathBudgetRefusal
+		}
+		if err != nil {
+			return false, fmt.Sprintf("sandbox violation: write/delete/edit operation outside sandbox: %s", w)
 		}
 	}
 
-	// 1. Detect dangerous write/delete/edit operations
-	if ds.isDangerousWriteOperation(commandLower) {
-		args := ds.extractFileArguments(commandLower)
-		for _, arg := range args {
-			if arg == "" {
-				continue
-			}
-			if _, err := ds.ValidateSafePath(arg); err != nil {
-				return false, fmt.Sprintf(
-					"sandbox violation: write/delete/edit operation outside sandbox: %s", arg)
-			}
+	// 1. Every file-looking argument of the write operation itself.
+	for _, arg := range ds.extractFileArguments(commandLower) {
+		if arg == "" {
+			continue
+		}
+		err, ok := checker.validate(arg)
+		if !ok {
+			return false, pathBudgetRefusal
+		}
+		if err != nil {
+			return false, fmt.Sprintf(
+				"sandbox violation: write/delete/edit operation outside sandbox: %s", arg)
 		}
 	}
 
@@ -136,6 +160,39 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 		return false, "command attempts directory escape"
 	}
 	return true, ""
+}
+
+// maxDistinctPathChecks bounds how many DIFFERENT paths one command may make
+// the sandbox resolve. No real command names hundreds of distinct absolute
+// paths; a generated or hostile one can name thousands, and each costs a chain
+// of lstat calls. Refusing past the cap fails CLOSED — the sandbox never
+// permits a path it declined to check.
+const maxDistinctPathChecks = 512
+
+const pathBudgetRefusal = "sandbox violation: too many distinct paths to validate in one command"
+
+// pathChecker memoises ValidateSafePath and enforces the budget above.
+//
+// Memoising is sound because ValidateSafePath only reads: it resolves a path
+// against the sandbox root and returns, touching nothing. The same word in one
+// command therefore cannot produce two answers.
+type pathChecker struct {
+	sandbox *DirectorySandbox
+	seen    map[string]error
+}
+
+// validate returns the validation error for path, and whether the command is
+// still within its path budget. A false second return means "refuse", not "ok".
+func (p *pathChecker) validate(path string) (error, bool) {
+	if err, done := p.seen[path]; done {
+		return err, true
+	}
+	if len(p.seen) >= maxDistinctPathChecks {
+		return nil, false
+	}
+	_, err := p.sandbox.ValidateSafePath(path)
+	p.seen[path] = err
+	return err, true
 }
 
 // ================================================================
@@ -284,7 +341,25 @@ func (ds *DirectorySandbox) isCommonNonFileArgument(arg string) bool {
 // Directory control
 // ================================================================
 
+// ChangeDirectory moves and announces the move, for callers acting on a
+// request the user just typed.
 func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
+	if err := ds.SetDirectory(newDir); err != nil {
+		return err
+	}
+	color.Green("📁 Changed directory: %s", ds.GetCurrentDirectory())
+	return nil
+}
+
+// SetDirectory moves WITHOUT announcing it.
+//
+// The announcement and the move were one function, which is right for /cd — the
+// user asked, so telling them is the answer — and wrong for anything that moves
+// on the user's behalf. /reboot restoring the working directory printed a green
+// "📁 Changed directory" line at column zero, ahead of the panel that was about
+// to report the same fact properly. A function that reports on its caller's
+// behalf leaves that caller no way to say it better.
+func (ds *DirectorySandbox) SetDirectory(newDir string) error {
 	if ds.mode == SandboxDisabled {
 		return os.Chdir(newDir)
 	}
@@ -293,13 +368,7 @@ func (ds *DirectorySandbox) ChangeDirectory(newDir string) error {
 	if err != nil {
 		return fmt.Errorf("directory change outside sandbox: %s", newDir)
 	}
-
-	if err := os.Chdir(safePath); err != nil {
-		return err
-	}
-
-	color.Green("📁 Changed directory: %s", safePath)
-	return nil
+	return os.Chdir(safePath)
 }
 
 // buildArgv converts a command + detected shell into an argv slice.
@@ -346,19 +415,46 @@ func runArgv(argv []string, dir string, lenient bool) error {
 // runArgvEnv is runArgv plus extra environment variables appended to the
 // process environment (used by stealth mode for history suppression).
 func runArgvEnv(argv []string, dir string, lenient bool, extraEnv []string) error {
+	return runArgvEnvCapture(argv, dir, lenient, extraEnv, nil)
+}
+
+// runArgvEnvCapture is runArgvEnv with optional output tee-ing (P8.6).
+//
+// Why capture is opt-in rather than always on: assigning an *os.File to
+// cmd.Stdout hands the child the terminal's file descriptor directly, so it
+// sees a TTY and behaves interactively — colors, progress bars, pagers. Any
+// other writer makes os/exec insert an os.Pipe and a copying goroutine, and
+// the child's isatty check now fails. That is a real behavior change, so the
+// default path (capture == nil) keeps the inherited descriptors byte for byte,
+// and only an explicitly agentic turn pays the cost.
+func runArgvEnvCapture(
+	argv []string, dir string, lenient bool, extraEnv []string, capture *OutputCapture,
+) error {
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Dir = dir
 	c.Env = os.Environ()
 	if len(extraEnv) > 0 {
 		c.Env = append(c.Env, extraEnv...)
 	}
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	if capture != nil {
+		// Tee, never swallow: the user still sees the full live output.
+		c.Stdout = io.MultiWriter(os.Stdout, capture.Stdout)
+		c.Stderr = io.MultiWriter(os.Stderr, capture.Stderr)
+	} else {
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+	}
 	c.Stdin = os.Stdin
 	err := c.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
+			// Record the true exit status before leniency discards it, so the
+			// agentic observation trace can see a failure the user was
+			// deliberately not bothered with.
+			if capture != nil {
+				capture.ExitCode = code
+			}
 			if code == 127 {
 				return exitErr
 			}
@@ -418,6 +514,25 @@ func (ds *DirectorySandbox) RunShellCommand(cmd, dir, shellName string) error {
 func (ds *DirectorySandbox) RunShellCommandEnv(cmd, dir, shellName string, extraEnv []string) error {
 	argv := ds.confinedArgv(buildArgv(cmd, shellName), dir)
 	return runArgvEnv(argv, dir, true, extraEnv)
+}
+
+// RunShellCommandCaptured is RunShellCommandEnv that ALSO tees stdout/stderr
+// into a bounded tail buffer for the agentic harness (P8.6). Confinement,
+// argv construction, and exit-code semantics are identical — capture changes
+// only where the bytes go, never what runs or under what restrictions.
+//
+// A nil capture selects the original inherited-fd path exactly, which matters:
+// see runArgvEnvCapture for why tee-ing is not free.
+//
+// Args: cmd/dir/shellName as RunShellCommand; extraEnv may be nil;
+// capture may be nil.
+// Returns: the same errors as RunShellCommand.
+// Complexity: O(command execution time).
+func (ds *DirectorySandbox) RunShellCommandCaptured(
+	cmd, dir, shellName string, extraEnv []string, capture *OutputCapture,
+) error {
+	argv := ds.confinedArgv(buildArgv(cmd, shellName), dir)
+	return runArgvEnvCapture(argv, dir, true, extraEnv, capture)
 }
 
 // WrapCommand executes the command strictly within the sandbox logic and, in

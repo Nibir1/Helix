@@ -13,12 +13,16 @@ import (
 	"helix/internal/providers"
 	anthropicprovider "helix/internal/providers/anthropic"
 	deepseekprovider "helix/internal/providers/deepseek"
+	geminiprovider "helix/internal/providers/gemini"
 	glmprovider "helix/internal/providers/glm"
 	kimiprovider "helix/internal/providers/kimi"
+	llamacppprovider "helix/internal/providers/llamacpp"
+	metaprovider "helix/internal/providers/meta"
 	ollamaprovider "helix/internal/providers/ollama"
 	openaiprovider "helix/internal/providers/openai"
 	openaicompatible "helix/internal/providers/openai_compatible"
 	qwenprovider "helix/internal/providers/qwen"
+	xaiprovider "helix/internal/providers/xai"
 	"helix/internal/utils"
 )
 
@@ -35,6 +39,10 @@ type ProviderSettings struct {
 	Provider      string
 	Model         string
 	CustomBaseURL string
+
+	// LlamaCppBaseURL points at a user-managed llama-server (P11.4). Empty
+	// falls back to HELIX_LLAMACPP_URL, then llama-server's default port.
+	LlamaCppBaseURL string
 }
 
 var (
@@ -55,10 +63,17 @@ func InitProviders(settings ProviderSettings) error {
 	registry.Register(openaiprovider.New(keys.Get("openai"), client))
 	registry.Register(anthropicprovider.New(keys.Get("anthropic"), client))
 	registry.Register(deepseekprovider.New(keys.Get("deepseek"), client))
+	registry.Register(geminiprovider.New(keys.Get("gemini"), client))
+	registry.Register(metaprovider.New(keys.Get("meta"), client))
 	registry.Register(kimiprovider.New(keys.Get("kimi"), client))
 	registry.Register(qwenprovider.New(keys.Get("qwen"), client))
 	registry.Register(glmprovider.New(keys.Get("glm"), client))
+	registry.Register(xaiprovider.New(keys.Get("xai"), client))
 	registry.Register(ollamaprovider.New(ollamaClient))
+	// llama.cpp is always registered (P11.4): it needs no key and costs nothing
+	// until used, and pre-registering it makes it selectable as the Phase 11
+	// local fallback on boards where Ollama is unsupported.
+	registry.Register(llamacppprovider.New(settings.LlamaCppBaseURL, client))
 	if settings.CustomBaseURL != "" {
 		if err := RegisterCustomProvider(settings.CustomBaseURL, keys.Get("custom")); err != nil {
 			return err
@@ -95,6 +110,15 @@ func RegisterCustomProvider(baseURL, apiKey string) error {
 	return nil
 }
 
+// GetProviderByName returns a registered provider without switching the active
+// one (BlackBox Phase 5 dedicated vision-provider routing).
+func GetProviderByName(name string) (providers.AIProvider, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("provider registry not initialized")
+	}
+	return registry.Get(name)
+}
+
 // UseProvider sets the active provider.
 func UseProvider(name string) error {
 	if registry == nil {
@@ -108,12 +132,16 @@ func UseProvider(name string) error {
 	if activeModel == "" {
 		activeModel = p.DefaultModel()
 	}
+	// A deliberate choice outranks the P11.2 breaker: without this, a later
+	// automatic restore would silently revert what the user just selected.
+	clearDegradedForUserOverride()
 	return nil
 }
 
 // UseModel sets the active model.
 func UseModel(model string) {
 	activeModel = model
+	clearDegradedForUserOverride()
 }
 
 // ActiveModel returns the active model.
@@ -187,7 +215,54 @@ func ProviderHasSavedKey(provider string) bool {
 	return registry.HasAPIKey(provider)
 }
 
+// ProviderKey returns the stored key for a provider, or "". See
+// Registry.APIKey for why this is reachable at all.
+func ProviderKey(provider string) string {
+	if registry == nil {
+		return ""
+	}
+	return registry.APIKey(provider)
+}
+
 // ProviderStatus returns human-readable provider status lines.
+// ProviderRow is one provider's state, structured.
+//
+// ProviderStatus below returns pre-formatted strings, which meant every caller
+// that wanted to RENDER the state (badges, a table, a colour per key state) had
+// to parse " - " back apart — the same re-parse-your-own-output mistake the
+// metrics reader was created to avoid. New callers use this.
+type ProviderRow struct {
+	Name     string
+	Display  string
+	KeyState string // "configured", "missing", or "" for a keyless local provider
+	Local    bool
+	Active   bool
+}
+
+// ProviderStatusRows reports every registered provider's state.
+func ProviderStatusRows() []ProviderRow {
+	if registry == nil {
+		return nil
+	}
+	out := make([]ProviderRow, 0)
+	for _, name := range registry.Names() {
+		p, err := registry.Get(name)
+		if err != nil {
+			continue
+		}
+		row := ProviderRow{Name: name, Display: p.DisplayName(), Local: !p.RequiresAPIKey()}
+		if p.RequiresAPIKey() {
+			row.KeyState = "missing"
+			if registry.HasAPIKey(name) {
+				row.KeyState = "configured"
+			}
+		}
+		row.Active = activeProvider != nil && activeProvider.Name() == name
+		out = append(out, row)
+	}
+	return out
+}
+
 func ProviderStatus() []string {
 	if registry == nil {
 		return []string{"provider registry not initialized"}

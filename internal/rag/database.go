@@ -177,7 +177,12 @@ func OpenDB(homeDir string) (*sql.DB, error) {
 	pragmaCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := db.ExecContext(pragmaCtx, "PRAGMA busy_timeout = 3000"); err != nil {
+	// 15s, not 3s. WAL allows one writer across the whole machine, and a
+	// knowledge-base import holds write transactions for minutes — so a second
+	// Helix process (a nested shell, or a daemon alongside a TTY session) hit
+	// "database is locked (SQLITE_BUSY)" almost immediately at 3s. This does
+	// not make bulk imports concurrent; it stops brief overlap from failing.
+	if _, err := db.ExecContext(pragmaCtx, "PRAGMA busy_timeout = 15000"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}

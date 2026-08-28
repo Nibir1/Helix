@@ -169,6 +169,65 @@ func (ux *UX) Typewriter(text string) {
 	fmt.Println()
 }
 
+// AIStreamWriter renders an AI response incrementally as tokens arrive
+// (BlackBox P8.8).
+//
+// It deliberately does NOT reuse Typewriter. The typewriter *simulates* live
+// generation with fixed per-character sleeps; once real tokens are streaming,
+// that simulation is strictly worse — it would add artificial delay on top of
+// genuine provider latency and make responses slower than they are today. Real
+// arrival timing replaces the simulation, while the audible tick and the
+// [NEURAL_NET] prefix keep the established character.
+type AIStreamWriter struct {
+	ux      *UX
+	started bool
+}
+
+// StreamAIMessage begins an incrementally rendered AI response. The caller
+// feeds it with Chunk and MUST finish with Close.
+func (ux *UX) StreamAIMessage() *AIStreamWriter {
+	return &AIStreamWriter{ux: ux}
+}
+
+// Chunk renders one streamed fragment, emitting the prefix on first content.
+//
+// The prefix is deferred rather than printed up front so a response that never
+// produces text leaves no orphaned "[NEURAL_NET] →" on screen.
+func (w *AIStreamWriter) Chunk(text string) {
+	if text == "" {
+		return
+	}
+	if !w.started {
+		// Models commonly open with a newline or spaces; leading whitespace
+		// would push the answer off the prefix line.
+		text = strings.TrimLeft(text, " \t\r\n")
+		if text == "" {
+			return
+		}
+		fmt.Print(w.ux.scifiPrefix("[NEURAL_NET]", w.ux.colors.Primary))
+		w.started = true
+	}
+
+	// One tick per chunk, not per character: a chunk is roughly a token, which
+	// gives a steadier rhythm than per-rune ticking. PlayType is internally
+	// throttled to 10ms, so fast streams cannot stack audio streams.
+	if strings.TrimSpace(text) != "" {
+		audio.PlayType()
+	}
+	fmt.Print(text)
+}
+
+// Started reports whether any content was rendered, so callers can fall back
+// to a buffered print for an empty response.
+func (w *AIStreamWriter) Started() bool { return w.started }
+
+// Close terminates the streamed line.
+func (w *AIStreamWriter) Close() {
+	if w.started {
+		fmt.Println()
+	}
+}
+
 // PrintSystemMessage prints a system-level message.
 //
 // Args:
