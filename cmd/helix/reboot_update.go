@@ -67,6 +67,7 @@ var (
 //     upgraded.
 func maybeInstallUpdate(spoken, explicit bool) bool {
 	if !cfg.Update.Check && !explicit {
+		setUpdateOutcome("not checked — update.check is off")
 		return false
 	}
 
@@ -94,10 +95,23 @@ func maybeInstallUpdate(spoken, explicit bool) bool {
 		SelfPath:   self,
 	})
 	if candidate == nil {
-		if err != nil && explicit {
-			fmt.Println(shell.Step(shell.StateWarn, "update check failed", err.Error()))
-			fmt.Println(shell.Hint("/reboot now restarts without checking"))
-		} else if explicit {
+		if err != nil {
+			setUpdateOutcome("check failed — " + err.Error())
+			if explicit {
+				fmt.Println(shell.Step(shell.StateWarn, "update check failed", err.Error()))
+				fmt.Println(shell.Hint("/reboot now restarts without checking"))
+			}
+			return false
+		}
+		// Recorded on BOTH paths, printed only when asked.
+		//
+		// A plain /reboot used to say nothing at all when already current, so
+		// the restart panel could not report whether it had even looked — and
+		// asked afterwards, Helix answered from the model's guess rather than
+		// from a fact. "Checked and found nothing" is a different statement
+		// from "did not check", and the user is entitled to know which.
+		setUpdateOutcome("already on the newest release (" + current.String() + ")")
+		if explicit {
 			fmt.Println(shell.Step(shell.StateGood, "up to date",
 				"running "+current.String()))
 		}
@@ -114,7 +128,12 @@ func maybeInstallUpdate(spoken, explicit bool) bool {
 		return false
 	}
 	_ = spoken // the record notes who asked; the install does not care
-	return performInstall(candidate)
+	if performInstall(candidate) {
+		setUpdateOutcome("installed " + candidate.Version.String() + " — restarting into it")
+		return true
+	}
+	setUpdateOutcome("found " + candidate.Version.String() + " but could not install it")
+	return false
 }
 
 // installCandidate fetches, verifies and installs, reporting each refusal.
@@ -206,3 +225,15 @@ func printUpdatePanel(c *update.Candidate, current update.Version) {
 func registerCancel(cancel context.CancelFunc) func() {
 	return utils.RegisterOperation(cancel)
 }
+
+// updateOutcome is what the last check concluded, for the restart panel.
+//
+// A single string rather than a struct: the panel prints one row, and the value
+// exists so that row can state a FACT instead of leaving the user to ask the
+// model afterwards — which is guesswork about the program's own behaviour.
+var updateOutcome string
+
+func setUpdateOutcome(s string) { updateOutcome = s }
+
+// updateOutcomeLine returns what to show on the restart panel, if anything.
+func updateOutcomeLine() string { return updateOutcome }

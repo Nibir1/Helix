@@ -38,6 +38,13 @@ func SpeakStream(ctx context.Context, text string) error {
 	// than at the next sentence boundary. Registering with the interrupt
 	// manager here — rather than at each call site — means every caller
 	// (interactive shell, daemon, ambient responses) gets it.
+	// One reply, one voice: scope the TTS pin here, where an utterance begins.
+	// Sentences are synthesized separately below, and without this each one
+	// re-resolved the provider chain from scratch — so a primary that failed
+	// mid-reply changed the voice partway through an answer, and every later
+	// sentence paid its timeout again. See tts_pin.go.
+	ctx = WithUtterance(ctx)
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	unreg := utils.RegisterOperation(cancel)

@@ -603,6 +603,13 @@ Two sources, and by default whichever is newer wins:
   have both, you are developing, and the binary you just compiled is the one you
   meant to run.
 
+**The restart says what the check found.** The panel carries an `UPDATE` row —
+`already on the newest release (1.5.0)`, `not checked — update.check is off`, or
+`found 1.6.0 but could not install it` — and that sentence crosses the restart,
+so asking afterwards gets a report rather than a guess. Every path records one,
+including the ones that decline to look: "did not check" and "checked and found
+nothing" are different answers.
+
 **The previous binary is kept.** If the new one cannot start — an authentic
 release that simply does not run here, which no checksum can catch — the
 supervisor restores it automatically and starts it.

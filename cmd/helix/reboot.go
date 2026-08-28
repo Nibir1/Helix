@@ -128,6 +128,7 @@ func captureContinuity(reason string, spoken bool) session.Continuity {
 	rec := session.Continuity{
 		At:       time.Now(),
 		Reason:   reason,
+		Update:   updateOutcomeLine(),
 		Mode:     session.ModeManual,
 		Provider: ai.ActiveProviderName(),
 		Model:    ai.ActiveModel(),
@@ -195,7 +196,7 @@ func printRebootNotice(rec session.Continuity) {
 	fmt.Println(shell.PanelTitle("reboot"))
 	fmt.Println(shell.Step(shell.StateIdle, "restarting", rec.Reason))
 
-	w := shell.KVWidth("MODE", "DOING", "WHERE")
+	w := shell.KVWidth("MODE", "DOING", "WHERE", "UPDATE")
 	fmt.Println(shell.KV("MODE", shell.Value(rec.Mode)+
 		shell.Muted("  ·  coming back the same way"), w))
 	if rec.Doing != "" {
@@ -203,6 +204,12 @@ func printRebootNotice(rec session.Continuity) {
 	}
 	if rec.Cwd != "" {
 		fmt.Println(shell.KV("WHERE", shell.Muted(rec.Cwd), w))
+	}
+	// Say whether an update was looked for. Without this the panel was silent
+	// about it, and "did you download the latest binaries?" could only be
+	// answered by the model guessing at what the program had done.
+	if out := updateOutcomeLine(); out != "" {
+		fmt.Println(shell.KV("UPDATE", shell.Muted(out), w))
 	}
 	fmt.Println(shell.PanelEnd())
 }
@@ -320,6 +327,9 @@ func recordRestartInSession(rec session.Continuity) {
 	detail += "."
 	if len(rec.Tasks) > 0 {
 		detail += " Still in progress: " + strings.Join(rec.Tasks, "; ") + "."
+	}
+	if rec.Update != "" {
+		detail += " On the update check: " + rec.Update + "."
 	}
 	detail += " The conversation before the restart is intact."
 

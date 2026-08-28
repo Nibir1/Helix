@@ -170,6 +170,12 @@ Late additions to v1.5.0, from a live `/blackbox setup` on an Intel Mac and an A
 - **One launch command per sidecar.** The printed command was rendered from the first entry of a preference list rather than the binary actually present, producing `piper -m piper.http_server …` beside the correct `python3 -m …`.
 - **Sidecars that will not install say why.** `kokoro-local` needs a container runtime — a licence decision and a system-wide change — rather than pointing at a document.
 - **`/purge` reclaims `~/.helix/csm.rs`**, several GB of compiled crates after a release build.
+- **A reply keeps one voice.** Spoken answers are synthesized sentence by sentence, and each sentence re-resolved the provider chain from scratch — so a cloud voice that rate-limited partway handed the rest of the answer to the local fallback, mid-paragraph, in a different voice. The provider is pinned for the length of an utterance now, and one already known to be down is not re-asked once per sentence, which also takes a stack of timeouts out of a degraded reply.
+- **An utterance is one line.** whisper.cpp returns one *segment* per line, so a sentence with a pause in it — or a `(coughing)` annotation before it — arrived as a transcript containing newlines. Not merely mis-rendered: that text is **submitted**, reaching the classifier and the shell as two lines of input.
+- **A restart says what it checked.** The panel carries an `UPDATE` row and that sentence crosses the restart, so "did you download the latest binaries?" is answered from a record rather than from the model's impression of its own behaviour. Recorded on every path, including the ones that decline to look.
+- **One provider, one key prompt.** A vendor on both sides of a chain — Deepgram does both — was asked for the same credential twice in a single wizard run.
+- **A sidecar's moved port survives the save.** A local provider chosen as a *fallback* and reassigned off an occupied port had its address written to a field that belongs to the primary, so the move was lost and the adapter dialled the default anyway. There is one writer for that address now.
+- **The CSM licence gate is walked, not just described.** Helix installs the Hugging Face CLI, opens the terms page in a browser and runs the login — stopping at the token, which is the only part that is actually consent.
 
 ---
 

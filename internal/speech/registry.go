@@ -391,6 +391,7 @@ func (r *Registry) Transcribe(ctx context.Context, audio AudioFormat) (Transcrip
 				failed = append(failed, name)
 				continue
 			}
+			t.Text = OneLine(t.Text)
 			r.recordSTTHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return t, nil
 		}
@@ -404,7 +405,9 @@ func (r *Registry) Transcribe(ctx context.Context, audio AudioFormat) (Transcrip
 
 // Synthesize runs the TTS failover chain, mirroring Transcribe.
 func (r *Registry) Synthesize(ctx context.Context, text string, opts SynthesisOptions) (AudioFormat, error) {
-	chain := r.TTSChain()
+	// Utterance-scoped order: the provider that spoke the last sentence first,
+	// and anything that already failed this reply left out. See tts_pin.go.
+	chain := r.chainFor(ctx)
 	if len(chain) == 0 {
 		r.recordTTSHealth(ChainHealth{Attempted: true})
 		return AudioFormat{}, errors.New("no TTS provider configured — run /blackbox setup")
@@ -421,9 +424,11 @@ func (r *Registry) Synthesize(ctx context.Context, text string, opts SynthesisOp
 		p, _ := r.TTSProvider(name)
 		audio, err := p.Synthesize(ctx, text, opts)
 		if err == nil {
+			spokeWith(ctx, name)
 			r.recordTTSHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return audio, nil
 		}
+		retire(ctx, name)
 		errs = append(errs, labelProviderErr(name, err))
 		failed = append(failed, name)
 	}
@@ -456,7 +461,7 @@ func contains(list []string, s string) bool {
 func (r *Registry) SynthesizeStream(
 	ctx context.Context, text string, opts SynthesisOptions,
 ) (StreamedAudio, string, error) {
-	chain := r.TTSChain()
+	chain := r.chainFor(ctx)
 	if len(chain) == 0 {
 		return StreamedAudio{}, "", errors.New("no TTS provider configured — run /blackbox setup")
 	}
@@ -479,9 +484,14 @@ func (r *Registry) SynthesizeStream(
 
 		stream, err := sp.SynthesizeStream(ctx, text, opts)
 		if err == nil {
+			spokeWith(ctx, name)
 			r.recordTTSHealth(ChainHealth{Attempted: true, OK: true, Used: name, Failed: failed})
 			return stream, name, nil
 		}
+		// NOT retired here. A streaming failure only means this provider cannot
+		// STREAM; speakOnce falls straight through to the buffered path, where
+		// the same provider may well succeed. Retiring it on that basis would
+		// change the voice over a capability difference rather than an outage.
 		errs = append(errs, labelProviderErr(name, err))
 		failed = append(failed, name)
 	}

@@ -58,6 +58,17 @@ type Continuity struct {
 	// "Helix restarted" with no cause reads like a crash.
 	Reason string `json:"reason"`
 
+	// Update is what the restart's version check concluded, in the user's
+	// terms: "already on the newest release (1.5.0)", "installed 1.6.0", or
+	// "not checked — update.check is off".
+	//
+	// Carried across the restart because the question is asked AFTER it. Left
+	// out, the only thing that could answer "did you download the latest
+	// binaries?" was the model's guess at what the program had done — and it
+	// guessed, plausibly and without evidence. A fact the new process can read
+	// is the difference between reporting and inventing.
+	Update string `json:"update,omitempty"`
+
 	// Mode is the shell to come back as: ModeVoice or ModeManual.
 	//
 	// Carried explicitly rather than left to cfg.UserPrefs.VoiceMode, even

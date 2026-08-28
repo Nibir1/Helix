@@ -448,6 +448,16 @@ provider and model, in-progress task texts, a one-line summary of the work, and
   greeting permanently.
 - **Bounded by age.** Past 12 hours it describes a machine that has moved on, so
   it is discarded unread rather than restoring a directory that may not exist.
+- **It carries what the update check concluded.** The question "did you download
+  the latest binaries?" is asked AFTER the restart, and the only thing that
+  could answer it was the model's guess at what the program had done — which it
+  answered plausibly, correctly, and without evidence. `Update` holds a sentence
+  ("already on the newest release (1.5.0)", "not checked — update.check is off",
+  "found 1.6.0 but could not install it"), the restart panel prints it, and the
+  synthetic turn appended on resume repeats it so the model reports rather than
+  infers. Recorded on every path including the ones that decline to look,
+  because "did not check" and "checked and found nothing" are different answers
+  and a blank is indistinguishable from never having run.
 - **A spoken restart writes no conversation content.** ADR-005's rule that voice
   may reduce what is collected but never increase it holds without an exception:
   the excerpt is omitted entirely when the request arrived through the

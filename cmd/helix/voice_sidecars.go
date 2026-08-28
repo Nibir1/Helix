@@ -692,8 +692,14 @@ func applySidecarEndpoint(kind, provider, endpoint string) {
 			cfg.Speech.TTS.BaseURL = endpoint
 		}
 	}
-	_ = cfg.SavePreferences()
-	_ = speech.Init(speechConfigFrom(cfg.Speech))
+	// Reported, not swallowed. An endpoint that fails to save is exactly the
+	// bug this function exists to prevent, and it would be invisible.
+	if err := cfg.SavePreferences(); err != nil {
+		wizStep(shell.StateWarn, provider, fmt.Sprintf("could not save the new endpoint: %v", err))
+	}
+	if err := speech.Init(speechConfigFrom(cfg.Speech)); err != nil {
+		wizStep(shell.StateWarn, provider, fmt.Sprintf("speech engine rebuild failed: %v", err))
+	}
 }
 
 // probeSpeechProvider runs one provider's health check.
@@ -764,6 +770,12 @@ func runVisibleCommandIn(cmdLine, dir string, env []string, timeout time.Duratio
 	var captured boundedLog
 	c := exec.CommandContext(ctx, fields[0], fields[1:]...)
 	c.Dir = dir
+	// Stdin is inherited, because some of these genuinely ask.
+	//
+	// `sudo apt-get install` wants a password on a host that has not cached
+	// one, and `huggingface-cli login` wants a token. Without a stdin those do
+	// not prompt — they fail, or hang, with the reason off-screen.
+	c.Stdin = os.Stdin
 	if len(env) > 0 {
 		c.Env = append(os.Environ(), env...)
 	}

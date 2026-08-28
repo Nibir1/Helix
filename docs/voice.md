@@ -122,6 +122,11 @@ Two commands are *readable* by voice and not settable (`VoiceReadOnly`):
 `/permissions` and `/sandbox`. You can ask what the posture is; changing it has
 to be typed.
 
+A spoken reboot reports what the version check concluded — the restart panel
+carries an `UPDATE` row and that sentence crosses the restart, so asking "did
+you download anything?" afterwards is answered from a record rather than from
+the model's impression of its own behaviour.
+
 A spoken reboot **also installs an available update**, by owner decision:
 `/reboot` self-updates automatically and voice is not carved out. The trade is
 recorded rather than implied — a television saying "reboot" can now cause an
@@ -437,6 +442,26 @@ Samples are local NDJSON under `~/.helix/metrics/`, wiped by `/purge`.
 /blackbox off       back to the keyboard (also stops a reply mid-sentence)
 ```
 
+**An utterance is one line.** whisper.cpp returns one *segment* per line, so a
+sentence with a pause in it — or a non-speech annotation like `(coughing)` in
+front of it — arrives as text containing newlines. That is not only a display
+question: the transcript is **submitted**, reaching the classifier, the planner
+and the shell as input, where a newline is a second line of something. Every
+transcript is collapsed to a single line before it goes anywhere, on the batch
+path and the streaming one alike.
+
+**One reply keeps one voice.** A spoken answer is synthesized sentence by
+sentence so the first words start playing while the rest are still being made,
+and each sentence used to resolve the provider chain from scratch — so a cloud
+voice that hit a rate limit on sentence three handed the rest of the answer to
+the local fallback, mid-paragraph, in a different voice. The provider is now
+pinned for the length of an utterance: whoever speaks the first sentence speaks
+the rest, a provider that fails is not asked again until the next reply, and a
+primary that recovers halfway does not steal the end of a sentence back. At
+most one voice change per answer, and none in the normal case. It is also
+faster when degraded — nothing waits on a provider already known to be down
+once per sentence.
+
 `/blackbox setup` opens with three **recommended chains** — cheapest cloud
 (Groq + gpt-4o-mini-tts), lowest latency (Deepgram Nova-3 + Aura-2), and fully
 local/private (whisper.cpp + Piper) — so the common case is one keystroke.
@@ -453,7 +478,10 @@ than surfacing later as a failed `/blackbox say`.
 runtime, missing model file, missing server: each is fetched and started without
 a further prompt, because choosing the chain was the decision — being asked
 again about the file it cannot start without has one sensible answer, and
-declining leaves you with a configuration Helix has just recommended. Host
+declining leaves you with a configuration Helix has just recommended. A provider on both sides of a chain is asked for its
+key **once**: STT and TTS keep separate keystores, which is right because a
+chain may hear with one vendor and speak with another, but they are not separate
+*accounts* — and the lowest-latency preset puts Deepgram on both sides. Host
 packages a sidecar depends on are installed too: a machine with no Python gets
 one rather than the message *"there is no single install command for this
 platform"*, which was a true sentence about a situation Helix could have fixed

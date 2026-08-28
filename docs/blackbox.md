@@ -236,7 +236,10 @@ backend is detected rather than guessed — CUDA if `nvidia-smi` answers, Metal 
 Apple Silicon, a tuned CPU build otherwise — and printed with its evidence
 before anything compiles, so a choice you can see is not a choice made on your
 behalf. The one remaining step is yours: the weights are licence-gated, and
-consent tied to an account is not something a program supplies. Per-platform
+consent tied to an account is not something a program supplies. Everything
+around it is automated — the Hugging Face CLI is installed if missing, the terms
+page opens in a browser, and `huggingface-cli login` runs so you can paste a
+token — because none of those three is the decision. Per-platform
 flags, the gated-weights step and an honest per-machine expectation table are in
 [local_runtimes.md](local_runtimes.md) §3.5; `make live-csm` measures the
 real-time factor on your own hardware.

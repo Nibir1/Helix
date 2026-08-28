@@ -430,11 +430,15 @@ huggingface-cli login    # then accept at https://huggingface.co/sesame/csm-1b
 ```
 
 csm.rs downloads them on first run (~2 GB bf16, or ~700 MB for the `q4_k` GGUF
-from `cartesia/sesame-csm-1b-gguf`). **This is the one step Helix does not
-take**, and it is a boundary rather than a gap: accepting a licence is consent
-tied to a person and an account. The build finishes, then names this step and
-stops — so you meet it as an instruction, not as a download error on your first
-attempt to speak.
+from `cartesia/sesame-csm-1b-gguf`). **Accepting the licence is the one step Helix does not take**, and it is a
+boundary rather than a gap: consent tied to a person and an account is not
+something a program supplies. Everything *around* it is automated, because none
+of it is the decision — after the build Helix installs the Hugging Face CLI if
+it is missing, opens the model page in your browser so the terms are in front of
+you rather than in a URL you scrolled past, and runs `huggingface-cli login` so
+you can paste a token. It checks first whether you are already signed in, and
+skips the whole thing if so. On a headless box the browser step degrades to
+printing the link.
 
 `/purge` reclaims `~/.helix/csm.rs`, which after a release build is several
 gigabytes of compiled crates — larger than most of the model weights.

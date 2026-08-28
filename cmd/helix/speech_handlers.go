@@ -1178,6 +1178,17 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 	if adoptAIKeyForSpeech(kind, provider) {
 		return true
 	}
+	// And at what they typed a moment ago in this very wizard.
+	//
+	// STT and TTS keep separate keystores, which is right — a chain can hear
+	// with one vendor and speak with another. But they are not separate
+	// ACCOUNTS. Deepgram does both, so the "lowest latency" preset put it on
+	// both sides of the chain, and the wizard asked for the same key twice in
+	// one run: once under stt.deepgram and once under tts.deepgram. Exactly the
+	// interrogation the paragraph above exists to prevent, one scope in.
+	if adoptSiblingSpeechKey(kind, provider) {
+		return true
+	}
 
 	key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", provider)))
 	if key == "" {
@@ -1220,6 +1231,41 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 // Args: kind ("stt"|"tts"), provider: the speech provider needing a key.
 // Returns: whether a key was adopted.
 // Complexity: O(1).
+// adoptSiblingSpeechKey copies a provider's key across the STT/TTS boundary.
+//
+// One vendor, one account, one credential: a provider that transcribes AND
+// speaks (Deepgram, OpenAI, ElevenLabs for one direction) has no reason to be
+// asked twice. Returns whether a key was adopted.
+func adoptSiblingSpeechKey(kind, provider string) bool {
+	reg := speech.Default()
+	if reg == nil {
+		return false
+	}
+	// The direction we are NOT configuring right now.
+	sibling := speech.TTSKeyPrefix
+	if kind == "tts" {
+		sibling = speech.STTKeyPrefix
+	}
+	key := strings.TrimSpace(reg.Keys().Get(sibling + provider))
+	if key == "" {
+		return false
+	}
+
+	var err error
+	if kind == "stt" {
+		err = speech.SaveSTTKey(provider, key)
+	} else {
+		err = speech.SaveTTSKey(provider, key)
+	}
+	if err != nil {
+		// Not fatal: fall through and ask, rather than fail the wizard over a
+		// convenience that did not work out.
+		return false
+	}
+	wizStep(shell.StateGood, provider, "using the key you just entered for the other direction")
+	return true
+}
+
 func adoptAIKeyForSpeech(kind, provider string) bool {
 	if !ai.ProviderHasSavedKey(provider) {
 		return false
@@ -1453,25 +1499,21 @@ func autoAssignSidecarPort(kind, provider, configured string) string {
 	// Persist immediately so the endpoint survives even if the wizard is
 	// interrupted before its final save.
 	//
-	// The PROVIDER is set alongside the URL, and that is not incidental:
-	// registerBuiltins only hands a configured BaseURL to the provider named as
-	// active, so rebuilding with just the URL set left the adapter on its stock
-	// endpoint. The wizard then verified the port it had moved away from and
-	// printed advice for it — the reassignment appeared to have no effect.
-	switch kind {
-	case "stt":
-		cfg.Speech.STT.Provider = provider
-		cfg.Speech.STT.BaseURL = assigned
-	case "tts":
-		cfg.Speech.TTS.Provider = provider
-		cfg.Speech.TTS.BaseURL = assigned
-	}
-	if err := cfg.SavePreferences(); err != nil {
-		wizStep(shell.StateWarn, provider, fmt.Sprintf("could not save the new endpoint: %v", err))
-	}
-	if err := speech.Init(speechConfigFrom(cfg.Speech)); err != nil {
-		wizStep(shell.StateWarn, provider, fmt.Sprintf("speech engine rebuild failed: %v", err))
-	}
+	// Recorded through applySidecarEndpoint, which is the ONE place that knows
+	// how to write a sidecar's address.
+	//
+	// This used to set Provider and BaseURL directly, and that is what made a
+	// moved port vanish. BaseURL belongs to whichever provider is PRIMARY, so
+	// for a chain like "deepgram → piper-local" the wizard wrote
+	// TTS.Provider=piper-local — and the final merge then set Provider back to
+	// deepgram and carried across an Endpoints map that nothing had written.
+	// The moved port was gone, the adapter dialled piper's stock 5000 (which
+	// AirPlay owns on macOS), and the summary reported "still not answering"
+	// three lines under "verified".
+	//
+	// whisper-local escaped it only by accident: its port collided again at
+	// START time, which reaches applySidecarEndpoint by the other route.
+	applySidecarEndpoint(kind, provider, assigned)
 	return assigned
 }
 

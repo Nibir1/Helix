@@ -498,17 +498,32 @@ func resetTimer(t *time.Timer, d time.Duration) {
 // consumes the utterance as chunks and never holds one contiguous clip, so those
 // turns contribute text-only context, which CSM still conditions on.
 func finishVoiceTranscript(text string, transcript speech.Transcript, audio speech.AudioFormat) (input.InputEvent, error) {
-	text = strings.TrimSpace(text)
+	// One line, whatever produced it.
+	//
+	// Registry.Transcribe already normalises the batch path, but the streaming
+	// path assembles its own transcript from chunks and never goes through it.
+	// Both end here, which makes this the one place that covers every route —
+	// and the text below is not just echoed, it is SUBMITTED, so a stray
+	// newline would arrive at the classifier as a second line of input.
+	text = speech.OneLine(text)
 	if text == "" {
 		return input.InputEvent{}, speech.ErrEmptyTranscript
 	}
+	transcript.Text = text
 
 	conf := fmt.Sprintf(", confidence %.2f", transcript.Confidence)
 	if transcript.Confidence <= 0 {
 		conf = ""
 	}
+	// "  ·  " between the words and the provider, not three spaces.
+	//
+	// Whitespace alone left the label looking like part of what was said:
+	// `❯ reboot.   whisper-local` was reported as the transcript being
+	// contaminated with a provider name. It never was — but a separator that
+	// can be mistaken for a pause in speech is the wrong separator, and this
+	// is the one the rest of Helix already uses to mean "different field".
 	fmt.Println("  " + shell.Fg(shell.HexSecondary, "❯ ") +
-		shell.Fg(shell.HexText, text) + shell.Muted("   "+transcript.Provider+conf))
+		shell.Fg(shell.HexText, text) + shell.Muted("  ·  "+transcript.Provider+conf))
 
 	// Hands-free kill switches (ADR-005 wake controls): recognized before
 	// dispatch.

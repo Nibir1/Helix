@@ -102,6 +102,19 @@ is printed before it runs, and installation is confined to the catalogue in
 `internal/deps` plus the specific sidecars in the wizard's own table. It will
 not install a container runtime, and it will not accept a model licence.
 
+**The licence gate is walked, not crossed.** For CSM's gated weights Helix
+installs the Hugging Face CLI, opens the model's terms page in a browser and
+runs `huggingface-cli login` — and stops there. None of those three is the
+consent: a pip package is not a decision, showing you a page is not agreeing to
+it, and a login prompt is not a token. The token you paste is the consent, and
+it goes to the Hugging Face CLI's own credential store, not to Helix.
+
+**Installers inherit stdin**, so a command that needs to ask can. `sudo` on a
+host without a cached password, and `huggingface-cli login` waiting for a token,
+both prompt at the terminal instead of failing with the reason off-screen. This
+is visible privilege escalation rather than hidden: the command is printed
+first, and the password goes to `sudo`, never through Helix.
+
 The one third-party archive Helix downloads is checksum-pinned and extracted
 under `os.Root` (§5a). Sources it builds — currently only csm.rs — are cloned
 from a pinned URL into `~/.helix` and compiled there; the build is ordinary

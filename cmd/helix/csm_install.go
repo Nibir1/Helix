@@ -181,7 +181,7 @@ func installCSMServer() (string, bool) {
 	}
 	fmt.Println(shell.Step(shell.StateGood, "csm-local", "built"))
 	fmt.Println(shell.StepCommand(bin))
-	reportCSMWeightsGate()
+	settleCSMWeights()
 	return bin, true
 }
 
