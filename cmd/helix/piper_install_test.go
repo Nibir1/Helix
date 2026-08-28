@@ -10,6 +10,7 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -160,7 +161,10 @@ func TestExtractTarGzStripsTopLevelAndKeepsTheExecutableBit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("binary not extracted to the top level: %v", err)
 	}
-	if info.Mode()&0o111 == 0 {
+	// Windows has no executable bit — it runs piper.exe by extension — and
+	// os.Stat there reports 0666 for every writable file, so this asserts the
+	// property only where it exists.
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Error("the executable bit was lost — piper would be unusable")
 	}
 	// The libraries must land beside it, or the binary starts and cannot phonemize.

@@ -222,13 +222,9 @@ func WaitReady(ctx context.Context, endpoint string, probe func(context.Context)
 // exited child nobody has reaped — is still in the table, so this returns true
 // for a process that has already died. For servers Helix launched, Server.Alive
 // consults the reaper instead and is exact.
-func processExists(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscallZero) == nil
-}
+// The implementation is per-platform: signal 0 does not exist on Windows,
+// where os.Process.Signal refuses anything but Kill, so asking that way
+// reported EVERY process as dead. See detach_unix.go / detach_windows.go.
 
 // LogTail returns the last n lines of a log file, for reporting a failed load.
 func LogTail(path string, n int) []string {

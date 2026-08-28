@@ -70,7 +70,13 @@ func TestDaemonIPCCrossPlatform(t *testing.T) {
 
 	// submit a cross-platform write command (mkdir exists in cmd.exe and sh).
 	probeDir := filepath.Join(home, "cross_probe_dir")
-	if resp, err := send(Request{Type: TypeSubmit, Text: "mkdir " + probeDir}); err != nil || !resp.OK {
+	// Forward slashes in the COMMAND, native separators for the stat.
+	//
+	// Windows CI runners carry Git Bash, so DetectEnvironment can legitimately
+	// pick bash there — and bash reads the backslashes in C:\Users\... as
+	// escapes, quietly creating the directory somewhere else. Win32 accepts
+	// forward slashes in every path API, so this is unambiguous on both.
+	if resp, err := send(Request{Type: TypeSubmit, Text: "mkdir " + filepath.ToSlash(probeDir)}); err != nil || !resp.OK {
 		t.Fatalf("submit failed: %+v err=%v", resp, err)
 	}
 	if st, err := os.Stat(probeDir); err != nil || !st.IsDir() {

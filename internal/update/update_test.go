@@ -309,11 +309,15 @@ func TestInstallKeepsThePreviousBinaryAndRollbackRestoresIt(t *testing.T) {
 		t.Fatalf("the previous binary was not kept (backup=%q)", backup)
 	}
 	// The installed file has to be executable, or the rollback is the only
-	// thing that ever runs again.
-	if st, err := os.Stat(target); err != nil {
-		t.Fatal(err)
-	} else if st.Mode().Perm()&0o111 == 0 {
-		t.Errorf("installed binary is not executable: %v", st.Mode())
+	// thing that ever runs again. Windows decides that by extension, not by a
+	// mode bit — os.Stat never reports 0o111 there — so the check is scoped to
+	// the platforms where the bit is what matters.
+	if runtime.GOOS != "windows" {
+		if st, err := os.Stat(target); err != nil {
+			t.Fatal(err)
+		} else if st.Mode().Perm()&0o111 == 0 {
+			t.Errorf("installed binary is not executable: %v", st.Mode())
+		}
 	}
 
 	if err := Rollback(target); err != nil {

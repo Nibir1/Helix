@@ -50,6 +50,7 @@ func TestFirstRunMenuExcludesHandManagedRuntimes(t *testing.T) {
 // chosen — the drift that shipped llamacpp broken once already.
 func TestNewCloudProvidersAreSelectableEndToEnd(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir()) // os.UserHomeDir on Windows
 	if err := ai.InitProviders(ai.ProviderSettings{}); err != nil {
 		t.Fatalf("init providers: %v", err)
 	}
@@ -160,6 +161,7 @@ func TestCapabilityLookupsUnaffectedByDemotion(t *testing.T) {
 // user choose told them nothing at all.
 func TestFallbackRowUsesTheRegistryKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir()) // os.UserHomeDir on Windows
 
 	var err error
 	cfg, err = config.DefaultConfig()

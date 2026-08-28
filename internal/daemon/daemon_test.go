@@ -22,6 +22,7 @@ import (
 func TestDaemonIPCRoundTrip(t *testing.T) {
 	home := shortTmpHome(t)
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 	t.Setenv("HELIX_DAEMON_TEST", "1")
 
 	d, err := New()
@@ -125,6 +126,7 @@ func TestDaemonIPCRoundTrip(t *testing.T) {
 func TestSecondDaemonRefuses(t *testing.T) {
 	home := shortTmpHome(t)
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
 	d, err := New()
 	if err != nil {
@@ -157,6 +159,7 @@ func TestSecondDaemonRefuses(t *testing.T) {
 func TestSubmitRefusedWhileTTYActive(t *testing.T) {
 	home := shortTmpHome(t)
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
 	d, err := New()
 	if err != nil {
@@ -215,6 +218,7 @@ func TestSubmitRefusedWhileTTYActive(t *testing.T) {
 func TestTTYLockHeartbeat(t *testing.T) {
 	home := shortTmpHome(t)
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
 	if ttyActive() {
 		t.Fatal("no lock yet: ttyActive must be false")

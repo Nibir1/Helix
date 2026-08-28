@@ -104,7 +104,9 @@ func TestPlanModeDoesNotExecute(t *testing.T) {
 	marker := filepath.Join(dir, "executed")
 
 	ag.SetPermission(PermissionPlan)
-	step := ai.PlanStep{Tool: "shell", Command: "touch " + marker}
+	// Forward slashes in the command: on Windows the shell may be Git Bash,
+	// which treats the backslashes of an absolute path as escapes.
+	step := ai.PlanStep{Tool: "shell", Command: "touch " + filepath.ToSlash(marker)}
 	if err := ag.handleShellStep(step); err != nil {
 		t.Fatalf("plan mode should report success without acting: %v", err)
 	}
@@ -227,12 +229,12 @@ func TestBlockingHookDeniesEvenWhenGatesAllow(t *testing.T) {
 
 	// A non-matching command must be untouched by the rule.
 	other := filepath.Join(dir, "allowed")
-	if err := ag.handleShellStep(ai.PlanStep{Tool: "shell", Command: "cp " + marker + "x " + other}); err == nil {
+	if err := ag.handleShellStep(ai.PlanStep{Tool: "shell", Command: "cp " + filepath.ToSlash(marker) + "x " + filepath.ToSlash(other)}); err == nil {
 		t.Log("copy of a missing file unexpectedly succeeded")
 	}
 	// Use a command the hook's pattern does not match, writing inside the
 	// sandbox root, to show the rule is scoped rather than global.
-	if err := ag.handleShellStep(ai.PlanStep{Tool: "shell", Command: "cp " + hookPath + " " + other}); err != nil {
+	if err := ag.handleShellStep(ai.PlanStep{Tool: "shell", Command: "cp " + filepath.ToSlash(hookPath) + " " + filepath.ToSlash(other)}); err != nil {
 		t.Fatalf("a non-matching command must not be denied: %v", err)
 	}
 	if _, statErr := os.Stat(other); statErr != nil {

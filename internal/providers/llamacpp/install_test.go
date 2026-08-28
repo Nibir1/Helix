@@ -150,7 +150,10 @@ func TestCacheDirsHonorsEnvironment(t *testing.T) {
 	t.Setenv("HF_HOME", "/custom/hfhome")
 
 	dirs := CacheDirs()
-	for _, want := range []string{"/custom/llama", "/custom/hf", "/custom/hfhome/hub"} {
+	// filepath.Join builds the HF_HOME entry, so the expectation has to be
+	// built the same way — on Windows the code produces `\custom\hfhome\hub`
+	// and a hardcoded "/custom/hfhome/hub" never matches it.
+	for _, want := range []string{"/custom/llama", "/custom/hf", filepath.Join("/custom/hfhome", "hub")} {
 		if !containsStr(dirs, want) {
 			t.Errorf("CacheDirs missing %q: %v", want, dirs)
 		}

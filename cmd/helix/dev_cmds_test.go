@@ -144,6 +144,7 @@ func TestLoadProjectContextIsBounded(t *testing.T) {
 func TestExportPathDefaultsAndOverrides(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
 	got, err := exportPath("")
 	if err != nil {

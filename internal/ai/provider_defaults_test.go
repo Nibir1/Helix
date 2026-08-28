@@ -21,6 +21,7 @@ import (
 
 func TestEveryRegisteredProviderDefaultsToAModelThatCanSee(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir()) // os.UserHomeDir on Windows
 	if err := InitProviders(ProviderSettings{}); err != nil {
 		t.Fatalf("init providers: %v", err)
 	}
@@ -50,6 +51,7 @@ func TestEveryRegisteredProviderDefaultsToAModelThatCanSee(t *testing.T) {
 // drift that shipped llamacpp broken once already.
 func TestGeminiAndMetaAreRegistered(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir()) // os.UserHomeDir on Windows
 	if err := InitProviders(ProviderSettings{}); err != nil {
 		t.Fatalf("init providers: %v", err)
 	}

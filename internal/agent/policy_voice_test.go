@@ -18,7 +18,15 @@ import (
 
 func newTestAgent(t *testing.T) (*Agent, *[]string) {
 	t.Helper()
-	env := shell.Env{OSName: "linux", Shell: "bash"}
+	// Use the HOST's real shell, not a hardcoded Linux one.
+	//
+	// Claiming {OSName: "linux", Shell: "bash"} on a Windows runner makes
+	// WrapCommand build `bash -c "<cmd>"`, and bash then treats the
+	// backslashes in a Windows absolute path as escapes: a marker at
+	// C:\Users\...\executed is created somewhere else entirely, and the test
+	// reports that the command never ran. Production never hits this — it
+	// detects the real environment — so the lie lived only here.
+	env := shell.DetectEnvironment()
 	gui := ux.NewUX()
 	ag := NewAgent(env, nil, commands.NewDirectorySandbox(), commands.DefaultExecuteConfig(),
 		false, gui, stealth.NewStealthExecutor(stealth.DefaultStealthConfig()), nil)

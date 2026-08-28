@@ -68,7 +68,10 @@ func TestE2E_DaemonRemoteStatus(t *testing.T) {
 
 	// submit: a cross-platform low-risk command (mkdir exists in cmd.exe and sh).
 	probe := filepath.Join(home, "remote_probe_dir")
-	submit, err := remote("submit", "mkdir "+probe)
+	// Forward slashes in the COMMAND, native separators for the stat: Windows
+	// runners carry Git Bash, and bash reads the backslashes in an absolute
+	// Windows path as escapes. Win32 accepts forward slashes everywhere.
+	submit, err := remote("submit", "mkdir "+filepath.ToSlash(probe))
 	if err != nil || !strings.Contains(submit, "reply") {
 		t.Fatalf("remote submit did not return a reply (err=%v):\n%s", err, submit)
 	}

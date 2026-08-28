@@ -6,6 +6,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -176,12 +177,21 @@ func TestContinuityFileIsPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := fi.Mode().Perm(); perm != 0o600 {
-		t.Errorf("record mode = %o, want 600", perm)
-	}
 	di, err := os.Stat(filepath.Dir(path))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		// Windows has no POSIX permission bits. Go synthesises 0666 (or 0444
+		// when the read-only attribute is set) from file attributes, so this
+		// assertion would be testing the synthesis rather than the code.
+		// Privacy there rests on the ACL of the user profile the record lives
+		// in, which this test cannot meaningfully inspect. Recorded rather
+		// than silently skipped: the 0600/0700 guarantee is a UNIX guarantee.
+		t.Skip("POSIX permission bits are not a Windows concept")
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("record mode = %o, want 600", perm)
 	}
 	if perm := di.Mode().Perm(); perm != 0o700 {
 		t.Errorf("directory mode = %o, want 700", perm)

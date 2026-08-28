@@ -106,6 +106,7 @@ func TestCheckDisabledStillAnswersAnExplicitCheck(t *testing.T) {
 func withUpdateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir()) // os.UserHomeDir on Windows
 	c, err := config.DefaultConfig()
 	if err != nil {
 		t.Fatal(err)

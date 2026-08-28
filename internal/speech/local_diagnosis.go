@@ -149,8 +149,16 @@ func isStatus(err error, codes ...int) bool {
 //
 // Checked through errors.Is on the syscall rather than by string match, so it
 // holds across platforms and locales.
+// isConnectionRefused reports whether nothing was listening at the other end.
+//
+// syscall.ECONNREFUSED alone is not enough. On Windows that constant is a
+// synthetic APPLICATION_ERROR value, and the error a refused socket actually
+// carries is WSAECONNREFUSED (10061) — a different number, with no Errno.Is
+// mapping between them. So this test was silently FALSE on every Windows host,
+// and the whole point of this function is to name the cause instead of
+// printing the raw socket error. See local_diagnosis_windows.go.
 func isConnectionRefused(err error) bool {
-	return errors.Is(err, syscall.ECONNREFUSED)
+	return errors.Is(err, syscall.ECONNREFUSED) || isPlatformConnRefused(err)
 }
 
 // Config keys for the local sidecars, kept next to the diagnosis that prints

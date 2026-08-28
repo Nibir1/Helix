@@ -34,6 +34,7 @@ func TestEmbeddedCatalogParses(t *testing.T) {
 func TestMergedCatalogUserOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 	dir := filepath.Join(home, ".helix")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

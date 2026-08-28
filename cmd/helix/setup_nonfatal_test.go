@@ -28,7 +28,11 @@ func TestPullFailureDoesNotAbortSetup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read helpers.go: %v", err)
 	}
-	body := string(src)
+	// Normalise line endings before matching. .gitattributes pins the checkout
+	// to LF, but a test that reads raw bytes and looks for "\n" should not
+	// depend on that being configured correctly — it failed on windows-latest
+	// for exactly this reason.
+	body := strings.ReplaceAll(string(src), "\r\n", "\n")
 
 	if !strings.Contains(body, "reportPullFailure(") {
 		t.Fatal("a failed pull must be reported, not returned as a setup error")

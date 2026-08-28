@@ -58,6 +58,7 @@ func TestWhisperModelsAreOrderedAndComplete(t *testing.T) {
 func TestInstalledWhisperModelPrefersTheMostAccurate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 
 	dir := filepath.Join(home, ".helix", "whisper-models")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

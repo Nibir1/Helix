@@ -9,6 +9,7 @@ import (
 
 func TestZZRenderProvider(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir()) // os.UserHomeDir on Windows
 	var err error
 	cfg, err = config.DefaultConfig()
 	if err != nil {

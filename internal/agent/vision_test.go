@@ -32,7 +32,16 @@ func TestVisionCaptureFailureDegradesGracefully(t *testing.T) {
 func TestVisionOnMetricFiresAfterInsight(t *testing.T) {
 	ag, _ := newTestAgent(t)
 	ag.VisionEnabled = func() bool { return true }
-	ag.VisionCapture = func(context.Context) ([]byte, error) { return []byte("frame"), nil }
+	// Spend a measurable amount of time inside the timed section. Windows'
+	// clock granularity is coarse enough that an instantaneous fake reports
+	// 0s, which failed this assertion on windows-latest while the metric was
+	// working correctly. The sleep gives the interval something real to
+	// measure, so "latency > 0" still means the timer spans the operation
+	// rather than meaning "this machine has a fast clock".
+	ag.VisionCapture = func(context.Context) ([]byte, error) {
+		time.Sleep(20 * time.Millisecond)
+		return []byte("frame"), nil
+	}
 	ag.VisionCall = func(string, []byte) (string, error) { return "insight", nil }
 
 	var metric string
