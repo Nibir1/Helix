@@ -21,7 +21,6 @@ import (
 	"helix/internal/providers"
 	"net/http"
 
-	"github.com/fatih/color"
 	"helix/internal/edge"
 	"net/url"
 	"runtime"
@@ -632,7 +631,7 @@ func handleSayCommand(c cmdArgs) {
 	// "buffered" even on a build where streaming works.
 	fmt.Println(shell.Muted("speaking  ") + shell.Value(truncStr(text, 60)))
 	if err := speech.Speak(ctx, text); err != nil {
-		color.Red("Speech failed: %v", err)
+		uiFail("speech", err.Error())
 		return
 	}
 
@@ -653,12 +652,12 @@ func handleTTSCommand(c cmdArgs) {
 	switch c.Lower() {
 	case "on":
 		speech.SetTTSEnabled(true)
-		color.Green("Replies are now spoken aloud.")
+		uiOK("replies", "spoken aloud")
 	case "off":
 		speech.SetTTSEnabled(false)
 		// Yellow rather than green: switching a capability off is the same kind
 		// of event as /blackbox wake off, and it should read the same way.
-		color.Yellow("Replies are silent — /blackbox say still speaks on demand.")
+		uiIdle("replies", "silent — /blackbox say still speaks on demand")
 	default:
 		state := shell.Badge(shell.StateIdle, "silent")
 		if speech.TTSEnabled() {
@@ -678,14 +677,14 @@ func handleListenCommand(c cmdArgs) {
 		// A bad duration used to be silently ignored and replaced with 8s.
 		// Say so: the user asked for a specific window.
 		if err != nil || n <= 0 || n > 60 {
-			color.Yellow("Duration must be a whole number of seconds between 1 and 60; using %ds.", seconds)
+			uiWarn("duration", fmt.Sprintf("must be a whole number of seconds between 1 and 60 — using %ds", seconds))
 		} else {
 			seconds = n
 		}
 	}
 
 	if _, err := speech.DetectRecorder(); err != nil {
-		color.Red("%v", err)
+		uiFail("microphone", err.Error())
 		return
 	}
 	fmt.Printf("Listening for up to %ds (speak now; stops after ~2s of silence with sox)...\n", seconds)
@@ -695,7 +694,7 @@ func handleListenCommand(c cmdArgs) {
 
 	clip, err := speech.RecordClip(ctx, speech.CaptureOptions{MaxDuration: time.Duration(seconds) * time.Second})
 	if err != nil {
-		color.Red("Capture failed: %v", err)
+		uiFail("capture", err.Error())
 		return
 	}
 
@@ -703,7 +702,7 @@ func handleListenCommand(c cmdArgs) {
 	defer tcancel()
 	transcript, err := speech.Transcribe(tctx, clip)
 	if err != nil {
-		color.Red("Transcription failed: %v", err)
+		uiFail("transcription", err.Error())
 		return
 	}
 

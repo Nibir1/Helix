@@ -11,8 +11,6 @@ import (
 	"helix/internal/config"
 	"helix/internal/shell"
 	"helix/internal/speech"
-
-	"github.com/fatih/color"
 )
 
 // handleWakeCommand implements /blackbox wake <on|off|status>.
@@ -23,11 +21,11 @@ func handleWakeCommand(c cmdArgs) {
 	case "off", "disable":
 		cfg.Speech.WakeWord.Enabled = false
 		_ = cfg.SavePreferences()
-		color.Yellow("Wake word DISABLED — hands-free listening is off.")
+		uiIdle("wake word", "off — hands-free listening is disabled")
 	case "", "status":
 		printWakeStatus()
 	default:
-		color.Yellow("Usage: /blackbox wake <on|off|status>")
+		uiUsage("/blackbox wake <on|off|status>")
 	}
 }
 
@@ -54,13 +52,14 @@ func enableWakeWord() {
 	ww.Enabled = true
 	_ = cfg.SavePreferences()
 
-	color.Green("Wake word ENABLED (\"%s\", engine: %s, preset: %s).", ww.Phrase, ww.Engine, ww.SensitivityPreset)
+	uiOK("wake word", fmt.Sprintf("%q  ·  %s  ·  %s", ww.Phrase, ww.Engine, ww.SensitivityPreset))
 	if _, err := speech.DetectRecorder(); err != nil {
-		color.Red("No audio recorder found — run /setup to install sox before hands-free will work.")
+		uiFail("no recorder", "hands-free needs one")
+		uiUsage("/setup installs sox")
 		return
 	}
 	for _, line := range wakeBannerLines(ww.Engine, ww.Phrase) {
-		color.Cyan("%s", line)
+		uiDetail(line)
 	}
 }
 

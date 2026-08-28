@@ -17,9 +17,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -573,20 +575,173 @@ func runVisibleCommand(cmdLine string, timeout time.Duration) bool {
 	unreg := utils.RegisterOperation(cancel)
 	defer unreg()
 
+	// Streamed to the terminal AND captured. Streaming alone is right for the
+	// progress — package managers draw their own, and animating over it makes
+	// interleaved garbage — but it leaves nothing to diagnose with, and pip's
+	// resolver failure is sixty lines of version list ending in one sentence
+	// that matters. The tee is bounded so a runaway installer cannot grow the
+	// shell's heap.
+	var captured boundedLog
 	c := exec.CommandContext(ctx, fields[0], fields[1:]...)
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	c.Stdout = io.MultiWriter(os.Stdout, &captured)
+	c.Stderr = io.MultiWriter(os.Stderr, &captured)
+
 	if err := c.Run(); err != nil {
 		fmt.Println()
 		if ctx.Err() != nil {
 			fmt.Println(shell.Step(shell.StateWarn, "cancelled", ""))
-		} else {
-			fmt.Println(shell.Step(shell.StateBad, "failed", err.Error()))
+			return false
+		}
+		fmt.Println(shell.Step(shell.StateBad, "failed", err.Error()))
+		// The output is already on screen; what is missing is the reading of it.
+		for _, line := range diagnoseInstallFailure(cmdLine, captured.String()) {
+			fmt.Println(line)
 		}
 		return false
 	}
 	fmt.Println()
 	return true
+}
+
+// boundedLog keeps the tail of a command's output for diagnosis.
+//
+// A ring rather than a growing buffer: this tees a subprocess that Helix does
+// not control, and "however much it prints" is not a size.
+type boundedLog struct {
+	buf []byte
+}
+
+// boundedLogMax is the tail kept. Generous enough for a pip resolver failure,
+// whose one useful sentence arrives at the very end after the version list.
+const boundedLogMax = 64 << 10
+
+func (b *boundedLog) Write(p []byte) (int, error) {
+	b.buf = append(b.buf, p...)
+	if len(b.buf) > boundedLogMax {
+		b.buf = b.buf[len(b.buf)-boundedLogMax:]
+	}
+	return len(p), nil
+}
+
+func (b *boundedLog) String() string { return string(b.buf) }
+
+// diagnoseInstallFailure reads an installer's own output and says what to do.
+//
+// The failure that prompted this, from a live session on an Intel Mac:
+// `python3 -m pip install --user piper-tts flask` printed sixty lines of
+// candidate versions and ended in ResolutionImpossible, because onnxruntime
+// publishes no wheels for macOS x86_64 on Python 3.14. Helix showed all sixty
+// lines and then said "failed exit status 1" — which is true, useless, and
+// blames the wrong layer. The user is left believing Helix is broken when the
+// actual answer is "this interpreter cannot have this package, pick another
+// voice or another Python".
+//
+// Diagnosis rather than prediction, deliberately: which Python versions have
+// wheels for which package on which architecture is a moving target that Helix
+// would get wrong, while the installer has just finished saying so precisely.
+//
+// Args: cmdLine: what was run; output: its captured stdout+stderr tail.
+// Returns: rendered panel lines, empty when nothing is recognised.
+func diagnoseInstallFailure(cmdLine, output string) []string {
+	lower := strings.ToLower(output)
+	var out []string
+	add := func(lines ...string) { out = append(out, lines...) }
+
+	switch {
+	case strings.Contains(lower, "no matching distribution") ||
+		strings.Contains(lower, "resolutionimpossible"):
+		missing := missingDistributions(output)
+		detail := "this Python cannot install " + strings.Join(missing, " or ")
+		if len(missing) == 0 {
+			detail = "this Python has no compatible build of a required package"
+		}
+		add(shell.Step(shell.StateBad, "not installable here", detail))
+		for _, l := range shell.StepDetail(
+			"It is not a Helix problem and not a network problem: the package "+
+				"publishes no wheel for "+runtime.GOOS+"/"+runtime.GOARCH+
+				" on "+pythonVersionLabel()+", and there is no source build "+
+				"either. Three ways forward, in the order most people want them:",
+			shell.Muted) {
+			add(l)
+		}
+		add(shell.StepCommand("pick a different voice: /blackbox setup → cheapest cloud"))
+		add(shell.StepCommand("or install a Python that has wheels, then re-run /blackbox setup"))
+		add(shell.StepCommand("or use kokoro-local if you already run Docker"))
+
+	case strings.Contains(lower, "externally-managed-environment"):
+		add(shell.Step(shell.StateBad, "blocked by the OS",
+			"this Python refuses user installs (PEP 668) — its packages belong to the system"))
+		for _, l := range shell.StepDetail(
+			"Install the distribution's own package if it has one, or make a "+
+				"virtualenv and point Helix at it.", shell.Muted) {
+			add(l)
+		}
+
+	case strings.Contains(lower, "permission denied"):
+		add(shell.Step(shell.StateBad, "permission denied",
+			"the install target is not writable by this user"))
+	}
+
+	if len(out) > 0 {
+		add(shell.Hint("/blackbox setup offers every alternative with prices"))
+	}
+	_ = cmdLine
+	return out
+}
+
+// missingDistributions pulls package names out of pip's own summary.
+//
+// pip ends a resolution failure with "some packages ... have no matching
+// distributions available for your environment:" followed by one indented name
+// per line. Reading that beats guessing, and beats reprinting sixty lines.
+func missingDistributions(output string) []string {
+	const marker = "no matching distributions available for your environment:"
+	i := strings.Index(strings.ToLower(output), marker)
+	if i < 0 {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(output[i+len(marker):], "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		// The block ends at the first line that is not an indented bare name.
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			break
+		}
+		if strings.ContainsAny(name, " :\t") {
+			break
+		}
+		names = append(names, name)
+		if len(names) == 6 {
+			break
+		}
+	}
+	return names
+}
+
+// pythonVersionLabel reports the interpreter's version, for the diagnosis.
+//
+// Best-effort and never fatal: a diagnosis that cannot name the version is
+// still worth printing, and this runs only after an install has already failed.
+func pythonVersionLabel() string {
+	for _, bin := range []string{"python3", "python"} {
+		path, err := exec.LookPath(bin)
+		if err != nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := exec.CommandContext(ctx, path, "-c",
+			"import sys;print('Python %d.%d'%sys.version_info[:2])").Output()
+		cancel()
+		if err == nil {
+			if v := strings.TrimSpace(string(out)); v != "" {
+				return v
+			}
+		}
+	}
+	return "this Python"
 }
 
 // piperVoiceBaseURL is where the default voice model lives.

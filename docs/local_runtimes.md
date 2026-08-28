@@ -312,6 +312,17 @@ Route walking treats **any 4xx** as "not on this route" — 404 for a missing pa
 the search before the other is tried. A **5xx** does stop it: that is the right
 endpoint failing, and looking elsewhere would report the wrong cause.
 
+**When an install cannot work, Helix says why rather than showing you the log.**
+`piper-tts` needs `onnxruntime`, which publishes no wheel for some
+platform/Python combinations — macOS on Intel with a very new Python is the case
+that turned up in QA. pip answers that with sixty lines of candidate versions and
+one sentence at the end; Helix now reads that sentence, names the packages pip
+named, says it is neither a Helix nor a network problem, and offers the three
+real ways forward: a different voice, a Python that has wheels, or kokoro-local
+if Docker is already running. Diagnosis rather than prediction — which Python has
+wheels for what is a moving target Helix would get wrong, while the installer has
+just finished saying so precisely.
+
 `/blackbox setup` verifies the chain before declaring success, and closes with a
 VOICE LINK panel naming what will hear you, what will answer, and whether every
 selected provider actually responded. It used to print a flat "Voice link

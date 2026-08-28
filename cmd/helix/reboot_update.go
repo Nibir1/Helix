@@ -1,18 +1,26 @@
 // cmd/helix/reboot_update.go
 //
-// Purpose: the update half of /reboot — check, show, confirm, install.
+// Purpose: the update half of /reboot — check, install, restart.
 //
-// Two rules shape everything here, and both are refusals:
+// **Installing is automatic, by owner decision.** There is no confirmation and
+// no voice carve-out: `/reboot` finds a newer Helix and installs it, whether the
+// word was typed or spoken. The reasoning is the owner's and worth recording,
+// because the code reads as permissive without it — the update comes from a
+// repository the owner controls and publishes to deliberately, so "is this
+// build wanted?" is a question already answered by the act of tagging a release.
+// A prompt in front of that is a prompt with one sensible answer.
 //
-//   - **A spoken reboot never installs.** `/reboot` is voice-reachable because
-//     restarting destroys nothing; downloading and executing a new binary is a
-//     different act entirely, and a television saying "reboot" must not be able
-//     to cause it. The spoken path checks and REPORTS, and the install waits
-//     for a typed confirmation.
-//   - **An update never blocks the restart.** GitHub being down, a rate limit,
-//     a checksum that does not match — none of them may stop `/reboot` from
-//     doing the thing it was asked to do. Every failure here degrades to "no
-//     update" and the shell restarts anyway.
+// What that shifts, stated plainly rather than left implicit: whoever can
+// publish a release to the configured repo can replace this binary without a
+// human present. The controls that remain are the ones in internal/update — a
+// mandatory checksum, a pinned host, a payload that must prove it is Helix for
+// this machine — plus the supervisor's automatic rollback when a freshly
+// installed binary cannot start. Integrity, not authenticity; see ADR-019.
+//
+// One rule survives unchanged: **an update never blocks the restart.** GitHub
+// being down, a rate limit, a checksum that does not match — none may stop
+// `/reboot` from doing the thing it was asked to do. Every failure degrades to
+// "no update" and the shell restarts anyway.
 package main
 
 import (
@@ -38,14 +46,10 @@ const updateCheckTimeout = 12 * time.Second
 // installed binary, so the supervisor can roll back if it dies immediately.
 const rebootUpdatedEnv = "HELIX_REBOOT_UPDATED"
 
-// checkForUpdate and confirmInstall are seams, so the two rules that matter —
-// a spoken reboot never installs, and a declined confirmation never installs —
-// are testable without a network or a terminal. Nothing but tests reassigns
-// them; they are variables rather than parameters because every caller of
-// maybeInstallUpdate wants the real ones.
+// checkForUpdate and performInstall are seams, so the update path is testable
+// without a network. Nothing but tests reassigns them.
 var (
 	checkForUpdate = update.Check
-	confirmInstall = wizConfirmDanger
 	performInstall = installCandidate
 )
 
@@ -55,9 +59,12 @@ var (
 // what to say — the restart proceeds either way.
 //
 // Args:
-//   - spoken: whether the reboot was asked for out loud. Gates the install.
-//   - explicit: whether the user asked to check ("/reboot check"), which makes
-//     "you are up to date" worth printing rather than noise.
+//   - spoken: whether the reboot was asked for out loud. Reported, not gated —
+//     it changes only what the record says about who asked.
+//   - explicit: whether the user asked to check ("/reboot check"), which both
+//     makes "you are up to date" worth printing rather than noise AND means
+//     install nothing, because someone asking a question has not asked to be
+//     upgraded.
 func maybeInstallUpdate(spoken, explicit bool) bool {
 	if !cfg.Update.Check && !explicit {
 		return false
@@ -99,16 +106,14 @@ func maybeInstallUpdate(spoken, explicit bool) bool {
 
 	printUpdatePanel(candidate, current)
 
-	if spoken {
-		// The carve-out. Reported, never acted on.
-		fmt.Println(shell.Step(shell.StateIdle, "not installing",
-			"a spoken reboot restarts only — type /reboot to install this"))
+	// `/reboot check` answers a question. Installing off the back of it would
+	// mean there is no way to ask without being upgraded.
+	if explicit {
+		fmt.Println(shell.Step(shell.StateIdle, "not installed",
+			"/reboot installs it and restarts"))
 		return false
 	}
-	if !confirmInstall(fmt.Sprintf("install %s and restart into it", candidate.Describe())) {
-		fmt.Println(shell.Step(shell.StateIdle, "kept", "the update was not installed"))
-		return false
-	}
+	_ = spoken // the record notes who asked; the install does not care
 	return performInstall(candidate)
 }
 

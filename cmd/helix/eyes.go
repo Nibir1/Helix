@@ -17,8 +17,6 @@ import (
 	"time"
 
 	"helix/internal/ai"
-
-	"github.com/fatih/color"
 )
 
 // describeWhatIsSeen captures one frame and answers a question about it.
@@ -29,29 +27,30 @@ import (
 // on and then have no way whatsoever to use it.
 func describeWhatIsSeen(question string) {
 	if agentCore == nil {
-		color.Red("The agent is not available in this session.")
+		uiFail("agent", "is not available in this session")
 		return
 	}
 	if !cfg.Vision.Enabled {
-		color.Yellow("Eyes are off. Run /blackbox eyes on first.")
+		uiIdle("eyes", "off")
+		uiUsage("/blackbox eyes on")
 		return
 	}
 	if ready, why := visionReady(); !ready {
 		// Both halves, not just the model: a host with no ffmpeg used to be told
 		// the camera was fine right up until the shutter.
-		color.Yellow("Cannot capture: %s", why)
+		uiWarn("cannot capture", why)
 		if !visionAvailable() {
 			for _, line := range visionUnavailableHelp() {
-				color.Yellow("%s", line)
+				uiDetail(line)
 			}
 		}
 		return
 	}
 	// Say what is about to happen before the shutter: a camera that activates
 	// without a word is exactly the behavior the /eyes opt-in exists to avoid.
-	color.Cyan("Capturing one frame (memory only) via %s…", visionRouteDescription())
+	uiIdle("capturing", "one frame, memory only, via "+visionRouteDescription())
 	if err := agentCore.DescribeFrame(question); err != nil {
-		color.Red("Vision failed: %v", err)
+		uiFail("vision", err.Error())
 	}
 }
 
@@ -142,13 +141,13 @@ func setVisionEnabled(on bool) {
 	cfg.Vision.Enabled = on
 	_ = cfg.SavePreferences()
 	if on {
-		color.Green("Eyes ENABLED — frames are captured in memory only, never written to disk.")
+		uiOK("eyes", "on — frames are held in memory only, never written to disk")
 		if agentCore != nil && agentCore.OnSpeak != nil {
 			agentCore.OnSpeak("Eyes on.")
 		}
 		journalVisionEvent("enabled", "", 0)
 	} else {
-		color.Yellow("Eyes DISABLED — camera perception is off.")
+		uiIdle("eyes", "off — camera perception is off")
 		if agentCore != nil && agentCore.OnSpeak != nil {
 			agentCore.OnSpeak("Eyes off.")
 		}

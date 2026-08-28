@@ -20,8 +20,6 @@ import (
 	"helix/internal/rag"
 	"helix/internal/shell"
 	"helix/internal/utils"
-
-	"github.com/fatih/color"
 )
 
 type providerOption struct {
@@ -95,7 +93,7 @@ func setupProvider(provider string) error {
 // unreachable one fails later as an opaque connection error.
 func setupLlamaCppProvider() error {
 	url := llamacpp.BaseURL(cfg.LLM.LlamaCppURL)
-	color.Cyan("llama.cpp endpoint: %s", url)
+	fmt.Println(shell.KV("ENDPOINT", shell.Value(url), shell.KVWidth("ENDPOINT")))
 
 	p, err := ai.GetProviderByName(llamacpp.Name)
 	if err != nil {
@@ -114,19 +112,19 @@ func setupLlamaCppProvider() error {
 
 		kind, hint := llamacpp.Diagnose(herr, url)
 		if kind == llamacpp.DiagnosisForeignServer {
-			color.Yellow("A DIFFERENT service is answering on %s.", url)
+			uiWarn("wrong service", "something else is answering on "+url)
 		} else {
-			color.Yellow("llama-server is not reachable at %s.", url)
+			uiWarn("llama-server", "not reachable at "+url)
 		}
 		for _, line := range strings.Split(hint, "\n") {
-			color.Yellow("  %s", line)
+			uiDetail(line)
 		}
 
 		// Whether llama-server exists decides the advice, and Diagnose already
 		// made that call (it is the package that can check). Reuse it here so
 		// /provider-status and this wizard cannot disagree.
 		_, installed := llamacpp.ServerInstalled()
-		color.Yellow("  Override the endpoint with HELIX_LLAMACPP_URL or llm.llamacpp_url.")
+		uiDetail("Override the endpoint with HELIX_LLAMACPP_URL or llm.llamacpp_url.")
 
 		// Offer to install it, then walk the user to a running server. Each stage
 		// only runs when the previous one is satisfied, so nobody is shown a
@@ -147,7 +145,7 @@ func setupLlamaCppProvider() error {
 		// Selecting it anyway leaves the shell unable to answer ANYTHING, so
 		// say that plainly rather than letting the next prompt fail with a raw
 		// 404 from whatever else is on that port.
-		color.Yellow("Until llama-server responds, every planner and chat request will fail.")
+		uiWarn("unusable", "until llama-server responds, every planner and chat request fails")
 		if !commands.AskForConfirmation("Select llama.cpp anyway?") {
 			return fmt.Errorf("llama.cpp not usable at %s", url)
 		}
@@ -155,7 +153,7 @@ func setupLlamaCppProvider() error {
 	}
 
 	ai.NoteProviderReachable(llamacpp.Name)
-	color.Green("llama-server reachable.")
+	uiOK("llama-server", "reachable")
 	reportResolvedLocalModel()
 	return nil
 }
@@ -176,20 +174,20 @@ func reportResolvedLocalModel() {
 	resolved, changed := ai.ResolveActiveLocalModel(ctx)
 	if !changed {
 		if ai.IsPlaceholderModel(ai.ActiveModel()) {
-			color.Yellow("The server did not report a model name; Helix will keep the %q label.",
-				ai.ActiveModel())
-			color.Yellow("  Capability limits fall back to conservative defaults (8k context, no vision).")
-			color.Yellow("  Set the real one with /model use <name> if you know it.")
+			uiWarn("no model name", fmt.Sprintf(
+				"the server did not report one — keeping the %q label", ai.ActiveModel()))
+			uiDetail("Capability limits fall back to conservative defaults (8k context, no vision).")
+			uiUsage("/model use <name>   sets the real one if you know it")
 		}
 		return
 	}
 
-	color.Green("Loaded model: %s", resolved)
-	color.Cyan("  Context window: %d tokens", providers.GetContextLimit(resolved))
+	uiOK("loaded", resolved)
+	uiDetail(fmt.Sprintf("context window: %d tokens", providers.GetContextLimit(resolved)))
 	if providers.SupportsVision(llamacpp.Name, resolved) {
-		color.Cyan("  Vision: supported — /blackbox on will see with this model")
+		uiDetail("vision: supported — /blackbox on will see with this model")
 	} else {
-		color.Cyan("  Vision: not detected in the model name — the camera will stay off")
+		uiDetail("vision: not detected in the model name — the camera stays off")
 	}
 	cfg.ProviderModel = resolved
 	_ = cfg.SavePreferences()
@@ -208,10 +206,10 @@ func ensureRemoteAPIKey(provider string) error {
 			// A network blip or a provider outage is not a bad key. Making
 			// someone re-paste a working credential because their wifi dropped
 			// would be the worse failure.
-			color.Yellow("Keeping the saved key for %s — it could not be checked just now.", provider)
+			uiIdle(provider, "keeping the saved key — it could not be checked just now")
 			return nil
 		case keyRejected:
-			color.Yellow("The saved key for %s no longer works. Enter a new one.", provider)
+			uiWarn(provider, "the saved key no longer works — enter a new one")
 		}
 	}
 
@@ -263,19 +261,19 @@ func verifyProviderKey(provider string) keyVerdict {
 		},
 	)
 	if err == nil {
-		color.Green("%s key verified.", provider)
+		uiOK(provider, "key verified")
 		ai.NoteProviderReachable(provider)
 		return keyWorks
 	}
 
 	ai.NoteProviderUnreachable(provider, err.Error())
 	if isAuthFailure(err) {
-		color.Red("%s rejected the API key.", provider)
-		color.Yellow("  Check it on the provider's dashboard, then re-run /setup.")
+		uiFail(provider, "rejected the API key")
+		uiDetail("Check it on the provider's dashboard, then re-run /setup.")
 		return keyRejected
 	}
-	color.Yellow("%s could not be verified right now: %v", provider, err)
-	color.Yellow("  The key is saved; /provider-status re-checks it.")
+	uiWarn(provider, "could not be verified right now: "+err.Error())
+	uiDetail("The key is saved; /provider-status re-checks it.")
 	return keyUnverifiable
 }
 
@@ -353,8 +351,8 @@ func selectRemoteModel(provider string) error {
 		// provider the user is selecting right now. Recording it keeps the status
 		// line from claiming CLEAR on a shell that cannot answer anything.
 		ai.NoteProviderUnreachable(provider, err.Error())
-		color.Yellow("Could not fetch live model list: %v", err)
-		color.Yellow("Using default model: %s", defaultModel)
+		uiWarn("model list", "could not be fetched: "+err.Error())
+		uiIdle("using the default", defaultModel)
 		ai.UseModel(defaultModel)
 		return nil
 	}
@@ -753,11 +751,11 @@ func runCancellableProgressWithBase(
 	cancel()
 
 	if errors.Is(err, context.Canceled) {
-		color.Yellow("Operation cancelled.")
+		uiIdle("cancelled", "")
 	}
 
 	if errors.Is(err, context.DeadlineExceeded) {
-		color.Yellow("Operation timed out.")
+		uiWarn("timed out", "")
 	}
 
 	return err
@@ -774,8 +772,8 @@ func confirmKeyForProvider(provider, key string) bool {
 	if !wrong {
 		return true
 	}
-	color.Yellow("That key looks like a %s key, but you are configuring %q.", owner, provider)
-	color.Yellow("  %s", providers.KeyOwnerHint(provider, owner))
+	uiWarn("wrong vendor", fmt.Sprintf("that looks like a %s key, but you are configuring %q", owner, provider))
+	uiDetail(providers.KeyOwnerHint(provider, owner))
 	return commands.AskForConfirmation("Store it anyway?")
 }
 
@@ -795,33 +793,33 @@ func suggestOllamaWeightsForLlamaCpp(serverInstalled bool) {
 	}
 
 	fmt.Println()
-	color.Cyan("You already have %d GGUF model(s) on disk from Ollama.", len(models))
+	uiIdle("already on disk", fmt.Sprintf("%d GGUF model(s) pulled by Ollama", len(models)))
 	if !serverInstalled {
 		// Without the binary this is context for later, not a command to run
 		// now. Presenting it as the latter is how a user ends up pasting a
 		// "command not found".
-		color.Cyan("Once llama-server is installed it can serve them directly — same files,")
-		color.Cyan("no copy or conversion:")
+		uiDetail("Once llama-server is installed it can serve them directly — same files, no copy or conversion:")
 	} else {
-		color.Cyan("llama.cpp can serve them directly — same files, no copy or conversion:")
+		uiDetail("llama.cpp can serve them directly — same files, no copy or conversion:")
 	}
 
 	const shown = 5
 	for i, m := range models {
 		if i == shown {
-			color.Cyan("  ... and %d more", len(models)-shown)
+			uiDetail(fmt.Sprintf("… and %d more", len(models)-shown))
 			break
 		}
-		color.Cyan("  %-28s %5.1f GB", m.Name, m.SizeGB())
-		color.Cyan("    llama-server -m %s --port 8080", m.Path)
+		fmt.Println(shell.KV(m.Name, shell.Muted(fmt.Sprintf("%.1f GB", m.SizeGB())),
+			shell.KVWidth(m.Name)))
+		fmt.Println(shell.StepCommand(fmt.Sprintf("llama-server -m %s --port 8080", m.Path)))
 	}
 	// Accuracy matters here: Ollama listens on 11434 and llama-server on 8080, so
 	// they do NOT collide by default — an earlier version of this line claimed
 	// they did. The real cost of running both is memory, since each loads its own
 	// copy of the weights.
-	color.Yellow("Ollama (11434) and llama-server (8080) can run side by side, but each")
-	color.Yellow("loads its own copy of the weights — stop one if RAM is tight.")
-	color.Yellow("Note: whisper.cpp also defaults to 8080; /doctor reports that clash.")
+	uiDetail("Ollama (11434) and llama-server (8080) run side by side, but each loads " +
+		"its own copy of the weights — stop one if RAM is tight. whisper.cpp also " +
+		"defaults to 8080; /doctor reports that clash.")
 }
 
 // suggestOllamaInstead points at a working Ollama when llama.cpp is not
@@ -845,12 +843,12 @@ func suggestOllamaInstead(llamaInstalled bool) {
 	}
 
 	fmt.Println()
-	color.Green("Ollama IS running on this machine and does the same job.")
+	uiOK("ollama", "is running here and does the same job")
 	if models, err := client.ListModels(ctx); err == nil && len(models) > 0 {
-		color.Green("  It already has: %s", strings.Join(modelIDs(models, 4), ", "))
+		uiDetail("it already has: " + strings.Join(modelIDs(models, 4), ", "))
 	}
-	color.Green("  Answer N here and choose \"Ollama (local)\" instead — no build required.")
-	color.Cyan("  llama.cpp is for hardware Ollama cannot serve; see docs/local_runtimes.md.")
+	uiDetail("Answer N here and choose \"Ollama (local)\" instead — no build required.")
+	uiDetail("llama.cpp is for hardware Ollama cannot serve; see docs/local_runtimes.md.")
 }
 
 // modelIDs renders up to max model names for a one-line summary.
@@ -880,10 +878,10 @@ func offerLlamaCppInstall() bool {
 	}
 
 	fmt.Println()
-	color.Cyan("Helix can install it for you:")
-	color.Cyan("  %s", cmdLine)
+	uiIdle("not installed", "Helix can install it")
+	fmt.Println(shell.StepCommand(cmdLine))
 	if !commands.AskForConfirmation("Run that now?") {
-		color.Yellow("Skipped. Run it yourself and re-select llama.cpp when done.")
+		uiIdle("skipped", "run it yourself and re-select llama.cpp when done")
 		return false
 	}
 
@@ -893,7 +891,7 @@ func offerLlamaCppInstall() bool {
 	// overwrote brew's line. Two writers, one cursor. brew's output is better
 	// than anything Helix would draw, so let the child own the terminal.
 	fmt.Println()
-	color.Cyan("$ %s", cmdLine)
+	fmt.Println(shell.StepCommand(cmdLine))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	unreg := utils.RegisterOperation(cancel)
@@ -902,11 +900,11 @@ func offerLlamaCppInstall() bool {
 	if err := runShellInstall(ctx, cmdLine); err != nil {
 		fmt.Println()
 		if ctx.Err() != nil {
-			color.Yellow("Install cancelled.")
+			uiIdle("cancelled", "nothing was installed")
 		} else {
-			color.Red("Install failed: %v", err)
+			uiFail("install", err.Error())
 		}
-		color.Yellow("Run it manually: %s", cmdLine)
+		uiUsage(cmdLine)
 		return false
 	}
 	fmt.Println()
@@ -916,11 +914,11 @@ func offerLlamaCppInstall() bool {
 	// include the keg until a new shell).
 	path, present := llamacpp.ServerInstalled()
 	if !present {
-		color.Yellow("Install reported success but llama-server is still not on PATH.")
-		color.Yellow("Open a new shell, or add Homebrew's bin directory to PATH.")
+		uiWarn("not on PATH", "the install reported success but llama-server is still missing")
+		uiDetail("Open a new shell, or add Homebrew's bin directory to PATH.")
 		return false
 	}
-	color.Green("Installed: %s", path)
+	uiOK("installed", path)
 	return true
 }
 
@@ -958,14 +956,14 @@ func guideLlamaCppModel(endpoint string) {
 
 	if len(cached) == 0 && len(ollamaModels) == 0 {
 		fmt.Println()
-		color.Cyan("No GGUF models found on this machine yet.")
-		color.Cyan("llama.cpp downloads them itself — no other tool needed:")
+		uiIdle("no GGUF models", "none on this machine yet")
+		uiDetail("llama.cpp downloads them itself — no other tool needed:")
 		printLlamaCppPullOptions(port)
 		return
 	}
 
 	fmt.Println()
-	color.Green("Models already on disk. Start llama-server with one of these:")
+	uiOK("models on disk", "start llama-server with one of these")
 
 	const shown = 4
 	printed := 0
@@ -973,27 +971,31 @@ func guideLlamaCppModel(endpoint string) {
 		if printed == shown {
 			break
 		}
-		color.Cyan("  %-34s %5.1f GB   (llama.cpp cache)", truncStr(m.Name, 34), m.SizeGB())
-		color.Cyan("    %s", llamacpp.ServeCommand(m.Path, port))
+		fmt.Println(shell.KV(truncStr(m.Name, 34),
+			shell.Muted(fmt.Sprintf("%.1f GB  ·  llama.cpp cache", m.SizeGB())),
+			shell.KVWidth(truncStr(m.Name, 34))))
+		fmt.Println(shell.StepCommand(llamacpp.ServeCommand(m.Path, port)))
 		printed++
 	}
 	for _, m := range ollamaModels {
 		if printed == shown {
 			break
 		}
-		color.Cyan("  %-34s %5.1f GB   (pulled by Ollama)", truncStr(m.Name, 34), m.SizeGB())
-		color.Cyan("    %s", llamacpp.ServeCommand(m.Path, port))
+		fmt.Println(shell.KV(truncStr(m.Name, 34),
+			shell.Muted(fmt.Sprintf("%.1f GB  ·  pulled by Ollama", m.SizeGB())),
+			shell.KVWidth(truncStr(m.Name, 34))))
+		fmt.Println(shell.StepCommand(llamacpp.ServeCommand(m.Path, port)))
 		printed++
 	}
 	if total := len(cached) + len(ollamaModels); total > printed {
-		color.Cyan("  ... and %d more", total-printed)
+		uiDetail(fmt.Sprintf("… and %d more", total-printed))
 	}
 
 	if len(ollamaModels) > 0 {
-		color.Yellow("Ollama's GGUFs are plain files llama.cpp can open directly — but not")
-		color.Yellow("every one will LOAD: Ollama converts some models with tensor layouts a")
-		color.Yellow("given llama.cpp build does not implement yet. If a load fails, the error")
-		color.Yellow("and the log tail are shown, and a -hf download below is the way past it.")
+		uiDetail("Ollama's GGUFs are plain files llama.cpp can open directly — but not " +
+			"every one will LOAD: Ollama converts some models with tensor layouts a given " +
+			"llama.cpp build does not implement yet. If a load fails, the error and the log " +
+			"tail are shown, and a -hf download below is the way past it.")
 	}
 
 	// Offer to run it. The wizard has already installed the binary and found the
@@ -1008,7 +1010,7 @@ func guideLlamaCppModel(endpoint string) {
 	}
 
 	fmt.Println()
-	color.Cyan("Or download a different one:")
+	uiDetail("Or download a different one:")
 	printLlamaCppPullOptions(port)
 }
 
@@ -1061,7 +1063,7 @@ func offerLlamaCppStart(choices []launchChoice, endpoint, port string) bool {
 		if answer != "" {
 			n, err := strconv.Atoi(answer)
 			if err != nil || n < 1 || n > len(choices) {
-				color.Yellow("Not a listed number; nothing started.")
+				uiIdle("not a listed number", "nothing was started")
 				return false
 			}
 			choice = choices[n-1]
@@ -1070,7 +1072,7 @@ func offerLlamaCppStart(choices []launchChoice, endpoint, port string) bool {
 
 	logPath, err := llamacpp.DefaultLogPath()
 	if err != nil {
-		color.Red("Cannot prepare a log file: %v", err)
+		uiFail("log file", err.Error())
 		return false
 	}
 
@@ -1078,20 +1080,22 @@ func offerLlamaCppStart(choices []launchChoice, endpoint, port string) bool {
 		ModelPath: choice.Path, Port: port, LogPath: logPath,
 	})
 	if err != nil {
-		color.Red("Could not start llama-server: %v", err)
+		uiFail("llama-server", err.Error())
 		return false
 	}
-	color.Cyan("Started llama-server (pid %d), loading %s…", srv.PID, choice.Label)
+	uiIdle("starting", fmt.Sprintf("llama-server pid %d, loading %s", srv.PID, choice.Label))
 
 	if !waitForLlamaCpp(srv, endpoint, choice.SizeGB) {
 		return false
 	}
 
-	color.Green("llama-server is answering on %s.", port)
+	uiOK("llama-server", "answering on "+port)
 	// The process is detached and outlives this session, which the user has to
 	// be told: they now own a process holding several gigabytes of RAM.
-	color.Yellow("It keeps running after Helix exits. Stop it with:  %s", srv.StopHint())
-	color.Cyan("Log: %s", srv.LogPath)
+	w := shell.KVWidth("KEEP-ALIVE", "LOG")
+	fmt.Println(shell.KV("KEEP-ALIVE", shell.Muted("runs after Helix exits · stop with  ")+
+		shell.Value(srv.StopHint()), w))
+	fmt.Println(shell.KV("LOG", shell.Value(srv.LogPath), w))
 
 	reportResolvedLocalModel()
 	return true
@@ -1131,18 +1135,18 @@ func waitForLlamaCpp(srv llamacpp.Server, endpoint string, sizeGB float64) bool 
 	}
 
 	if errors.Is(err, errServerExited) || !srv.Alive() {
-		color.Red("llama-server exited while loading the model.")
+		uiFail("llama-server", "exited while loading the model")
 		if exitErr := srv.ExitError(); exitErr != nil {
-			color.Red("  %v", exitErr)
+			uiDetail(exitErr.Error())
 		}
 	} else {
-		color.Red("llama-server did not become ready within %s.", budget)
-		color.Yellow("It may still be loading; check again with /provider-status.")
+		uiFail("llama-server", "did not become ready within "+budget.String())
+		uiDetail("It may still be loading; /provider-status checks again.")
 	}
 	if tail := llamacpp.LogTail(srv.LogPath, 8); len(tail) > 0 {
-		color.Yellow("Last lines of %s:", srv.LogPath)
+		uiDetail("last lines of " + srv.LogPath + ":")
 		for _, line := range tail {
-			color.Yellow("  %s", truncStr(line, 160))
+			uiDetail(truncStr(line, 160))
 		}
 	}
 	return false
@@ -1159,19 +1163,19 @@ func printLlamaCppPullOptions(port string) {
 		if rec.Runtime != "llamacpp" || rec.HFRepo == "" {
 			continue
 		}
-		color.Cyan("  %s", rec.DisplayName)
-		color.Cyan("    %s", llamacpp.PullCommand(rec.HFRepo, port))
+		fmt.Println(shell.KV(rec.DisplayName, "", shell.KVWidth(rec.DisplayName)))
+		fmt.Println(shell.StepCommand(llamacpp.PullCommand(rec.HFRepo, port)))
 		offered++
 	}
 	if offered == 0 {
 		// RecommendLocalModels filters on RAM, so a very small machine can end
 		// up with nothing. Say that rather than printing an empty list.
-		color.Yellow("  No recommended model fits %d GB of RAM.", hw.RAMGB)
-		color.Yellow("  Browse GGUFs at https://huggingface.co/models?library=gguf and use:")
-		color.Yellow("    %s", llamacpp.PullCommand("<org>/<repo>", port))
+		uiIdle("no fit", fmt.Sprintf("no recommended model fits %d GB of RAM", hw.RAMGB))
+		uiDetail("Browse GGUFs at https://huggingface.co/models?library=gguf and use:")
+		fmt.Println(shell.StepCommand(llamacpp.PullCommand("<org>/<repo>", port)))
 		return
 	}
-	color.Yellow("  The download is cached, so later launches reuse it.")
+	uiDetail("The download is cached, so later launches reuse it.")
 }
 
 // warnIfOllamaCannotSeeItsmodels reports models present on disk that the RUNNING
@@ -1215,13 +1219,13 @@ func warnIfOllamaCannotSeeItsModels(onDisk []ollama.LocalModel) {
 	}
 
 	fmt.Println()
-	color.Red("The running Ollama server does not list %d model(s) that are on disk:", len(invisible))
-	color.Red("  %s", strings.Join(invisible, ", "))
-	color.Yellow("That means the server is reading a DIFFERENT model store than ~/.ollama —")
-	color.Yellow("usually because it was started with another HOME or OLLAMA_MODELS.")
-	color.Yellow("Those models will 404, including for Helix's own local fallback.")
-	color.Cyan("Find the server and what it inherited:")
-	color.Cyan("  lsof -nP -iTCP:11434 -sTCP:LISTEN")
-	color.Cyan("  ps eww -p <pid> | tr ' ' '\\n' | grep -E 'HOME=|OLLAMA_MODELS='")
-	color.Cyan("Restart it from your own shell to serve ~/.ollama again.")
+	uiFail("ollama", fmt.Sprintf("does not list %d model(s) that are on disk", len(invisible)))
+	uiDetail(strings.Join(invisible, ", "))
+	uiDetail("The server is reading a DIFFERENT model store than ~/.ollama — usually " +
+		"because it was started with another HOME or OLLAMA_MODELS. Those models will " +
+		"404, including for Helix's own local fallback.")
+	uiDetail("Find the server and what it inherited:")
+	fmt.Println(shell.StepCommand("lsof -nP -iTCP:11434 -sTCP:LISTEN"))
+	fmt.Println(shell.StepCommand("ps eww -p <pid> | tr ' ' '\\n' | grep -E 'HOME=|OLLAMA_MODELS='"))
+	uiDetail("Restart it from your own shell to serve ~/.ollama again.")
 }

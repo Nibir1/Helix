@@ -92,7 +92,7 @@ func TestVisionReadyRequiresCaptureNotJustAModel(t *testing.T) {
 	saved := visionSvc
 	defer func() { visionSvc = saved }()
 
-	visionSvc = nil // stands in for a host with no ffmpeg
+	visionSvc = nil
 	ready, why := visionReady()
 	if ready {
 		t.Fatal("vision must not report ready when no frame can be captured")
@@ -100,8 +100,30 @@ func TestVisionReadyRequiresCaptureNotJustAModel(t *testing.T) {
 	if why == "" {
 		t.Fatal("an unready camera must say why")
 	}
-	if !bytes.Contains([]byte(why), []byte("ffmpeg")) {
-		t.Errorf("reason = %q, want it to name the missing piece", why)
+}
+
+// "The service is not up" and "ffmpeg is missing" are DIFFERENT answers, and
+// this test exists because conflating them shipped a real bug: initVoiceMode
+// ran before visionSvc was constructed, so a restored live session reported
+// "no ffmpeg on PATH" on machines that had ffmpeg and were about to use it
+// successfully. The same session entered by typing /blackbox on said
+// "watching" seconds later.
+//
+// The old version of the test above set visionSvc = nil and asserted the reason
+// named ffmpeg — encoding the conflation as the expectation, which is why
+// nothing caught it.
+func TestVisionReadyDoesNotBlameFfmpegForAnAbsentService(t *testing.T) {
+	saved := visionSvc
+	defer func() { visionSvc = saved }()
+
+	visionSvc = nil
+	_, why := visionReady()
+	if bytes.Contains([]byte(why), []byte("ffmpeg")) {
+		t.Errorf("reason = %q — a readiness check must not name a cause it has "+
+			"not established; the service simply had not been built yet", why)
+	}
+	if why == "" {
+		t.Error("an unready camera must still say why")
 	}
 }
 

@@ -28,8 +28,6 @@ import (
 	"helix/internal/ux"
 	"helix/internal/vision"
 	"helix/internal/wakeword"
-
-	"github.com/fatih/color"
 )
 
 var (
@@ -53,7 +51,7 @@ func initVoiceMode() {
 			// the same mode reached by a different door, behaving differently.
 			startCompanion()
 		} else {
-			color.Yellow("Voice mode skipped at startup: %v", err)
+			uiWarn("voice mode skipped at startup", err.Error())
 			cfg.UserPrefs.VoiceMode = false
 			_ = cfg.SavePreferences()
 		}
@@ -244,7 +242,7 @@ func voiceTurn() (input.InputEvent, error) {
 			// nothing — do not silently re-record over these.
 			return ev, err
 		}
-		color.Yellow("streaming unavailable (%v); using batch capture", err)
+		uiIdle("batch capture", "streaming is unavailable: "+err.Error())
 	}
 	return batchVoiceTurn()
 }
@@ -280,8 +278,8 @@ func voiceTurnWithRetry() (input.InputEvent, error) {
 			if attempt >= maxVoiceRetries {
 				return ev, err
 			}
-			color.Yellow("I didn't catch that — please speak again (attempt %d/%d)",
-				attempt+1, maxVoiceRetries)
+			uiWarn("not caught", fmt.Sprintf("please speak again (attempt %d/%d)",
+				attempt+1, maxVoiceRetries))
 			// voiceTurn plays the ready cue itself — no extra beep here.
 			continue
 		}
@@ -773,7 +771,7 @@ func noteWakeLapse(o wakeOutcome) {
 		return
 	}
 	wakeLapseAnnounced[o] = true
-	color.Yellow("%s", notice)
+	uiWarn("wake", notice)
 }
 
 // interactiveAmbientMonitor builds the monitor for the interactive wake loop.
@@ -804,7 +802,7 @@ func interactiveAmbientMonitor() *ambient.ChunkMonitor {
 func handleMicTest() {
 	recorder, err := speech.DetectRecorder()
 	if err != nil {
-		color.Red("%v", err)
+		uiFail("microphone", err.Error())
 		return
 	}
 	fmt.Printf("Mic test (recorder: %s) — speak now for up to 3s...\n", recorder)
@@ -813,7 +811,7 @@ func handleMicTest() {
 	defer cancel()
 	clip, err := speech.RecordClip(ctx, speech.CaptureOptions{MaxDuration: 3 * time.Second})
 	if err != nil {
-		color.Red("Capture failed: %v", err)
+		uiFail("capture", err.Error())
 		return
 	}
 
@@ -828,8 +826,8 @@ func handleMicTest() {
 	}
 	fmt.Printf("Captured %.1fs — level %.3f (%.0f dBFS) — %s\n",
 		speech.ClipDuration(clip), rms, dB, status)
-	color.Cyan("If this reads QUIET, run /blackbox status to confirm the STT chain, then check macOS")
-	color.Cyan("System Settings ▸ Sound ▸ Input (or the OS equivalent) for the active microphone.")
+	uiDetail("If this reads QUIET, /blackbox status confirms the STT chain — then check " +
+		"the OS sound input settings for the active microphone.")
 }
 
 // appendMetricsRecord appends one JSON line to ~/.helix/metrics/<name>.jsonl

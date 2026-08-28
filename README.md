@@ -20,6 +20,7 @@ It combines:
 - **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more)
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
+- **One visual language across all 57 commands** — panels, badges and aligned rows, never a flat stack of coloured lines. Colour honours `NO_COLOR` and switches itself off when the output is not a terminal, so piping Helix or running it as a service produces clean text
 - **A Multi-Layer Safety & Sandbox Engine** around shell, git, packages, and recon
 - **Enterprise-Grade Hardening** (Kernel confinement, instruction firewalls, and signed supply chains)
 - **Synthetic Tonal Audio** for immersive, synchronized terminal feedback
@@ -268,7 +269,7 @@ The first boot walks three stages, each skippable: **AI provider**, **system pac
 Where Helix does not know a verified package name for your platform, it says so and points at the docs rather than running a guess.
 
 ### Live mode — `/blackbox`
-`/blackbox on` is Helix awake: microphone open, camera on, replies spoken, and a companion loop that looks at the scene on its own and speaks up when something is worth saying. Say **"manual mode"** at any time to return to the keyboard, **"turn off your eyes"** to close the camera without ending the conversation, or **"reboot"** to restart the shell — which comes back listening, in the same directory, on the same provider, with the conversation intact. A spoken reboot restarts but never **installs**: it will tell you an update is waiting and leave the decision to the keyboard.
+`/blackbox on` is Helix awake: microphone open, camera on, replies spoken, and a companion loop that looks at the scene on its own and speaks up when something is worth saying. Say **"manual mode"** at any time to return to the keyboard, **"turn off your eyes"** to close the camera without ending the conversation, or **"reboot"** to restart the shell — which comes back listening, in the same directory, on the same provider, with the conversation intact.
 
 Eight commands (`/voice`, `/manual`, `/voice-setup`, `/voice-status`, `/wake`, `/say`, `/tts`, `/eyes`) folded into this one; typing an old name prints where it went.
 
@@ -325,7 +326,7 @@ hours old, and wiped by `/purge`.
 ### DANGER ZONE
 | Command | Description |
 | :--- | :--- |
-| `/reboot [now\|check]` | **Self-update and restart.** Checks GitHub releases and locally built binaries, installs with your confirmation, and comes back in the same mode, directory, provider and conversation. A download is installed only if its SHA-256 matches the release's checksums file; the previous binary is kept and restored automatically if the new one cannot start. `now` skips the check, `check` only reports. Say **"reboot"** in live mode — a spoken reboot restarts but never installs |
+| `/reboot [now\|check]` | **Self-update and restart.** Checks GitHub releases and locally built binaries, installs automatically, and comes back in the same mode, directory, provider and conversation. A download is installed only if its SHA-256 matches the release's checksums file; the previous binary is kept and restored automatically if the new one cannot start. `now` skips the check, `check` only reports. Say **"reboot"** in live mode |
 | `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, and the piper runtime binary) with their sizes, and closes by pointing at `/reboot` — open database handles only release when the process exits |
 
 ### Aliases
@@ -578,9 +579,14 @@ Two sources, and by default whichever is newer wins:
 release that simply does not run here, which no checksum can catch — the
 supervisor restores it automatically and starts it.
 
-**A spoken reboot never installs.** `/reboot` is voice-reachable because
-restarting destroys nothing; replacing the program you run is a different act,
-so the microphone can check and report and nothing else.
+**Installing is automatic — no confirmation, and voice may do it too.** Owner
+decision: the release comes from a repository you control and tag on purpose, so
+"is this build wanted?" is already answered by the act of publishing it. What
+that shifts, stated plainly: whoever can publish a release to the configured repo
+can replace your binary without a human present. The controls that remain are the
+checksum, the host pin, the build-info check and the automatic rollback.
+`/reboot check` reports without installing, and `update.check: false` turns the
+check off entirely.
 
 **Signatures are published but not checked by the updater.** Keyless
 verification with the wrong identity constraints reports success while proving

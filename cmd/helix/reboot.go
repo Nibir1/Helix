@@ -239,6 +239,8 @@ func restoreContinuity(now time.Time) bool {
 	// banner and restart the companion for no reason.
 	applyContinuityMode(rec.Mode)
 
+	recordRestartInSession(rec)
+
 	if !rec.Resumable() {
 		// A bare mode carry-over is worth doing and not worth a paragraph.
 		return true
@@ -277,6 +279,66 @@ func restoreContinuity(now time.Time) bool {
 	fmt.Println(shell.PanelEnd())
 	fmt.Println(shell.Hint("/memory shows the conversation this picks up from"))
 	return true
+}
+
+// recordRestartInSession tells the MODEL that the restart happened.
+//
+// Without this the shell resumes correctly and the assistant denies it. From a
+// live session, verbatim:
+//
+//	> Did you reboot yourself?
+//	No. I did not reboot myself. I have been running the whole time.
+//
+// It had, seconds earlier, on the user's spoken instruction. The panel said so
+// on screen and the planner never saw a word of it, because session.json
+// carries the CONVERSATION and a restart is not a turn in it — so the one
+// participant who could answer the question had no record of the event.
+//
+// Written as a synthetic turn, which is an established shape here (/compact
+// replaces the ring with one). It reaches the planner inside the same
+// zero-authority `<session_history>` fence as everything else, so it informs an
+// answer and never instructs one.
+//
+// This does NOT reintroduce the V5d problem. What is recorded is Helix's own
+// action — that it restarted, in which mode, from where — never anything the
+// microphone heard; rec.LastExchange is deliberately not used, and on a spoken
+// restart it is empty anyway.
+func recordRestartInSession(rec session.Continuity) {
+	if agentCore == nil || agentCore.Session == nil {
+		return
+	}
+	detail := "I restarted and came back in " + rec.Mode + " mode"
+	if rec.Cwd != "" {
+		detail += ", in " + rec.Cwd
+	}
+	if rec.Provider != "" {
+		detail += ", on " + rec.Provider
+		if rec.Model != "" {
+			detail += "/" + rec.Model
+		}
+	}
+	detail += "."
+	if len(rec.Tasks) > 0 {
+		detail += " Still in progress: " + strings.Join(rec.Tasks, "; ") + "."
+	}
+	detail += " The conversation before the restart is intact."
+
+	agentCore.Session.Append(session.Turn{
+		Timestamp: time.Now(),
+		Channel:   restartTurnChannel(rec),
+		UserText:  "(you asked me to reboot — " + rec.Reason + ")",
+		Reply:     detail,
+	})
+}
+
+// restartTurnChannel stamps the synthetic turn with the channel the request
+// actually arrived on, so an audit of the session can tell a spoken restart
+// from a typed one without consulting a second file.
+func restartTurnChannel(rec session.Continuity) string {
+	if rec.Mode == session.ModeVoice {
+		return "voice"
+	}
+	return "text"
 }
 
 // applyContinuityMode puts the shell back in the mode the record names.
@@ -338,41 +400,60 @@ var rebootPhrases = []string{
 // Complexity: O(len(text) × len(rebootPhrases)).
 func isVoiceRebootPhrase(text string) bool {
 	t := strings.ToLower(strings.TrimSpace(text))
-	// A question about rebooting is not a request to reboot. "What happens when
-	// you reboot" ends on the phrase and would otherwise fire — which is the
-	// suffix rule's one weak spot, and it costs more here than it does for the
-	// manual-mode kill phrase: mishearing that stops the microphone, mishearing
-	// this ends the process.
-	if looksLikeAQuestion(t) {
-		return false
-	}
 	t = strings.TrimRight(t, " .!?,")
+
 	for _, p := range rebootPhrases {
-		if t == p || strings.HasSuffix(t, " "+p) {
+		if t == p {
+			return true // the bare instruction
+		}
+		if !strings.HasSuffix(t, " "+p) {
+			continue
+		}
+		// Something precedes the phrase. It is an instruction only if that
+		// something is a lead-in someone actually says before a command.
+		if isImperativeLeadIn(strings.TrimSpace(t[:len(t)-len(p)])) {
 			return true
 		}
 	}
 	return false
 }
 
-// questionOpeners begin a sentence that is asking rather than instructing.
+// imperativeLeadIns are the words that may precede a spoken instruction.
 //
-// Openers rather than a trailing "?" alone: speech-to-text punctuation is a
-// guess, and several providers never emit a question mark at all — so a rule
-// that depended on one would work on some chains and not others.
-var questionOpeners = []string{
-	"what", "how", "why", "when", "where", "who", "which",
-	"can ", "could ", "should ", "would ", "will ", "do ", "does ", "did ",
-	"is ", "are ", "was ", "were ",
+// An ALLOWLIST, replacing an earlier blacklist of question openers, because the
+// blacklist let through the sentence that actually cost a live session:
+//
+//	"So you don't have any memory that I told you to reboot."
+//
+// It is not a question, so no opener matched; it ends on the phrase, so the
+// suffix matched; and Helix restarted itself in the middle of the user
+// explaining that it had forgotten restarting. A blacklist has to anticipate
+// every way English can end on a word without meaning it, which is not a list
+// anyone can finish. An allowlist has to anticipate how people ASK, which is
+// short — and its failure mode is a reboot that does not happen, where the user
+// simply says the word again.
+//
+// Reported speech is the case that matters and the one a blacklist cannot
+// cover: "I told you to reboot", "you said reboot", "I am not asking you to
+// reboot" all end on the phrase and none of them are requests.
+var imperativeLeadIns = []string{
+	"ok", "okay", "alright", "right", "now", "please", "helix",
+	"ok now", "okay now", "alright now", "and now", "so now", "then",
+	"go ahead and", "just", "please just", "now please", "okay please",
+	"ok please", "alright please", "helix please", "please helix",
+	"can you please", "could you please", // polite imperatives, not questions
+	"i want you to", "i need you to", "you can", "let's", "lets",
 }
 
-// looksLikeAQuestion reports whether an utterance is asking about something.
-func looksLikeAQuestion(t string) bool {
-	if strings.HasSuffix(strings.TrimSpace(t), "?") {
+// isImperativeLeadIn reports whether what precedes the phrase is a lead-in
+// rather than a sentence that merely mentions it.
+func isImperativeLeadIn(prefix string) bool {
+	prefix = strings.TrimSpace(strings.TrimRight(prefix, " ,"))
+	if prefix == "" {
 		return true
 	}
-	for _, opener := range questionOpeners {
-		if strings.HasPrefix(t, opener) {
+	for _, l := range imperativeLeadIns {
+		if prefix == l {
 			return true
 		}
 	}

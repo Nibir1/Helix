@@ -29,8 +29,6 @@ import (
 	"helix/internal/shell"
 	"helix/internal/speech"
 	"helix/internal/utils"
-
-	"github.com/fatih/color"
 )
 
 // todoList is the process-wide task list, shared with the agent so the planner
@@ -47,8 +45,8 @@ func requireAgent() bool {
 	if agentCore != nil {
 		return true
 	}
-	color.Red("This command needs the agent, which is not available in this session.")
-	color.Yellow("Run /doctor to see what failed to start.")
+	uiFail("agent", "is not available in this session")
+	uiUsage("/doctor shows what failed to start")
 	return false
 }
 
@@ -61,24 +59,26 @@ func handlePlanCommand(c cmdArgs) {
 		return
 	}
 	if c.Empty() {
-		color.Red("Usage: /plan <request>")
-		color.Yellow("Shows the steps a request would run, without executing any of them.")
+		uiUsage("/plan <request>")
+		uiDetail("Shows the steps a request would run, without executing any of them.")
 		return
 	}
 
 	plan, err := agentCore.PlanPreview(c.Rest)
 	if err != nil {
-		color.Red("Planning failed: %v", err)
+		uiFail("planning", err.Error())
 		return
 	}
 	if plan == nil || len(plan.Steps) == 0 {
-		color.Yellow("The planner produced no steps for that request.")
+		uiIdle("no steps", "the planner produced nothing for that request")
 		return
 	}
 
 	fmt.Println()
-	color.Cyan("=== Plan (nothing executed) ===")
-	color.Cyan("Intent: %s · %d step(s)", plan.Intent, len(plan.Steps))
+	fmt.Println(shell.PanelTitle("plan"))
+	fmt.Println(shell.Step(shell.StateIdle, "preview", "nothing here has been executed"))
+	fmt.Println(shell.KV("INTENT", shell.Value(string(plan.Intent))+
+		shell.Muted(fmt.Sprintf("  ·  %d step(s)", len(plan.Steps))), shell.KVWidth("INTENT")))
 	for i, step := range plan.Steps {
 		fmt.Printf("  %s %s\n",
 			shell.Fg(shell.HexTertiary, fmt.Sprintf("%d.", i+1)),
@@ -100,8 +100,9 @@ func handlePlanCommand(c cmdArgs) {
 		}
 	}
 	fmt.Println()
-	color.Yellow("This is a preview. Retype the request without /plan to run it,")
-	color.Yellow("or use /permissions plan to keep the whole session read-only.")
+	fmt.Println(shell.PanelEnd())
+	uiUsage("retype the request without /plan to run it")
+	uiUsage("/permissions plan   keeps the whole session read-only")
 }
 
 func describeStepAction(step ai.PlanStep) string {
@@ -135,7 +136,7 @@ func handlePermissionsCommand(c cmdArgs) {
 
 	if c.Empty() {
 		fmt.Println()
-		color.Cyan("⚡ APPROVAL POSTURE")
+		fmt.Println(shell.PanelTitle("approval posture"))
 		for _, m := range agent.PermissionModes() {
 			marker := "  "
 			label := fmt.Sprintf("%-10s", string(m))
@@ -147,10 +148,16 @@ func handlePermissionsCommand(c cmdArgs) {
 			fmt.Printf("  %s%s %s\n", marker, paint, shell.Fg(shell.HexMuted, m.Describe()))
 		}
 		fmt.Println()
-		color.Yellow("The mode layers on top of the risk tiers; it never replaces them.")
-		color.Yellow("High-risk commands stay blocked in every mode, typed confirmations stay")
-		color.Yellow("typed, the sandbox still validates, and voice input stays capped.")
-		color.Cyan("Change it with /permissions <%s>", permissionModeList())
+		fmt.Println(shell.PanelGap())
+		for _, l := range shell.PanelWrap(
+			"The mode layers on top of the risk tiers and never replaces them. "+
+				"High risk stays blocked in every mode, typed confirmations stay "+
+				"typed, the sandbox still validates, and voice input stays capped.",
+			shell.Muted) {
+			fmt.Println(l)
+		}
+		fmt.Println(shell.PanelEnd())
+		uiUsage("/permissions <" + permissionModeList() + ">")
 		fmt.Println()
 		return
 	}
@@ -162,42 +169,43 @@ func handlePermissionsCommand(c cmdArgs) {
 	// posture decides how much runs WITHOUT being asked. A misheard phrase must
 	// not be able to widen that.
 	if voiceModeActive {
-		color.Yellow("Changing the approval posture by voice is refused.")
-		color.Yellow("Current mode: %s — %s", current, current.Describe())
-		color.Cyan("Type /permissions %s in the terminal to change it.", strings.ToLower(c.Rest))
+		uiWarn("typed only", "changing the approval posture by voice is refused")
+		fmt.Println(shell.KV("MODE", shell.Value(string(current))+
+			shell.Muted("  "+current.Describe()), shell.KVWidth("MODE")))
+		uiUsage("/permissions " + strings.ToLower(c.Rest) + "   typed at the keyboard")
 		return
 	}
 
 	mode, ok := agent.ParsePermissionMode(c.Rest)
 	if !ok {
-		color.Red("Unknown mode: %s", c.Rest)
-		color.Yellow("Valid modes: %s", permissionModeList())
+		uiFail(c.Rest, "is not an approval mode")
+		uiUsage("/permissions <" + permissionModeList() + ">")
 		return
 	}
 	if mode == current {
-		color.Cyan("Already in %s mode — %s", mode, mode.Describe())
+		uiIdle(string(mode), "already the current mode — "+mode.Describe())
 		return
 	}
 
 	// Loosening the posture is a decision worth stating out loud; tightening it
 	// never needs a confirmation.
 	if mode == agent.PermissionAuto {
-		color.Yellow("auto mode answers the medium-risk prompt for you.")
-		color.Yellow("High risk is still blocked and typed confirmations are still typed,")
-		color.Yellow("but commands that would have asked will now simply run.")
+		uiWarn("auto", "answers the medium-risk prompt for you")
+		uiDetail("High risk is still blocked and typed confirmations are still typed, " +
+			"but commands that would have asked will simply run.")
 		if !commands.AskForConfirmation("Switch to auto?") {
-			color.Yellow("Left in %s mode.", current)
+			uiIdle("unchanged", "still in "+string(current)+" mode")
 			return
 		}
 	}
 
 	if !agentCore.SetPermission(mode) {
-		color.Red("Could not apply mode %s.", mode)
+		uiFail(string(mode), "could not be applied")
 		return
 	}
 	cfg.UserPrefs.Permission = string(mode)
 	_ = cfg.SavePreferences()
-	color.Green("Permission mode: %s — %s", mode, mode.Describe())
+	uiOK(string(mode), mode.Describe())
 }
 
 // -------------------------------------------------------
@@ -206,7 +214,7 @@ func handlePermissionsCommand(c cmdArgs) {
 
 func handleTodoCommand(c cmdArgs) {
 	if todoList == nil {
-		color.Red("Task list is not available in this session.")
+		uiFail("task list", "is not available in this session")
 		return
 	}
 
@@ -218,11 +226,11 @@ func handleTodoCommand(c cmdArgs) {
 		text := c.From(1)
 		item, err := todoList.Add(text)
 		if err != nil {
-			color.Red("%v", err)
-			color.Yellow("Usage: /todo add <what needs doing>")
+			uiFail("add", err.Error())
+			uiUsage("/todo add <what needs doing>")
 			return
 		}
-		color.Green("Added task %d: %s", item.ID, item.Text)
+		uiOK(fmt.Sprintf("task %d", item.ID), item.Text)
 
 	case "done", "complete", "x":
 		setTodoState(c, session.TodoDone, "Completed")
@@ -239,41 +247,41 @@ func handleTodoCommand(c cmdArgs) {
 			return
 		}
 		if err := todoList.Remove(id); err != nil {
-			color.Red("%v", err)
+			uiFail("todo", err.Error())
 			return
 		}
-		color.Green("Removed task %d.", id)
+		uiOK("removed", fmt.Sprintf("task %d", id))
 
 	case "prune":
 		n, err := todoList.PruneDone()
 		if err != nil {
-			color.Red("%v", err)
+			uiFail("todo", err.Error())
 			return
 		}
 		if n == 0 {
-			color.Cyan("No completed tasks to prune.")
+			uiIdle("nothing to prune", "no completed tasks")
 			return
 		}
-		color.Green("Pruned %d completed task(s).", n)
+		uiOK("pruned", fmt.Sprintf("%d completed task(s)", n))
 
 	case "clear", "reset":
 		if len(todoList.Items()) == 0 {
-			color.Cyan("Task list is already empty.")
+			uiIdle("already empty", "there is nothing to clear")
 			return
 		}
 		if !commands.AskForConfirmation("Delete every task, including unfinished ones?") {
-			color.Yellow("Clear cancelled.")
+			uiIdle("cancelled", "the task list is unchanged")
 			return
 		}
 		if err := todoList.Clear(); err != nil {
-			color.Red("%v", err)
+			uiFail("todo", err.Error())
 			return
 		}
-		color.Green("Task list cleared.")
+		uiOK("cleared", "the task list is empty")
 
 	default:
-		color.Red("Unknown subcommand: %s", c.Arg(0))
-		color.Yellow("Usage: /todo [add <text>|start <id>|done <id>|block <id>|open <id>|rm <id>|prune|clear]")
+		uiFail(c.Arg(0), "is not a /todo subcommand")
+		uiUsage("/todo [add <text>|start <id>|done <id>|block <id>|open <id>|rm <id>|prune|clear]")
 	}
 }
 
@@ -286,12 +294,12 @@ func setTodoState(c cmdArgs, state session.TodoState, verb string) {
 	}
 	item, err := todoList.SetState(id, state, c.From(2))
 	if err != nil {
-		color.Red("%v", err)
+		uiFail("todo", err.Error())
 		return
 	}
-	color.Green("%s task %d: %s", verb, item.ID, item.Text)
+	uiOK(fmt.Sprintf("%s task %d", verb, item.ID), item.Text)
 	if item.Note != "" {
-		color.Cyan("  note: %s", item.Note)
+		uiDetail("note: " + item.Note)
 	}
 }
 
@@ -299,12 +307,12 @@ func setTodoState(c cmdArgs, state session.TodoState, verb string) {
 func todoID(raw string) (int, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		color.Red("Which task? Give its ID — /todo lists them.")
+		uiFail("which task", "give its ID — /todo lists them")
 		return 0, false
 	}
 	id, err := strconv.Atoi(raw)
 	if err != nil || id <= 0 {
-		color.Red("%q is not a task ID. IDs are the numbers shown by /todo.", raw)
+		uiFail(raw, "is not a task ID — IDs are the numbers /todo shows")
 		return 0, false
 	}
 	return id, true
@@ -313,13 +321,14 @@ func todoID(raw string) (int, bool) {
 func printTodoList() {
 	items := todoList.Items()
 	if len(items) == 0 {
-		color.Cyan("No tasks. Add one with /todo add <what needs doing>.")
-		color.Yellow("Open tasks are shown to the planner, so the harness can pick up where it stopped.")
+		uiIdle("no tasks", "nothing is on the list")
+		uiUsage("/todo add <what needs doing>")
+		uiDetail("Open tasks are shown to the planner, so the harness can pick up where it stopped.")
 		return
 	}
 
 	fmt.Println()
-	color.Cyan("⚡ TASKS")
+	fmt.Println(shell.PanelTitle("tasks"))
 	for _, it := range items {
 		paint := shell.HexText
 		switch it.State {
@@ -340,11 +349,12 @@ func printTodoList() {
 	}
 
 	counts := todoList.Counts()
-	fmt.Println()
-	color.Cyan("%d pending · %d in progress · %d blocked · %d done",
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.KV("TOTALS", shell.Muted(fmt.Sprintf(
+		"%d pending  ·  %d in progress  ·  %d blocked  ·  %d done",
 		counts[session.TodoPending], counts[session.TodoInProgress],
-		counts[session.TodoBlocked], counts[session.TodoDone])
-	fmt.Println()
+		counts[session.TodoBlocked], counts[session.TodoDone])), shell.KVWidth("TOTALS")))
+	fmt.Println(shell.PanelEnd())
 }
 
 // -------------------------------------------------------
@@ -485,8 +495,8 @@ func reconToolDetail() string {
 func handleHooksCommand(c cmdArgs) {
 	set, err := hooks.Load()
 	if err != nil {
-		color.Red("Could not load hooks: %v", err)
-		color.Yellow("Fix or remove the file, then run /hooks again. Until it loads, NO hooks run.")
+		uiFail("hooks", err.Error())
+		uiDetail("Fix or remove the file, then run /hooks again. Until it loads, NO hooks run.")
 		return
 	}
 
@@ -495,23 +505,23 @@ func handleHooksCommand(c cmdArgs) {
 		printHooks(set)
 
 	case "events":
-		color.Cyan("Hook events: %s", hookEventList())
-		color.Cyan("pre-shell / pre-git can DENY a step when the hook is blocking.")
-		color.Cyan("post-* hooks are informational: the action already happened.")
+		uiDetail("events: " + hookEventList())
+		uiDetail("pre-shell and pre-git can DENY a step when the hook is blocking.")
+		uiDetail("post-* hooks are informational: the action already happened.")
 
 	case "add":
 		addHookInteractive(set)
 
 	case "rm", "remove", "del", "delete":
 		if c.Count() < 2 {
-			color.Red("Usage: /hooks rm <name>")
+			uiUsage("/hooks rm <name>")
 			return
 		}
 		if err := set.Remove(c.From(1)); err != nil {
-			color.Red("%v", err)
+			uiFail("todo", err.Error())
 			return
 		}
-		color.Green("Removed hook %q.", c.From(1))
+		uiOK("removed", "hook "+c.From(1))
 
 	case "on", "enable":
 		toggleHook(set, c.From(1), true)
@@ -522,20 +532,22 @@ func handleHooksCommand(c cmdArgs) {
 		testHook(c)
 
 	default:
-		color.Red("Unknown subcommand: %s", c.Arg(0))
-		color.Yellow("Usage: /hooks [list|events|add|rm <name>|on <name>|off <name>|test <event> <command>]")
+		uiFail(c.Arg(0), "is not a /hooks subcommand")
+		uiUsage("/hooks [list|events|add|rm <name>|on <name>|off <name>|test <event> <command>]")
 	}
 }
 
 func printHooks(set *hooks.Set) {
 	fmt.Println()
-	color.Cyan("⚡ LOCAL POLICY HOOKS")
-	color.Cyan("Config: %s", set.Path())
+	fmt.Println(shell.PanelTitle("local policy hooks"))
+	fmt.Println(shell.KV("CONFIG", shell.Muted(set.Path()), shell.KVWidth("CONFIG")))
 	if len(set.Hooks) == 0 {
 		fmt.Println()
-		color.Yellow("No hooks configured. Hooks are opt-in and come only from that file —")
-		color.Yellow("nothing a model produces can define one.")
-		color.Cyan("Add one with /hooks add, or see the events with /hooks events.")
+		fmt.Println(shell.Step(shell.StateIdle, "none configured",
+			"hooks are opt-in and come only from that file — nothing a model "+
+				"produces can define one"))
+		fmt.Println(shell.PanelEnd())
+		uiUsage("/hooks add   ·   /hooks events")
 		fmt.Println()
 		return
 	}
@@ -560,45 +572,49 @@ func printHooks(set *hooks.Set) {
 		fmt.Printf("      %s\n", shell.Fg(shell.HexText, "$ "+h.Command))
 	}
 	fmt.Println()
-	color.Yellow("A blocking pre-hook that exits non-zero DENIES the step. Hooks run after")
-	color.Yellow("every built-in gate, so they can only subtract permission, never grant it.")
+	fmt.Println(shell.PanelEnd())
+	uiDetail("A blocking pre-hook that exits non-zero DENIES the step. Hooks run " +
+		"after every built-in gate, so they can only subtract permission, never grant it.")
 	fmt.Println()
 }
 
 func addHookInteractive(set *hooks.Set) {
-	color.Cyan("New hook. Blank input at any prompt cancels.")
+	fmt.Println(shell.PanelTitle("new hook"))
+	fmt.Println(shell.PanelLine(shell.Muted("blank input at any prompt cancels")))
+	fmt.Println(shell.PanelEnd())
 
 	name := strings.TrimSpace(commands.AskLine("Name"))
 	if name == "" {
-		color.Yellow("Cancelled.")
+		uiIdle("cancelled", "no hook was added")
 		return
 	}
-	color.Cyan("Events: %s", hookEventList())
+	uiDetail("events: " + hookEventList())
 	eventRaw := strings.TrimSpace(commands.AskLine("Event"))
 	event, ok := hooks.ValidEvent(eventRaw)
 	if !ok {
-		color.Red("%q is not a valid event. Valid: %s", eventRaw, hookEventList())
+		uiFail(eventRaw, "is not a hook event")
+		uiDetail("valid: " + hookEventList())
 		return
 	}
 	command := strings.TrimSpace(commands.AskLine("Shell command to run"))
 	if command == "" {
-		color.Yellow("Cancelled.")
+		uiIdle("cancelled", "no hook was added")
 		return
 	}
 	match := strings.TrimSpace(commands.AskLine("Match pattern (regexp, blank = every occurrence)"))
 
 	blocking := false
 	if event == hooks.PreShell || event == hooks.PreGit {
-		color.Yellow("A blocking hook DENIES the step when it exits non-zero.")
+		uiDetail("A blocking hook DENIES the step when it exits non-zero.")
 		blocking = commands.AskForConfirmation("Make this hook blocking?")
 	}
 
 	h := hooks.Hook{Name: name, Event: event, Match: match, Command: command, Blocking: blocking}
 	if err := set.Add(h); err != nil {
-		color.Red("%v", err)
+		uiFail("add", err.Error())
 		return
 	}
-	color.Green("Added hook %q on %s.", name, event)
+	uiOK("added", "hook "+name+" on "+string(event))
 	// The live agent holds its own loaded copy; without this the new hook would
 	// not fire until the next restart, which is precisely when someone would
 	// assume it was already guarding them.
@@ -607,17 +623,17 @@ func addHookInteractive(set *hooks.Set) {
 
 func toggleHook(set *hooks.Set, name string, enabled bool) {
 	if strings.TrimSpace(name) == "" {
-		color.Red("Usage: /hooks %s <name>", map[bool]string{true: "on", false: "off"}[enabled])
+		uiUsage("/hooks " + map[bool]string{true: "on", false: "off"}[enabled] + " <name>")
 		return
 	}
 	if err := set.SetEnabled(name, enabled); err != nil {
-		color.Red("%v", err)
+		uiFail(name, err.Error())
 		return
 	}
 	if enabled {
-		color.Green("Hook %q enabled.", name)
+		uiOK("enabled", "hook "+name)
 	} else {
-		color.Yellow("Hook %q disabled.", name)
+		uiIdle("disabled", "hook "+name)
 	}
 	reloadAgentHooks()
 }
@@ -626,13 +642,14 @@ func toggleHook(set *hooks.Set, name string, enabled bool) {
 // can be checked before it is trusted to block real work.
 func testHook(c cmdArgs) {
 	if c.Count() < 3 {
-		color.Red("Usage: /hooks test <event> <command>")
-		color.Yellow("Runs the command once with the HELIX_* hook variables set to sample values.")
+		uiUsage("/hooks test <event> <command>")
+		uiDetail("Runs the command once with the HELIX_* hook variables set to sample values.")
 		return
 	}
 	event, ok := hooks.ValidEvent(c.Arg(1))
 	if !ok {
-		color.Red("%q is not a valid event. Valid: %s", c.Arg(1), hookEventList())
+		uiFail(c.Arg(1), "is not a hook event")
+		uiDetail("valid: " + hookEventList())
 		return
 	}
 	command := c.From(2)
@@ -649,19 +666,19 @@ func testHook(c cmdArgs) {
 		Dir:     wd,
 	})
 	if len(results) == 0 {
-		color.Yellow("The hook did not run.")
+		uiWarn("did not run", "the hook produced no result")
 		return
 	}
 	r := results[0]
 	fmt.Println()
-	color.Cyan("exit %d", r.ExitCode)
+	fmt.Println(shell.KV("EXIT", shell.Value(fmt.Sprint(r.ExitCode)), shell.KVWidth("EXIT")))
 	if r.Output != "" {
 		fmt.Println(r.Output)
 	}
 	if r.ExitCode == 0 {
-		color.Green("As a blocking pre-hook, this would ALLOW the step.")
+		uiOK("would allow", "as a blocking pre-hook")
 	} else {
-		color.Yellow("As a blocking pre-hook, this would DENY the step.")
+		uiWarn("would deny", "as a blocking pre-hook")
 	}
 	fmt.Println()
 }
@@ -673,7 +690,7 @@ func reloadAgentHooks() {
 	}
 	set, err := hooks.Load()
 	if err != nil {
-		color.Yellow("Hooks changed on disk but could not be reloaded: %v", err)
+		uiWarn("saved", "but could not be reloaded: "+err.Error())
 		return
 	}
 	agentCore.Hooks = set
@@ -956,8 +973,8 @@ func handleConfigCommand(c cmdArgs) {
 		}
 	}
 	if target == nil {
-		color.Red("Unknown setting: %s", c.Arg(0))
-		color.Yellow("Run /config with no argument to list every settable key.")
+		uiFail(c.Arg(0), "is not a settable key")
+		uiUsage("/config   lists every settable key")
 		return
 	}
 
@@ -1111,24 +1128,35 @@ func orNone(s string) string {
 
 func handleVersionCommand(cmdArgs) {
 	rep := edge.Collect()
-	fmt.Println()
-	color.Cyan("Helix %s", config.HelixVersion)
-	fmt.Printf("  %-22s %s/%s\n", "Platform", rep.OS, rep.Arch)
+
+	platform := shell.Value(rep.OS + "/" + rep.Arch)
 	if rep.Board != "" {
-		fmt.Printf("  %-22s %s\n", "Board", rep.Board)
+		platform += shell.Muted("  ·  " + rep.Board)
 	}
-	// The two build facts that change behavior invisibly.
-	if rep.SpeechSupported {
-		fmt.Printf("  %-22s %s\n", "Audio output", rep.AudioBackend)
-	} else {
-		fmt.Printf("  %-22s %s\n", "Audio output",
-			shell.Fg(shell.HexRectifier, rep.AudioBackend+" — this build cannot speak"))
+
+	// The two build facts that change behaviour invisibly, and the one that
+	// most often explains "why is it silent" — a CGO-free build cannot speak
+	// however the TTS chain is configured, so that state is a badge, not a
+	// value in a column of values.
+	audioLine := shell.Badge(shell.StateGood, rep.AudioBackend)
+	if !rep.SpeechSupported {
+		audioLine = shell.Badge(shell.StateBad, rep.AudioBackend) +
+			shell.Muted("  this build cannot speak — it needs a rebuild, not a setting")
 	}
-	fmt.Printf("  %-22s %s\n", "Confinement backend", confinement.BackendName())
-	fmt.Printf("  %-22s %s (%s)\n", "AI provider", ai.ActiveProviderName(), ai.ActiveModel())
-	fmt.Printf("  %-22s %s\n", "Planner transport", ai.PlannerTransport())
-	fmt.Printf("  %-22s %d registered\n", "Slash commands", len(registry))
-	fmt.Println()
-	color.Cyan("/doctor runs the full diagnostic, including sidecars and thermals.")
-	fmt.Println()
+
+	brain := shell.Value(ai.ActiveProviderName())
+	if m := ai.ActiveModel(); m != "" {
+		brain += shell.Muted("  ·  " + m)
+	}
+
+	uiReport("version",
+		uiRow{"HELIX", shell.Value(config.HelixVersion)},
+		uiRow{"PLATFORM", platform},
+		uiRow{"AUDIO", audioLine},
+		uiRow{"CONFINEMENT", shell.Muted(confinement.BackendName())},
+		uiRow{"BRAIN", brain},
+		uiRow{"PLANNER", shell.Muted(ai.PlannerTransport())},
+		uiRow{"COMMANDS", shell.Muted(fmt.Sprintf("%d registered", len(registry)))},
+	)
+	uiUsage("/doctor runs the full diagnostic, including sidecars and thermals")
 }

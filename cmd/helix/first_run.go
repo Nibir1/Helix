@@ -30,8 +30,7 @@ import (
 
 	"helix/internal/commands"
 	"helix/internal/deps"
-
-	"github.com/fatih/color"
+	"helix/internal/shell"
 )
 
 // runFirstRunStages runs the setup that follows the AI provider.
@@ -50,13 +49,15 @@ func runFirstRunStages() {
 	// one stage — because the packages were already installed — reads as a
 	// stage that silently failed.
 	if len(deps.Missing()) > 0 {
-		color.Cyan("⚡ FIRST RUN — two more stages")
-		color.Cyan("The system packages Helix needs, then the speech chain.")
-		color.Cyan("Either can be skipped and redone later with /setup.")
+		fmt.Println(shell.PanelTitle("first run"))
+		fmt.Println(shell.PanelLine(shell.Muted("two more stages: the system packages Helix needs, then the speech chain")))
+		fmt.Println(shell.PanelLine(shell.Muted("either can be skipped and redone later with /setup")))
+		fmt.Println(shell.PanelEnd())
 	} else {
-		color.Cyan("⚡ FIRST RUN — one more stage")
-		color.Cyan("System packages are already installed; only the speech chain is left.")
-		color.Cyan("It can be skipped and redone later with /setup.")
+		fmt.Println(shell.PanelTitle("first run"))
+		fmt.Println(shell.PanelLine(shell.Muted("one more stage: system packages are already installed, only the speech chain is left")))
+		fmt.Println(shell.PanelLine(shell.Muted("it can be skipped and redone later with /setup")))
+		fmt.Println(shell.PanelEnd())
 	}
 
 	runDependencySetup(true)
@@ -72,23 +73,26 @@ func runDependencySetup(firstRun bool) bool {
 	missing := deps.Missing()
 	if len(missing) == 0 {
 		if !firstRun {
-			color.Green("All system packages Helix uses are already installed.")
+			uiOK("system packages", "all of them are already installed")
 		}
 		return true
 	}
 
 	fmt.Println()
-	color.Cyan("⚡ SYSTEM PACKAGES")
+	fmt.Println(shell.PanelTitle("system packages"))
 	for _, d := range missing {
-		color.Yellow("  missing: %-8s %s", d.Name, d.Purpose)
+		fmt.Println(shell.KV(d.Name, shell.Badge(shell.StateWarn, "missing")+
+			shell.Muted("  "+d.Purpose), shell.KVWidth(d.Name)))
 	}
 
 	manager := deps.DetectManager()
 	if manager == deps.ManagerUnknown {
-		color.Yellow("%s", deps.ManagerHint())
+		fmt.Println(shell.PanelEnd())
+		uiDetail(deps.ManagerHint())
 		return false
 	}
-	color.Cyan("Package manager: %s", manager)
+	fmt.Println(shell.KV("MANAGER", shell.Value(string(manager)), shell.KVWidth("MANAGER")))
+	fmt.Println(shell.PanelEnd())
 
 	allPresent := true
 	for _, d := range missing {
@@ -97,19 +101,19 @@ func runDependencySetup(firstRun bool) bool {
 			// Honest dead end, same as the sidecar installers: name the tool
 			// and stop, rather than run a guessed package name under Helix's
 			// name. See the Windows/sox note in the deps catalog.
-			color.Yellow("Helix has no verified install command for %s on %s —",
-				d.Name, manager)
-			color.Yellow("install it yourself, then re-run /setup.")
+			uiWarn(d.Name, fmt.Sprintf("no verified install command for %s on %s",
+				d.Name, manager))
+			uiDetail("Install it yourself, then re-run /setup.")
 			allPresent = false
 			continue
 		}
 
 		fmt.Println()
-		color.Cyan("  %s — %s", d.Name, d.Purpose)
-		color.Cyan("  Helix can install it:  %s", cmd)
+		uiIdle(d.Name, d.Purpose)
+		fmt.Println(shell.StepCommand(cmd))
 		if !commands.AskForConfirmation(fmt.Sprintf("Install %s now?", d.Name)) {
-			color.Yellow("Skipped. %s stays unavailable until %s is installed.",
-				capabilityOf(d), d.Name)
+			uiIdle("skipped", fmt.Sprintf("%s stays unavailable until %s is installed",
+				capabilityOf(d), d.Name))
 			allPresent = false
 			continue
 		}
@@ -122,12 +126,12 @@ func runDependencySetup(firstRun bool) bool {
 		// Trust the lookup, not the exit code — a manager can succeed and still
 		// leave the binary somewhere this process cannot see yet.
 		if !d.Present() {
-			color.Yellow("Install finished but %s is still not on PATH.", d.Name)
-			color.Yellow("Open a new shell and run /setup to continue.")
+			uiWarn(d.Name, "installed, but still not on PATH")
+			uiDetail("Open a new shell and run /setup to continue.")
 			allPresent = false
 			continue
 		}
-		color.Green("  ✔ %s installed", d.Name)
+		uiOK(d.Name, "installed")
 	}
 	return allPresent
 }
@@ -149,11 +153,12 @@ func capabilityOf(d deps.Dependency) string {
 // should not have to sit through it to reach a prompt.
 func offerSpeechSetup() {
 	fmt.Println()
-	color.Cyan("⚡ VOICE")
-	color.Cyan("Helix can listen and speak, locally or through a cloud provider.")
-	color.Cyan("This picks the STT/TTS chain and verifies it actually answers.")
+	fmt.Println(shell.PanelTitle("voice"))
+	fmt.Println(shell.PanelLine(shell.Muted("Helix can listen and speak, locally or through a cloud provider")))
+	fmt.Println(shell.PanelLine(shell.Muted("this picks the STT/TTS chain and verifies it actually answers")))
+	fmt.Println(shell.PanelEnd())
 	if !commands.AskForConfirmation("Set up voice now? (you can do this later with /blackbox setup)") {
-		color.Yellow("Skipped — run /blackbox setup when you want it.")
+		uiIdle("skipped", "run /blackbox setup when you want it")
 		return
 	}
 	handleVoiceSetup()

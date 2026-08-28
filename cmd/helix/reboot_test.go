@@ -21,6 +21,9 @@ func TestSpokenRebootAcceptsHowPeopleActuallyAsk(t *testing.T) {
 		"Okay, please reboot.",
 		"reboot yourself",
 		"go ahead and reboot the shell",
+		"helix reboot",
+		"now reboot",
+		"i want you to reboot",
 		"restart yourself",
 		"Alright, restart helix!",
 		"reboot now",
@@ -46,6 +49,14 @@ func TestSpokenRebootRefusesEverythingElse(t *testing.T) {
 		"should we reboot",
 		"do you need to reboot",
 		"when did you last reboot",
+		// The sentence that actually cost a live session: not a question, ends
+		// on the phrase, and Helix restarted in the middle of the user
+		// explaining that it had forgotten restarting.
+		"so you don't have any memory that I told you to reboot",
+		"you said reboot",
+		"I already asked you to reboot",
+		"the last thing I said was reboot",
+		"I am not asking you to reboot",
 		// "restart" alone is the ordinary English word for restarting anything.
 		// A suffix match on it would fire on a conversation about a download.
 		"let's restart",

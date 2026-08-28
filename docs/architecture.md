@@ -206,10 +206,30 @@ a wrong explanation.
   stale second copy of the command list.
 
 ### 5c. Report Rendering (`internal/shell/panel.go`, `wizard.go`)
+**Colour is gated on whether anything can render it.** `NO_COLOR` disables it,
+`CLICOLOR_FORCE` overrides in the other direction, `TERM=dumb` disables it, and
+otherwise it follows whether stdout is a terminal. This closed an asymmetry that
+nearly shipped a regression: `github.com/fatih/color` has always disabled itself
+off a TTY, `shell.Fg` never did — so converting the daemon's output to the panel
+language would have written escape sequences into journald where none appeared
+before, the polish making things worse in the one place nobody looks until
+something breaks.
+
 One visual language for everything Helix reports: a titled panel, a gutter, a
 closing rule, content-measured tables, and state badges. It exists because
 `/help` had *a* language and nothing else used it, so each report grew its own
 flat stack of coloured lines.
+
+`cmd/helix/ui.go` sits above both, holding the three ARRANGEMENTS that account
+for most of the command surface — a toggle reporting or changing its state, a
+short labelled report, a one-line outcome. It adds no styling of its own; it
+composes these primitives, so there is still exactly one visual language and
+only one place that decides what it looks like. Writing those arrangements out
+at every call site is how fifty-odd commands drifted into fifty-odd slightly
+different screens, which is what it exists to stop. It carries four outcome
+states rather than three: `uiIdle` is for "nothing happened, and that is fine",
+because rendering "no crash reports" in the warning colour is how a screen full
+of yellow trains people to stop reading yellow.
 
 `wizard.go` extends it to the screens that ASK rather than report. A wizard step
 is not a report row: it has a SUBJECT, an OUTCOME and usually an explanation or a
@@ -423,6 +443,13 @@ provider and model, in-progress task texts, a one-line summary of the work, and
   may reduce what is collected but never increase it holds without an exception:
   the excerpt is omitted entirely when the request arrived through the
   microphone.
+- **The restart is recorded where the MODEL can see it.** A synthetic turn is
+  appended to the session ring on resume, because session.json carries the
+  conversation and a restart is not a turn in it — so the planner had no record
+  of an event the panel had just announced on screen, and answered "no, I have
+  been running the whole time" to a user who had asked it to reboot seconds
+  earlier. What is recorded is Helix's own action, never anything the microphone
+  heard, so the rule above is untouched.
 
 **The restart itself is a supervisor, not `syscall.Exec`.** Go's exec takes the
 runtime's exec lock, which in a binary with live cgo callback threads — Helix's
@@ -495,6 +522,26 @@ User Input → Classifier → [Shell Command] → Safety Pipeline → Sandbox �
 
 See `docs/harness.md` for the harness layer in full: tool vocabulary, approval
 postures, the task list, hooks, and what the model is told each turn.
+
+### 5h. Startup Order (`cmd/helix/main.go`)
+
+Most of boot is order-insensitive. Two steps are not, and one of them shipped
+wrong: `initVoiceMode()` restores a persisted live session and prints the live
+banner, and that banner REPORTS the camera — so it has to run after
+`visionSvc` is constructed, not forty lines before it. It did not, so a restored
+live session printed `SIGHT ✘ on but blind — no ffmpeg on PATH` on machines with
+working ffmpeg, while the same mode entered by typing `/blackbox on` said
+`✔ watching` seconds later. Two doors into one mode disagreeing, with the one
+that runs at boot blaming a dependency for a service that had merely not been
+built yet.
+
+`visionReady` now distinguishes "the camera service is not up" from "ffmpeg is
+missing", because a readiness check must never name a cause it has not
+established. A source-order test pins the sequence, since nothing else in the
+package can express "this must run after that" — and the unit test that should
+have caught the original bug had **encoded the conflation as its expectation**
+(`visionSvc = nil // stands in for a host with no ffmpeg`), which is why it did
+not.
 
 ### 6a. Voice Command Routing (`cmd/helix/voice_commands.go`)
 A spoken transcript never contains a `/`, so the slash-command surface was

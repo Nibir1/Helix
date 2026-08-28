@@ -88,7 +88,7 @@ Voice is treated as an **untrusted input channel**, because a television, a podc
 - **Spoken input never takes the shell fast path.** The classifier decides on the first token and English sentences start with command names, so "make a new branch called test" now reaches the planner that produces `git checkout -b test` instead of being executed verbatim.
 - **Voice may reduce what is collected, never increase it.** "Turn off your eyes" and `/blackbox log off` work by voice; opening the camera is an explicit announced act and starting a transcript log must be typed. The rule has **no exceptions**: `/reboot` is voice-reachable and its continuity record stores no conversation content on the spoken path, because the feature was shaped to fit the rule rather than the rule amended to fit it.
 - **Opt-in transcript log** (`/blackbox log on`) — off by default, and off means *no directory and no file*. Text and metadata only, never audio. 0600, rotated, `/purge`-able.
-- **`/reboot` self-updates.** It checks the project's GitHub releases and any locally built binary, installs with your confirmation, and restarts into the new version. A download is installed only if its SHA-256 matches the release's checksums file, the URL never leaves GitHub, and the payload proves it is a Helix binary for this machine. The previous binary is kept and restored automatically if the new one cannot start. **A spoken reboot never installs** — it reports that an update is waiting and leaves the decision to the keyboard. Sigstore signatures are published and deliberately not checked by the updater; the `cosign verify-blob` command is printed instead (ADR-019).
+- **`/reboot` self-updates.** It checks the project's GitHub releases and any locally built binary, installs with your confirmation, and restarts into the new version. A download is installed only if its SHA-256 matches the release's checksums file, the URL never leaves GitHub, and the payload proves it is a Helix binary for this machine. The previous binary is kept and restored automatically if the new one cannot start. **Installing is automatic and needs no confirmation**, from the microphone as well as the keyboard — an owner decision, because the release comes from a repository the owner controls and tags on purpose. `update.check: false` turns it off; `/reboot check` reports without installing. Sigstore signatures are published and deliberately not checked by the updater; the `cosign verify-blob` command is printed instead (ADR-019).
 - **`/reboot` restarts the shell in place** and comes back in the same mode, directory, provider and conversation, naming what you were in the middle of. Its continuity record (`~/.helix/reboot.json`) is 0600, **consumed on read** rather than rotated, expires after 12 hours, and is `/purge`-able. One DANGER ZONE command reachable by voice, because it destroys nothing.
 - **Three packages are provably network-free** (diagnostics, journal, metrics), each grep-enforced in CI.
 
@@ -207,6 +207,28 @@ everything else: a panel may not report a state the machine cannot deliver.
 
 `/blackbox` (`on·off·status·setup·look·eyes·wake·tts·say·log·stats`) replaces eight separate voice verbs — typing an old name tells you where it went. Plus `/agentic`, `/memory`, `/undo`, `/listen`, `/mictest`, `/web`, `/todo`, `/plan`, `/review`, `/diff`, `/context`, `/cost`, `/tools`, `/hooks`, `/permissions`, `/export`, `/resume`, `/compact`, `/reboot`, `helix --version`, and `helix daemon` / `helix remote`.
 
+### 🎨 One visual language, everywhere
+
+All 57 slash commands, the first-run stages, the startup path and the
+`helix daemon` CLI render through the same primitives — a titled panel, a gutter,
+aligned rows, state badges — instead of the flat stacks of coloured lines they
+had each grown independently. 561 raw colour calls became zero.
+
+- **Colour switches itself off when nothing can render it.** `NO_COLOR`,
+  `TERM=dumb`, or stdout not being a terminal all disable it;
+  `CLICOLOR_FORCE=1` overrides. Piping Helix, redirecting it, or running it as a
+  systemd service now produces clean text — which it did not before, because
+  `shell.Fg` emitted escapes unconditionally while `github.com/fatih/color`
+  had always disabled itself.
+- **Four outcome states, not three.** "No crash reports" and "nothing to prune"
+  are not warnings; rendering them yellow is how a screen full of yellow teaches
+  people to stop reading yellow.
+- **`/blackbox setup`, `/doctor`'s appliance section, `/config`, `/purge`,
+  `/provider`, `/version`** and the rest were converted individually rather than
+  repainted, and several content bugs fell out — `/audio` reported
+  "ON (NOT READY)", a contradiction in brackets, and `/debug` read the config
+  field while logging is actually governed by the environment.
+
 ### 🚧 Known limits, stated plainly
 
 This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
@@ -221,6 +243,7 @@ This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
   servers silently ignore the context field — Helix detects and reports that rather than
   overstating, but the prosody benefit only arrives once `docs/csm-context.patch` (or an
   equivalent upstream change) is in place.
+- **The panel glyphs (`│ ─ ✔ →`) still render with colour off**, which is right for a piped terminal and arguably noise in a log file. Nobody has read a week of journald output to decide.
 - **The updater does not check signatures**, only checksums — a deliberate refusal rather than an omission (ADR-019), and the rollback path has never fired against a genuinely broken release, which is the one input nobody can synthesise honestly.
 - **The restart supervisor is one extra idle process** for the life of the session, and nobody has measured what that costs on a Pi. `/reboot` also has never been run with Helix as a **login** shell — which is precisely the case the supervisor exists for, since a parent that simply exited would end the session.
 - **Full-duplex barge-in is parked; sentence-boundary interruption is not.** You can stop a reply by speaking in the gap *between* sentences (`/config barge-in on`, off by default) — the speaker is idle there, so no echo cancellation is needed. You still cannot talk *over* a sentence: that needs concurrent capture plus AEC, which conflicts with the CGO-free build unless a headset is assumed. `Ctrl+C` remains the instant, microphone-free stop.

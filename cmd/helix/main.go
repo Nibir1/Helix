@@ -35,8 +35,6 @@ import (
 	"helix/internal/utils"
 	"helix/internal/ux"
 	"helix/internal/vision"
-
-	"github.com/fatih/color"
 )
 
 var (
@@ -165,7 +163,7 @@ func main() {
 		// still work, and /doctor now says exactly what is missing. Ejecting the
 		// user is the one outcome from which they cannot recover in place.
 		if err := runNativeSetup(); err != nil {
-			color.Red("Setup did not finish: %v", err)
+			uiFail("setup", "did not finish: "+err.Error())
 			fmt.Println(shell.Hint(
 				"Helix is starting anyway · /setup finishes it · /provider use <name> picks a brain"))
 		}
@@ -191,7 +189,7 @@ func main() {
 	// startup failure is non-fatal — text Helix keeps working; /blackbox setup
 	// or /blackbox status diagnose.
 	if err := speech.Init(speechConfigFrom(cfg.Speech)); err != nil {
-		color.Yellow("Speech engine unavailable: %v", err)
+		uiWarn("speech engine", "unavailable: "+err.Error())
 	}
 	if firstRun {
 		// The rest of first run: system packages, then the speech chain. A
@@ -212,17 +210,17 @@ func main() {
 	select {
 	case aerr := <-audioDone:
 		if aerr != nil {
-			color.Yellow("Audio engine unavailable: %v", aerr)
-			color.Yellow("Helix will stay silent. Try /audio on after checking your sound device.")
+			uiWarn("audio engine", "unavailable: "+aerr.Error())
+			uiDetail("Helix stays silent. /audio on retries once the sound device is available.")
 			if dbg {
-				color.Yellow("Audio debug: speaker initialization failed at startup.")
+				uiDetail("debug: speaker initialization failed at startup")
 			}
 		}
 	case <-time.After(2 * time.Second):
-		color.Yellow("Audio engine init timeout; continuing silent")
-		color.Yellow("Use /audio on to retry once your sound device is available.")
+		uiWarn("audio engine", "timed out starting — continuing silent")
+		uiDetail("/audio on retries once the sound device is available.")
 		if dbg {
-			color.Yellow("Audio debug: startup initialization exceeded 2s.")
+			uiDetail("debug: startup initialization exceeded 2s")
 		}
 	}
 	commands.SetPrompter(gui)
@@ -244,7 +242,9 @@ func main() {
 
 	// BlackBox Phase 2: voice channel wiring — prompter swap, persisted mode,
 	// and the spoken-response seam.
-	initVoiceMode()
+	// initVoiceMode is deliberately NOT here — it prints the live banner for a
+	// restored voice session, and that banner reports the camera. See its call
+	// site below the vision seams.
 	initVoiceLog()
 	agentCore.OnSpeak = func(text string) {
 		if !speech.TTSEnabled() {
@@ -272,13 +272,13 @@ func main() {
 	// A misconfigured fallback only warns — running unprotected is strictly
 	// better than refusing to start.
 	if err := ai.ConfigureLocalFallback(cfg.AIFallback()); err != nil {
-		color.Yellow("Local LLM fallback disabled: %v", err)
+		uiWarn("offline fallback", "disabled: "+err.Error())
 	}
 	ai.SetFailoverNotice(func(msg string) {
 		// Printed as well as spoken: a silent brain swap would look like the
 		// model simply got worse. The user must be able to see it too when TTS
 		// is off or unavailable.
-		color.Yellow("[llm] %s", msg)
+		uiWarn("llm", msg)
 		if agentCore.OnSpeak != nil {
 			agentCore.OnSpeak(msg)
 		}
@@ -328,6 +328,18 @@ func main() {
 		logVisionLatency(metric, latency, provider)
 	}
 
+	// Restoring the persisted voice mode happens HERE, after the vision service
+	// exists, and the ordering is load-bearing rather than tidy.
+	//
+	// It used to run ~40 lines earlier, before `visionSvc` was constructed. A
+	// restored live session therefore printed its banner while captureAvailable()
+	// could only be false, so the SIGHT row read "on but blind — no ffmpeg on
+	// PATH" on machines with ffmpeg installed and working. The same session,
+	// entered by typing /blackbox on, said "watching" seconds later: the two
+	// doors into one mode disagreed, and the one that ran at startup blamed a
+	// missing dependency for a service that had merely not been built yet.
+	initVoiceMode()
+
 	fmt.Println("⚡ Helix Native Shell. Type '/help' for SOS or 'exit' to quit.")
 
 	// BlackBox Phase 4B: stateful awareness for the interactive session too
@@ -348,16 +360,16 @@ func main() {
 		// A corrupt task file must not take the shell down with it, but it must
 		// not be silent either: the planner would then be planning against a
 		// task list the user believes it can see.
-		color.Yellow("Task list unavailable: %v", err)
-		color.Yellow("/todo is disabled this session; fix or delete ~/.helix/todo.json.")
+		uiWarn("task list", "unavailable: "+err.Error())
+		uiDetail("/todo is disabled this session; fix or delete ~/.helix/todo.json.")
 	}
 	if hookSet, err := hooks.Load(); err == nil {
 		agentCore.Hooks = hookSet
 	} else {
 		// Failing closed on load means NO hooks run — a user who added a
 		// blocking hook must hear that it is not guarding them.
-		color.Red("Hook configuration failed to load: %v", err)
-		color.Red("NO hooks are active this session. Run /hooks to see the config path.")
+		uiFail("hooks", "failed to load: "+err.Error())
+		uiDetail("NO hooks are active this session. /hooks shows the config path.")
 	}
 	agentCore.ProjectContext = loadProjectContext
 	applyPersistedPermission()
@@ -365,7 +377,7 @@ func main() {
 		agentCore.MaxAgenticSteps = cfg.UserPrefs.AgenticSteps
 	}
 	if _, path, ok := loadProjectContext(); ok {
-		color.Cyan("Project context loaded from %s", path)
+		uiOK("project context", path)
 	}
 
 	// A restart left a note. Read it here — after the banner, and after the
@@ -601,14 +613,14 @@ func advancedProviderNames() []string {
 // FIX (interrupt hardening): the subcommand is cancellable via Ctrl+C and
 // exits with 130 (standard SIGINT code) instead of dying mid-write.
 func runKnowledgeUpdate() {
-	color.Cyan("Helix Knowledge Update Tool")
+	fmt.Println(shell.PanelTitle("knowledge update"))
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "/tmp"
 	}
 	db, err := rag.OpenDB(homeDir)
 	if err != nil {
-		color.Red("Database error: %v", err)
+		uiFail("database", err.Error())
 		os.Exit(1)
 	}
 	defer func() { _ = db.Close() }()
@@ -621,17 +633,17 @@ func runKnowledgeUpdate() {
 	cancel()
 	if err != nil {
 		if ctx.Err() != nil {
-			color.Yellow("Update cancelled.")
+			uiIdle("cancelled", "the knowledge base is unchanged")
 			os.Exit(130)
 		}
 		if errors.Is(err, rag.ErrOffline) {
-			color.Yellow("Offline — knowledge update requires internet connectivity.")
+			uiWarn("offline", "the knowledge update needs internet connectivity")
 			os.Exit(1)
 		}
-		color.Red("Update failed: %v", err)
+		uiFail("update", err.Error())
 		os.Exit(1)
 	}
-	color.Green("Knowledge base updated successfully.")
+	uiOK("updated", "the knowledge base is current")
 }
 
 // applyPersistedPermission restores the saved approval posture.
@@ -652,7 +664,7 @@ func applyPersistedPermission() {
 	}
 	mode, ok := agent.ParsePermissionMode(saved)
 	if !ok {
-		color.Yellow("Saved permission mode %q is not recognized; using the default (ask).", saved)
+		uiWarn("permission mode", fmt.Sprintf("%q is not recognised — using the default (ask)", saved))
 		return
 	}
 	agentCore.SetPermission(mode)
@@ -663,7 +675,7 @@ func applyPersistedPermission() {
 	if mode != agent.PermissionAsk {
 		// Any posture other than the default changes what happens without
 		// asking; starting a session in it silently would be a surprise.
-		color.Yellow("Permission mode: %s — %s", mode, mode.Describe())
+		uiIdle(string(mode), mode.Describe())
 	}
 }
 

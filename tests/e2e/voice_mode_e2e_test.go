@@ -62,7 +62,7 @@ func TestE2E_VoiceRefusedWithoutSTT(t *testing.T) {
 	// guarantee (roadmap P2.2). With a recorder present the refusal names
 	// /blackbox setup; without one it names the recorder install hint.
 	h.WriteLine("/blackbox on")
-	if err := h.Expect("Cannot go live", 10*time.Second); err != nil {
+	if err := h.Expect("cannot go live", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	out := h.stripped()

@@ -55,9 +55,9 @@ One command in the DANGER ZONE category is deliberately reachable by voice:
 the continuity record is written before the process ends, so a misheard trigger
 costs seconds rather than data. Everything else in that category remains
 unreachable, and the criterion is data loss rather than how alarming the command
-sounds. Its self-update half is typed-only: restarting destroys nothing, while
-downloading and executing a new binary is a different act. See
-`threat_model_voice.md` rules 9 and V5e.
+sounds. Its self-update half installs automatically, by owner decision, from the
+microphone as well as the keyboard — a deliberate trade recorded in ADR-019 and
+V5e rather than an oversight. See `threat_model_voice.md` rules 9 and V5e.
 
 ## Residual Risk (honest statement)
 Distinguishing instruction from data in natural language is undecidable in the

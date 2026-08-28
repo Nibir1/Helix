@@ -84,10 +84,15 @@ structural rather than advisory:
   are back. `/purge`, `/rag-reset`, `/commit`, `/config`, `/hooks`, `/init`, `/scan`,
   `/setup` and `/stealth` — all nine — remain unreachable, and the distinction is
   data loss, not severity of sound.
-- **A spoken restart never installs software.** `/reboot` self-updates when
-  typed; from the microphone it checks and reports only. Restarting destroys
-  nothing, which is why voice may do it — replacing the running binary is a
-  different act and stays typed.
+- **A spoken restart MAY install software, by owner decision.** `/reboot`
+  self-updates and does so automatically, from the microphone as well as the
+  keyboard. The reasoning is that the release comes from a repository the owner
+  controls and tags deliberately, so publishing it IS the authorization. The
+  consequence is stated rather than hidden: whoever can publish to the configured
+  repo can replace the binary with no human present, and a misheard "reboot" can
+  trigger that. What still holds is everything in ADR-019 — mandatory checksum,
+  pinned host, build-info proof — plus automatic rollback when the new binary
+  cannot start. `update.check: false` turns the check off entirely.
 - **A spoken restart writes nothing you said.** `/reboot` is voice-reachable, and
   the continuity record it leaves omits conversation content entirely on the
   spoken path — so the rule below survives without an exception.
@@ -137,8 +142,11 @@ plainly because an updater is the highest-consequence code in the project:
 - **Reversible.** The previous binary is kept, and restored automatically if the
   new one exits non-zero within ten seconds of starting — the failure a checksum
   cannot catch, which is an authentic release that does not run on this machine.
-- **Never automatic.** Checking is on by default; installing always requires a
-  typed confirmation, and never happens on the voice path.
+- **Automatic, by owner decision.** Checking is on by default and installing
+  needs no confirmation, on the typed and spoken paths alike. This is the one
+  place Helix trades a prompt for convenience, and it does so because the
+  publisher and the operator are the same person. Turn the whole thing off with
+  `update.check: false`, or use `/reboot now` to restart without checking.
 
 ### 8. Camera and Transcript Privacy
 - **A restart is the only thing that puts an excerpt of your words on disk

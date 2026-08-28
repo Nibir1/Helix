@@ -78,11 +78,14 @@ The restart comes back **in live mode**, in the same directory, on the same
 provider and model, with the conversation intact and whatever you were working on
 named on the way in. Rebooting from the keyboard comes back at the keyboard.
 
-`/reboot` also **self-updates** — but never from the microphone. A spoken reboot
-checks, says an update is waiting, and restarts the version you already have;
-installing a downloaded binary requires a typed confirmation. Restarting destroys
-nothing, which is why voice may do it. Replacing the program you run is a
-different act.
+`/reboot` also **self-updates**, and does so automatically — from the microphone
+as well as the keyboard, with no confirmation. That is an owner decision, and the
+trade is worth knowing: the release comes from a repository the owner controls
+and tags deliberately, so publishing it is the authorization; the cost is that a
+bystander saying "reboot" can trigger an install. The download must still match
+the release's checksum, come from GitHub, and prove it is a Helix binary for this
+machine, and the supervisor restores the previous one if the new one cannot
+start. `update.check: false` turns it off.
 
 Live mode replaces the typed line with a record→transcribe cycle. Transcripts
 are stamped `Channel=voice` and pass through the **Voice Risk Policy** (ADR-005):

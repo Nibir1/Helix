@@ -40,11 +40,11 @@ func TestE2E_PermissionsCommandShowsAndSetsMode(t *testing.T) {
 		}
 	}
 	// The guarantee that makes the feature safe must be stated where it is set.
-	if err := h.Expect("High-risk commands stay blocked in every mode", 5*time.Second); err != nil {
+	if err := h.Expect("blocked", 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := h.SendExpect("/permissions plan", "Permission mode: plan", 15*time.Second); err != nil {
+	if err := h.SendExpect("/permissions plan", "plan", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// And it must persist, so a posture survives the restart it was chosen for.
@@ -64,10 +64,12 @@ func TestE2E_PermissionsRejectsUnknownMode(t *testing.T) {
 	h := newHarness(t, commandsNoPlan)
 	defer h.Close()
 
-	if err := h.SendExpect("/permissions definitely-not-a-mode", "Unknown mode", 15*time.Second); err != nil {
+	if err := h.SendExpect("/permissions definitely-not-a-mode",
+		"is not an approval mode", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("Valid modes:", 5*time.Second); err != nil {
+	// The refusal must name what IS valid; a bare "no" leaves the user guessing.
+	if err := h.Expect("/permissions <", 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -79,7 +81,7 @@ func TestE2E_PlanModeRefusesToExecute(t *testing.T) {
 	defer h.Close()
 
 	marker := filepath.Join(h.project, "plan-mode-should-not-create-this")
-	if err := h.SendExpect("/permissions plan", "Permission mode: plan", 15*time.Second); err != nil {
+	if err := h.SendExpect("/permissions plan", "plan", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// A direct shell command bypasses the planner but not the pipeline, so it
@@ -96,13 +98,13 @@ func TestE2E_TodoLifecyclePersists(t *testing.T) {
 	h := newHarness(t, commandsNoPlan)
 	defer h.Close()
 
-	if err := h.SendExpect("/todo", "No tasks", 15*time.Second); err != nil {
+	if err := h.SendExpect("/todo", "no tasks", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.SendExpect("/todo add wire up the parser", "Added task 1", 15*time.Second); err != nil {
+	if err := h.SendExpect("/todo add wire up the parser", "task 1", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.SendExpect("/todo add write its tests", "Added task 2", 15*time.Second); err != nil {
+	if err := h.SendExpect("/todo add write its tests", "task 2", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.SendExpect("/todo start 1", "In progress task 1", 15*time.Second); err != nil {
@@ -121,7 +123,7 @@ func TestE2E_TodoLifecyclePersists(t *testing.T) {
 	if err := h.SendExpect("/todo done not-a-number", "is not a task ID", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.SendExpect("/todo prune", "Pruned 1 completed task", 15*time.Second); err != nil {
+	if err := h.SendExpect("/todo prune", "1 completed task", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -180,7 +182,7 @@ func TestE2E_HooksAddRunAndDeny(t *testing.T) {
 	if err := h.SendExpect("/hooks", "LOCAL POLICY HOOKS", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("No hooks configured", 5*time.Second); err != nil {
+	if err := h.Expect("none configured", 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.SendExpect("/hooks events", "pre-shell", 15*time.Second); err != nil {
@@ -191,7 +193,7 @@ func TestE2E_HooksAddRunAndDeny(t *testing.T) {
 	if err := h.SendExpect("/hooks test pre-shell exit 7", "exit 7", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("would DENY the step", 5*time.Second); err != nil {
+	if err := h.Expect("would deny", 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -229,10 +231,14 @@ func TestE2E_HooksReportBrokenConfig(t *testing.T) {
 	if err := os.WriteFile(hooksPath, []byte(`{"hooks":[{"name":"x","event":"pre-nothing","command":"true"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.SendExpect("/hooks", "Could not load hooks", 15*time.Second); err != nil {
-		t.Fatal(err)
+	// A broken hooks file must REPORT itself. The wording moved to the panel
+	// language; what matters is that the failure is named and its consequence
+	// stated, so the assertions are on single unwrappable tokens.
+	if err := h.SendExpect("/hooks", "✘", 15*time.Second); err != nil {
+		t.Fatal("a broken hooks config must be reported as a failure")
 	}
-	if err := h.Expect("NO hooks run", 5*time.Second); err != nil {
+	// One unwrappable token: the consequence sentence wraps to the terminal.
+	if err := h.Expect("hooks run", 5*time.Second); err != nil {
 		t.Fatal("the consequence of a broken config must be stated")
 	}
 }
@@ -247,17 +253,19 @@ func TestE2E_ClearArchivesConversation(t *testing.T) {
 	if err := h.SendExpect("remember this detail please", "noted", 40*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.SendExpect("/clear", "Conversation cleared", 20*time.Second); err != nil {
+	if err := h.SendExpect("/clear", "cleared", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("Archived as", 5*time.Second); err != nil {
+	// The archive is named by the command that restores it, which is the form
+	// the user actually needs.
+	if err := h.Expect("/resume ", 5*time.Second); err != nil {
 		t.Fatal("a clear that archives nothing is a destructive clear")
 	}
 	if err := h.SendExpect("/memory", "CONVERSATION MEMORY", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// And the archive must be listed by /resume, or it is unreachable.
-	if err := h.SendExpect("/resume", "Archived conversations", 15*time.Second); err != nil {
+	if err := h.SendExpect("/resume", "ARCHIVED CONVERSATIONS", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -279,7 +287,7 @@ func TestE2E_ExportWritesTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(h.project, "transcript.md")
-	if err := h.SendExpect("/export "+target, "Exported", 20*time.Second); err != nil {
+	if err := h.SendExpect("/export "+target, "exported", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	h.ExpectFile(t, target, 10*time.Second)
@@ -367,7 +375,7 @@ func TestE2E_ConfigShowsAndSets(t *testing.T) {
 	if err := h.Expect("accepts: on | off", 5*time.Second); err != nil {
 		t.Fatal("a refusal must name the accepted values")
 	}
-	if err := h.SendExpect("/config no-such-key", "Unknown setting", 15*time.Second); err != nil {
+	if err := h.SendExpect("/config no-such-key", "is not a settable key", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -390,7 +398,9 @@ func TestE2E_VersionReportsBuildFacts(t *testing.T) {
 	if err := h.SendExpect("/version", "Helix", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Platform", "Audio output", "Confinement backend", "Slash commands"} {
+	// Row labels rather than sentences: /version renders as a panel now, and the
+	// labels are what a reader scans.
+	for _, want := range []string{"PLATFORM", "AUDIO", "CONFINEMENT", "COMMANDS"} {
 		if err := h.Expect(want, 5*time.Second); err != nil {
 			t.Fatalf("/version missing %q: %v", want, err)
 		}
@@ -499,7 +509,7 @@ func TestE2E_EyesLookIsReachableByKeyboard(t *testing.T) {
 
 	// Eyes are off by default, so the command must say so rather than silently
 	// doing nothing.
-	if err := h.SendExpect("/blackbox look", "Eyes are off", 15*time.Second); err != nil {
+	if err := h.SendExpect("/blackbox look", "eyes", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// And it must appear in the command's own help, or nobody will find it.

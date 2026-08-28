@@ -23,8 +23,6 @@ import (
 
 	"helix/internal/journal"
 	"helix/internal/shell"
-
-	"github.com/fatih/color"
 )
 
 // voiceLog is nil whenever the feature is disabled, which is the normal case.
@@ -44,7 +42,7 @@ func initVoiceLog() {
 		KeepFiles: cfg.VoiceLog.KeepFiles,
 	})
 	if err != nil {
-		color.Yellow("Voice log disabled: %v", err)
+		uiWarn("voice log disabled", err.Error())
 		return
 	}
 	voiceLog = vl
@@ -79,7 +77,7 @@ func handleVoiceLogCommand(c cmdArgs) {
 		}
 		fmt.Println(shell.PanelEnd())
 	default:
-		color.Yellow("Usage: /blackbox log <on|off|status|show [n]>")
+		uiUsage("/blackbox log <on|off|status|show [n]>")
 	}
 }
 
@@ -92,7 +90,7 @@ func handleVoiceLogCommand(c cmdArgs) {
 func setVoiceLogEnabled(on bool) {
 	cfg.VoiceLog.Enabled = on
 	if err := cfg.SavePreferences(); err != nil {
-		color.Red("Could not save the voice-log setting: %v", err)
+		uiFail("voice log", "could not be saved: "+err.Error())
 		return
 	}
 	initVoiceLog()
@@ -103,7 +101,7 @@ func setVoiceLogEnabled(on bool) {
 		return
 	}
 	if !voiceLog.Enabled() {
-		color.Yellow("Voice log could not be opened — nothing is being recorded.")
+		uiWarn("voice log", "could not be opened — nothing is being recorded")
 		return
 	}
 	fmt.Println(shell.Badge(shell.StateGood, "voice log on") +

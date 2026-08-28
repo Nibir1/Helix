@@ -288,6 +288,11 @@ sudo usermod -aG audio "$USER"          # microphone + speaker access (re-login)
 journalctl --user -u helix-daemon -f    # watch it run
 ```
 
+Output written by `helix daemon` under systemd or launchd is **plain text**:
+colour switches itself off when stdout is not a terminal, so the journal holds
+no escape sequences. `NO_COLOR` disables it everywhere; `CLICOLOR_FORCE=1`
+re-enables it when you are piping into something that renders ANSI.
+
 ## §6. Post-deploy verification (any device)
 
 Run these inside Helix after install:
@@ -337,7 +342,7 @@ deployment raises, and it now has an answer instead of an assurance.
 | Ambient analysis (when `ambient.enabled`) | 571 µs, 852 KB allocated | **0.038 %** |
 | Restart supervisor (after one `/reboot`) | idle, blocked in `wait` | **not measured** |
 
-`/reboot` also self-updates, which has two consequences on a small board.
+`/reboot` also self-updates — automatically, with no confirmation — which has two consequences on a small board.
 It replaces the binary **in place** and keeps the previous one beside it as
 `helix.prev`, so budget for two copies on a constrained filesystem. And it
 refuses when the install directory is not writable by the user running Helix —

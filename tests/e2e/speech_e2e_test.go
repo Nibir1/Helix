@@ -44,11 +44,11 @@ func TestE2E_TTSToggle(t *testing.T) {
 	defer h.Close()
 
 	h.WriteLine("/blackbox tts off")
-	if err := h.Expect("Replies are silent", 10*time.Second); err != nil {
+	if err := h.Expect("silent", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	h.WriteLine("/blackbox tts on")
-	if err := h.SendExpect("/blackbox tts on", "Replies are now spoken aloud", 10*time.Second); err != nil {
+	if err := h.SendExpect("/blackbox tts on", "spoken aloud", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

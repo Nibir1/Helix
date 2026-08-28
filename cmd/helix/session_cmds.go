@@ -23,8 +23,6 @@ import (
 	"helix/internal/session"
 	"helix/internal/shell"
 	"helix/internal/utils"
-
-	"github.com/fatih/color"
 )
 
 // -------------------------------------------------------
@@ -40,7 +38,7 @@ import (
 func handleClearCommand(c cmdArgs) {
 	if agentCore == nil || agentCore.Session == nil {
 		clearScreen()
-		color.Yellow("Screen cleared. Conversation memory is not available in this session.")
+		uiWarn("cleared the screen", "conversation memory is not available in this session")
 		return
 	}
 
@@ -50,9 +48,9 @@ func handleClearCommand(c cmdArgs) {
 		id, err := session.SaveSnapshot("cleared", turns)
 		if err != nil {
 			// A failed archive must not silently become a destructive clear.
-			color.Red("Could not archive the conversation: %v", err)
+			uiFail("archive", err.Error())
 			if !commands.AskForConfirmation("Clear it anyway (the transcript will be lost)?") {
-				color.Yellow("Clear cancelled.")
+				uiIdle("cancelled", "the conversation is unchanged")
 				return
 			}
 		} else {
@@ -61,17 +59,17 @@ func handleClearCommand(c cmdArgs) {
 	}
 
 	if err := agentCore.Session.Clear(); err != nil {
-		color.Red("Failed to clear conversation memory: %v", err)
+		uiFail("clear", err.Error())
 		return
 	}
 	ai.ResetUsage()
 	clearScreen()
 
-	color.Green("Conversation cleared (%d turn(s)) and usage meter reset.", len(turns))
+	uiOK("cleared", fmt.Sprintf("%d turn(s), and the usage meter is reset", len(turns)))
 	if archived != "" {
-		color.Cyan("Archived as %s — restore it with /resume %s", archived, archived)
+		uiUsage("/resume " + archived + "   restores what was cleared")
 	}
-	color.Cyan("Tasks, the undo journal, and shell history are untouched.")
+	uiDetail("Tasks, the undo journal and shell history are untouched.")
 }
 
 // clearScreen clears the terminal and homes the cursor.
@@ -86,12 +84,12 @@ func clearScreen() {
 // handleCompactCommand replaces the conversation with a model-written summary.
 func handleCompactCommand(c cmdArgs) {
 	if agentCore == nil || agentCore.Session == nil {
-		color.Red("Conversation memory is not available in this session.")
+		uiFail("session memory", "is not available in this session")
 		return
 	}
 	turns := agentCore.SessionTurns()
 	if len(turns) < 2 {
-		color.Yellow("Nothing to compact yet — %d turn(s) in memory.", len(turns))
+		uiIdle("nothing to compact", fmt.Sprintf("%d turn(s) in memory", len(turns)))
 		return
 	}
 
@@ -102,20 +100,20 @@ func handleCompactCommand(c cmdArgs) {
 		Temperature: 0.2, TopP: 0.9, TopK: 40, MaxTokens: 1024,
 	})
 	if err != nil {
-		color.Red("Compaction failed: %v", err)
+		uiFail("compact", err.Error())
 		return
 	}
 	if strings.TrimSpace(summary) == "" {
-		color.Yellow("The model returned an empty summary; memory left unchanged.")
+		uiWarn("empty summary", "the model returned nothing — memory is unchanged")
 		return
 	}
 
 	fmt.Println()
-	color.Cyan("=== Proposed summary (%d turns → 1) ===", len(turns))
+	fmt.Println(shell.PanelTitle(fmt.Sprintf("proposed summary  %d turns → 1", len(turns))))
 	fmt.Println(summary)
 	fmt.Println()
 	if !commands.AskForConfirmation("Replace conversation memory with this summary?") {
-		color.Yellow("Compaction cancelled; memory left unchanged.")
+		uiIdle("cancelled", "memory is unchanged")
 		return
 	}
 
@@ -123,7 +121,7 @@ func handleCompactCommand(c cmdArgs) {
 	// cannot know what it dropped until later.
 	id, saveErr := session.SaveSnapshot("pre-compact", turns)
 	if saveErr != nil {
-		color.Yellow("Could not archive the pre-compaction conversation: %v", saveErr)
+		uiWarn("archive", "could not be written first: "+saveErr.Error())
 	}
 
 	if err := agentCore.Session.Restore([]session.Turn{{
@@ -132,13 +130,13 @@ func handleCompactCommand(c cmdArgs) {
 		UserText:  compactMarker(len(turns), focus),
 		Reply:     summary,
 	}}); err != nil {
-		color.Red("Failed to write the compacted memory: %v", err)
+		uiFail("compact", err.Error())
 		return
 	}
 
-	color.Green("Compacted %d turns into one summary.", len(turns))
+	uiOK("compacted", fmt.Sprintf("%d turns into one summary", len(turns)))
 	if id != "" {
-		color.Cyan("Full transcript archived as %s — /resume %s restores it.", id, id)
+		uiUsage("/resume " + id + "   restores the full transcript")
 	}
 }
 
@@ -189,7 +187,7 @@ func buildCompactPrompt(turns []session.Turn, focus string) string {
 
 func handleResumeCommand(c cmdArgs) {
 	if agentCore == nil || agentCore.Session == nil {
-		color.Red("Conversation memory is not available in this session.")
+		uiFail("session memory", "is not available in this session")
 		return
 	}
 
@@ -201,89 +199,96 @@ func handleResumeCommand(c cmdArgs) {
 	id := c.Arg(0)
 	if strings.EqualFold(id, "rm") || strings.EqualFold(id, "delete") {
 		if c.Count() < 2 {
-			color.Red("Usage: /resume rm <id>")
+			uiUsage("/resume rm <id>")
 			return
 		}
 		if err := session.DeleteSnapshot(c.Arg(1)); err != nil {
-			color.Red("Could not delete %s: %v", c.Arg(1), err)
+			uiFail(c.Arg(1), err.Error())
 			return
 		}
-		color.Green("Deleted archived conversation %s.", c.Arg(1))
+		uiOK("deleted", c.Arg(1))
 		return
 	}
 
 	snap, err := session.LoadSnapshot(id)
 	if err != nil {
-		color.Red("Could not load %s: %v", id, err)
-		color.Yellow("Run /resume with no argument to list the archive.")
+		uiFail(id, err.Error())
+		uiUsage("/resume   lists the archive")
 		return
 	}
 	if len(snap.Turns) == 0 {
-		color.Yellow("Archive %s is empty.", snap.ID)
+		uiIdle(snap.ID, "is empty")
 		return
 	}
 
 	current := agentCore.SessionTurns()
-	fmt.Println()
-	color.Cyan("Resuming %s (%s, %d turns)", snap.ID,
-		snap.CreatedAt.Format("2006-01-02 15:04"), len(snap.Turns))
+	fmt.Println(shell.PanelTitle("resuming " + snap.ID))
+	fmt.Println(shell.KV("ARCHIVED", shell.Muted(snap.CreatedAt.Format("2006-01-02 15:04")+
+		fmt.Sprintf("  ·  %d turns", len(snap.Turns))), shell.KVWidth("ARCHIVED")))
+	fmt.Println(shell.PanelGap())
 	for _, t := range snap.Turns {
-		fmt.Printf("  %s %s\n", shell.Fg(shell.HexMuted, t.Timestamp.Format("15:04:05")),
-			truncStr(t.UserText, 90))
+		fmt.Println(shell.PanelLine(shell.Muted(t.Timestamp.Format("15:04:05")) + "  " +
+			shell.Fg(shell.HexText, truncStr(t.UserText, 80))))
 	}
-	fmt.Println()
+	fmt.Println(shell.PanelEnd())
 	if len(current) > 0 {
-		color.Yellow("This replaces the %d turn(s) currently in memory (they will be archived first).",
-			len(current))
+		uiWarn("replaces the current conversation",
+			fmt.Sprintf("%d turn(s) in memory, archived first", len(current)))
 	}
 	if !commands.AskForConfirmation("Load this conversation?") {
-		color.Yellow("Resume cancelled.")
+		uiIdle("cancelled", "memory is unchanged")
 		return
 	}
 
 	if len(current) > 0 {
 		if id, err := session.SaveSnapshot("replaced-by-resume", current); err == nil && id != "" {
-			color.Cyan("Current conversation archived as %s.", id)
+			uiOK("archived", id)
 		}
 	}
 	if err := agentCore.Session.Restore(snap.Turns); err != nil {
-		color.Red("Failed to restore the conversation: %v", err)
+		uiFail("restore", err.Error())
 		return
 	}
 	capacity := agentCore.Session.Capacity()
 	if len(snap.Turns) > capacity {
-		color.Yellow("Loaded the most recent %d of %d turns (memory ring holds %d).",
-			capacity, len(snap.Turns), capacity)
+		uiWarn("loaded in part",
+			fmt.Sprintf("the most recent %d of %d turns (the ring holds %d)",
+				capacity, len(snap.Turns), capacity))
 	} else {
-		color.Green("Loaded %d turn(s) from %s.", len(snap.Turns), snap.ID)
+		uiOK("loaded", fmt.Sprintf("%d turn(s) from %s", len(snap.Turns), snap.ID))
 	}
 }
 
 func listSnapshots() {
 	snaps, err := session.ListSnapshots()
 	if err != nil {
-		color.Red("Could not read the session archive: %v", err)
+		uiFail("archive", err.Error())
 		return
 	}
 	if len(snaps) == 0 {
-		color.Cyan("No archived conversations yet.")
-		color.Yellow("/clear and /compact archive automatically before they wipe anything.")
+		uiIdle("no archives yet", "nothing has been cleared or compacted")
+		uiDetail("/clear and /compact archive automatically before they wipe anything.")
 		return
 	}
-	fmt.Println()
-	color.Cyan("Archived conversations (newest first):")
+	fmt.Println(shell.PanelTitle("archived conversations"))
+	rows := make([][]string, 0, len(snaps))
 	for _, s := range snaps {
 		label := s.Label
 		if label == "" {
 			label = "session"
 		}
-		fmt.Printf("  %s  %s  %s\n",
-			shell.Fg(shell.HexAmber, s.ID),
-			shell.Fg(shell.HexMuted, fmt.Sprintf("%2d turns · %-18s", s.Turns, label)),
-			shell.Fg(shell.HexText, s.Preview))
+		rows = append(rows, []string{
+			shell.Value(s.ID),
+			shell.Muted(fmt.Sprintf("%d turns", s.Turns)),
+			shell.Muted(label),
+			shell.Fg(shell.HexText, s.Preview),
+		})
 	}
-	fmt.Println()
-	color.Yellow("Load one with /resume <id>, or delete one with /resume rm <id>.")
+	for _, l := range shell.Table([]string{"id", "size", "why", "opens with"}, rows) {
+		fmt.Println(l)
+	}
+	fmt.Println(shell.PanelEnd())
+	uiUsage("/resume <id>   loads one  ·  /resume rm <id>   deletes one")
 }
 
 // -------------------------------------------------------
@@ -294,33 +299,34 @@ func handleExportCommand(c cmdArgs) {
 	turns := agentCore.SessionTurns()
 
 	if len(turns) == 0 {
-		color.Yellow("Nothing to export — conversation memory is empty.")
+		uiIdle("nothing to export", "conversation memory is empty")
 		return
 	}
 
 	path, err := exportPath(c.Rest)
 	if err != nil {
-		color.Red("%v", err)
+		uiFail("export", err.Error())
 		return
 	}
 	if _, statErr := os.Stat(path); statErr == nil {
 		if !commands.AskForConfirmation(fmt.Sprintf("%s exists. Overwrite?", path)) {
-			color.Yellow("Export cancelled.")
+			uiIdle("cancelled", "nothing was written")
 			return
 		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		color.Red("Could not create the export directory: %v", err)
+		uiFail("export directory", err.Error())
 		return
 	}
 	// 0600: a transcript is conversation content, and can hold anything the
 	// user typed. It gets the same protection as the session file it came from.
 	if err := os.WriteFile(path, []byte(renderTranscript(turns)), 0o600); err != nil {
-		color.Red("Export failed: %v", err)
+		uiFail("export", err.Error())
 		return
 	}
-	color.Green("Exported %d turn(s) to %s", len(turns), path)
+	uiOK("exported", fmt.Sprintf("%d turn(s)", len(turns)))
+	fmt.Println(shell.StepCommand(path))
 }
 
 // exportPath resolves the destination, defaulting to a timestamped file under
@@ -585,13 +591,13 @@ func roundDuration(d time.Duration) time.Duration {
 func handleHistoryCommand(c cmdArgs) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		color.Red("Cannot resolve the home directory: %v", err)
+		uiFail("home directory", err.Error())
 		return
 	}
 	path := filepath.Join(home, ".helix_history")
 	lines, err := utils.LoadHistory(path)
 	if err != nil || len(lines) == 0 {
-		color.Yellow("No history recorded yet (%s).", path)
+		uiIdle("no history yet", path)
 		return
 	}
 
@@ -605,7 +611,7 @@ func handleHistoryCommand(c cmdArgs) {
 		}
 	}
 	if len(matched) == 0 {
-		color.Yellow("No history lines match %q.", c.Rest)
+		uiIdle("no matches", "nothing in the history matches "+c.Rest)
 		return
 	}
 
@@ -615,9 +621,9 @@ func handleHistoryCommand(c cmdArgs) {
 	}
 	fmt.Println()
 	if pattern == "" {
-		color.Cyan("Recent history (%d of %d lines):", len(shown), len(lines))
+		fmt.Println(shell.PanelTitle(fmt.Sprintf("history  %d of %d lines", len(shown), len(lines))))
 	} else {
-		color.Cyan("History matching %q (%d of %d matches):", c.Rest, len(shown), len(matched))
+		fmt.Println(shell.PanelTitle(fmt.Sprintf("history matching %q  %d of %d", c.Rest, len(shown), len(matched))))
 	}
 	// Number from the true position in the file so a filtered view still tells
 	// the user where each line actually sits.
@@ -629,6 +635,6 @@ func handleHistoryCommand(c cmdArgs) {
 	}
 	fmt.Println()
 	if agentCore != nil && !agentCore.PersistsHistory() {
-		color.Yellow("Stealth mode is ON — this session's lines are NOT being recorded here.")
+		uiWarn("stealth is on", "this session's lines are not being recorded here")
 	}
 }

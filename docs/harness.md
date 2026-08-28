@@ -298,6 +298,11 @@ checkout. `/reboot` is what makes the removal take
 effect — open database handles only release when the process exits, so "blank
 slate" is true one restart later.
 
+A restart also leaves a turn in the conversation saying it happened — mode,
+directory, provider — so the planner can answer "did you reboot?" instead of
+denying it. That turn records Helix's own action and never anything the
+microphone heard.
+
 An open task survives a `/reboot` by two independent paths: `todo.json` is
 reloaded like any other boot, and the continuity record separately carries the
 **in-progress** task texts so the resume can name what you were in the middle of.

@@ -83,9 +83,15 @@ sample:
 
 Two phrases are matched at the **end** of anything you say rather than at the
 start, because they end the turn instead of being served by it: **"manual
-mode"** returns you to the keyboard, and **"reboot"** restarts the shell. Both
-work mid-sentence — "okay, please reboot" — and neither fires on a question, so
-"what happens when you reboot" is answered rather than obeyed.
+mode"** returns you to the keyboard, and **"reboot"** restarts the shell.
+
+"reboot" fires when it is the whole sentence, or when what comes before it is a
+lead-in people actually use — "okay", "please", "go ahead and", "helix". It does
+**not** fire on a sentence that merely mentions it: *"So you don't have any
+memory that I told you to reboot"* is heard, not obeyed. That is an allowlist
+rather than a list of exclusions, because there is no finite set of ways English
+can end on a word without meaning it — and the failure mode of an allowlist is a
+reboot that does not happen, where you simply say the word again.
 
 Anything without a phrase is reachable by saying **"slash \<command name\>"** —
 "slash provider status", "slash knowledge status", "slash dry run". Hyphens are
@@ -116,11 +122,13 @@ Two commands are *readable* by voice and not settable (`VoiceReadOnly`):
 `/permissions` and `/sandbox`. You can ask what the posture is; changing it has
 to be typed.
 
-A spoken reboot **restarts and never installs**. `/reboot` also self-updates, and
-downloading and executing a new binary is a different act from restarting one —
-a television saying "reboot" must not be able to replace the program you run. The
-spoken path checks, says an update is waiting, and leaves the decision to the
-keyboard.
+A spoken reboot **also installs an available update**, by owner decision:
+`/reboot` self-updates automatically and voice is not carved out. The trade is
+recorded rather than implied — a television saying "reboot" can now cause an
+install, bounded by the fact that the release must come from the configured
+repository and pass the checksum, the host pin and the build-info check, and by
+the supervisor rolling back a binary that cannot start. Set
+`update.check: false` if that trade is not wanted on a given machine.
 
 `/reboot` is the one DANGER ZONE command that voice **can** reach, and the
 carve-out is argued rather than assumed: it destroys nothing. The continuity
@@ -384,11 +392,10 @@ yet do:
   seconds on a CPU-bound local chain. `/blackbox status` reports the measured
   time-to-first-audio against the budget, and labels whether the streamed or
   buffered path served it.
-- **Voice can restart Helix but cannot update it.** "Reboot" restarts the shell;
-  installing a downloaded binary is typed-only. That is a deliberate asymmetry,
-  not a missing feature — restarting destroys nothing, while replacing the
-  program you run is an act a television saying "reboot" must not be able to
-  cause.
+- **Voice can update Helix.** "Reboot" restarts the shell AND installs an
+  available release, with no confirmation. That is an owner decision rather than
+  an oversight: the publisher and the operator are the same person here. On a
+  machine where that is not true, `update.check: false` turns it off.
 - **Spoken command matching is phrase-based, not model-based.** It is
   predictable and costs no tokens, but it only knows the phrases in the table.
   Anything else goes to the planner — which is the correct fallback, not a

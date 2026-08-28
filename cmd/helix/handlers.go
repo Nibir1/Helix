@@ -40,8 +40,6 @@ import (
 	"helix/internal/speech"
 	"helix/internal/utils"
 	"helix/internal/ux"
-
-	"github.com/fatih/color"
 )
 
 // -------------------------------------------------------
@@ -173,7 +171,7 @@ func handleSetup() {
 			if newName != "" {
 				cfg.UserPrefs.UserName = newName
 				if err := cfg.SavePreferences(); err != nil {
-					color.Red("Failed to save preferences: %v", err)
+					uiFail("preferences", "could not be saved: "+err.Error())
 				} else {
 					shell.SetUserName(newName)
 					fmt.Println("  " + shell.Fg(shell.HexSecondary, "✔ Identity updated to: ") + shell.Fg(shell.HexPrimary, newName))
@@ -181,7 +179,7 @@ func handleSetup() {
 			}
 		case "2":
 			if err := runNativeSetup(); err != nil {
-				color.Red("Provider setup failed: %v", err)
+				uiFail("provider setup", err.Error())
 			} else {
 				cfg.Provider = ai.ActiveProviderName()
 				cfg.ProviderModel = ai.ActiveModel()
@@ -244,12 +242,11 @@ func setupMenuItems() []shell.MenuItem {
 
 func handleDebugCommand(c cmdArgs) {
 	if c.Empty() {
-		current := "OFF"
-		if utils.IsDebugMode() {
-			current = "ON"
-		}
-		color.Cyan("Debug mode is currently: %s", current)
-		color.Yellow("Usage: /debug <on|off>")
+		// utils.IsDebugMode reads the ENV, which is the state that actually
+		// governs logging — cfg.UserPrefs.DebugMode is only what it was set
+		// from, and the two diverge the moment HELIX_DEBUG is exported by hand.
+		uiToggle("DEBUG", utils.IsDebugMode(), "verbose logging is on",
+			"only the essentials are logged", "/debug <on|off>")
 		return
 	}
 	switch c.Sub() {
@@ -257,15 +254,15 @@ func handleDebugCommand(c cmdArgs) {
 		utils.SetDebugMode(true)
 		_ = os.Setenv("HELIX_DEBUG", "1")
 		cfg.UserPrefs.DebugMode = true
-		color.Green("Debug mode ENABLED")
+		uiOK("debug", "on — verbose logging")
 	case "off", "disable":
 		utils.SetDebugMode(false)
 		_ = os.Unsetenv("HELIX_DEBUG")
 		cfg.UserPrefs.DebugMode = false
-		color.Yellow("Debug mode DISABLED")
+		uiIdle("debug", "off — only the essentials are logged")
 	default:
-		color.Red("Unknown debug setting: %s", c.Arg(0))
-		color.Yellow("Usage: /debug <on|off>")
+		uiFail(c.Arg(0), "is not a /debug setting")
+		uiUsage("/debug <on|off>")
 		return
 	}
 	_ = cfg.SavePreferences()
@@ -418,16 +415,16 @@ func knowledgeLine() string {
 
 func handleSandboxCommand(c cmdArgs) {
 	if sandbox == nil {
-		color.Red("Sandbox is not available in this session.")
+		uiFail("sandbox", "is not available in this session")
 		return
 	}
 	if c.Empty() {
 		sandbox.PrintStatus()
-		color.Yellow("Usage: /sandbox <off|current|strict>")
-		color.Yellow("  off      no directory confinement")
-		color.Yellow("  current  confine to the current directory tree")
-		color.Yellow("  strict   current-dir confinement plus kernel confinement (%s)",
-			confinement.BackendName())
+		uiUsage("/sandbox <off|current|strict>")
+		uiDetail("off — no directory confinement")
+		uiDetail("current — confine to the current directory tree")
+		uiDetail(fmt.Sprintf("strict — current-dir confinement plus kernel confinement (%s)",
+			confinement.BackendName()))
 		return
 	}
 	mode := c.Sub()
@@ -439,8 +436,8 @@ func handleSandboxCommand(c cmdArgs) {
 	case "strict", "tight", "restricted":
 		sandbox.SetMode(commands.SandboxStrict)
 	default:
-		color.Red("Unknown sandbox mode: %s", mode)
-		color.Yellow("Valid modes: off, current, strict")
+		uiFail(mode, "is not a sandbox mode")
+		uiUsage("/sandbox <off|current|strict>")
 	}
 }
 
@@ -448,28 +445,28 @@ func handleChangeDirectory(c cmdArgs) {
 	targetDir := c.Rest
 	if targetDir == "" {
 		current, _ := os.Getwd()
-		color.Cyan("Current directory: %s", current)
+		fmt.Println(shell.KV("DIRECTORY", shell.Value(current), shell.KVWidth("DIRECTORY")))
 		return
 	}
 	if err := sandbox.ChangeDirectory(targetDir); err != nil {
-		color.Red("Failed to change directory: %v", err)
+		uiFail("cd", err.Error())
 	}
 }
 
 func handleGitCommand(c cmdArgs) {
 	request := c.Rest
 	if request == "" {
-		color.Red("Usage: /git <natural-language git operation>")
-		color.Yellow("Examples: /git commit everything with a sensible message")
-		color.Yellow("          /git show me what changed on this branch")
+		uiUsage("/git <natural-language git operation>")
+		uiDetail("e.g. /git commit everything with a sensible message")
+		uiDetail("e.g. /git show me what changed on this branch")
 		return
 	}
 	if gitManager == nil {
-		color.Red("Git manager is not available in this session.")
+		uiFail("git", "is not available in this session")
 		return
 	}
 	if err := gitManager.HandleGitRequest(request); err != nil {
-		color.Red("Git operation failed: %v", err)
+		uiFail("git", err.Error())
 	}
 }
 
@@ -531,10 +528,10 @@ func pagesIndexed(v any) int {
 
 func handleRAGReindex() {
 	if ragSystem == nil {
-		color.Red("RAG system not initialized")
+		uiFail("knowledge base", "not initialized")
 		return
 	}
-	color.Cyan("Forcing full RAG reindex…")
+	uiIdle("reindexing", "rebuilding the knowledge index")
 	ctx, cancel := context.WithCancel(context.Background())
 	unreg := utils.RegisterOperation(cancel)
 	err := ragSystem.RebuildWithProgressCtx(ctx)
@@ -542,52 +539,52 @@ func handleRAGReindex() {
 	cancel()
 	if err != nil {
 		if ctx.Err() != nil {
-			color.Yellow("RAG reindex cancelled.")
+			uiIdle("cancelled", "the index is unchanged")
 			return
 		}
-		color.Red("RAG reindex failed: %v", err)
+		uiFail("reindex", err.Error())
 		return
 	}
-	color.Green("RAG reindex completed successfully")
+	uiOK("reindexed", "the knowledge index is current")
 }
 
 func handleRAGReset() {
 	if ragSystem == nil {
-		color.Red("RAG system not initialized")
+		uiFail("knowledge base", "not initialized")
 		return
 	}
-	color.Yellow("This deletes every RAG index and embedding cache on disk.")
+	uiWarn("destructive", "this deletes every knowledge index and embedding cache on disk")
 	if !commands.AskForConfirmation("Wipe all RAG vector data?") {
-		color.Yellow("RAG reset cancelled.")
+		uiIdle("cancelled", "nothing was deleted")
 		return
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		color.Red("Cannot resolve the home directory: %v", err)
+		uiFail("home directory", err.Error())
 		return
 	}
 	ragDir := filepath.Join(home, ".helix", "rag_index")
 	if err := os.RemoveAll(ragDir); err != nil {
-		color.Red("Failed to reset RAG data: %v", err)
+		uiFail("reset", err.Error())
 		return
 	}
-	color.Green("RAG data deleted from %s.", ragDir)
+	uiOK("deleted", ragDir)
 	// The running system still holds the state it loaded at boot, so it will
 	// keep answering retrievals from memory. Saying "reset completed" and
 	// stopping there made that look like a working empty index.
-	color.Yellow("The running RAG system still holds what it loaded at startup.")
-	color.Yellow("Run /rag-rebuild to index again now, or restart Helix for a clean load.")
+	uiDetail("The running index still holds what it loaded at startup.")
+	uiUsage("/rag-rebuild indexes again now  ·  /reboot restarts for a clean load")
 }
 
 func handleRAGRebuild() {
 	if ragSystem == nil {
-		color.Red("RAG system not initialized")
-		color.Yellow("Start Helix normally first so the RAG system is created, then run /rag-rebuild.")
+		uiFail("knowledge base", "not initialized")
+		uiDetail("Start Helix normally first so the index is created, then run /rag-rebuild.")
 		return
 	}
-	color.Yellow("Full RAG REBUILD will delete all cached embeddings and rebuild every index.")
+	uiWarn("destructive", "this deletes every cached embedding and rebuilds every index")
 	if !commands.AskForConfirmation("Proceed with full rebuild now?") {
-		color.Yellow("RAG rebuild cancelled by user")
+		uiIdle("cancelled", "nothing was deleted")
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -597,13 +594,13 @@ func handleRAGRebuild() {
 	cancel()
 	if err != nil {
 		if ctx.Err() != nil {
-			color.Yellow("RAG rebuild cancelled.")
+			uiIdle("cancelled", "the index is unchanged")
 			return
 		}
-		color.Red("RAG rebuild failed: %v", err)
+		uiFail("rebuild", err.Error())
 		return
 	}
-	color.Green("RAG rebuild completed successfully and is now ACTIVE.")
+	uiOK("rebuilt", "the new index is live")
 }
 
 // -------------------------------------------------------
@@ -619,24 +616,24 @@ func toggleDryRun() {
 		agentCore.SetDryRun(execConfig.DryRun)
 	}
 	if execConfig.DryRun {
-		color.Yellow("Dry-run mode ENABLED — commands are printed, never executed")
-		color.Cyan("For a whole session that only plans, /permissions plan is the stronger form.")
+		uiOK("dry-run", "on — commands are printed, never executed")
+		uiDetail("For a whole session that only plans, /permissions plan is the stronger form.")
 	} else {
-		color.Green("Dry-run mode DISABLED — commands will run normally")
+		uiIdle("dry-run", "off — commands run normally")
 	}
 }
 
 func checkOnlineStatus() {
-	color.Blue("Checking internet connectivity…")
+	uiIdle("checking", "internet connectivity")
 	if utils.IsOnline(3 * time.Second) {
-		color.Green("Online — real-time capabilities available")
+		uiOK("online", "real-time capabilities available")
 	} else {
-		color.Yellow("Offline — using local AI only")
+		uiWarn("offline", "local providers only")
 	}
 }
 
 func testBasicAI() {
-	color.Cyan("Smoke testing %s (%s)…", ai.ActiveProviderName(), ai.ActiveModel())
+	uiIdle("smoke test", ai.ActiveProviderName()+"  ·  "+ai.ActiveModel())
 	think := ux.NewThinker("HELIX :: SMOKE TEST")
 	think.Start()
 	started := time.Now()
@@ -645,27 +642,28 @@ func testBasicAI() {
 	think.Stop()
 
 	if err != nil {
-		color.Red("Smoke test FAILED after %v: %v", elapsed.Round(time.Millisecond), err)
-		color.Yellow("Run /provider-status to see whether the brain is reachable at all.")
+		uiFail("failed", fmt.Sprintf("after %v: %v", elapsed.Round(time.Millisecond), err))
+		uiUsage("/provider-status shows whether the brain is reachable at all")
 		return
 	}
 	resp = strings.TrimSpace(resp)
 	if resp == "" {
 		// An empty 200 is a real and confusing failure mode on reasoning models
 		// that burn their token budget before emitting anything.
-		color.Yellow("The model answered in %v but returned NOTHING.", elapsed.Round(time.Millisecond))
-		color.Yellow("That usually means the token budget was consumed before any output.")
+		uiWarn("empty answer", fmt.Sprintf("the model replied in %v and returned nothing", elapsed.Round(time.Millisecond)))
+		uiDetail("That usually means the token budget was consumed before any output.")
 		return
 	}
-	color.Green("Smoke test OK in %v: %s", elapsed.Round(time.Millisecond), truncStr(resp, 120))
+	uiOK("ok", fmt.Sprintf("%v  ·  %s", elapsed.Round(time.Millisecond), truncStr(resp, 120)))
 }
 
 func handleStealthCommand(c cmdArgs) {
 	if c.Empty() {
 		if agentCore != nil {
-			color.Cyan("Stealth mode: %v", agentCore.IsStealthEnabled())
+			uiToggle("STEALTH", agentCore.IsStealthEnabled(),
+				"memory only — nothing is written to history", "history is written as usual", "")
 		}
-		color.Yellow("Usage: /stealth <on|off>")
+		uiUsage("/stealth <on|off>")
 		return
 	}
 	switch c.Sub() {
@@ -687,7 +685,7 @@ func handleStealthCommand(c cmdArgs) {
 // handleAgenticCommand toggles the iterative agentic harness: /agentic [on|off|status].
 func handleAgenticCommand(c cmdArgs) {
 	if agentCore == nil {
-		color.Red("Agent is not available in this session.")
+		uiFail("agent", "is not available in this session")
 		return
 	}
 	// /agentic steps <n> retunes the budget without leaving the command: the
@@ -702,19 +700,17 @@ func handleAgenticCommand(c cmdArgs) {
 		agentCore.Agentic = true
 		cfg.UserPrefs.AgenticMode = true
 		_ = cfg.SavePreferences()
-		color.Green("Agentic harness ON — Helix will observe step results and self-correct across up to %d follow-ups.", agenticStepBudget())
-		color.Cyan("Every follow-up plan still passes the full safety pipeline. Use /agentic off to return to single-shot planning.")
+		uiOK("agentic", fmt.Sprintf("on — self-corrects across up to %d follow-ups", agenticStepBudget()))
+		uiDetail("Every follow-up plan still passes the full safety pipeline.")
 	case "off", "disable":
 		agentCore.Agentic = false
 		cfg.UserPrefs.AgenticMode = false
 		_ = cfg.SavePreferences()
-		color.Yellow("Agentic harness OFF — single-shot planning restored.")
+		uiIdle("agentic", "off — single-shot planning")
 	default:
-		state := "OFF"
-		if agentCore.Agentic {
-			state = "ON"
-		}
-		color.Cyan("Agentic harness: %s (step budget %d). Toggle with /agentic on|off.", state, agenticStepBudget())
+		uiToggle("AGENTIC", agentCore != nil && agentCore.Agentic,
+			fmt.Sprintf("on — up to %d self-correcting follow-ups", agenticStepBudget()),
+			"off — single-shot planning", "/agentic <on|off|steps <n>>")
 	}
 }
 
@@ -723,20 +719,22 @@ func handleAgenticCommand(c cmdArgs) {
 // iterations than the default.
 func setAgenticBudget(raw string) {
 	if strings.TrimSpace(raw) == "" {
-		color.Cyan("Agentic step budget: %d. Set it with /agentic steps <1-20>.", agenticStepBudget())
+		fmt.Println(shell.KV("STEP BUDGET", shell.Value(fmt.Sprint(agenticStepBudget())),
+			shell.KVWidth("STEP BUDGET")))
+		uiUsage(fmt.Sprintf("/agentic steps <1-%d>", maxAgenticStepBudget))
 		return
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 1 || n > maxAgenticStepBudget {
-		color.Red("Step budget must be a whole number between 1 and %d.", maxAgenticStepBudget)
+		uiFail("step budget", fmt.Sprintf("must be a whole number between 1 and %d", maxAgenticStepBudget))
 		return
 	}
 	agentCore.MaxAgenticSteps = n
 	cfg.UserPrefs.AgenticSteps = n
 	_ = cfg.SavePreferences()
-	color.Green("Agentic step budget set to %d.", n)
+	uiOK("step budget", fmt.Sprint(n))
 	if !agentCore.Agentic {
-		color.Yellow("The harness is currently OFF — run /agentic on to use it.")
+		uiDetail("The harness is currently off — /agentic on uses it.")
 	}
 }
 
@@ -759,7 +757,7 @@ func handleMemoryCommand(c cmdArgs) {
 	}
 
 	if agentCore == nil || agentCore.Session == nil {
-		color.Red("Session memory is not available in this session.")
+		uiFail("session memory", "is not available in this session")
 		return
 	}
 
@@ -800,7 +798,7 @@ func handleMemoryCommand(c cmdArgs) {
 		fmt.Println(shell.PanelEnd())
 	case "clear", "wipe", "reset":
 		if !commands.AskForConfirmation("Clear all conversation memory?") {
-			color.Yellow("Memory clear cancelled.")
+			uiIdle("cancelled", "the conversation is unchanged")
 			return
 		}
 		// Archive before wiping, exactly as /clear does: a transcript is cheap
@@ -808,18 +806,18 @@ func handleMemoryCommand(c cmdArgs) {
 		turns := agentCore.SessionTurns()
 		archived, aerr := session.SaveSnapshot("memory-clear", turns)
 		if aerr != nil {
-			color.Yellow("Could not archive the conversation first: %v", aerr)
+			uiWarn("archive", "could not be written first: "+aerr.Error())
 		}
 		if err := agentCore.Session.Clear(); err != nil {
-			color.Red("Memory clear failed: %v", err)
+			uiFail("clear", err.Error())
 			return
 		}
-		color.Green("Conversation memory cleared (%d turn(s)).", len(turns))
+		uiOK("cleared", fmt.Sprintf("%d turn(s)", len(turns)))
 		if archived != "" {
-			color.Cyan("Archived as %s — restore it with /resume %s", archived, archived)
+			uiUsage("/resume " + archived + "   restores what was cleared")
 		}
 	default:
-		color.Yellow("Usage: /memory <show|clear>")
+		uiUsage("/memory <show|clear>")
 	}
 }
 
@@ -828,23 +826,30 @@ func handleMemoryCommand(c cmdArgs) {
 // -------------------------------------------------------
 func handleQuickScan(c cmdArgs) {
 	if c.Empty() {
-		color.Cyan("Usage:")
-		color.Cyan("  /scan authorize <target> --reason \"<written scope>\"   record authorization")
-		color.Cyan("  /scan status                                          list authorized targets")
-		color.Cyan("  /scan revoke <target>                                 withdraw authorization")
-		color.Cyan("  /scan <target>                                        scan an authorized target")
-		color.Yellow("Authorization is required first: written scope is the record that this")
-		color.Yellow("was a permitted engagement, and Helix will not scan without it.")
+		fmt.Println(shell.PanelTitle("scan"))
+		fmt.Println(shell.Step(shell.StateWarn, "authorization required",
+			"written scope is the record that this was a permitted engagement, "+
+				"and Helix will not scan without it"))
+		fmt.Println(shell.PanelGap())
+		for _, l := range shell.Table([]string{"command", "does"}, [][]string{
+			{shell.Value("/scan authorize <target> --reason \"<scope>\""), shell.Muted("record authorization")},
+			{shell.Value("/scan status"), shell.Muted("list authorized targets")},
+			{shell.Value("/scan revoke <target>"), shell.Muted("withdraw authorization")},
+			{shell.Value("/scan <target>"), shell.Muted("scan an authorized target")},
+		}) {
+			fmt.Println(l)
+		}
+		fmt.Println(shell.PanelEnd())
 		return
 	}
 	if agentCore == nil {
-		color.Red("Agent not initialized")
+		uiFail("agent", "not initialized")
 		return
 	}
 	switch c.Sub() {
 	case "authorize":
 		if c.Count() < 2 {
-			color.Red("Usage: /scan authorize <target> --reason \"<written scope>\"")
+			uiUsage("/scan authorize <target> --reason \"<written scope>\"")
 			return
 		}
 		target := c.Arg(1)
@@ -861,29 +866,29 @@ func handleQuickScan(c cmdArgs) {
 		agentCore.AuthorizeRecon(target, reason)
 	case "revoke", "deauthorize":
 		if c.Count() < 2 {
-			color.Red("Usage: /scan revoke <target>")
+			uiUsage("/scan revoke <target>")
 			return
 		}
 		if agentCore.RevokeRecon(c.Arg(1)) {
-			color.Yellow("Authorization withdrawn for %s.", c.Arg(1))
+			uiOK("withdrawn", c.Arg(1)+" is no longer authorized")
 		} else {
-			color.Yellow("%s was not authorized.", c.Arg(1))
+			uiIdle(c.Arg(1), "was not authorized")
 		}
 	case "status":
 		targets := agentCore.ListAuthorizedReconTargets()
 		if len(targets) == 0 {
-			color.Yellow("No authorized recon targets.")
+			uiIdle("no targets", "nothing is authorized for reconnaissance")
 			return
 		}
-		color.Cyan("Authorized recon targets:")
+		fmt.Println(shell.PanelTitle("authorized targets"))
 		for target, reason := range targets {
-			color.Cyan("  • %s — %s", target, reason)
+			fmt.Println(shell.KV(target, shell.Muted(reason), shell.KVWidth(target)))
 		}
 	default:
 		target := c.Arg(0)
 		if !agentCore.IsReconTargetAuthorized(target) {
-			color.Red("Target %q is not authorized for reconnaissance.", target)
-			color.Yellow("Authorize it first: /scan authorize %s --reason \"<written scope>\"", target)
+			uiFail(target, "is not authorized for reconnaissance")
+			uiUsage("/scan authorize " + target + " --reason \"<written scope>\"")
 			return
 		}
 
@@ -896,19 +901,19 @@ func handleQuickScan(c cmdArgs) {
 		think.Stop()
 
 		if err != nil {
-			color.Red("Recon failed: %v", err)
+			uiFail("recon", err.Error())
 			return
 		}
 
 		// Auto-install missing recon tools
 		if result.Error != nil && strings.Contains(strings.ToLower(result.Error.Error()), "not found") {
-			color.Yellow("Recon tool %q is not installed.", toolName)
+			uiWarn(toolName, "is not installed")
 			if commands.AskForConfirmation(fmt.Sprintf("Install %s now using system package manager?", toolName)) {
 				if installErr := agentCore.InstallTool(toolName); installErr != nil {
-					color.Red("Installation failed: %v", installErr)
+					uiFail("install", installErr.Error())
 					return
 				}
-				color.Green("%s installed successfully. Retrying scan...", toolName)
+				uiOK(toolName, "installed — retrying the scan")
 
 				think2 := ux.NewThinker("HELIX :: SCANNING")
 				think2.Start()
@@ -916,24 +921,24 @@ func handleQuickScan(c cmdArgs) {
 				think2.Stop()
 
 				if err != nil {
-					color.Red("Recon retry failed: %v", err)
+					uiFail("recon retry", err.Error())
 					return
 				}
 			} else {
-				color.Yellow("Scan skipped.")
+				uiIdle("skipped", "nothing was scanned")
 				return
 			}
 		}
 
 		if result.Error != nil {
-			color.Red("Recon tool issue: %v", result.Error)
+			uiFail("recon tool", result.Error.Error())
 		}
-		color.Green("Recon completed in %v", result.Elapsed)
+		uiOK("complete", result.Elapsed.String())
 		if result.Raw != "" {
 			fmt.Println(result.Raw)
 		} else if len(result.Parsed) > 0 {
 			summary, _ := json.MarshalIndent(result.Parsed, "", "  ")
-			color.Cyan("Parsed Results:")
+			fmt.Println(shell.PanelSection("results"))
 			fmt.Println(string(summary))
 		}
 	}
@@ -945,7 +950,7 @@ func handleQuickScan(c cmdArgs) {
 func handleExplainCommand(c cmdArgs) {
 	args := c.Rest
 	if args == "" {
-		color.Red("Usage: /explain <command or technique description>")
+		uiUsage("/explain <command or technique description>")
 		return
 	}
 	if !requireAgent() {
@@ -971,13 +976,14 @@ FORMAT RULES: Use ONLY plain text. NO markdown. Separate sections with blank lin
 	explainConfig := ai.ModelConfig{Temperature: 0.7, TopP: 0.9, TopK: 40, MaxTokens: 2048}
 	resp, err := agentCore.AskModel("HELIX :: REASONING", prompt, explainConfig)
 	if err != nil {
-		color.Red("AI call failed: %v", err)
-		color.Yellow("Run /provider-status to see whether the brain is reachable.")
+		uiFail("the model", err.Error())
+		uiUsage("/provider-status shows whether the brain is reachable")
 		return
 	}
 	cleaned := cleanDebrief(strings.TrimSpace(resp))
 	if cleaned == "" {
-		color.Yellow("The AI model returned an empty explanation. Try rephrasing the request or checking /provider-status.")
+		uiWarn("empty answer", "the model returned nothing")
+		uiDetail("Try rephrasing, or check /provider-status.")
 		return
 	}
 	// PrintAnswer, not the raw UX call: this routes through the same seam as
@@ -994,16 +1000,16 @@ func listAvailableModels() {
 	models, err := ai.ListProviderModels(ctx)
 	think.Stop()
 	if err != nil {
-		color.Red("Could not list models: %v", err)
+		uiFail("models", err.Error())
 		return
 	}
-	color.Cyan("Available models:")
+	fmt.Println(shell.PanelTitle("models"))
 	for i, model := range models {
 		if i >= 50 {
-			color.Cyan("... and %d more", len(models)-50)
+			fmt.Println(shell.PanelLine(shell.Muted(fmt.Sprintf("… and %d more", len(models)-50))))
 			break
 		}
-		color.Cyan("  %s", model.ID)
+		fmt.Println(shell.PanelLine(shell.Value(model.ID)))
 	}
 }
 
@@ -1016,8 +1022,7 @@ func cleanDebrief(text string) string {
 		"4. Safer Operational Alternatives:",
 	}
 	for _, h := range headers {
-		coloured := color.New(color.FgCyan, color.Bold).Sprint(h)
-		text = strings.Replace(text, h, coloured, 1)
+		text = strings.Replace(text, h, shell.Fg(shell.HexSecondary, h), 1)
 	}
 	return text
 }
@@ -1028,7 +1033,7 @@ func cleanDebrief(text string) string {
 
 func handleKnowledgeUpdate() {
 	if ragSystem == nil || ragSystem.GetDB() == nil {
-		color.Red("Knowledge database not available.")
+		uiFail("knowledge database", "not available")
 		return
 	}
 	prog := rag.NewProgress()
@@ -1058,17 +1063,17 @@ func handleKnowledgeUpdate() {
 	prog.Stop()
 	if err != nil {
 		if ctx.Err() != nil {
-			color.Yellow("Knowledge update cancelled.")
+			uiIdle("cancelled", "the knowledge base is unchanged")
 			return
 		}
 		if errors.Is(err, rag.ErrOffline) {
-			color.Yellow("You appear to be OFFLINE — knowledge update requires internet connectivity.")
+			uiWarn("offline", "the knowledge update needs internet connectivity")
 			return
 		}
-		color.Red("Update failed: %v", err)
+		uiFail("update", err.Error())
 		return
 	}
-	color.Green("Knowledge base updated successfully.")
+	uiOK("updated", "the knowledge base is current")
 }
 
 // handleKnowledgeStats reports the threat-intelligence corpus.
@@ -1106,11 +1111,11 @@ func handleKnowledgeStats() {
 func handleVulnCommand(c cmdArgs) {
 	query := strings.Trim(c.Rest, `"'`)
 	if query == "" {
-		color.Red("Usage: /vuln <CVE-ID|EDB-ID|MITRE-T-ID|search query>")
+		uiUsage("/vuln <CVE-ID|EDB-ID|MITRE-T-ID|search query>")
 		return
 	}
 	if ragSystem == nil || ragSystem.GetDB() == nil {
-		color.Red("Knowledge database not available.")
+		uiFail("knowledge database", "not available")
 		return
 	}
 	db := ragSystem.GetDB()
@@ -1122,8 +1127,8 @@ func handleVulnCommand(c cmdArgs) {
 			return
 		}
 
-		color.Yellow("⚠ Local CVE database does not contain %s (rolling 119-day window).", strings.ToUpper(query))
-		color.Yellow("  Attempting on-demand fetch from NVD API...")
+		uiWarn("not in the local database", strings.ToUpper(query)+
+			" is outside the rolling 119-day window — fetching from NVD")
 
 		// Phase 15 Fix: Show reasoning progress bar during the API fetch
 		think := ux.NewThinker("HELIX :: FETCHING NVD")
@@ -1138,10 +1143,10 @@ func handleVulnCommand(c cmdArgs) {
 				return
 			}
 		} else {
-			color.Yellow("  On-demand fetch failed: %v", fetchErr)
+			uiFail("fetch", fetchErr.Error())
 		}
 
-		color.Yellow("  Run /knowledge-update to sync full NVD data if needed.")
+		uiUsage("/knowledge-update syncs the full NVD data")
 	} else {
 		exact, err := rag.LookupVulnByID(db, query)
 		if err == nil && len(exact) > 0 {
@@ -1152,11 +1157,11 @@ func handleVulnCommand(c cmdArgs) {
 
 	entries, err := rag.SearchVulns(db, query, 5)
 	if err != nil {
-		color.Red("Vulnerability search failed: %v", err)
+		uiFail("search", err.Error())
 		return
 	}
 	if len(entries) == 0 {
-		color.Yellow("No matching vulnerability intelligence found.")
+		uiIdle("no matches", "nothing in the intelligence set matches that")
 		return
 	}
 	displayVulnEntries(entries)
@@ -1247,40 +1252,73 @@ func fetchAndInsertCVE(db *sql.DB, cveID string) error {
 	return err
 }
 
+// displayVulnEntries renders threat intelligence as one panel per finding.
+//
+// It was a bold-cyan "ID: … Source: … Title: …" stack in which the CVSS score
+// and the CISA KEV flag — the two fields that decide whether you stop what you
+// are doing — carried exactly the weight of the source name. Severity is a
+// badge now, so the screen can be triaged by colour before it is read.
 func displayVulnEntries(entries []rag.VulnIntel) {
-	bold := color.New(color.FgCyan, color.Bold).SprintFunc()
-	color.Cyan("=== Vulnerability Intelligence ===")
+	fmt.Println(shell.PanelTitle("vulnerability intelligence"))
+	w := shell.KVWidth("DESCRIPTION", "PATCH", "DETECTION", "SOURCE", "SEVERITY")
+
 	for i, e := range entries {
 		if i > 0 {
-			fmt.Println()
+			fmt.Println(shell.PanelGap())
 		}
-		color.Cyan("%s %s", bold("ID:"), e.ID)
-		color.Cyan("%s %s", bold("Source:"), e.SourceType)
-		color.Cyan("%s %s", bold("Title:"), e.Title)
+		fmt.Println(shell.KV(e.ID, shell.Value(e.Title), w))
+		fmt.Println(shell.KV("SOURCE", shell.Muted(e.SourceType), w))
+
+		if e.CVSS > 0 || e.KEV {
+			fmt.Println(shell.KV("SEVERITY", vulnSeverityLine(e), w))
+		}
 		if e.Description != "" {
-			color.Cyan("%s %s", bold("Description:"), e.Description)
-		}
-		if e.CVSS > 0 {
-			color.Cyan("%s %.1f", bold("CVSS:"), e.CVSS)
-		}
-		color.Cyan("%s %v", bold("CISA KEV:"), e.KEV)
-		if e.KEVAction != "" {
-			color.Cyan("%s %s", bold("KEV Action:"), e.KEVAction)
+			fmt.Println(shell.KV("DESCRIPTION", shell.Muted(e.Description), w))
 		}
 		if e.Detection != "" {
-			color.Cyan("%s %s", bold("Detection:"), e.Detection)
+			fmt.Println(shell.KV("DETECTION", shell.Muted(e.Detection), w))
 		}
 		if e.PatchGuidance != "" {
-			color.Cyan("%s %s", bold("Patch Guidance:"), e.PatchGuidance)
+			fmt.Println(shell.KV("PATCH", shell.Muted(e.PatchGuidance), w))
 		}
 	}
-	fmt.Println()
-	color.Yellow("Defensive use only: prioritize patching and detection.")
+	fmt.Println(shell.PanelEnd())
+	uiDetail("Defensive use only: prioritise patching and detection.")
+}
+
+// vulnSeverityLine renders CVSS and the KEV flag as one triage cell.
+//
+// KEV outranks the score, deliberately: "known exploited in the wild" is a
+// statement about reality and a CVSS number is a statement about theory, so a
+// KEV entry is red whatever it scores.
+func vulnSeverityLine(e rag.VulnIntel) string {
+	state := shell.StateIdle
+	switch {
+	case e.KEV || e.CVSS >= 9:
+		state = shell.StateBad
+	case e.CVSS >= 7:
+		state = shell.StateWarn
+	case e.CVSS > 0:
+		state = shell.StateGood
+	}
+
+	label := "unscored"
+	if e.CVSS > 0 {
+		label = fmt.Sprintf("CVSS %.1f", e.CVSS)
+	}
+	line := shell.Badge(state, label)
+	if e.KEV {
+		line += shell.Muted("  ·  ") + shell.Fg(shell.HexRectifier, "CISA KEV")
+		if e.KEVAction != "" {
+			line += shell.Muted("  " + e.KEVAction)
+		}
+	}
+	return line
 }
 
 func handleKnowledgeReindex() {
 	if ragSystem == nil || ragSystem.GetDB() == nil {
-		color.Red("Knowledge database not available.")
+		uiFail("knowledge database", "not available")
 		return
 	}
 	db := ragSystem.GetDB()
@@ -1294,15 +1332,15 @@ func handleKnowledgeReindex() {
 	})
 	prog.Stop()
 	if err != nil {
-		color.Red("FTS reindex failed: %v", err)
+		uiFail("reindex", err.Error())
 		return
 	}
 	count, cerr := rag.FTSCount(db)
 	if cerr != nil {
-		color.Yellow("FTS reindex completed but count check failed: %v", cerr)
+		uiWarn("reindexed", "but the row count could not be read: "+cerr.Error())
 		return
 	}
-	color.Green("FTS index rebuilt successfully. Rows indexed: %d", count)
+	uiOK("reindexed", fmt.Sprintf("%d rows", count))
 }
 
 // -------------------------------------------------------
@@ -1750,7 +1788,7 @@ func handleProviderStatus() {
 // with what this printed.
 func printActiveProviderHealth() {
 	fmt.Println(shell.KV("REACHABILITY", activeProviderHealthLine(),
-		shell.KVWidth("REACHABILITY")))
+		shell.KVWidth("REACHABILITY", "ANSWERING")))
 }
 
 // activeProviderHealthLine probes the active provider and renders one honest
@@ -1801,12 +1839,11 @@ func handleProviderCommand(c cmdArgs) {
 	case "status":
 		displayProviderStatus()
 	case "list":
-		color.Cyan("Registered providers: %s", strings.Join(ai.ListProviders(), ", "))
-		color.Cyan("Active: %s (%s)", ai.ActiveProviderName(), ai.ActiveModel())
+		displayProviderStatus()
 	case "use":
 		if c.Count() < 2 {
-			color.Red("Usage: /provider use <provider>")
-			color.Yellow("Registered: %s", strings.Join(ai.ListProviders(), ", "))
+			uiFail("/provider use", "needs a provider name")
+			uiUsage("/provider use <name>", "registered: "+strings.Join(ai.ListProviders(), ", "))
 			return
 		}
 		switchProvider(c.Arg(1))
@@ -1820,9 +1857,9 @@ func handleProviderCommand(c cmdArgs) {
 			switchProvider(name)
 			return
 		}
-		color.Red("Unknown provider or subcommand: %s", c.Arg(0))
-		color.Yellow("Usage: /provider [status|list|use <name>|<name>]")
-		color.Yellow("Registered: %s", strings.Join(ai.ListProviders(), ", "))
+		uiFail(c.Arg(0), "is not a provider or a /provider subcommand")
+		uiUsage("/provider [status|list|use <name>|<name>]",
+			"registered: "+strings.Join(ai.ListProviders(), ", "))
 	}
 }
 
@@ -1830,19 +1867,20 @@ func handleProviderCommand(c cmdArgs) {
 func switchProvider(name string) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if err := useProviderInteractive(name); err != nil {
-		color.Red("Provider switch failed: %v", err)
+		uiFail("provider", err.Error())
 		return
 	}
 	cfg.Provider = name
 	cfg.ProviderModel = ai.ActiveModel()
 	_ = cfg.SavePreferences()
-	color.Green("Active provider: %s (%s)", name, ai.ActiveModel())
+	uiOK(name, "is answering  ·  "+ai.ActiveModel())
 }
 
 func handleModelCommand(c cmdArgs) {
 	if c.Empty() {
-		color.Cyan("Active model: %s (%s)", ai.ActiveModel(), ai.ActiveProviderName())
-		color.Yellow("Usage: /model [list|use <model-id>|<model-id>]")
+		fmt.Println(shell.KV("MODEL", shell.Value(ai.ActiveModel())+
+			shell.Muted("  on "+ai.ActiveProviderName()), shell.KVWidth("MODEL")))
+		uiUsage("/model [list|use <model-id>|<model-id>]")
 		return
 	}
 	switch c.Sub() {
@@ -1850,7 +1888,7 @@ func handleModelCommand(c cmdArgs) {
 		listAvailableModels()
 	case "use":
 		if c.Count() < 2 {
-			color.Red("Usage: /model use <model-id>")
+			uiUsage("/model use <model-id>")
 			return
 		}
 		switchModel(c.From(1))
@@ -1866,63 +1904,113 @@ func handleModelCommand(c cmdArgs) {
 func switchModel(model string) {
 	model = strings.TrimSpace(model)
 	if model == "" {
-		color.Red("Usage: /model use <model-id>")
+		uiUsage("/model use <model-id>")
 		return
 	}
 	if err := useModelInteractive(ai.ActiveProviderName(), model); err != nil {
-		color.Red("Model switch failed: %v", err)
+		uiFail("model", err.Error())
 		return
 	}
 	cfg.ProviderModel = ai.ActiveModel()
 	_ = cfg.SavePreferences()
-	color.Green("Active model: %s", ai.ActiveModel())
+	uiOK(ai.ActiveModel(), "is the active model")
 }
 
+// displayProviderStatus lists every registered provider and its key state.
+//
+// It reads ProviderStatusRows rather than ProviderStatus, which returns
+// pre-formatted " - " separated strings — the same re-parse-your-own-output
+// mistake internal/metrics exists to avoid, and the reason this screen was the
+// last flat `=== Provider Status ===` stack in the shell. Twelve identically
+// cyan lines meant the one fact a reader opens it for, which provider is
+// answering and whether it has a key, had to be hunted for.
 func displayProviderStatus() {
-	lines := ai.ProviderStatus()
-	color.Cyan("=== Provider Status ===")
-	for _, line := range lines {
-		color.Cyan(line)
+	rows := ai.ProviderStatusRows()
+	active := ai.ActiveProviderName()
+
+	fmt.Println(shell.PanelTitle("providers"))
+	if len(rows) == 0 {
+		fmt.Println(shell.PanelLine(shell.Muted("no providers registered")))
+		fmt.Println(shell.PanelEnd())
+		return
 	}
+
+	// A self-fitting table rather than KV rows: three facts per provider across
+	// twelve providers is a grid, and hanging the display name off the end of a
+	// KV value made every row a different length with the state buried in the
+	// middle of it.
+	table := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		var state string
+		switch {
+		case r.KeyState == "configured":
+			state = shell.Badge(shell.StateGood, "key saved")
+		case r.Local:
+			state = shell.Badge(shell.StateIdle, "local")
+		default:
+			state = shell.Badge(shell.StateIdle, "no key")
+		}
+		name := shell.Muted(r.Display)
+		if r.Active {
+			// The one row a reader is looking for, so it is the one row that
+			// carries the heading colour.
+			name = shell.Fg(shell.HexSecondary, r.Display+"  ← active")
+		}
+		table = append(table, []string{shell.Value(r.Name), state, name})
+	}
+	for _, l := range shell.Table([]string{"provider", "key", "name"}, table) {
+		fmt.Println(l)
+	}
+
+	fmt.Println(shell.PanelGap())
+	if active == "" {
+		fmt.Println(shell.Step(shell.StateWarn, "no active provider", "/setup picks one"))
+		fmt.Println(shell.PanelEnd())
+		return
+	}
+	brain := shell.Value(active)
+	if m := ai.ActiveModel(); m != "" {
+		brain += shell.Muted("  ·  " + m)
+	}
+	fmt.Println(shell.KV("ANSWERING", brain, shell.KVWidth("REACHABILITY", "ANSWERING")))
 	// /provider status and /provider-status are separate handlers; both must
 	// answer "can the selected brain actually be reached?", or which one the user
 	// happened to type decides whether they find out.
-	color.Cyan("Active Provider: %s", ai.ActiveProviderName())
 	printActiveProviderHealth()
+	fmt.Println(shell.PanelEnd())
 }
 
 func handleAudioCommand(c cmdArgs) {
 	if c.Empty() {
-		current := "ON"
-		if !audio.IsEnabled() {
-			current = "OFF"
+		// The engine's readiness is a SECOND fact, not a parenthetical: audio
+		// can be switched on and still produce nothing (SSH, a container, a
+		// headless box), and "ON (NOT READY)" put the contradiction in brackets.
+		on := audio.IsEnabled()
+		detail := "tonal feedback plays"
+		if on && !audio.IsReady() {
+			detail = "switched on, but the sound engine is not available here"
 		}
-		ready := "READY"
-		if !audio.IsReady() {
-			ready = "NOT READY"
-		}
-		color.Cyan("Audio is currently: %s (%s)", current, ready)
-		color.Yellow("Usage: /audio <on|off>")
+		uiToggle("AUDIO", on, detail, "no tonal feedback", "/audio <on|off>")
 		return
 	}
 	switch c.Sub() {
 	case "on", "enable":
 		audio.SetEnabled(true)
 		if err := audio.EnsureReady(true); err != nil {
-			color.Yellow("Audio enabled, but the sound engine is unavailable: %v", err)
-			color.Yellow("Check your system output device and volume.")
-			color.Yellow("SSH, Docker, and headless sessions have no local speaker.")
+			uiWarn("audio", "on, but the sound engine is unavailable: "+err.Error())
+			uiDetail("Check the system output device and volume. SSH, Docker and " +
+				"headless sessions have no local speaker.")
 			return
 		}
-		color.Green("Audio enabled")
+		uiOK("audio", "on — tonal feedback plays")
 		audio.PlayAlert()
 		time.Sleep(100 * time.Millisecond)
 	case "off", "disable":
 		audio.SetEnabled(false)
-		color.Yellow("Audio disabled")
+		uiIdle("audio", "off — no tonal feedback")
 	default:
-		color.Red("Unknown audio setting: %s", c.Arg(0))
-		color.Yellow("Usage: /audio <on|off>")
+		uiFail(c.Arg(0), "is not an /audio setting")
+		uiUsage("/audio <on|off>")
 	}
 }
 
@@ -1940,44 +2028,46 @@ func handleCrashCommand(c cmdArgs) {
 	case "list", "ls", "status":
 		summaries := diagnostics.ListReports()
 		if len(summaries) == 0 {
-			color.Green("✔ No pending crash reports. System is clean.")
+			uiOK("none pending", "telemetry-free — nothing left the machine")
 			return
 		}
-		color.Yellow("⚠ Pending crash reports (%d):", len(summaries))
+		fmt.Println(shell.PanelTitle("crash reports"))
 		for i, s := range summaries {
-			color.Yellow("  [%d] %s — %s", i+1, s.Time, s.Reason)
-			color.Yellow("      %s", s.Path)
+			fmt.Println(shell.KV(fmt.Sprintf("%d", i+1),
+				shell.Value(s.Time)+shell.Muted("  "+s.Reason), 3))
+			fmt.Println(shell.PanelLine("    " + shell.Muted(s.Path)))
 		}
 		fmt.Println()
-		color.Cyan("Use '/crash view <number>' to inspect the redacted stack trace.")
-		color.Cyan("Use '/crash clear' to safely delete them without wiping your config.")
+		fmt.Println(shell.PanelEnd())
+		uiUsage("/crash view <n>   the redacted stack trace")
+		uiUsage("/crash clear      delete them, keeping config, keys and history")
 
 	case "view", "show", "cat", "read":
 		if c.Count() < 2 {
-			color.Red("Usage: /crash view <number>")
+			uiUsage("/crash view <number>")
 			return
 		}
 		summaries := diagnostics.ListReports()
 		if len(summaries) == 0 {
-			color.Yellow("No crash reports to view.")
+			uiIdle("none pending", "there is nothing to view")
 			return
 		}
 
 		idx, err := strconv.Atoi(c.Arg(1))
 		if err != nil || idx < 1 || idx > len(summaries) {
-			color.Red("Invalid report number. Use '/crash list' to see valid numbers (1-%d).", len(summaries))
+			uiFail("no such report", fmt.Sprintf("valid numbers are 1-%d  ·  /crash list", len(summaries)))
 			return
 		}
 
 		target := summaries[idx-1]
 		data, err := os.ReadFile(target.Path)
 		if err != nil {
-			color.Red("Failed to read crash report: %v", err)
+			uiFail("read", err.Error())
 			return
 		}
 
 		fmt.Println()
-		color.Cyan("=== Crash Report: %s ===", filepath.Base(target.Path))
+		fmt.Println(shell.PanelTitle("crash " + filepath.Base(target.Path)))
 		var prettyJSON bytes.Buffer
 		if json.Indent(&prettyJSON, data, "", "  ") == nil {
 			fmt.Println(prettyJSON.String())
@@ -1985,22 +2075,23 @@ func handleCrashCommand(c cmdArgs) {
 			fmt.Println(string(data))
 		}
 		fmt.Println()
-		color.Yellow("Note: All API keys, tokens, and secrets are automatically [REDACTED].")
+		fmt.Println(shell.PanelEnd())
+		uiDetail("Every API key, token and secret is [REDACTED] before it is written.")
 
 	case "clear", "clean", "rm", "delete":
 		n, err := diagnostics.PurgeReports()
 		if err != nil {
-			color.Red("Failed to clear crash reports: %v", err)
+			uiFail("clear", err.Error())
 			return
 		}
 		if n == 0 {
-			color.Yellow("No crash reports to clear.")
+			uiIdle("none pending", "there is nothing to clear")
 		} else {
-			color.Green("✔ Cleared %d crash report(s). Your config, keys, and history remain intact.", n)
+			uiOK("cleared", fmt.Sprintf("%d report(s) — config, keys and history are intact", n))
 		}
 
 	default:
-		color.Yellow("Usage: /crash <list|view <number>|clear>")
+		uiUsage("/crash <list|view <number>|clear>")
 	}
 }
 
@@ -2009,12 +2100,9 @@ func handleCrashCommand(c cmdArgs) {
 // -------------------------------------------------------
 func handleTypewriteAllCommand(c cmdArgs) {
 	if c.Empty() {
-		current := "OFF"
-		if cfg.UserPrefs.TypewriteAll {
-			current = "ON"
-		}
-		color.Cyan("Typewrite-all mode is currently: %s", current)
-		color.Yellow("Usage: /typewrite-all <on|off>")
+		uiToggle("TYPEWRITE-ALL", cfg.UserPrefs.TypewriteAll,
+			"every line is animated", "only AI replies are animated",
+			"/typewrite-all <on|off>")
 		return
 	}
 
@@ -2031,16 +2119,16 @@ func handleTypewriteAllCommand(c cmdArgs) {
 		if gui != nil {
 			gui.SetTypewriteAll(true)
 		}
-		color.Green("Typewrite-all ENABLED — all output will use typewriter effect")
+		uiOK("typewrite-all", "on — every line is animated")
 	case "off", "disable":
 		cfg.UserPrefs.TypewriteAll = false
 		if gui != nil {
 			gui.SetTypewriteAll(false)
 		}
-		color.Yellow("Typewrite-all DISABLED — only AI output will use typewriter effect")
+		uiIdle("typewrite-all", "off — only AI replies are animated")
 	default:
-		color.Red("Unknown setting: %s", c.Arg(0))
-		color.Yellow("Usage: /typewrite-all <on|off>")
+		uiFail(c.Arg(0), "is not a /typewrite-all setting")
+		uiUsage("/typewrite-all <on|off>")
 		return
 	}
 	_ = cfg.SavePreferences()

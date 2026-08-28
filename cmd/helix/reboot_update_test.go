@@ -1,10 +1,15 @@
 // cmd/helix/reboot_update_test.go
 //
-// Purpose: the two refusals that keep a self-updater safe to have.
+// Purpose: the update POLICY — who causes an install, and when.
 //
 // Everything else about updating is verified in internal/update, where the
-// checksum, the host pin and the archive handling live. What can only be tested
-// here is the POLICY: who is allowed to cause an install.
+// checksum, the host pin and the archive handling live.
+//
+// The policy is deliberately permissive by owner decision: installing is
+// automatic, from typed and spoken reboots alike, because the release comes
+// from a repository the owner controls and tags on purpose. These tests pin
+// that decision so it stays a decision rather than becoming an accident, and
+// pin the one case that is still NOT an install: asking whether one exists.
 package main
 
 import (
@@ -16,21 +21,18 @@ import (
 	"helix/internal/update"
 )
 
-// stubUpdateSeams replaces the check, the confirmation and the install for one
-// test, and records whether an install was attempted.
-func stubUpdateSeams(t *testing.T, candidate *update.Candidate, confirm bool) *bool {
+// stubUpdateSeams replaces the check and the install for one test, and records
+// whether an install was attempted.
+func stubUpdateSeams(t *testing.T, candidate *update.Candidate) *bool {
 	t.Helper()
 	installed := false
 
-	oldCheck, oldConfirm, oldInstall := checkForUpdate, confirmInstall, performInstall
-	t.Cleanup(func() {
-		checkForUpdate, confirmInstall, performInstall = oldCheck, oldConfirm, oldInstall
-	})
+	oldCheck, oldInstall := checkForUpdate, performInstall
+	t.Cleanup(func() { checkForUpdate, performInstall = oldCheck, oldInstall })
 
 	checkForUpdate = func(context.Context, update.Options) (*update.Candidate, error) {
 		return candidate, nil
 	}
-	confirmInstall = func(string) bool { return confirm }
 	performInstall = func(*update.Candidate) bool {
 		installed = true
 		return true
@@ -51,47 +53,26 @@ func fakeCandidate(t *testing.T) *update.Candidate {
 	}
 }
 
-// THE rule. /reboot is voice-reachable because restarting destroys nothing;
-// downloading and executing a new binary is a different act, and a television
-// saying "reboot" must not be able to cause it.
-func TestSpokenRebootNeverInstallsAnUpdate(t *testing.T) {
-	withUpdateConfig(t)
-	installed := stubUpdateSeams(t, fakeCandidate(t), true /* would confirm */)
+// Owner decision: installing is automatic and needs no human in the loop,
+// because the release comes from a repo the owner controls and tags on purpose.
+// Pinned so it stays a decision — the alternative reads identically in code.
+func TestRebootInstallsWithoutAsking(t *testing.T) {
+	for _, spoken := range []bool{false, true} {
+		name := "typed"
+		if spoken {
+			name = "spoken"
+		}
+		t.Run(name, func(t *testing.T) {
+			withUpdateConfig(t)
+			installed := stubUpdateSeams(t, fakeCandidate(t))
 
-	if maybeInstallUpdate(true /* spoken */, false) {
-		t.Error("a spoken reboot reported an install")
-	}
-	if *installed {
-		t.Fatal("a spoken reboot installed a downloaded binary — voice must never " +
-			"be able to replace the program the user runs")
-	}
-}
-
-// A typed reboot still asks. Replacing the binary someone is running is not
-// something to do because they wanted a fresh process.
-func TestDeclinedConfirmationNeverInstalls(t *testing.T) {
-	withUpdateConfig(t)
-	installed := stubUpdateSeams(t, fakeCandidate(t), false /* declines */)
-
-	if maybeInstallUpdate(false, false) {
-		t.Error("a declined update reported an install")
-	}
-	if *installed {
-		t.Fatal("an update was installed after the user declined it")
-	}
-}
-
-// The typed, confirmed path is the one that may proceed — otherwise the two
-// refusals above would pass on a feature that never works at all.
-func TestTypedAndConfirmedInstalls(t *testing.T) {
-	withUpdateConfig(t)
-	installed := stubUpdateSeams(t, fakeCandidate(t), true)
-
-	if !maybeInstallUpdate(false, false) {
-		t.Error("a confirmed update did not report an install")
-	}
-	if !*installed {
-		t.Fatal("a confirmed update did not install")
+			if !maybeInstallUpdate(spoken, false) {
+				t.Error("the update did not report an install")
+			}
+			if !*installed {
+				t.Fatalf("a %s reboot did not install the available update", name)
+			}
+		})
 	}
 }
 
@@ -100,7 +81,7 @@ func TestTypedAndConfirmedInstalls(t *testing.T) {
 func TestCheckDisabledStillAnswersAnExplicitCheck(t *testing.T) {
 	withUpdateConfig(t)
 	cfg.Update.Check = false
-	installed := stubUpdateSeams(t, fakeCandidate(t), false)
+	installed := stubUpdateSeams(t, fakeCandidate(t))
 
 	if maybeInstallUpdate(false, false /* not explicit */) {
 		t.Error("an update ran with checking disabled")
@@ -109,9 +90,15 @@ func TestCheckDisabledStillAnswersAnExplicitCheck(t *testing.T) {
 		t.Fatal("checking disabled must mean no install on an ordinary reboot")
 	}
 
-	// Explicit: it looks, and reports, and still installs nothing without a yes.
+	// Explicit: it looks and reports, and installs nothing. Asking whether an
+	// update exists is a question, and a question that upgrades you is a
+	// question nobody can afford to ask.
 	if maybeInstallUpdate(false, true) {
-		t.Error("an explicit check must not install by itself")
+		t.Error("/reboot check must not install")
+	}
+	if *installed {
+		t.Fatal("/reboot check installed an update — there would then be no way " +
+			"to ask without being upgraded")
 	}
 }
 

@@ -35,8 +35,6 @@ import (
 	"helix/internal/commands"
 	"helix/internal/shell"
 	"helix/internal/speech"
-
-	"github.com/fatih/color"
 )
 
 // piperDownloadTimeout bounds the fetch. Generous: ~26 MB over a slow edge
@@ -317,7 +315,7 @@ func offerPiperBinary() (string, bool) {
 		}
 		return "", false
 	}
-	color.Green("Installed: %s", bin)
+	uiOK("installed", bin)
 	return bin, true
 }
 

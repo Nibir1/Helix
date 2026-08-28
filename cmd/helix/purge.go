@@ -23,8 +23,6 @@ import (
 	"strings"
 
 	"helix/internal/shell"
-
-	"github.com/fatih/color"
 )
 
 // purgeGroup orders and titles a section of the manifest.
@@ -90,7 +88,7 @@ type purgeTarget struct {
 func handlePurgeCommand() {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		color.Red("Purge failed: cannot resolve home directory: %v", err)
+		uiFail("purge", "cannot resolve the home directory: "+err.Error())
 		return
 	}
 	helixDir := filepath.Join(home, ".helix")

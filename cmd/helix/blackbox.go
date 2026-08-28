@@ -33,8 +33,6 @@ import (
 
 	"helix/internal/shell"
 	"helix/internal/speech"
-
-	"github.com/fatih/color"
 )
 
 // blackBoxUsage is the one place the subcommand vocabulary is written down.
@@ -86,9 +84,9 @@ func handleBlackBoxCommand(c cmdArgs) {
 		handleVoiceStatsCommand()
 
 	default:
-		color.Yellow("Unknown: /blackbox %s", c.Sub())
+		uiFail("/blackbox "+c.Sub(), "is not a subcommand")
 		for _, line := range blackBoxUsage {
-			color.Cyan("%s", line)
+			uiDetail(line)
 		}
 	}
 }
@@ -106,7 +104,7 @@ func blackBoxOn() {
 		return
 	}
 	if err := voiceEntryPreflight(); err != nil {
-		color.Red("Cannot go live: %v", err)
+		uiFail("cannot go live", err.Error())
 		return
 	}
 
@@ -160,9 +158,9 @@ func blackBoxEyes(c cmdArgs) {
 	switch c.Sub() {
 	case "on", "enable":
 		if ready, why := visionReady(); !ready {
-			color.Yellow("Cannot open the camera: %s", why)
+			uiWarn("cannot open the camera", why)
 			for _, line := range visionUnavailableHelp() {
-				color.Yellow("%s", line)
+				uiDetail(line)
 			}
 			return
 		}
@@ -172,7 +170,7 @@ func blackBoxEyes(c cmdArgs) {
 	case "", "status":
 		fmt.Println(blackBoxEyesLine())
 	default:
-		color.Yellow("Usage: /blackbox eyes <on|off|status>")
+		uiUsage("/blackbox eyes <on|off|status>")
 	}
 }
 
@@ -403,6 +401,14 @@ func cameraDeliveredNothing() bool {
 // the first is what let /eyes on succeed on a machine that could never produce
 // a frame.
 func visionReady() (bool, string) {
+	// "Not built yet" and "no ffmpeg" are different answers, and conflating
+	// them let a startup-ordering bug present as a missing dependency: the
+	// restored-live-session banner blamed ffmpeg on machines that had it,
+	// because the capture service had not been constructed at that point in
+	// boot. A readiness check must never name a cause it has not established.
+	if visionSvc == nil {
+		return false, "the camera service is not up yet"
+	}
 	if !captureAvailable() {
 		return false, "no ffmpeg on PATH — /setup installs it"
 	}

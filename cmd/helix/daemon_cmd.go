@@ -26,8 +26,6 @@ import (
 
 	"helix/internal/daemon"
 	"helix/internal/edge"
-
-	"github.com/fatih/color"
 )
 
 // runDaemon implements `helix daemon` and `helix remote ...` and
@@ -64,14 +62,14 @@ func runDaemonCommand(args []string) (bool, int) {
 func runDaemonProcess() {
 	d, err := daemon.New()
 	if err != nil {
-		color.Red("daemon start failed: %v", err)
+		uiFail("daemon", "did not start: "+err.Error())
 		os.Exit(1)
 	}
-	color.Cyan("Helix daemon listening on %s (Ctrl+C to stop)", d.Addr())
+	uiOK("daemon", "listening on "+d.Addr()+"  ·  Ctrl+C stops it")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := d.Run(ctx); err != nil {
-		color.Red("daemon ended: %v", err)
+		uiFail("daemon", "ended: "+err.Error())
 		os.Exit(1)
 	}
 }
@@ -95,13 +93,13 @@ func runRemoteClient(args []string) int {
 		req = daemon.Request{Type: daemon.TypeStatus}
 	case "say":
 		if len(args) < 2 {
-			color.Red("say needs text")
+			uiUsage("helix remote say <text>")
 			return 2
 		}
 		req = daemon.Request{Type: daemon.TypeSay, Text: strings.Join(args[1:], " ")}
 	case "submit":
 		if len(args) < 2 {
-			color.Red("submit needs text")
+			uiUsage("helix remote submit <text>")
 			return 2
 		}
 		req = daemon.Request{Type: daemon.TypeSubmit, Text: strings.Join(args[1:], " ")}
@@ -114,36 +112,37 @@ func runRemoteClient(args []string) int {
 	case "stop":
 		req = daemon.Request{Type: daemon.TypeStop}
 	default:
-		color.Red("unknown remote command %q", args[0])
+		uiFail(args[0], "is not a remote command")
 		return 2
 	}
 
 	conn, err := daemon.Dial()
 	if err != nil {
-		color.Red("daemon unreachable: %v (start it with `helix daemon`)", err)
+		uiFail("daemon", "unreachable: "+err.Error())
+		uiUsage("helix daemon   starts it")
 		return 1
 	}
 	defer func() { _ = conn.Close() }()
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		color.Red("send failed: %v", err)
+		uiFail("send", err.Error())
 		return 1
 	}
 
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadBytes('\n')
 	if err != nil {
-		color.Red("no response: %v", err)
+		uiFail("no response", err.Error())
 		return 1
 	}
 	var resp daemon.Response
 	if err := json.Unmarshal(line, &resp); err != nil {
-		color.Red("malformed response: %v", err)
+		uiFail("malformed response", err.Error())
 		return 1
 	}
 
 	if !resp.OK {
-		color.Red("daemon: %s", resp.Error)
+		uiFail("daemon", resp.Error)
 		return 1
 	}
 	printRemoteResponse(resp)
@@ -231,7 +230,7 @@ func helixBinaryPath() (string, error) {
 func installDaemonService() {
 	exe, err := helixBinaryPath()
 	if err != nil {
-		color.Red("resolve helix path: %v", err)
+		uiFail("helix path", "could not be resolved: "+err.Error())
 		return
 	}
 
@@ -240,7 +239,7 @@ func installDaemonService() {
 		plistDir := filepath.Join(homeDirOrEmpty(), "Library", "LaunchAgents")
 		plist := filepath.Join(plistDir, serviceLabel+".plist")
 		if err := os.MkdirAll(plistDir, 0o755); err != nil {
-			color.Red("mkdir LaunchAgents: %v", err)
+			uiFail("LaunchAgents directory", err.Error())
 			return
 		}
 		content := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -258,10 +257,10 @@ func installDaemonService() {
 </plist>
 `, serviceLabel, exe, homeDirOrEmpty(), homeDirOrEmpty())
 		if err := os.WriteFile(plist, []byte(content), 0o644); err != nil {
-			color.Red("write plist: %v", err)
+			uiFail("plist", "could not be written: "+err.Error())
 			return
 		}
-		color.Green("Installed %s", plist)
+		uiOK("installed", plist)
 		fmt.Println("Start now:   launchctl load " + plist)
 		fmt.Println("Stop:        launchctl unload " + plist)
 		fmt.Println("The daemon auto-starts at login (RunAtLoad) and restarts on crash (KeepAlive).")
@@ -269,14 +268,14 @@ func installDaemonService() {
 	case "linux":
 		unit := edge.SystemdUnitPath(homeDirOrEmpty())
 		if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
-			color.Red("mkdir systemd user dir: %v", err)
+			uiFail("systemd user directory", err.Error())
 			return
 		}
 		if err := os.WriteFile(unit, []byte(edge.SystemdUnit(exe)), 0o644); err != nil {
-			color.Red("write unit: %v", err)
+			uiFail("unit", "could not be written: "+err.Error())
 			return
 		}
-		color.Green("Installed %s", unit)
+		uiOK("installed", unit)
 
 		// P10.4: headless-board guidance. The linger note in particular is the
 		// difference between "installed" and "actually runs" on an appliance
@@ -284,7 +283,7 @@ func installDaemonService() {
 		lingerOn, lingerKnown := edge.LingerEnabled("")
 		for _, line := range edge.SystemdEdgeNotes("", lingerOn, lingerKnown) {
 			if strings.HasPrefix(line, "Boot start:  lingering is OFF") {
-				color.Yellow(line)
+				uiDetail(line)
 				continue
 			}
 			fmt.Println(line)
@@ -304,18 +303,19 @@ func uninstallDaemonService() {
 		plist := filepath.Join(homeDirOrEmpty(), "Library", "LaunchAgents", serviceLabel+".plist")
 		_ = exec.Command("launchctl", "unload", plist).Run()
 		if err := os.Remove(plist); err != nil {
-			color.Yellow("remove plist: %v", err)
+			uiWarn("plist", "could not be removed: "+err.Error())
 			return
 		}
-		color.Green("Removed %s", plist)
+		uiOK("removed", plist)
 	case "linux":
 		_ = exec.Command("systemctl", "--user", "disable", "--now", "helix-daemon").Run()
 		unit := filepath.Join(homeDirOrEmpty(), ".config", "systemd", "user", "helix-daemon.service")
 		if err := os.Remove(unit); err != nil {
-			color.Yellow("remove unit: %v", err)
+			uiWarn("unit", "could not be removed: "+err.Error())
 			return
 		}
-		color.Green("Removed %s (run: systemctl --user daemon-reload)", unit)
+		uiOK("removed", unit)
+		uiUsage("systemctl --user daemon-reload")
 	default:
 		fmt.Println("Run in an elevated prompt: sc delete HelixDaemon")
 	}

@@ -29,15 +29,13 @@ import (
 
 	"helix/internal/metrics"
 	"helix/internal/shell"
-
-	"github.com/fatih/color"
 )
 
 // handleVoiceStatsCommand implements /blackbox stats.
 func handleVoiceStatsCommand() {
 	dir, err := metrics.Dir()
 	if err != nil {
-		color.Red("Cannot resolve the metrics directory: %v", err)
+		uiFail("metrics directory", err.Error())
 		return
 	}
 
@@ -99,7 +97,7 @@ func handleVoiceStatsCommand() {
 func loadMetric(dir, name string) []metrics.Record {
 	recs, err := metrics.Load(dir, name)
 	if err != nil {
-		color.Yellow("Could not read %s metrics: %v", name, err)
+		uiWarn(name+" metrics", err.Error())
 		return nil
 	}
 	return recs
