@@ -194,10 +194,18 @@ func voiceSidecars() map[string]voiceSidecar {
 				return "", false
 			},
 			ModelHint: func() (string, string, bool) {
-				return "huggingface-cli login   # then accept the terms at https://huggingface.co/sesame/csm-1b",
-					"CSM's weights are gated: accept Sesame's terms once and log in, " +
-						"then csm.rs downloads them on first run (~2 GB, or ~700 MB for the q4_k GGUF)",
-					true
+				// Nothing here. settleCSMWeights (hf_gate.go) handles the
+				// gated weights properly — installing the CLI, opening the
+				// terms page and running the login.
+				//
+				// It used to return
+				//   "huggingface-cli login   # then accept the terms at <url>"
+				// which was written to be PRINTED. Once model hints started
+				// running without a confirmation, that string was exec'd — and
+				// there is no shell here, so the "#" and the URL after it
+				// became arguments to a login command. It failed every time,
+				// and it could never have done anything else.
+				return "", "", false
 			},
 			Args: func(port int) []string {
 				return []string{
@@ -401,7 +409,6 @@ func offerSidecarSetup(kind, provider string) bool {
 		for _, l := range shell.PanelWrap(why, shell.Muted) {
 			fmt.Println(l)
 		}
-		fmt.Println(shell.StepCommand(cmd))
 		// Fetched, not offered. The user has already chosen this chain; asking
 		// again whether they want the file it cannot start without is a
 		// question with one sensible answer, and answering "n" leaves them with
@@ -462,7 +469,6 @@ func offerSidecarInstall(provider string, spec voiceSidecar) (string, bool) {
 	}
 
 	fmt.Println(shell.Step(shell.StateWarn, provider, "not installed — installing it"))
-	fmt.Println(shell.StepCommand(cmd))
 	if !runVisibleCommand(cmd, 30*time.Minute) {
 		return "", false
 	}
@@ -566,7 +572,6 @@ func installSidecarPrereqs(provider string, spec voiceSidecar) bool {
 		}
 		fmt.Println(shell.Step(shell.StateWarn, name,
 			fmt.Sprintf("%s needs it — installing", provider)))
-		fmt.Println(shell.StepCommand(cmd))
 		if !runVisibleCommand(cmd, 30*time.Minute) {
 			continue
 		}
@@ -749,10 +754,21 @@ func runVisibleCommand(cmdLine string, timeout time.Duration) bool {
 // the command STRING, because it is split on spaces and exec'd with no shell —
 // "RUSTFLAGS=... cargo" would look for a binary with an equals sign in its name.
 func runVisibleCommandIn(cmdLine, dir string, env []string, timeout time.Duration) bool {
-	fields := strings.Fields(cmdLine)
+	return runVisibleArgv(strings.Fields(cmdLine), dir, env, timeout)
+}
+
+// runVisibleArgv is runVisibleCommandIn for a command that is already split.
+//
+// Splitting a string on spaces is fine for the fixed command lines in this
+// package, and wrong the moment a PATH is involved: pip installs user scripts
+// under the home directory, and a home directory with a space in it turns
+// "/Users/Jo Smith/Library/Python/3.14/bin/hf login" into four arguments and a
+// binary that does not exist. Callers holding a resolved path pass argv.
+func runVisibleArgv(fields []string, dir string, env []string, timeout time.Duration) bool {
 	if len(fields) == 0 {
 		return false
 	}
+	cmdLine := strings.Join(fields, " ")
 	fmt.Println(shell.StepCommand(cmdLine))
 	fmt.Println()
 

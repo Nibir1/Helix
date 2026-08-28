@@ -134,3 +134,55 @@ func TestLaunchCommandIsEmptyWhenThereIsNoServer(t *testing.T) {
 		t.Error("an uninstalled sidecar should still show what will run it")
 	}
 }
+
+// A command Helix runs must be a COMMAND, not prose.
+//
+// csm-local's model hint used to be:
+//
+//	"huggingface-cli login   # then accept the terms at https://…"
+//
+// which was written to be printed. Once model hints started running without a
+// confirmation, that string was exec'd — and there is no shell here, so the "#"
+// and the URL after it became arguments to a login command. It failed every
+// time and could never have done anything else.
+//
+// The tell is cheap to check: a "#" comment, a shell operator, or a redirect
+// means the string was written for a human or for a shell that is not there.
+func TestRunnableStringsAreCommandsNotProse(t *testing.T) {
+	shellOnly := []struct{ token, why string }{
+		{"#", "a comment — there is no shell to strip it"},
+		{"&&", "a shell operator"},
+		{"||", "a shell operator"},
+		{";", "a shell separator"},
+		{"|", "a pipe"},
+		{">", "a redirect"},
+	}
+
+	check := func(t *testing.T, provider, field, cmd string) {
+		t.Helper()
+		if strings.TrimSpace(cmd) == "" {
+			return
+		}
+		for _, s := range shellOnly {
+			if strings.Contains(cmd, s.token) {
+				t.Errorf("%s %s contains %q (%s):\n  %s\n"+
+					"runVisibleCommand execs this directly with no shell, so every "+
+					"word after it becomes an argument",
+					provider, field, s.token, s.why, cmd)
+			}
+		}
+	}
+
+	for provider, spec := range voiceSidecars() {
+		if spec.InstallCmd != nil {
+			if cmd, ok := spec.InstallCmd(); ok {
+				check(t, provider, "InstallCmd", cmd)
+			}
+		}
+		if spec.ModelHint != nil {
+			if cmd, _, ok := spec.ModelHint(); ok {
+				check(t, provider, "ModelHint", cmd)
+			}
+		}
+	}
+}

@@ -440,6 +440,12 @@ you can paste a token. It checks first whether you are already signed in, and
 skips the whole thing if so. On a headless box the browser step degrades to
 printing the link.
 
+`pip install --user` puts console scripts in a directory that is frequently not
+on `PATH` — Helix asks Python where that is (`python -m site --user-base`) and
+uses the binary it just installed rather than telling you to open a new shell.
+It also says when the directory is not on your `PATH`, since every tool *you*
+run by name will still not find it.
+
 `/purge` reclaims `~/.helix/csm.rs`, which after a release build is several
 gigabytes of compiled crates — larger than most of the model weights.
 

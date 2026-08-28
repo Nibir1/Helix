@@ -26,6 +26,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -49,14 +50,68 @@ const (
 // working install that they have nothing.
 var hfBinaryNames = []string{"hf", "huggingface-cli"}
 
-// findHuggingFaceCLI returns the CLI's name on this host.
+// findHuggingFaceCLI returns the CLI's path on this host.
+//
+// PATH first, then the directory pip installs user scripts into — because that
+// directory is very often NOT on PATH, and pip says so itself:
+//
+//	WARNING: The scripts hf, huggingface-cli and tiny-agents are installed in
+//	'/Users/you/Library/Python/3.14/bin' which is not on PATH.
+//
+// Helix used to install the CLI, fail to find it a second later, and tell the
+// user to open a new shell — having just been told exactly where the thing was.
+// A tool Helix installed is a tool Helix can locate.
 func findHuggingFaceCLI() (string, bool) {
 	for _, name := range hfBinaryNames {
 		if p, err := exec.LookPath(name); err == nil {
 			return p, true
 		}
 	}
+	for _, dir := range pythonUserScriptDirs() {
+		for _, name := range hfBinaryNames {
+			p := filepath.Join(dir, name)
+			if isRunnableFile(p) {
+				return p, true
+			}
+		}
+	}
 	return "", false
+}
+
+// pythonUserScriptDirs returns where `pip install --user` puts executables.
+//
+// Asked of the interpreter rather than assumed: the layout differs by platform
+// (bin vs Scripts) and by Python version (the 3.14 in the path above), and
+// guessing either wrong reproduces the bug this exists to fix.
+func pythonUserScriptDirs() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, py := range []string{"python3", "python"} {
+		bin, err := exec.LookPath(py)
+		if err != nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		raw, err := exec.CommandContext(ctx, bin, "-m", "site", "--user-base").Output() //nolint:gosec // resolved from PATH
+		cancel()
+		if err != nil {
+			continue
+		}
+		base := strings.TrimSpace(string(raw))
+		if base == "" {
+			continue
+		}
+		leaf := "bin"
+		if runtime.GOOS == "windows" {
+			leaf = "Scripts"
+		}
+		dir := filepath.Join(base, leaf)
+		if !seen[dir] {
+			seen[dir] = true
+			out = append(out, dir)
+		}
+	}
+	return out
 }
 
 // hfLoggedIn reports whether the CLI already has a token.
@@ -98,23 +153,33 @@ func installHuggingFaceCLI() (string, bool) {
 		"not installed — installing it"))
 	// No quotes around huggingface_hub[cli]: this is exec'd with no shell, so
 	// quoting would make the brackets part of the package name.
-	cmd := python + " -m pip install --user huggingface_hub[cli]"
-	if !runVisibleCommand(cmd, 15*time.Minute) {
+	if !runVisibleArgv(
+		[]string{python, "-m", "pip", "install", "--user", "huggingface_hub[cli]"},
+		"", nil, 15*time.Minute) {
 		return "", false
 	}
 	bin, found := findHuggingFaceCLI()
 	if !found {
 		fmt.Println(shell.Step(shell.StateWarn, "huggingface-cli",
-			"installed, but not on PATH yet"))
+			"installed, but cannot be located"))
 		for _, l := range shell.StepDetail(
-			"pip puts user scripts in a directory that may not be on PATH — "+
-				"open a new shell, or add python's user bin directory to it.",
+			"pip reported success and the binary is not on PATH or in python's "+
+				"user script directory. Open a new shell and re-run /blackbox setup.",
 			shell.Muted) {
 			fmt.Println(l)
 		}
 		return "", false
 	}
 	fmt.Println(shell.Step(shell.StateGood, "huggingface-cli", "installed"))
+	if _, err := exec.LookPath(filepath.Base(bin)); err != nil {
+		// Found, but only because Helix knew where to look. Say so: every other
+		// tool the user runs by name will still not find it.
+		for _, l := range shell.StepDetail(
+			"not on your PATH — Helix will use "+bin+". To use it yourself, add "+
+				filepath.Dir(bin)+" to PATH.", shell.Muted) {
+			fmt.Println(l)
+		}
+	}
 	return bin, true
 }
 
@@ -187,7 +252,7 @@ func settleCSMWeights() {
 		fmt.Println(l)
 	}
 
-	if !runVisibleCommand(bin+" login", hfLoginTimeout) {
+	if !runVisibleArgv([]string{bin, "login"}, "", nil, hfLoginTimeout) {
 		fmt.Println(shell.Step(shell.StateWarn, "hugging face",
 			"not signed in — csm.rs cannot fetch the weights until you are"))
 		fmt.Println(shell.StepCommand(bin + " login"))
