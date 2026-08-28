@@ -89,6 +89,15 @@ func FindPiperBinary() (string, error) {
 // does. Cheap, and it does not run the file to find out — the question is
 // whether this thing IS the native runtime, and executing it to ask would both
 // be slower and start something.
+//
+// LIMITATION, on Windows: pip does not write a shebang script there. It writes
+// a real PE launcher named piper.exe, which is byte-indistinguishable from the
+// standalone build by any test this cheap. So the shim confusion this prevents
+// on Unix is still possible on Windows, where the defence is the lookup order
+// instead — Helix's own downloaded binary in ~/.helix/piper is preferred over
+// anything on PATH. Stated rather than papered over: a function that claims a
+// guarantee it cannot keep on one platform is worse than one that names the
+// gap.
 func IsNativePiperBinary(path string) bool {
 	f, err := os.Open(path) //nolint:gosec // a path already resolved from PATH
 	if err != nil {

@@ -37,8 +37,24 @@ jobs:
       # "undefined: beep / isatty / runewidth (typecheck)" errors even with all
       # modules downloaded. The v2 release line is the first with full Go 1.25+
       # support. `go install` works identically on bash and PowerShell runners.
+      # Retried, because this step's failures are not this project's failures.
+      # A build of golangci-lint pulls ~200 modules from proxy.golang.org, and a
+      # single HTTP/2 stream error there ("INTERNAL_ERROR; received from peer")
+      # fails the whole job before a line of Helix is compiled. Retrying a
+      # DOWNLOAD is not the same as retrying a red test: nothing about the
+      # repository changes between attempts, so a pass on the second try is
+      # evidence about the network rather than about the code.
       - name: Install golangci-lint (Go 1.25-compatible)
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+        run: |
+          for attempt in 1 2 3; do
+            if go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0; then
+              exit 0
+            fi
+            echo "::warning::golangci-lint install failed (attempt $attempt/3) — retrying"
+            sleep $((attempt * 10))
+          done
+          echo "::error::golangci-lint could not be installed after 3 attempts"
+          exit 1
 
       # Direct tool invocations (instead of make) keep the pipeline identical
       # on PowerShell, bash, and zsh runners (no chmod/Make dependency).

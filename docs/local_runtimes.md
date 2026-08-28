@@ -344,6 +344,14 @@ setup` start the HTTP server, verify it answering on its port, and then report
 had health-checked the script instead. One name, two providers, disagreeing in
 the same screen of output.
 
+**On Windows this check does not apply**, and the difference is worth knowing:
+pip writes a real `piper.exe` launcher there rather than a shebang script, and
+no byte-level test separates it from the standalone build. What protects a
+Windows host is the lookup order instead — Helix's own downloaded binary in
+`~/.helix/piper` is preferred over anything on `PATH`. If you have installed
+`piper-tts` with pip on Windows and want the interpreter-free path, let Helix
+download the standalone build rather than relying on the name.
+
 ## 3.5 Sesame CSM-1B — the most natural local voice
 
 CSM is the speech model behind Sesame's "crossing the uncanny valley of voice"

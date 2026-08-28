@@ -137,6 +137,21 @@ func voiceSidecars() map[string]voiceSidecar {
 				// below is not optional.
 				return "brew install whisper-cpp", true
 			},
+			InstallBlocker: func() (string, bool) {
+				// Reached only when brew is absent, which is every Windows host
+				// and any Linux one without it. whisper.cpp is not carried by
+				// apt, dnf, winget or choco under a name Helix can rely on, and
+				// the rule here is absolute: never run a guessed package name on
+				// someone's machine. So this says what is true rather than
+				// inventing a command that would fail — or worse, succeed and
+				// install something else.
+				return "Helix knows one verified install for whisper.cpp — Homebrew's " +
+					"whisper-cpp formula — and this host has no brew. No other " +
+					"package manager carries it under a name Helix will guess at. " +
+					"Build it from source (see docs/local_runtimes.md), or use a " +
+					"cloud STT provider with whisper-local as a fallback once it " +
+					"is on PATH.", true
+			},
 			ModelHint: func() (string, string, bool) {
 				if _, ok := installedWhisperModel(); ok {
 					return "", "", false // one is already on disk
