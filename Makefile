@@ -192,8 +192,18 @@ release:
 release-check:
 	@./$(SCRIPTS_DIR)/release.sh --dry-run $(ARGS)
 
+# Lint the GitHub Actions workflows.
+#
+# actionlint plus one check it does not perform: a multi-line `run:` in a job
+# whose matrix includes Windows must say which shell it is written for, because
+# the default there is PowerShell. actionlint cannot know that — `runs-on` is
+# `${{ matrix.os }}`, resolved at run time — so it shellchecks every step as
+# bash and passes the one case that breaks.
+lint-workflows:
+	@./$(SCRIPTS_DIR)/check-workflows.sh
+
 # Run all tasks: lint, sec-scan, fuzz-ci, e2e, build, test, install
-work: lint sec-scan fuzz-ci e2e build test install
+work: lint lint-workflows sec-scan fuzz-ci e2e build test install
 
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint work sec-scan install fuzz fuzz-ci e2e release release-check
+.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint lint-workflows work sec-scan install fuzz fuzz-ci e2e release release-check

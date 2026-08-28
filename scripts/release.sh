@@ -323,6 +323,19 @@ else
     info "goreleaser not installed; skipping config check (CI validates it, after tagging)"
 fi
 
+# The workflow that publishes this release. Same argument as the goreleaser
+# config: .github/workflows/release.yml is only interpreted once the tag exists,
+# so a broken step there is discovered on the wrong side of the irreversible
+# step — and unlike a test, nothing before the push exercises it.
+if [[ -x scripts/check-workflows.sh ]]; then
+    if ./scripts/check-workflows.sh >/dev/null 2>&1; then
+        ok "workflows lint clean"
+    else
+        ./scripts/check-workflows.sh 2>&1 | sed 's/^/      /'
+        die "workflow lint failed — release.yml runs only after the tag is pushed"
+    fi
+fi
+
 if [[ $SKIP_TESTS -eq 1 ]]; then
     warn "tests skipped (--skip-tests) — CI will still run them"
 else

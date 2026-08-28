@@ -727,8 +727,12 @@ Ideas, issues, and PRs are welcome:
 3. Run your changes locally with `make start`
 4. Open a PR with a clear description and demo steps
 
-Before opening a PR, `make work` runs the whole gate — lint, vulnerability scan,
-fuzzing, e2e, build, tests. `make release-check` runs everything a release
+Before opening a PR, `make work` runs the whole gate — lint, workflow lint,
+vulnerability scan, fuzzing, e2e, build, tests. `make lint-workflows` on its own
+checks `.github/workflows`: actionlint, plus one rule actionlint cannot enforce
+— a multi-line `run:` in a job whose matrix includes Windows must declare
+`shell:`, because the default there is PowerShell and `runs-on` is a runtime
+value nothing can resolve statically. `make release-check` runs everything a release
 checks without tagging anything. It works from a feature branch — the
 repository-state checks (branch, clean tree, in sync with origin) report as
 deferred rather than stopping it — so the release itself has nothing left to

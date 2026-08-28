@@ -10,6 +10,40 @@ on:
     branches: [ main, master ]
 
 jobs:
+  # Workflow files are the one thing CI cannot prove by running: a step that is
+  # wrong for a platform fails only on that platform, and a step that is wrong
+  # everywhere fails only once someone pushes. Both are cheap to catch here.
+  workflows:
+    name: Workflow Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Install actionlint
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12; then
+              exit 0
+            fi
+            echo "::warning::actionlint install failed (attempt $attempt/3) — retrying"
+            sleep $((attempt * 10))
+          done
+          echo "::error::actionlint could not be installed after 3 attempts"
+          exit 1
+
+      # actionlint AND a check it does not perform — see the script for why one
+      # is not enough.
+      - name: Check workflows
+        shell: bash
+        run: ./scripts/check-workflows.sh
+
   build-and-test:
     name: Test & Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -44,7 +78,15 @@ jobs:
       # DOWNLOAD is not the same as retrying a red test: nothing about the
       # repository changes between attempts, so a pass on the second try is
       # evidence about the network rather than about the code.
+      #
+      # `shell: bash` is REQUIRED, not stylistic. This job's matrix includes
+      # windows-latest, where the default shell is PowerShell — and pwsh cannot
+      # parse `for x in 1 2 3; do`, so the first version of this retry failed
+      # every Windows run with "Missing opening '(' after keyword 'for'". The
+      # single-line `go install` it replaced worked in both shells by accident
+      # of being one command; a loop has to say which shell it is written for.
       - name: Install golangci-lint (Go 1.25-compatible)
+        shell: bash
         run: |
           for attempt in 1 2 3; do
             if go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0; then
