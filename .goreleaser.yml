@@ -61,6 +61,14 @@ changelog:
   disable: true
 
 release:
+  # Replace, not the default keep-existing.
+  #
+  # Only matters when a release for the tag already exists, which happens on a
+  # deliberate re-tag (`./scripts/release.sh <tag> --force`). The default would
+  # keep whatever is already attached, so a forced re-release could publish the
+  # OLD artifacts under the new tag — the one outcome worse than failing, since
+  # the checksums file would then describe binaries nobody just built.
+  mode: replace
   header: |
     {{ readFile "docs/RELEASE_NOTES.md" }}
 

@@ -1,38 +1,3 @@
-## Unreleased
-
-Fixes and changes landed after the v1.5.0 tag. They ship in the next release;
-`/reboot` will pick them up.
-
-- **The speech wizard installs instead of skipping.** Choosing a chain is the
-  decision, so what that chain needs — runtime, model file, server, and host
-  packages such as Python, git or cargo — is installed and started without a
-  further prompt. A host with no Python used to be told *"there is no single
-  install command for this platform"*, which was a true sentence about a
-  situation Helix could have fixed in one step. First boot still asks per
-  package; the difference is deliberate and documented in SECURITY.md §5c.
-- **CSM is built, not printed.** `/blackbox setup` detects the compute backend
-  (CUDA if `nvidia-smi` answers, Metal on Apple Silicon, otherwise a tuned CPU
-  build), prints the evidence for that choice before compiling, installs `git`
-  and `cargo` if absent, and builds csm.rs into `~/.helix/csm.rs`. The refusal it
-  replaces rested on the word *silently*: guessing a backend is wrong, detecting
-  one and showing your working is not. The licence gate remains yours.
-- **A `piper` on PATH is no longer assumed to be the standalone binary.**
-  `pip install piper-tts` leaves a console script by that name; treating it as
-  the native runtime made setup verify a running server and then report
-  `piper-local still not answering` three lines later, because the status probe
-  had health-checked the script instead. Told apart now by the file's first two
-  bytes.
-- **One launch command per sidecar.** The printed command was rendered from the
-  first entry of a preference list rather than the binary actually present,
-  producing `piper -m piper.http_server …` beside the correct `python3 -m …`.
-- **Sidecars that will not install say why.** `kokoro-local` needs a container
-  runtime — a licence decision and a system-wide change — rather than pointing
-  at a document.
-- **`/purge` reclaims `~/.helix/csm.rs`**, several GB of compiled crates after a
-  release build.
-
----
-
 ## Helix v1.5.0 — BlackBox: The Voice-First Companion
 
 v1.0.0 taught the terminal to speak human. v1.5.0 lets you stop typing.
@@ -293,6 +258,40 @@ Nothing is required. Voice is entirely opt-in: existing configs keep working, ev
 ```
 
 Say **"manual mode"** to get back to the keyboard, or **"reboot"** to restart the shell without losing your place.
+
+### 🧰 Setup that finishes the job
+
+Late additions to v1.5.0, from a live `/blackbox setup` on an Intel Mac and an
+Apple Silicon one. Each is a case where the wizard knew what to do and stopped
+short of doing it.
+
+- **The speech wizard installs instead of skipping.** Choosing a chain is the
+  decision, so what that chain needs — runtime, model file, server, and host
+  packages such as Python, git or cargo — is installed and started without a
+  further prompt. A host with no Python used to be told *"there is no single
+  install command for this platform"*, which was a true sentence about a
+  situation Helix could have fixed in one step. First boot still asks per
+  package; the difference is deliberate and documented in SECURITY.md §5c.
+- **CSM is built, not printed.** `/blackbox setup` detects the compute backend
+  (CUDA if `nvidia-smi` answers, Metal on Apple Silicon, otherwise a tuned CPU
+  build), prints the evidence for that choice before compiling, installs `git`
+  and `cargo` if absent, and builds csm.rs into `~/.helix/csm.rs`. The refusal it
+  replaces rested on the word *silently*: guessing a backend is wrong, detecting
+  one and showing your working is not. The licence gate remains yours.
+- **A `piper` on PATH is no longer assumed to be the standalone binary.**
+  `pip install piper-tts` leaves a console script by that name; treating it as
+  the native runtime made setup verify a running server and then report
+  `piper-local still not answering` three lines later, because the status probe
+  had health-checked the script instead. Told apart now by the file's first two
+  bytes.
+- **One launch command per sidecar.** The printed command was rendered from the
+  first entry of a preference list rather than the binary actually present,
+  producing `piper -m piper.http_server …` beside the correct `python3 -m …`.
+- **Sidecars that will not install say why.** `kokoro-local` needs a container
+  runtime — a licence decision and a system-wide change — rather than pointing
+  at a document.
+- **`/purge` reclaims `~/.helix/csm.rs`**, several GB of compiled crates after a
+  release build.
 
 ---
 

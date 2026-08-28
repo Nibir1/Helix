@@ -309,6 +309,20 @@ for target in "darwin/amd64" "darwin/arm64" "linux/amd64" "linux/arm64" "windows
 done
 ok "cross-compiles for all five release targets"
 
+# The release pipeline's own config. It is read only by CI, AFTER the tag
+# exists — so a syntax or key error there is discovered on the wrong side of the
+# irreversible step, exactly like the sed bug this script already learned from.
+if command -v goreleaser >/dev/null 2>&1; then
+    if goreleaser check >/dev/null 2>&1; then
+        ok "goreleaser config valid"
+    else
+        goreleaser check 2>&1 | sed 's/^/      /'
+        die ".goreleaser.yml is not valid — CI would fail after the tag is pushed"
+    fi
+else
+    info "goreleaser not installed; skipping config check (CI validates it, after tagging)"
+fi
+
 if [[ $SKIP_TESTS -eq 1 ]]; then
     warn "tests skipped (--skip-tests) — CI will still run them"
 else
@@ -371,6 +385,34 @@ read -r REPLY </dev/tty
 # 7. Tag and push
 # ---------------------------------------------------------------------------
 step "publishing"
+
+# Delete the RELEASE OBJECT first, not just the tag.
+#
+# Deleting a tag that has a release attached does not remove the release —
+# GitHub demotes it to a draft, still holding every asset from last time.
+# goreleaser then finds it and, depending on release.mode, may keep those stale
+# artifacts or collide on duplicate asset names. Both outcomes are discovered
+# after the tag is pushed, which is the wrong side of the irreversible step.
+# .goreleaser.yml sets mode: replace as the second line of defence; this is the
+# first.
+#
+# Keyed on the RELEASE existing, not on the local tag: a machine that never
+# fetched the tag can still be the one re-cutting it, and that is exactly the
+# case where the stale release would survive unnoticed.
+if [[ $HAVE_GH -eq 1 ]] && gh release view "$TAG" >/dev/null 2>&1; then
+    if gh release delete "$TAG" --yes >/dev/null 2>&1; then
+        warn "deleted the published $TAG release and its assets"
+    else
+        die "cannot delete the existing $TAG release.
+    The authenticated gh account may not have write access to this repository
+    (check: gh repo view --json viewerPermission). Delete the release yourself,
+    then re-run — pushing the tag while a draft release holds the old assets
+    would publish artifacts nobody just built."
+    fi
+elif [[ $TAG_EXISTS_REMOTE -eq 1 && $HAVE_GH -eq 0 ]]; then
+    warn "no gh available to remove the existing $TAG release; CI will replace"
+    warn "its artifacts (mode: replace), but check the result"
+fi
 
 if [[ $TAG_EXISTS_LOCAL -eq 1 ]]; then
     git tag -d "$TAG" >/dev/null
