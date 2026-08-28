@@ -172,6 +172,11 @@ func purgeWeightTargets(helixDir string) []purgeTarget {
 		{filepath.Join(helixDir, "whisper-models"), "speech-to-text models", groupRuntime},
 		{filepath.Join(helixDir, "piper-voices"), "text-to-speech voices", groupRuntime},
 		{filepath.Join(helixDir, "piper"), "the piper runtime binary", groupRuntime},
+		// The CSM checkout AND its target/ tree. A release build of a candle
+		// project is several gigabytes of compiled crates — larger than most of
+		// the model weights above it — and it is created by Helix's own wizard,
+		// which is exactly the criterion the rest of this list is built on.
+		{filepath.Join(helixDir, "csm.rs"), "the CSM voice server source and build", groupRuntime},
 	}
 }
 

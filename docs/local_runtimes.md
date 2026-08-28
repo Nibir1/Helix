@@ -370,10 +370,24 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release --features accelerate
 RUSTFLAGS="-C target-cpu=native" cargo build --release --features mkl
 ```
 
-The backend is a **compile-time** choice, which is why Helix prints these rather
-than running one for you: picking `mkl` for someone with a 3080 would silently
-hand them a CPU build, and Helix's rule is that it only auto-installs when there
-is one obvious command that makes no choices on your behalf.
+**Helix does this for you now.** Choosing `csm-local` in `/blackbox setup`
+detects the backend, installs `git` and `cargo` if the host lacks them, fetches
+the source into `~/.helix/csm.rs` and builds it. The commands above are what it
+runs, kept here for anyone who wants to build it by hand.
+
+The backend used to be printed rather than chosen, on the grounds that "picking
+`mkl` for someone with a 3080 would silently hand them a CPU build". The
+load-bearing word there is **silently**: guessing is what was wrong, not
+choosing. An RTX 3080 announces itself through `nvidia-smi` and Apple Silicon
+through the architecture, so Helix probes for the answer and prints the evidence
+beside it —
+
+```text
+BACKEND   cuda  nvidia-smi reports NVIDIA GeForce RTX 3080
+```
+
+— before anything compiles. A detected choice you can see and argue with is not
+a choice made on your behalf.
 
 Then start it on the port Helix expects:
 
@@ -395,9 +409,14 @@ huggingface-cli login    # then accept at https://huggingface.co/sesame/csm-1b
 ```
 
 csm.rs downloads them on first run (~2 GB bf16, or ~700 MB for the `q4_k` GGUF
-from `cartesia/sesame-csm-1b-gguf`). Helix will not do this for you — gated
-weights need your account, and a multi-gigabyte download is consent-gated by
-policy anyway.
+from `cartesia/sesame-csm-1b-gguf`). **This is the one step Helix does not
+take**, and it is a boundary rather than a gap: accepting a licence is consent
+tied to a person and an account. The build finishes, then names this step and
+stops — so you meet it as an instruction, not as a download error on your first
+attempt to speak.
+
+`/purge` reclaims `~/.helix/csm.rs`, which after a release build is several
+gigabytes of compiled crates — larger than most of the model weights.
 
 ### Will it be smooth on my machine?
 

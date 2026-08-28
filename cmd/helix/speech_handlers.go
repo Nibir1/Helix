@@ -1348,16 +1348,43 @@ func sidecarSpecs() map[string]sidecarSpec {
 	runnable := voiceSidecars()
 	for name, spec := range specs {
 		if sc, ok := runnable[name]; ok {
-			binary, args := sc.Binaries[0], sc.Args
-			spec.Launch = func(port int) string {
-				return binary + " " + strings.Join(args(port), " ")
-			}
+			spec.Launch = launchCommandFor(name, sc)
 		} else {
 			spec.Launch = func(int) string { return "" }
 		}
 		specs[name] = spec
 	}
 	return specs
+}
+
+// launchCommandFor renders the command that starts one sidecar ON THIS HOST.
+//
+// Binaries is a PREFERENCE ORDER, not an answer. Rendering Binaries[0] printed
+// the first name in the list regardless of what is installed, and for piper
+// that is "piper" — joined to arguments that only a Python interpreter
+// understands, producing `piper -m piper.http_server …`, a command that cannot
+// run. The transcript showed it beside the real one, two different launch lines
+// for the same sidecar in the same screen.
+//
+// So the binary is resolved the same way the launcher resolves it, and a
+// sidecar with no server to start says so instead of inventing a command.
+func launchCommandFor(name string, sc voiceSidecar) func(int) string {
+	binary, found := findFirstBinary(sc.Binaries)
+	if !found {
+		// Nothing installed yet: name the preferred runtime, which is what the
+		// install step is about to provide.
+		binary = sc.Binaries[0]
+	}
+	// The native piper is a CLI Helix runs per synthesis — no server, no port.
+	// There is no launch command to print, and printing the Python one would
+	// send the reader to install an interpreter they do not need.
+	if name == "piper-local" && found && !isPythonInterpreter(binary) {
+		return func(int) string { return "" }
+	}
+	args := sc.Args
+	return func(port int) string {
+		return binary + " " + strings.Join(args(port), " ")
+	}
 }
 
 // autoAssignSidecarPort resolves the endpoint a local sidecar will use, moving
@@ -1419,7 +1446,9 @@ func autoAssignSidecarPort(kind, provider, configured string) string {
 	wizStep(shell.StateWarn, provider, held)
 	wizStep(shell.StateGood, provider,
 		fmt.Sprintf("moved to port %d — verified free just now", port))
-	fmt.Println(shell.StepCommand(spec.Launch(port)))
+	if launch := spec.Launch(port); strings.TrimSpace(launch) != "" {
+		fmt.Println(shell.StepCommand(launch))
+	}
 
 	// Persist immediately so the endpoint survives even if the wizard is
 	// interrupted before its final save.

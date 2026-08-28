@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"helix/internal/deps"
 	"helix/internal/edge"
 	"helix/internal/providers/llamacpp"
 	"helix/internal/shell"
@@ -40,10 +41,40 @@ type voiceSidecar struct {
 
 	// InstallCmd is a single unambiguous install command, or "".
 	//
-	// Same rule as llama.cpp: Helix offers to run an install only when there is
-	// one obvious command that makes no choices on the user's behalf. Anything
+	// Same rule as llama.cpp: Helix runs an install only when there is one
+	// obvious command that makes no choices on the user's behalf. Anything
 	// requiring a build with backend flags is printed, not executed.
 	InstallCmd func() (string, bool)
+
+	// GoInstall installs this sidecar in Go, for the ones whose install is not
+	// a single command.
+	//
+	// runVisibleCommand execs a string with no shell, so anything that is a
+	// pipeline, a checksum, or a build with an environment cannot be expressed
+	// as InstallCmd. Piper (download, verify, extract) and CSM (detect backend,
+	// fetch, compile) both live here. Declared on the spec rather than
+	// special-cased by name in offerSidecarInstall, so the table stays the one
+	// place that says how a sidecar is installed.
+	GoInstall func() (string, bool)
+
+	// Prereqs names catalogue entries (internal/deps) this sidecar needs on the
+	// host before InstallCmd or GoInstall can succeed.
+	//
+	// They are installed on demand, not at first run. The distinction matters:
+	// piper-local's InstallCmd declines on a host with no Python, and until
+	// this existed that decline was reported as "there is no single install
+	// command for this platform" — a true statement about a situation Helix
+	// could have fixed in one step.
+	Prereqs []string
+
+	// InstallBlocker explains why this sidecar cannot be installed
+	// automatically, when that is a deliberate refusal rather than a gap.
+	//
+	// Some things Helix must not decide: which compute backend to compile
+	// against, or whether someone accepts a model's licence. Naming the
+	// specific reason is what separates "Helix will not do this for you, and
+	// here is the one thing to do" from a dead end pointing at a document.
+	InstallBlocker func() (string, bool)
 
 	// ModelHint describes what the server needs besides the binary, and how to
 	// get it. Empty when the binary is self-sufficient.
@@ -135,11 +166,16 @@ func voiceSidecars() map[string]voiceSidecar {
 		// their behalf.
 		"csm-local": {
 			Binaries: []string{"csm-server"},
+			// Built, not installed — see csm_install.go. The backend is
+			// DETECTED and reported rather than guessed, which is what changed
+			// the old refusal into something Helix can honestly do.
+			GoInstall: installCSMServer,
+			Prereqs:   []string{"git", "rust"},
 			InstallCmd: func() (string, bool) {
-				// Deliberately no auto-install. The llama.cpp precedent applies
-				// exactly: "Helix offers to run an install only when there is one
-				// obvious command that makes no choices on the user's behalf."
-				// A CSM build chooses a compute backend, so it is printed.
+				// Not a single command: GoInstall above detects the backend,
+				// fetches the source and builds it. The old refusal here read
+				// "a CSM build chooses a compute backend, so it is printed" —
+				// true of a GUESSED backend, and not of a detected one.
 				return "", false
 			},
 			ModelHint: func() (string, string, bool) {
@@ -161,6 +197,12 @@ func voiceSidecars() map[string]voiceSidecar {
 			// user to either — see Unmet.
 			Binaries:   []string{"docker"},
 			InstallCmd: func() (string, bool) { return "", false },
+			InstallBlocker: func() (string, bool) {
+				return "kokoro runs in a container, and installing a container " +
+					"runtime is a licence decision and a system-wide change Helix " +
+					"will not make for you. piper-local is the docker-free local " +
+					"voice and Helix installs it end to end.", true
+			},
 			Unmet: func() (string, bool) {
 				if dockerAvailable() {
 					return "", false
@@ -193,6 +235,11 @@ func voiceSidecars() map[string]voiceSidecar {
 			},
 		},
 		"piper-local": {
+			GoInstall: offerPiperBinary,
+			// If it comes to the Python path, the interpreter is installable —
+			// so a host without one is no longer a dead end. The standalone
+			// binary is still tried first and needs none of this.
+			Prereqs: []string{"python3"},
 			// The native binary first, then the Python interpreter. Order is
 			// the preference: a machine with the standalone piper needs no
 			// interpreter at all, which is the whole point of shipping it.
@@ -339,12 +386,11 @@ func offerSidecarSetup(kind, provider string) bool {
 		for _, l := range shell.PanelWrap(why, shell.Muted) {
 			fmt.Println(l)
 		}
-		fmt.Println(shell.Hint(cmd))
-		if !wizConfirm("fetch it now") {
-			fmt.Println(shell.Step(shell.StateWarn, provider,
-				"skipped — it cannot start without one"))
-			return false
-		}
+		fmt.Println(shell.StepCommand(cmd))
+		// Fetched, not offered. The user has already chosen this chain; asking
+		// again whether they want the file it cannot start without is a
+		// question with one sensible answer, and answering "n" leaves them with
+		// a configuration Helix just told them to pick.
 		if !runVisibleCommand(cmd, 30*time.Minute) {
 			return false
 		}
@@ -361,42 +407,47 @@ func offerSidecarSetup(kind, provider string) bool {
 		return true
 	}
 
-	if !wizConfirm("start " + provider + " now") {
-		fmt.Println(shell.Step(shell.StateIdle, provider,
-			"not started — /blackbox setup offers again"))
-		return false
-	}
 	return startVoiceSidecar(kind, provider, binary, spec)
 }
 
 // offerSidecarInstall offers the one unambiguous install command, if there is
 // one.
 func offerSidecarInstall(provider string, spec voiceSidecar) (string, bool) {
-	// Piper's interpreter-free binary is installed in Go — downloaded, checksum
-	// verified against a pinned digest, then extracted — because there is no
-	// shell here to express those three steps as one command.
-	if provider == "piper-local" {
-		if bin, ok := offerPiperBinary(); ok {
+	// A Go-driven install runs first where one exists: it is the more capable
+	// path, and for piper it avoids needing an interpreter at all.
+	if spec.GoInstall != nil {
+		if err := ensureSidecarPrereqs(provider, spec); err != nil {
+			fmt.Println(shell.Step(shell.StateBad, provider, err.Error()))
+			return "", false
+		}
+		if bin, ok := spec.GoInstall(); ok {
 			return bin, true
 		}
 	}
 
 	cmd, ok := spec.InstallCmd()
 	if !ok {
-		fmt.Println(shell.Step(shell.StateBad, provider, "not installed"))
-		for _, l := range shell.StepDetail(
-			"There is no single install command for this platform — "+
-				"see docs/local_runtimes.md.", shell.Muted) {
-			fmt.Println(l)
+		// Before calling this a dead end, try to make it not one.
+		//
+		// A sidecar's InstallCmd can decline for two very different reasons:
+		// Helix genuinely does not know how to build the thing (csm.rs picks a
+		// compute backend; kokoro wants Docker), or it knows exactly how and is
+		// only blocked because a PREREQUISITE is missing. piper-local was the
+		// second kind: with no interpreter on the host it returned false, and
+		// the user — who had just picked this chain — was told to read the docs.
+		// Installing the prerequisite and asking again is the obvious move, and
+		// the wizard was not making it.
+		if installed := installSidecarPrereqs(provider, spec); installed {
+			if cmd, ok = spec.InstallCmd(); !ok {
+				return sidecarInstallDeadEnd(provider, spec)
+			}
+		} else {
+			return sidecarInstallDeadEnd(provider, spec)
 		}
-		return "", false
 	}
 
-	fmt.Println(shell.Step(shell.StateWarn, provider, "not installed — Helix can install it"))
+	fmt.Println(shell.Step(shell.StateWarn, provider, "not installed — installing it"))
 	fmt.Println(shell.StepCommand(cmd))
-	if !wizConfirm("run that now") {
-		return "", false
-	}
 	if !runVisibleCommand(cmd, 30*time.Minute) {
 		return "", false
 	}
@@ -415,6 +466,109 @@ func offerSidecarInstall(provider string, spec voiceSidecar) (string, bool) {
 	fmt.Println(shell.Step(shell.StateGood, provider, "installed"))
 	fmt.Println(shell.StepCommand(binary))
 	return binary, true
+}
+
+// ensureSidecarPrereqs installs what a Go-driven install needs, and reports
+// what is still missing afterwards.
+//
+// Distinct from installSidecarPrereqs, which is advisory: this one gates a
+// build that cannot start without cargo, so "tried and failed" has to stop the
+// flow rather than fall through to an error from a compiler that is not there.
+func ensureSidecarPrereqs(provider string, spec voiceSidecar) error {
+	if len(spec.Prereqs) == 0 {
+		return nil
+	}
+	installSidecarPrereqs(provider, spec)
+
+	var missing []string
+	for _, name := range spec.Prereqs {
+		if dep, ok := deps.Lookup(name); ok && !dep.Present() {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("needs %s, which could not be installed here",
+		strings.Join(missing, " and "))
+}
+
+// sidecarInstallDeadEnd reports a provider Helix genuinely cannot install, and
+// says WHY rather than pointing at a document.
+//
+// "See docs/local_runtimes.md" is the right answer only when the reason is a
+// choice Helix must not make for someone. Naming that choice is what turns a
+// dead end into a next step.
+func sidecarInstallDeadEnd(provider string, spec voiceSidecar) (string, bool) {
+	fmt.Println(shell.Step(shell.StateBad, provider, "cannot be installed automatically"))
+	reason := "Helix has no verified install command for this platform."
+	if spec.InstallBlocker != nil {
+		if why, ok := spec.InstallBlocker(); ok {
+			reason = why
+		}
+	}
+	for _, l := range shell.StepDetail(reason, shell.Muted) {
+		fmt.Println(l)
+	}
+	for _, l := range shell.StepDetail("See docs/local_runtimes.md.", shell.Muted) {
+		fmt.Println(l)
+	}
+	return "", false
+}
+
+// installSidecarPrereqs installs the host packages a sidecar needs before its
+// own installer can run, and reports whether anything was installed.
+//
+// This is the deps catalogue the first-run flow uses, reached on demand: the
+// entries are marked Optional so they stay out of the first-boot offer, but a
+// user who has now chosen a chain that needs one gets it installed rather than
+// being told to go and read something.
+func installSidecarPrereqs(provider string, spec voiceSidecar) bool {
+	if len(spec.Prereqs) == 0 {
+		return false
+	}
+	manager := deps.DetectManager()
+	progress := false
+	for _, name := range spec.Prereqs {
+		dep, known := deps.Lookup(name)
+		if !known || dep.Present() {
+			continue
+		}
+		if manager == deps.ManagerUnknown {
+			fmt.Println(shell.Step(shell.StateWarn, name, "missing, and no package manager was found"))
+			for _, l := range shell.StepDetail(deps.ManagerHint(), shell.Muted) {
+				fmt.Println(l)
+			}
+			continue
+		}
+		cmd, ok := dep.InstallCommand(manager)
+		if !ok {
+			// Same rule the catalogue applies everywhere: never run a guessed
+			// package name under Helix's name.
+			fmt.Println(shell.Step(shell.StateWarn, name,
+				fmt.Sprintf("no verified install command for %s on %s", name, manager)))
+			continue
+		}
+		fmt.Println(shell.Step(shell.StateWarn, name,
+			fmt.Sprintf("%s needs it — installing", provider)))
+		fmt.Println(shell.StepCommand(cmd))
+		if !runVisibleCommand(cmd, 30*time.Minute) {
+			continue
+		}
+		// Trust the lookup, not the exit code: a manager can succeed and still
+		// leave the binary somewhere this process cannot see yet.
+		if !dep.Present() {
+			fmt.Println(shell.Step(shell.StateWarn, name, "installed, but still not on PATH"))
+			for _, l := range shell.StepDetail(
+				"Open a new shell and re-run /blackbox setup.", shell.Muted) {
+				fmt.Println(l)
+			}
+			continue
+		}
+		fmt.Println(shell.Step(shell.StateGood, name, "installed"))
+		progress = true
+	}
+	return progress
 }
 
 // startVoiceSidecar launches the server and waits for it to answer.
@@ -563,6 +717,17 @@ func findFirstBinary(names []string) (string, bool) {
 // No spinner: package managers and downloaders draw their own progress, and
 // animating over it produces interleaved garbage — two writers, one cursor.
 func runVisibleCommand(cmdLine string, timeout time.Duration) bool {
+	return runVisibleCommandIn(cmdLine, "", nil, timeout)
+}
+
+// runVisibleCommandIn is runVisibleCommand with a working directory and extra
+// environment.
+//
+// Both are needed by builds rather than installs: `cargo build` runs inside a
+// checkout, and the CPU backends want RUSTFLAGS. Neither can be expressed in
+// the command STRING, because it is split on spaces and exec'd with no shell —
+// "RUSTFLAGS=... cargo" would look for a binary with an equals sign in its name.
+func runVisibleCommandIn(cmdLine, dir string, env []string, timeout time.Duration) bool {
 	fields := strings.Fields(cmdLine)
 	if len(fields) == 0 {
 		return false
@@ -583,6 +748,10 @@ func runVisibleCommand(cmdLine string, timeout time.Duration) bool {
 	// shell's heap.
 	var captured boundedLog
 	c := exec.CommandContext(ctx, fields[0], fields[1:]...)
+	c.Dir = dir
+	if len(env) > 0 {
+		c.Env = append(os.Environ(), env...)
+	}
 	c.Stdout = io.MultiWriter(os.Stdout, &captured)
 	c.Stderr = io.MultiWriter(os.Stderr, &captured)
 

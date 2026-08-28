@@ -92,6 +92,30 @@ type Dependency struct {
 	// today: every one of these buys a capability, and text Helix runs fine
 	// without any of them.
 	Required bool
+
+	// Optional keeps a dependency OUT of the first-run offer while leaving it
+	// installable on demand.
+	//
+	// The catalogue is deliberately short, because a setup flow that asks about
+	// a dozen tools is one people quit halfway through. But "not worth
+	// mentioning on first boot" and "Helix has no idea how to install this"
+	// are different statements, and the wizard needs the second one to be rare.
+	// An optional entry is skipped by Missing() and found by Lookup().
+	Optional bool
+}
+
+// Lookup returns a catalogue entry by name, including optional ones.
+//
+// This is how a wizard resolves a prerequisite it has just discovered is
+// missing, rather than reporting a dead end at the moment the user has already
+// chosen the thing that needs it.
+func Lookup(name string) (Dependency, bool) {
+	for _, d := range Catalog() {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return Dependency{}, false
 }
 
 // Catalog is everything Helix would like the host to have.
@@ -117,6 +141,63 @@ func Catalog() []Dependency {
 				// No Windows entry on purpose: the winget and choco IDs for sox
 				// are not stable enough to put in a command Helix runs for
 				// someone. Guidance beats a confident wrong package name.
+			},
+		},
+		{
+			Name:    "python3",
+			Purpose: "the piper voice server, when the standalone binary is unavailable",
+			// Optional: Helix prefers the interpreter-free piper binary, which
+			// it downloads and checksum-verifies itself. This entry exists so a
+			// host that needs the Python path is INSTALLED rather than skipped
+			// — the wizard used to reach "no single install command" and stop,
+			// which left the user with a chain it had just told them to pick.
+			Optional: true,
+			Binaries: []string{"python3", "python"},
+			Packages: map[Manager]string{
+				ManagerBrew:   "python",
+				ManagerApt:    "python3",
+				ManagerDnf:    "python3",
+				ManagerPacman: "python",
+				ManagerZypper: "python3",
+				ManagerApk:    "python3",
+				ManagerWinget: "Python.Python.3.12",
+				ManagerChoco:  "python",
+			},
+		},
+		{
+			Name:    "git",
+			Purpose: "fetching sources Helix builds locally, such as the CSM voice server",
+			// Optional: only a from-source sidecar needs it, and most users
+			// never build one.
+			Optional: true,
+			Binaries: []string{"git"},
+			Packages: map[Manager]string{
+				ManagerBrew:   "git",
+				ManagerApt:    "git",
+				ManagerDnf:    "git",
+				ManagerPacman: "git",
+				ManagerZypper: "git",
+				ManagerApk:    "git",
+				ManagerWinget: "Git.Git",
+				ManagerChoco:  "git",
+			},
+		},
+		{
+			Name:    "rust",
+			Purpose: "building the CSM voice server, which ships as source",
+			// Optional, and cargo is the binary that matters: rustc alone
+			// cannot build the crate.
+			Optional: true,
+			Binaries: []string{"cargo"},
+			Packages: map[Manager]string{
+				ManagerBrew:   "rust",
+				ManagerApt:    "cargo",
+				ManagerDnf:    "cargo",
+				ManagerPacman: "rust",
+				ManagerZypper: "cargo",
+				ManagerApk:    "cargo",
+				ManagerWinget: "Rustlang.Rustup",
+				ManagerChoco:  "rust",
 			},
 		},
 		{
@@ -184,6 +265,9 @@ func (d Dependency) InstallCommand(m Manager) (string, bool) {
 func Missing() []Dependency {
 	var out []Dependency
 	for _, d := range Catalog() {
+		if d.Optional {
+			continue // installable on demand, not part of the first-run offer
+		}
 		if !d.Present() {
 			out = append(out, d)
 		}

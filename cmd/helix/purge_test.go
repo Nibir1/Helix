@@ -23,7 +23,13 @@ func TestPurgeWeightTargetsCoverEveryDirectoryHelixDownloadsInto(t *testing.T) {
 			t.Errorf("%s has no description; the prompt asks about it by name", tg.path)
 		}
 	}
-	for _, want := range []string{"models", "whisper-models", "piper-voices", "piper"} {
+	// Every directory the wizard creates under ~/.helix and fills with something
+	// large. This list has to grow WITH the wizard: it is a copy of a fact that
+	// lives elsewhere, so a new download reaching gigabytes while this stayed at
+	// four entries is exactly how /purge came to delete nothing the first time.
+	for _, want := range []string{
+		"models", "whisper-models", "piper-voices", "piper", "csm.rs",
+	} {
 		if !got[want] {
 			t.Errorf("~/.helix/%s is downloaded by Helix but not offered for deletion", want)
 		}

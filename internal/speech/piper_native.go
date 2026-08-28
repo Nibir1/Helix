@@ -55,16 +55,52 @@ var piperBinaryNames = []string{"piper", "piper-tts"}
 func FindPiperBinary() (string, error) {
 	if home, err := os.UserHomeDir(); err == nil {
 		own := filepath.Join(home, ".helix", "piper", piperExecutableName())
-		if isExecutableFile(own) {
+		if isExecutableFile(own) && IsNativePiperBinary(own) {
 			return own, nil
 		}
 	}
 	for _, name := range piperBinaryNames {
-		if p, err := exec.LookPath(name); err == nil {
-			return p, nil
+		p, err := exec.LookPath(name)
+		if err != nil {
+			continue
 		}
+		// Searching Helix's own directory first was not enough of a guard.
+		//
+		// `pip install piper-tts` drops a `piper` CONSOLE SCRIPT on PATH, and on
+		// a machine that never downloaded the standalone build, LookPath finds
+		// it. Returning it here makes newPiperProvider wrap a Python shim in the
+		// NATIVE adapter — so the wizard would start the HTTP server, verify it
+		// answering on its port, and then speech.Status would health-check the
+		// shim instead and report "piper-local still not answering" three lines
+		// later. One name, two providers, contradicting each other.
+		if !IsNativePiperBinary(p) {
+			continue
+		}
+		return p, nil
 	}
 	return "", ErrNoPiperBinary
+}
+
+// IsNativePiperBinary reports whether path is a real executable rather than an
+// interpreter script.
+//
+// A shebang is the whole test: the standalone piper is a Mach-O/ELF/PE image
+// and never begins with "#!", while every console script and shell wrapper
+// does. Cheap, and it does not run the file to find out — the question is
+// whether this thing IS the native runtime, and executing it to ask would both
+// be slower and start something.
+func IsNativePiperBinary(path string) bool {
+	f, err := os.Open(path) //nolint:gosec // a path already resolved from PATH
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+
+	var head [2]byte
+	if n, _ := io.ReadFull(f, head[:]); n < 2 {
+		return false // too small to be an executable of any kind
+	}
+	return head[0] != '#' || head[1] != '!'
 }
 
 // piperExecutableName is the file name inside the release archive.
