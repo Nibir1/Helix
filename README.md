@@ -17,13 +17,15 @@
 Helix is an **AI-powered command‑line assistant and adversarial cybersecurity platform** that turns natural language into **safe, executable actions**. It bridges the gap between human intent and machine execution, combining local LLM inference, retrieval-augmented generation (RAG), live threat intelligence, and strict safety pipelines.
 
 It combines:
-- **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more)
+- **A voice-first companion** (`/blackbox on`) — microphone open, camera on, replies spoken, and an ambient loop that looks at the scene and speaks up on its own. Say "manual mode" to return to the keyboard
+- **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more), every default model vision-capable
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
 - **One visual language across all 57 commands** — panels, badges and aligned rows, never a flat stack of coloured lines. Colour honours `NO_COLOR` and switches itself off when the output is not a terminal, so piping Helix or running it as a service produces clean text
 - **A Multi-Layer Safety & Sandbox Engine** around shell, git, packages, and recon
 - **Enterprise-Grade Hardening** (Kernel confinement, instruction firewalls, and signed supply chains)
 - **Synthetic Tonal Audio** for immersive, synchronized terminal feedback
+- **Self-updating** — `/reboot` verifies, installs and restarts into a new release, resuming the same mode, directory, provider and conversation
 
 It’s built as a **portfolio‑grade, enterprise-hardened systems project** in Go, demonstrating real‑world skills in AI integration, sandboxed execution, strict JSON planner protocols, memory-only stealth execution, live threat intelligence pipelines, and verifiable supply-chain security.
 
@@ -48,8 +50,13 @@ git clone https://github.com/Nibir1/Helix.git; cd Helix; .\scripts\install.ps1
 If you already have Go 1.25+ installed and just want the binary in your `$GOPATH/bin`:
 
 ```bash
-go install github.com/Nibir1/Helix/cmd/helix@latest
+git clone https://github.com/Nibir1/Helix.git && cd Helix && go install ./cmd/helix
 ```
+
+> **`go install github.com/Nibir1/Helix/cmd/helix@latest` does not work.** The
+> module is declared as `helix` rather than as its repository path, so the Go
+> toolchain refuses it with *"module declares its path as: helix"*. Clone
+> first, as above, or use the prebuilt binaries in Option 4.
 
 ### Option 4: Pre-compiled Binaries (No Build Required)
 Don't want to build from source? Download the latest pre-compiled binary, checksums, and archives for your OS directly from the **[Releases Page](https://github.com/Nibir1/Helix/releases)**. All official releases are cryptographically signed and include a Software Bill of Materials (SBOM). *(See "Verifying Releases" below).*
@@ -531,36 +538,55 @@ syft Helix_Linux_x86_64.tar.gz
 
 ```text
 Helix/
-├── cmd/helix              # CLI entrypoint, handlers, and non-interactive bridge
+├── cmd/helix              # CLI entrypoint, command handlers, non-interactive bridge
 ├── internal/
-│   ├── ai/                # Planner, OpenAI/local model integration, strict JSON parsing
-│   ├── agent/             # Agent orchestrator, Instruction Firewall, and step executor
+│   ├── agent/             # Agent orchestrator, Instruction Firewall, step executor
+│   ├── ai/                # Planner, provider registry, strict JSON parsing, local failover
+│   ├── ambient/           # Companion loop — watches the scene and speaks up unprompted
 │   ├── audio/             # Synthetic tonal audio engine (beep/oto)
-│   ├── commands/          # Shell safety, git manager, package manager, sandbox
+│   ├── commands/          # Shell safety, git manager, package manager, directory sandbox
+│   ├── config/            # ~/.helix/config.json loading, defaults, persistence
 │   ├── confinement/       # Kernel-grade write confinement (Seatbelt, Landlock, bwrap)
+│   ├── daemon/            # Headless service + IPC (Unix socket; loopback TCP on Windows)
+│   ├── deps/              # System package catalogue (sox, ffmpeg) and verified install commands
 │   ├── diagnostics/       # Telemetry-free, redacted crash reporting
-│   ├── shell/             # SYNAPSE prompt, raw-mode reader, input classifier, TTY hardening
+│   ├── edge/              # Edge-appliance diagnostics and deployment checks
+│   ├── hooks/             # User policy hooks — the escape hatch Helix cannot know about
+│   ├── input/             # HybridSource: keyboard and microphone multiplexed into one stream
+│   ├── journal/           # The one append-only NDJSON writer behind every local log
+│   ├── metrics/           # Local metrics journal and its reader
+│   ├── ollama/            # Ollama integration and GGUF discovery for llama.cpp reuse
+│   ├── providers/         # Per-provider adapters, capability flags, context limits, keystore
 │   ├── rag/               # MAN page indexing, vector store, SQLite FTS5, NVD/KEV/MITRE updaters
 │   ├── recon/             # Authorized multi-tool reconnaissance engine
+│   ├── session/           # Conversation ring, undo journal, restart continuity
+│   ├── shell/             # SYNAPSE prompt, raw-mode reader, input classifier, panel primitives
+│   ├── sidecar/           # Local sidecar process lifecycle (detach, health, ports)
+│   ├── speech/            # STT/TTS chain — cloud providers, whisper, piper, CSM-1B
 │   ├── stealth/           # Memory-only private history execution
+│   ├── update/            # Self-update: fetch, checksum, atomic install, rollback
+│   ├── utils/             # Quote/brace validation, syntax highlighting, history, interrupts
 │   ├── ux/                # Terminal UX (typewriter, prompts, colors)
-│   └── utils/             # Quote/brace validation, syntax highlighting, history, interrupts
+│   ├── vision/            # Single-frame camera capture via ffmpeg
+│   └── wakeword/          # Hands-free wake detection
+├── tests/                 # Cross-cutting checks (portability guards)
 ├── tests/e2e/             # PTY-based end-to-end TTY harness
+├── docs/                  # Architecture, threat models, voice, edge, release notes
 ├── dist/                  # Built binaries (make current)
-└── scripts/               # Developer, build, and install scripts
+└── scripts/               # Developer, build, install, and release scripts
 ```
 
 ---
 
 ## Keeping Helix current
 
-`/reboot` is the update path. It checks for a newer Helix, offers it, verifies
-it, installs it and restarts into it — coming back in the same mode, directory,
-provider and conversation.
+`/reboot` is the update path. It checks for a newer Helix, verifies it, installs
+it and restarts into it — coming back in the same mode, directory, provider and
+conversation.
 
 | | |
 | :--- | :--- |
-| `/reboot` | check, offer, install with your confirmation, restart |
+| `/reboot` | check, verify, install, restart — no confirmation |
 | `/reboot check` | only report whether an update exists |
 | `/reboot now` | restart immediately, no check |
 

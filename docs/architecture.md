@@ -543,6 +543,34 @@ have caught the original bug had **encoded the conflation as its expectation**
 (`visionSvc = nil // stands in for a host with no ffmpeg`), which is why it did
 not.
 
+### 5i. The Daemon (`internal/daemon/`)
+
+Helix also runs headless. The daemon owns the same Agent the interactive shell
+does — the identical safety pipeline, sandbox and firewall — with a
+`failClosedPrompter` in place of a human: every confirmation declines, because
+approving something with nobody at the terminal is the one answer that can never
+be right (ADR-005).
+
+**Transport is platform-split** (ADR-004): a Unix domain socket on macOS and
+Linux, a loopback TCP listener plus a per-start token in
+`~/.helix/daemon.conn.json` (0600) on Windows, which has no comparable
+filesystem-permission story for sockets. Both speak NDJSON, one request per
+line.
+
+**Single-instance coordination:** while an interactive TTY session holds a fresh
+active-session lock, the daemon refuses injected submits — the foreground
+session owns the machine (threat V7).
+
+`Run` starts the background loops — connectivity, sidecar health, uptime
+heartbeat, local-brain readiness, and optionally the wake-word voice loop — and
+**waits for all of them before returning**, so "Run returned" means the daemon
+has stopped rather than merely been asked to. That matters for `/reboot`: a
+writer outliving shutdown can recreate state the next boot is meant to start
+clean from.
+
+Operational detail lives in [blackbox.md §4](blackbox.md#4-the-living-ai-daemon)
+and [edge_deployment.md](edge_deployment.md).
+
 ### 6a. Voice Command Routing (`cmd/helix/voice_commands.go`)
 A spoken transcript never contains a `/`, so the slash-command surface was
 unreachable by voice. A phrase table maps plain English onto command lines

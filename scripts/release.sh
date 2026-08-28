@@ -52,6 +52,21 @@ state_die() {
     die "$1"
 }
 
+# repo_slug_from_url turns a git remote URL into "owner/repo".
+#
+# Handles both forms without a regex:
+#   git@github.com-personal:Nibir1/Helix.git  ->  Nibir1/Helix
+#   https://github.com/Nibir1/Helix.git       ->  Nibir1/Helix
+repo_slug_from_url() {
+    local url="${1%/}"
+    url="${url%.git}"
+    local repo="${url##*/}"     # Helix
+    local rest="${url%/*}"      # git@host:Nibir1   |   https://github.com/Nibir1
+    local owner="${rest##*/}"   # Nibir1            |   Nibir1
+    owner="${owner##*:}"        # strips the scp-style host prefix
+    printf '%s/%s' "$owner" "$repo"
+}
+
 # A failure anywhere should say WHERE, not just stop. `set -e` on its own leaves
 # you guessing which of forty commands exited non-zero.
 trap 'die "failed at line $LINENO: ${BASH_COMMAND}"' ERR
@@ -362,8 +377,23 @@ ok "tagged $(git rev-parse --short "$TAG")"
 git push origin "$TAG"
 ok "pushed — the release workflow is starting"
 
-REPO_SLUG="$(git remote get-url origin \
-    | sed -E 's#^.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')"
+# The owner/repo slug, for the release URL.
+#
+# This used to parse `git remote get-url` with a sed regex containing `+?` —
+# a PCRE lazy quantifier that POSIX ERE does not have, so it was invalid on
+# BSD sed and GNU sed alike. It shipped because it sits AFTER the tag push:
+# no dry run reaches this line, so the first time it ever executed was the
+# first real release, and it failed there. `gh` knows the answer; the fallback
+# is plain parameter expansion, because the two remote forms
+# (scp-style `git@host:owner/repo.git` and `https://host/owner/repo.git`)
+# do not need a regex to tell apart.
+REPO_SLUG=""
+if [[ $HAVE_GH -eq 1 ]]; then
+    REPO_SLUG="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || echo "")"
+fi
+if [[ -z "$REPO_SLUG" ]]; then
+    REPO_SLUG="$(repo_slug_from_url "$(git remote get-url origin)")"
+fi
 RELEASE_URL="https://github.com/${REPO_SLUG}/releases/tag/${TAG}"
 
 # ---------------------------------------------------------------------------

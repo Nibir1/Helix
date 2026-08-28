@@ -88,7 +88,7 @@ Voice is treated as an **untrusted input channel**, because a television, a podc
 - **Spoken input never takes the shell fast path.** The classifier decides on the first token and English sentences start with command names, so "make a new branch called test" now reaches the planner that produces `git checkout -b test` instead of being executed verbatim.
 - **Voice may reduce what is collected, never increase it.** "Turn off your eyes" and `/blackbox log off` work by voice; opening the camera is an explicit announced act and starting a transcript log must be typed. The rule has **no exceptions**: `/reboot` is voice-reachable and its continuity record stores no conversation content on the spoken path, because the feature was shaped to fit the rule rather than the rule amended to fit it.
 - **Opt-in transcript log** (`/blackbox log on`) — off by default, and off means *no directory and no file*. Text and metadata only, never audio. 0600, rotated, `/purge`-able.
-- **`/reboot` self-updates.** It checks the project's GitHub releases and any locally built binary, installs with your confirmation, and restarts into the new version. A download is installed only if its SHA-256 matches the release's checksums file, the URL never leaves GitHub, and the payload proves it is a Helix binary for this machine. The previous binary is kept and restored automatically if the new one cannot start. **Installing is automatic and needs no confirmation**, from the microphone as well as the keyboard — an owner decision, because the release comes from a repository the owner controls and tags on purpose. `update.check: false` turns it off; `/reboot check` reports without installing. Sigstore signatures are published and deliberately not checked by the updater; the `cosign verify-blob` command is printed instead (ADR-019).
+- **`/reboot` self-updates.** It checks the project's GitHub releases and any locally built binary, installs it, and restarts into the new version. A download is installed only if its SHA-256 matches the release's checksums file, the URL never leaves GitHub, and the payload proves it is a Helix binary for this machine. The previous binary is kept and restored automatically if the new one cannot start. **Installing is automatic and needs no confirmation**, from the microphone as well as the keyboard — an owner decision, because the release comes from a repository the owner controls and tags on purpose. `update.check: false` turns it off; `/reboot check` reports without installing. Sigstore signatures are published and deliberately not checked by the updater; the `cosign verify-blob` command is printed instead (ADR-019).
 - **`/reboot` restarts the shell in place** and comes back in the same mode, directory, provider and conversation, naming what you were in the middle of. Its continuity record (`~/.helix/reboot.json`) is 0600, **consumed on read** rather than rotated, expires after 12 hours, and is `/purge`-able. One DANGER ZONE command reachable by voice, because it destroys nothing.
 - **Three packages are provably network-free** (diagnostics, journal, metrics), each grep-enforced in CI.
 
@@ -311,7 +311,7 @@ git clone https://github.com/Nibir1/Helix.git; cd Helix; .\scripts\install.ps1
 If you already have Go 1.25+ installed and just want the binary in your `$GOPATH/bin`:
 
 ```bash
-go install github.com/Nibir1/Helix/cmd/helix@latest
+git clone https://github.com/Nibir1/Helix.git && cd Helix && go install ./cmd/helix
 ```
 
 ### Option 4: Pre-compiled Binaries (No Build Required)

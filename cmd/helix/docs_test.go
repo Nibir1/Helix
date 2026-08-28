@@ -98,3 +98,58 @@ func betweenHeadings(doc, start, end string) string {
 	}
 	return rest[:j]
 }
+
+// treeEntryRe matches an `internal/` package line in the README's architecture
+// tree: "│   ├── update/    # ...".
+var treeEntryRe = regexp.MustCompile(`[├└]──\s+([a-z_]+)/`)
+
+// TestReadmeArchitectureTreeMatchesPackages keeps the published architecture
+// diagram honest, for the same reason the command reference is checked.
+//
+// It had drifted badly: seventeen packages existed that the tree never
+// mentioned — speech, vision, wakeword, update, session, daemon, ambient and
+// more — so a reader forming a mental model of Helix from the README was
+// missing every subsystem added after the first release. A diagram nobody
+// verifies becomes a picture of the past.
+func TestReadmeArchitectureTreeMatchesPackages(t *testing.T) {
+	section := betweenHeadings(readReadme(t), "## Architecture Overview", "---")
+	if section == "" {
+		t.Fatal("could not locate the architecture tree in README.md")
+	}
+
+	documented := map[string]bool{}
+	for _, m := range treeEntryRe.FindAllStringSubmatch(section, -1) {
+		documented[m[1]] = true
+	}
+	// Top-level entries share the same shape as package lines; they are not
+	// packages and are not checked either way.
+	for _, notAPackage := range []string{"cmd", "internal", "tests", "docs", "dist", "scripts"} {
+		delete(documented, notAPackage)
+	}
+
+	entries, err := os.ReadDir(filepath.Join("..", "..", "internal"))
+	if err != nil {
+		t.Fatalf("read internal/: %v", err)
+	}
+	actual := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			actual[e.Name()] = true
+		}
+	}
+	if len(actual) < 10 {
+		t.Fatalf("only found %d packages — the walk is broken, so this check "+
+			"would pass by finding nothing", len(actual))
+	}
+
+	for name := range actual {
+		if !documented[name] {
+			t.Errorf("internal/%s exists but is absent from the README architecture tree", name)
+		}
+	}
+	for name := range documented {
+		if !actual[name] {
+			t.Errorf("the README architecture tree lists internal/%s, which does not exist", name)
+		}
+	}
+}
