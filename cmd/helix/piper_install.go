@@ -149,20 +149,32 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// safeJoin resolves an archive entry against a destination directory and
-// refuses anything that escapes it.
+// archiveRel turns an archive entry name into a path that is safe to use
+// relative to the destination root, or reports that it is not usable.
 //
-// This is the zip-slip / tar-slip guard. An archive entry named
+// This is the zip-slip / tar-slip guard. An entry named
 // "../../.ssh/authorized_keys" would otherwise be written wherever it points,
-// and this archive is fetched over the network. The checksum makes that
-// unlikely; it does not make it impossible to get wrong later, and a path check
-// costs nothing.
-func safeJoin(dir, name string) (string, error) {
-	clean := filepath.Clean(filepath.Join(dir, name))
-	if clean != dir && !strings.HasPrefix(clean, dir+string(os.PathSeparator)) {
-		return "", fmt.Errorf("archive entry %q escapes the destination", name)
+// and this archive is fetched over the network.
+//
+// Two things are checked, and neither is redundant:
+//
+//   - filepath.IsLocal rejects anything absolute, anything rooted, anything
+//     that walks out with "..", and (on Windows) reserved device names like
+//     NUL and COM1. A hand-rolled prefix comparison gets the Windows cases
+//     wrong; this is the standard library's own answer.
+//   - Entry names are always slash-separated, whatever the host is, so they
+//     are converted before any path logic touches them. Skipping this makes
+//     "..\\evil" look like an ordinary filename on Linux and a traversal on
+//     Windows.
+//
+// The caller then writes through an *os.Root, which enforces the same
+// property at the syscall layer — see extractInto.
+func archiveRel(name string) (string, bool) {
+	rel := filepath.FromSlash(stripTop(name))
+	if rel == "" || !filepath.IsLocal(rel) {
+		return "", false
 	}
-	return clean, nil
+	return filepath.Clean(rel), true
 }
 
 // stripTop removes the archive's single top-level directory.
@@ -171,6 +183,24 @@ func stripTop(name string) string {
 		return name[i+1:]
 	}
 	return ""
+}
+
+// extractInto opens dir as a confined root.
+//
+// os.Root is the part that makes this genuinely safe rather than merely
+// checked. A string comparison can only judge the name an archive declares;
+// it cannot know what the filesystem will do with it. An archive that first
+// creates a symlink "x" -> "/etc" and then writes "x/passwd" passes every
+// name-based test — both entries look perfectly local — and still lands in
+// /etc. Every operation through a Root is resolved inside the root by the
+// kernel, so that archive fails instead, and so does anything racing the
+// check by swapping a directory for a symlink after it passed.
+func extractInto(dir string) (*os.Root, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open %s for extraction: %w", dir, err)
+	}
+	return root, nil
 }
 
 func extractTarGz(archive, dir string) error {
@@ -186,6 +216,12 @@ func extractTarGz(archive, dir string) error {
 	}
 	defer func() { _ = gz.Close() }()
 
+	root, err := extractInto(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -195,21 +231,17 @@ func extractTarGz(archive, dir string) error {
 		if err != nil {
 			return fmt.Errorf("archive read failed: %w", err)
 		}
-		rel := stripTop(hdr.Name)
-		if rel == "" {
+		rel, ok := archiveRel(hdr.Name)
+		if !ok {
 			continue
-		}
-		path, err := safeJoin(dir, rel)
-		if err != nil {
-			return err
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(path, 0o755); err != nil {
+			if err := root.MkdirAll(rel, 0o755); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := writeExtracted(path, tr, os.FileMode(hdr.Mode)); err != nil {
+			if err := writeExtracted(root, rel, tr, os.FileMode(hdr.Mode)); err != nil {
 				return err
 			}
 		}
@@ -223,17 +255,19 @@ func extractZip(archive, dir string) error {
 	}
 	defer func() { _ = zr.Close() }()
 
+	root, err := extractInto(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+
 	for _, entry := range zr.File {
-		rel := stripTop(entry.Name)
-		if rel == "" {
+		rel, ok := archiveRel(entry.Name)
+		if !ok {
 			continue
 		}
-		path, err := safeJoin(dir, rel)
-		if err != nil {
-			return err
-		}
 		if entry.FileInfo().IsDir() {
-			if err := os.MkdirAll(path, 0o755); err != nil {
+			if err := root.MkdirAll(rel, 0o755); err != nil {
 				return err
 			}
 			continue
@@ -242,7 +276,7 @@ func extractZip(archive, dir string) error {
 		if err != nil {
 			return err
 		}
-		err = writeExtracted(path, rc, entry.Mode())
+		err = writeExtracted(root, rel, rc, entry.Mode())
 		_ = rc.Close()
 		if err != nil {
 			return err
@@ -255,15 +289,20 @@ func extractZip(archive, dir string) error {
 //
 // The bit matters: piper and espeak-ng arrive executable and are useless
 // without it, and Go's archive readers do not restore permissions for you.
-func writeExtracted(path string, src io.Reader, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+func writeExtracted(root *os.Root, rel string, src io.Reader, mode os.FileMode) error {
+	if dir := filepath.Dir(rel); dir != "." {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
 	}
 	perm := os.FileMode(0o644)
 	if mode&0o111 != 0 {
 		perm = 0o755
 	}
-	out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm) //nolint:gosec // path checked by safeJoin
+	// Every operation here is relative to root, which the kernel confines to
+	// the destination directory — rel cannot reach outside it even if the
+	// filesystem underneath changes while this runs.
+	out, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}

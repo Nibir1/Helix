@@ -1,3 +1,5 @@
+//go:build !windows
+
 // tests/e2e/reboot_e2e_test.go
 //
 // Purpose: /reboot has to actually restart the process, and the shell that

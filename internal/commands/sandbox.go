@@ -100,35 +100,58 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 	}
 	commandLower := strings.ToLower(command)
 
-	// Phase 15 Hardening: Explicitly check for absolute paths outside the sandbox
-	// for ANY command that contains a path-like argument, not just "dangerous" ones.
-	// This closes the gap where extractFileArguments might miss certain path patterns.
-	words := strings.Fields(commandLower)
-	for _, w := range words {
-		if strings.HasPrefix(w, "-") {
+	// Whether this is a write/delete/edit operation is a property of the whole
+	// command, not of any one word, so it is decided ONCE, here.
+	//
+	// It used to be re-decided inside the loop below — and, worse, *after* the
+	// filesystem work whose result it gated. Every read-only command therefore
+	// paid for a full symlink resolution of every absolute-looking word and
+	// then threw the answer away. A fuzzer found it as a stall rather than a
+	// wrong answer: ValidateSafePath is one lstat chain per path, so cost grew
+	// linearly with the command string, reaching seconds for inputs a model can
+	// plausibly emit. Hoisting the invariant is behaviour-preserving — if it is
+	// false the loop could never have returned anything.
+	if !ds.isDangerousWriteOperation(commandLower) {
+		// 2. Directory escape is the only check that still applies.
+		if ds.containsDirectoryEscape(commandLower) {
+			return false, "command attempts directory escape"
+		}
+		return true, ""
+	}
+
+	// Resolution is a pure function of the path, so the same word is never
+	// resolved twice, and the total number of distinct resolutions is capped.
+	// Both matter on the slow storage this project targets at the edge.
+	checker := &pathChecker{sandbox: ds, seen: make(map[string]error)}
+
+	// Phase 15 Hardening: check absolute paths outside the sandbox for any
+	// path-like argument. This closes the gap where extractFileArguments
+	// might miss certain path patterns.
+	for _, w := range strings.Fields(commandLower) {
+		if strings.HasPrefix(w, "-") || !filepath.IsAbs(w) {
 			continue
 		}
-		if filepath.IsAbs(w) {
-			if _, err := ds.ValidateSafePath(w); err != nil {
-				// If it's a write operation, block it
-				if ds.isDangerousWriteOperation(commandLower) {
-					return false, fmt.Sprintf("sandbox violation: write/delete/edit operation outside sandbox: %s", w)
-				}
-			}
+		err, ok := checker.validate(w)
+		if !ok {
+			return false, pathBudgetRefusal
+		}
+		if err != nil {
+			return false, fmt.Sprintf("sandbox violation: write/delete/edit operation outside sandbox: %s", w)
 		}
 	}
 
-	// 1. Detect dangerous write/delete/edit operations
-	if ds.isDangerousWriteOperation(commandLower) {
-		args := ds.extractFileArguments(commandLower)
-		for _, arg := range args {
-			if arg == "" {
-				continue
-			}
-			if _, err := ds.ValidateSafePath(arg); err != nil {
-				return false, fmt.Sprintf(
-					"sandbox violation: write/delete/edit operation outside sandbox: %s", arg)
-			}
+	// 1. Every file-looking argument of the write operation itself.
+	for _, arg := range ds.extractFileArguments(commandLower) {
+		if arg == "" {
+			continue
+		}
+		err, ok := checker.validate(arg)
+		if !ok {
+			return false, pathBudgetRefusal
+		}
+		if err != nil {
+			return false, fmt.Sprintf(
+				"sandbox violation: write/delete/edit operation outside sandbox: %s", arg)
 		}
 	}
 
@@ -137,6 +160,39 @@ func (ds *DirectorySandbox) ValidateCommand(command string) (bool, string) {
 		return false, "command attempts directory escape"
 	}
 	return true, ""
+}
+
+// maxDistinctPathChecks bounds how many DIFFERENT paths one command may make
+// the sandbox resolve. No real command names hundreds of distinct absolute
+// paths; a generated or hostile one can name thousands, and each costs a chain
+// of lstat calls. Refusing past the cap fails CLOSED — the sandbox never
+// permits a path it declined to check.
+const maxDistinctPathChecks = 512
+
+const pathBudgetRefusal = "sandbox violation: too many distinct paths to validate in one command"
+
+// pathChecker memoises ValidateSafePath and enforces the budget above.
+//
+// Memoising is sound because ValidateSafePath only reads: it resolves a path
+// against the sandbox root and returns, touching nothing. The same word in one
+// command therefore cannot produce two answers.
+type pathChecker struct {
+	sandbox *DirectorySandbox
+	seen    map[string]error
+}
+
+// validate returns the validation error for path, and whether the command is
+// still within its path budget. A false second return means "refuse", not "ok".
+func (p *pathChecker) validate(path string) (error, bool) {
+	if err, done := p.seen[path]; done {
+		return err, true
+	}
+	if len(p.seen) >= maxDistinctPathChecks {
+		return nil, false
+	}
+	_, err := p.sandbox.ValidateSafePath(path)
+	p.seen[path] = err
+	return err, true
 }
 
 // ================================================================

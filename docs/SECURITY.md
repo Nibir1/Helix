@@ -43,6 +43,41 @@ even a confused or injected child process cannot write outside the sandbox.
 Where no kernel backend exists, Helix warns and degrades to advisory
 confinement.
 
+### 5a. Confined Archive Extraction
+Helix extracts exactly one third-party archive: the standalone `piper` speech
+binary, fetched over the network and then executed. Extraction writes through
+an `os.Root` opened on the destination, so every path is resolved **inside**
+that directory by the kernel. Entry names are additionally required to be local
+(`filepath.IsLocal`, after slash conversion), which rejects absolute paths,
+`..` traversal, and Windows reserved device names.
+
+The `os.Root` is the load-bearing half, not the name check. A name-based guard
+can only judge the path an archive *declares*; it cannot know what the
+filesystem will do with it. `~/.helix/piper` is reused across installs and
+upgrades, so if anything in that tree is a symlink pointing out of it, an entry
+named `piper/lib/x` is perfectly local by every string test and a checked
+`filepath.Join` still follows the link straight out. A regression test extracts
+exactly that archive into exactly that tree and asserts the file outside is
+untouched.
+
+The self-updater's extraction is safe by a different route: it never uses an
+entry's path at all, matching the binary by base name and always writing to a
+filename of its own choosing.
+
+### 5b. Bounded Path Validation
+Sandbox validation resolves symlinks, which costs a chain of `lstat` calls per
+path. `ValidateCommand` therefore bounds the work it will do for one command:
+results are memoised per path, and the number of **distinct** paths one command
+may make it resolve is capped. Passing the cap **refuses the command** — the
+sandbox never permits a path it declined to check.
+
+This is a denial-of-service control, not an access-control one. Commands reach
+the validator from a model, so their length is not under the user's control, and
+the storage this runs on at the edge is slow. A fuzzer found the original
+version resolving every absolute-looking word in *every* command — including
+read-only ones, which discarded the answer — at a cost that grew without limit
+alongside the input.
+
 ### 6. Telemetry-Free Local Records
 Crash reports are written ONLY to local disk (0600), contain redacted
 environment values (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`), are never

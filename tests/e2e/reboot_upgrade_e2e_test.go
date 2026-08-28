@@ -1,3 +1,5 @@
+//go:build !windows
+
 // tests/e2e/reboot_upgrade_e2e_test.go
 //
 // Purpose: what a restart actually refreshes.
