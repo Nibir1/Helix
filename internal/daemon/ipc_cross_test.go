@@ -93,6 +93,7 @@ func TestDaemonIPCCrossPlatform(t *testing.T) {
 // the ~104-char sun_path limit; Windows can use the normal (long) t.TempDir().
 func crossTmpHome(t *testing.T) string {
 	t.Helper()
+	restoreCwd(t) // registered first, so it runs LAST-in/first-out: before removal
 	if runtime.GOOS == "windows" {
 		return t.TempDir()
 	}

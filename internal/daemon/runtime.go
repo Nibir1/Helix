@@ -362,49 +362,78 @@ func (d *Daemon) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go func() {
+	// Every background loop is tracked, because "Run returned" has to mean
+	// "the daemon has stopped".
+	//
+	// It did not used to. Run cancelled its goroutines on the way out and
+	// returned immediately, so watchConnectivity, recordUptimeLoop and the
+	// rest could still be mid-write to the journal and the metrics file after
+	// the caller believed shutdown was complete. On Unix nothing notices: the
+	// files live under $HOME and a late write to a file being deleted is
+	// harmless. On Windows it is a sharing violation, which is how it was
+	// finally seen — a daemon test that PASSED and then failed to remove its
+	// own temporary directory. The same race matters more than a test:
+	// /reboot restarts this process, and a writer outliving shutdown can
+	// recreate state the next boot is meant to start clean from.
+	var wg sync.WaitGroup
+	spawn := func(name string, fn func(context.Context)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer diagnostics.Guard(name)()
+			fn(runCtx)
+		}()
+	}
+
+	spawn("daemon-stop-watch", func(c context.Context) {
 		select {
 		case <-d.stopping:
 			cancel()
-		case <-runCtx.Done():
+		case <-c.Done():
 		}
-	}()
-
-	go func() {
-		defer diagnostics.Guard("daemon-connectivity")()
-		d.watchConnectivity(runCtx)
-	}()
-
-	go func() {
-		defer diagnostics.Guard("daemon-sidecar-health")()
-		d.sidecarHealthLoop(runCtx)
-	}()
-
-	go func() {
-		defer diagnostics.Guard("daemon-uptime")()
-		d.recordUptimeLoop(runCtx)
-	}()
-
-	go func() {
-		defer diagnostics.Guard("daemon-llm-ready")()
-		d.ensureLocalBrainReady(runCtx)
-	}()
+	})
+	spawn("daemon-connectivity", d.watchConnectivity)
+	spawn("daemon-sidecar-health", d.sidecarHealthLoop)
+	spawn("daemon-uptime", d.recordUptimeLoop)
+	spawn("daemon-llm-ready", d.ensureLocalBrainReady)
 
 	if cfg, err := config.DefaultConfig(); err == nil && cfg.Speech.WakeWord.Enabled {
-		go func() {
-			defer diagnostics.Guard("daemon-voice-loop")()
-			d.voiceLoop(runCtx)
-		}()
+		spawn("daemon-voice-loop", d.voiceLoop)
 	}
 
 	if d.breakReminderMin > 0 {
-		go func() {
-			defer diagnostics.Guard("daemon-break-reminder")()
-			d.breakReminderLoop(runCtx)
-		}()
+		spawn("daemon-break-reminder", d.breakReminderLoop)
 	}
 
-	return d.server.Serve(runCtx, d)
+	err := d.server.Serve(runCtx, d)
+
+	// Stop the loops, then WAIT for them — bounded, because a shutdown that
+	// hangs forever is worse than one that reports a straggler. Every loop
+	// above selects on ctx.Done, so the normal case returns immediately.
+	cancel()
+	if !waitTimeout(&wg, daemonShutdownGrace) {
+		d.journal.Record("lifecycle", "", "",
+			"a background loop did not stop within "+daemonShutdownGrace.String())
+	}
+	return err
+}
+
+// daemonShutdownGrace bounds how long Run waits for its background loops.
+const daemonShutdownGrace = 5 * time.Second
+
+// waitTimeout reports whether wg finished before d elapsed.
+func waitTimeout(wg *sync.WaitGroup, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(d):
+		return false
+	}
 }
 
 // recordUptimeLoop writes a liveness heartbeat on metrics.UptimeInterval.

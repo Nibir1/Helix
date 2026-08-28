@@ -250,6 +250,7 @@ func TestJournalRedaction(t *testing.T) {
 // paths to ~104 chars, and t.TempDir() paths are far longer.
 func shortTmpHome(t *testing.T) string {
 	t.Helper()
+	restoreCwd(t)
 	dir, err := os.MkdirTemp("/tmp", "hxd")
 	if err != nil {
 		t.Fatalf("short tmp home: %v", err)
