@@ -231,8 +231,13 @@ memory-only and off by default.
 prosody is conditioned on the dialogue, run through the Rust `csm.rs` sidecar —
 **no Python, no Docker**. It wants a GPU (~8 GB VRAM) to stay ahead of playback;
 on a machine without one, pair it with `piper-local` as the fallback so a slow
-box simply uses the fast voice. Setup, per-platform build flags, the gated-weights
-step and an honest per-machine expectation table are in
+box simply uses the fast voice. `/blackbox setup` **builds it for you**: the compute
+backend is detected rather than guessed — CUDA if `nvidia-smi` answers, Metal on
+Apple Silicon, a tuned CPU build otherwise — and printed with its evidence
+before anything compiles, so a choice you can see is not a choice made on your
+behalf. The one remaining step is yours: the weights are licence-gated, and
+consent tied to an account is not something a program supplies. Per-platform
+flags, the gated-weights step and an honest per-machine expectation table are in
 [local_runtimes.md](local_runtimes.md) §3.5; `make live-csm` measures the
 real-time factor on your own hardware.
 

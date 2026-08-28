@@ -78,6 +78,35 @@ version resolving every absolute-looking word in *every* command — including
 read-only ones, which discarded the answer — at a cost that grew without limit
 alongside the input.
 
+### 5c. What the Setup Wizard May Install
+Two install policies exist deliberately, and the boundary between them is the
+moment of consent.
+
+**First boot asks.** The system-package stage detects the host's package manager
+and requests a separate yes for each dependency, showing the exact command
+first. This is where you decide what Helix may put on your machine.
+
+**`/blackbox setup` does not ask again.** Choosing a speech chain *is* the
+decision, so what that chain needs — a runtime, a model file, a voice server, or
+a host package such as Python, git or cargo — is installed and started without a
+further prompt. Being asked whether you want the file the chain cannot start
+without has one sensible answer, and declining leaves a configuration Helix has
+just recommended.
+
+**Stated plainly, because it is a real escalation:** on Linux those package
+commands carry `sudo`, and they run after one selection rather than one
+selection per package. The controls that remain are the ones that were always
+doing the work: **Helix never runs a guessed package name** — a manager with no
+verified entry in the catalogue produces guidance, not a command — the command
+is printed before it runs, and installation is confined to the catalogue in
+`internal/deps` plus the specific sidecars in the wizard's own table. It will
+not install a container runtime, and it will not accept a model licence.
+
+The one third-party archive Helix downloads is checksum-pinned and extracted
+under `os.Root` (§5a). Sources it builds — currently only csm.rs — are cloned
+from a pinned URL into `~/.helix` and compiled there; the build is ordinary
+`cargo`, with no privilege beyond the user's.
+
 ### 6. Telemetry-Free Local Records
 Crash reports are written ONLY to local disk (0600), contain redacted
 environment values (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`), are never

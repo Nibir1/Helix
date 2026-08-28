@@ -331,6 +331,19 @@ a failed `/blackbox say` — by which point the wizard appeared to have succeede
 
 ---
 
+### A `piper` on PATH is not necessarily the standalone build
+
+`pip install piper-tts` installs a **console script** named `piper` — a shim
+around the Python module, not the interpreter-free binary. Helix distinguishes
+them by what the file is rather than what it is called: an executable image
+never begins with `#!`, and every console script and shell wrapper does.
+
+This is not pedantry. Treating the shim as the native binary made `/blackbox
+setup` start the HTTP server, verify it answering on its port, and then report
+`piper-local still not answering` three lines later — because the status probe
+had health-checked the script instead. One name, two providers, disagreeing in
+the same screen of output.
+
 ## 3.5 Sesame CSM-1B — the most natural local voice
 
 CSM is the speech model behind Sesame's "crossing the uncanny valley of voice"

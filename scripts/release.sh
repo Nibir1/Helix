@@ -274,7 +274,16 @@ if ! grep -qiE "v?${VERSION//./\\.}" docs/RELEASE_NOTES.md; then
     warn "docs/RELEASE_NOTES.md never mentions $VERSION"
     warn "goreleaser publishes that file verbatim as the release body"
 fi
-ok "release notes present ($(wc -l < docs/RELEASE_NOTES.md | tr -d ' ') lines)"
+# An "Unreleased" heading left in place ships as the FIRST thing anyone reads on
+# the release page, because goreleaser embeds this file verbatim as the body.
+# Renaming it to the version being cut is the release-time step it exists for.
+if grep -qiE '^#{1,3}[[:space:]]+unreleased' docs/RELEASE_NOTES.md; then
+    die "docs/RELEASE_NOTES.md still has an 'Unreleased' heading.
+    goreleaser embeds this file verbatim, so it would head the published
+    release page. Rename that section to $TAG (and check what is under it
+    actually shipped)."
+fi
+ok "release notes present ($(wc -l < docs/RELEASE_NOTES.md | tr -d ' ') lines), no Unreleased heading"
 
 # ---------------------------------------------------------------------------
 # 5. The build gate

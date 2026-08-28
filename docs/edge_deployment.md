@@ -92,6 +92,11 @@ The right inference path depends on the board's horsepower and your privacy/cost
 |------|-----|-----|-----|-------|----------|
 | **Cloud** (recommended default for weak boards) | Groq `whisper-large-v3-turbo` | any cloud provider | `gpt-4o-mini-tts` | network + mic + `sox`/`ffmpeg` | Jetson Nano 1st-gen, Pi 4, anything CPU-limited |
 | **Hybrid** (resilient) | cloud primary, `whisper-local` fallback | cloud primary, small Ollama fallback | cloud primary, Piper/Kokoro fallback | above + local sidecars | Pi 5, amd64 mini-PC |
+<!-- CSM is deliberately absent from the table below: a candle build needs
+several GB of disk for compiled crates alone and wants a discrete GPU, neither
+of which describes an edge board. `/blackbox setup` will build it if selected,
+but Piper is the voice these devices should run. -->
+
 | **Fully local** (private/offline) | whisper.cpp / sherpa-onnx | Ollama 3B (Q4) | Kokoro-82M / Piper | Ollama + whisper.cpp + Piper/Kokoro + openWakeWord | amd64 mini-PC, Pi 5 (tight) |
 
 The heavy compute in the **cloud path is remote**, so a slow board runs it smoothly as long as it
@@ -128,6 +133,16 @@ Verify with `/provider status` (an "Offline fallback" line) or `helix remote sta
 (`llm_fallback`, `llm_local_mode`).
 
 ---
+
+### 4.1a A `piper` on PATH may be a Python shim
+
+On a board where someone has run `pip install piper-tts`, the `piper` on `PATH`
+is a **console script**, not the interpreter-free binary. Helix distinguishes
+them by the file's first two bytes rather than its name — an executable image
+never begins with `#!` — because treating the shim as the native runtime made
+setup verify a running server and then report it dead moments later. Worth
+knowing on an edge box, where the standalone build is the whole point of
+choosing Piper.
 
 ### 4.2 Piper on edge boards: `libstdc++`, not glibc
 

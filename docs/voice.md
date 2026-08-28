@@ -199,7 +199,12 @@ without ending the conversation.
 
 For the most natural local voice, `/blackbox setup` offers a **"Most natural,
 local"** chain (tagged *needs a GPU*): whisper.cpp ears with Sesame CSM-1B as the voice
-and Piper as the fallback. CSM is conditioned on conversation context, so replies
+and Piper as the fallback. Picking it **builds CSM** — the compute backend is
+detected (CUDA if `nvidia-smi` answers, Metal on Apple Silicon, otherwise a
+tuned CPU build) and printed with the evidence for the choice before anything
+compiles, `git` and `cargo` are installed if the host lacks them, and the build
+stops at the one step Helix will not take for you: accepting Sesame's licence,
+which needs your own account. CSM is conditioned on conversation context, so replies
 sound like part of a dialogue rather than isolated lines — at the cost of wanting
 a GPU. See [local_runtimes.md](local_runtimes.md) §3.5 for what to expect on your
 hardware.
@@ -316,7 +321,11 @@ whisper.cpp (STT) and Piper (TTS) are the local chain. Both need only a binary
 on Linux and Windows — Piper runs as a persistent process with its voice model
 resident, so there is no interpreter and no HTTP server in the path. On macOS
 Piper still needs Python, because its published standalone build is missing its
-own libraries (see `local_runtimes.md`). Kokoro is the single optional component
+own libraries (see `local_runtimes.md`). Helix tells the two apart by what the
+file **is**, not what it is called: `pip install piper-tts` leaves a `piper`
+console script on `PATH`, and treating that as the standalone binary made the
+wizard verify a running server while the status probe checked the script — one
+name reporting two answers. Kokoro is the single optional component
 distributed as a
 container: Helix will not install a container runtime, will not attempt a pull
 when no daemon answers, and shows `needs docker` in the provider table so the
@@ -439,6 +448,23 @@ than skipping steps. "Choose manually" shows the full pricing tables.
 `/blackbox setup` probes what you selected before reporting success, so a sidecar
 that is not running (or a port owned by something else) is named at setup rather
 than surfacing later as a failed `/blackbox say`.
+
+**It installs what the chain needs, rather than telling you to.** Missing
+runtime, missing model file, missing server: each is fetched and started without
+a further prompt, because choosing the chain was the decision — being asked
+again about the file it cannot start without has one sensible answer, and
+declining leaves you with a configuration Helix has just recommended. Host
+packages a sidecar depends on are installed too: a machine with no Python gets
+one rather than the message *"there is no single install command for this
+platform"*, which was a true sentence about a situation Helix could have fixed
+in one step.
+
+Two components are still not installed, and both now say **why** instead of
+pointing at a document. `csm-local` was one of them until Helix learned to
+detect the compute backend; what remains is its licence gate. `kokoro-local`
+needs a container runtime, which is a licence decision and a system-wide change
+Helix will not make for you — `piper-local` is the docker-free local voice and
+Helix installs it end to end.
 
 Local, offline chain: whisper.cpp for STT and Piper or Kokoro for TTS. See
 [local_runtimes.md](local_runtimes.md) for ports and launch commands — and note

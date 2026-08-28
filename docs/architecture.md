@@ -46,7 +46,16 @@ A defensive pipeline; each stage can only refuse, never grant:
 6. **Execution**: Runs the command via the detected native shell.
 
 ### 3a. Local Runtime Sidecars (`internal/providers/llamacpp/`, `internal/speech/`, `internal/edge/endpoints.go`)
-Four user-managed local services (ADR-002: Helix never launches them).
+Four local services, run as external processes rather than linked in (ADR-002 —
+which is what keeps the CGO-free default build honest).
+
+**Helix does launch them**, and this line used to claim the opposite. The wizard
+starts a selected sidecar, reports its pid and log path, and deliberately leaves
+it running after Helix exits — `KEEP-ALIVE  runs after Helix exits · stop with
+kill <pid>` — because a voice server that dies with the shell is useless to the
+daemon. ADR-002's "optional auto-install" covers this; what Helix does not do is
+supervise them, which is the part the daemon's health loop reports rather than
+fixes.
 
 - **Route discovery.** whisper.cpp serves transcription at `/inference`, not the
   OpenAI path; Piper's own server serves synthesis at `/`, not `/api/tts`. Both

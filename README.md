@@ -271,6 +271,8 @@ Local runtimes — Ollama, llama.cpp, whisper.cpp, Piper — have their own guid
 ### First run
 The first boot walks three stages, each skippable: **AI provider**, **system packages**, then the **speech chain**. The package stage detects the host's package manager (brew, apt, dnf, pacman, zypper, apk, winget, choco) and offers to install what Helix needs — `sox` for the microphone, `ffmpeg` for the camera. Nothing installs without a separate yes, and the exact command is shown before it runs. Re-run any stage later with `/setup`.
 
+The **speech chain** stage behaves differently on purpose. Choosing a chain there is the decision, so what that chain needs — a runtime, a model file, a server, even a missing host package like Python — is installed and started without asking again. First boot is where you decide what Helix may put on your machine; the voice wizard is where you have already decided.
+
 **A stage failing is survivable too.** If a model download fails or a provider cannot be reached, Helix says what did not finish and starts anyway — you get a working shell with `/doctor` naming exactly what is missing, rather than being returned to your login prompt.
 
 Where Helix does not know a verified package name for your platform, it says so and points at the docs rather than running a guess.
@@ -334,7 +336,7 @@ hours old, and wiped by `/purge`.
 | Command | Description |
 | :--- | :--- |
 | `/reboot [now\|check]` | **Self-update and restart.** Checks GitHub releases and locally built binaries, installs automatically, and comes back in the same mode, directory, provider and conversation. A download is installed only if its SHA-256 matches the release's checksums file; the previous binary is kept and restored automatically if the new one cannot start. `now` skips the check, `check` only reports. Say **"reboot"** in live mode |
-| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, and the piper runtime binary) with their sizes, and closes by pointing at `/reboot` — open database handles only release when the process exits |
+| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, the piper runtime binary, and the CSM source and build tree) with their sizes, and closes by pointing at `/reboot` — open database handles only release when the process exits |
 
 ### Aliases
 `/?` `/h` `/sos` → `/help` · `/v` → `/version` · `/reset` → `/clear` · `/usage` → `/cost` · `/mode` → `/permissions` · `/intel` → `/vuln`
