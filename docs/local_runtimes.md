@@ -446,6 +446,33 @@ uses the binary it just installed rather than telling you to open a new shell.
 It also says when the directory is not on your `PATH`, since every tool *you*
 run by name will still not find it.
 
+Signing in hands over to the Hugging Face CLI's own interactive prompt — its
+wording, its numbered choice — and Helix says so before it does. That prompt
+cannot be restyled: it is another program's output, and `hf auth login` has no
+flag to skip the question. Naming the seam is the honest version of polish; a
+panel says whose interface the next lines belong to and which option to pick,
+and closes when control comes back.
+
+The login command is **probed, not assumed**: `huggingface_hub` 1.x moved
+authentication under an `auth` group (`hf auth login`), while 0.x used
+`huggingface-cli login`. The binary's name does not settle it — 1.x installs
+both `hf` and a `huggingface-cli` that only prints *"deprecated and no longer
+works"* — so Helix asks the CLI whether it has an `auth` group and builds the
+command that exists.
+
+**The weights are fetched before the server starts, not during.** csm.rs
+downloads `sesame/csm-1b` on first run — several gigabytes — and that used to
+happen inside the window Helix measures as *"did the server come up?"*, so a
+normal connection blew the readiness budget and Helix reported a sidecar as dead
+while its own log showed it working. Helix pulls the model as its own step now,
+with the CLI's progress display, so the readiness check measures startup. The
+download is cached, so a second run skips it.
+
+**csm-local is not started until this is done.** csm.rs fetches its tokenizer
+from the gated repo at launch, so without a token it exits a second later with
+`401 Unauthorized`. Helix checks first and reports the one remaining step
+instead of starting a server it knows cannot serve and showing you the crash.
+
 `/purge` reclaims `~/.helix/csm.rs`, which after a release build is several
 gigabytes of compiled crates — larger than most of the model weights.
 

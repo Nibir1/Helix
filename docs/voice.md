@@ -442,6 +442,26 @@ Samples are local NDJSON under `~/.helix/metrics/`, wiped by `/purge`.
 /blackbox off       back to the keyboard (also stops a reply mid-sentence)
 ```
 
+**Silence is not a failure.** Being quiet is the ordinary state of someone who
+is not talking, so live mode waits — indefinitely, with no attempt budget. It
+used to have one: three quiet turns and the shell reported "voice unavailable"
+and dropped to a typed prompt, which is both wrong about what silence means and
+a decision that belongs to you. Leaving live mode has exactly two triggers, and
+both are yours: say **"manual mode"**, or type `/blackbox off`. Every four quiet
+turns — roughly three minutes, since a silent capture waits for speech rather
+than returning — Helix says it is still listening and points at `/mictest`, in
+case you are speaking and are not being heard.
+
+A genuine fault is different and still surfaces: a missing recorder or a
+collapsed provider chain is reported, and you are offered a typed turn *without*
+leaving live mode, so a dead microphone cannot strand you.
+
+The same distinction governs a sidecar's **readiness budget**, which exists to
+answer "did the server bind its port?" and must not be made to measure anything
+else. Downloads are pulled as their own step — kokoro's container image, CSM's
+model weights — because a multi-gigabyte fetch inside that window makes Helix
+report a sidecar as dead while its own log shows it working.
+
 **An utterance is one line.** whisper.cpp returns one *segment* per line, so a
 sentence with a pause in it — or a non-speech annotation like `(coughing)` in
 front of it — arrives as text containing newlines. That is not only a display

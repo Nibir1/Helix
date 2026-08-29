@@ -280,6 +280,8 @@ Where Helix does not know a verified package name for your platform, it says so 
 ### Live mode — `/blackbox`
 `/blackbox on` is Helix awake: microphone open, camera on, replies spoken, and a companion loop that looks at the scene on its own and speaks up when something is worth saying. Say **"manual mode"** at any time to return to the keyboard, **"turn off your eyes"** to close the camera without ending the conversation, or **"reboot"** to restart the shell — which comes back listening, in the same directory, on the same provider, with the conversation intact.
 
+**Live mode never ends itself.** Being quiet is the ordinary state of someone who is not talking, so Helix waits — there is no timeout and no attempt budget. Leaving has exactly two triggers and both are yours: say "manual mode", or type `/blackbox off`. A genuine fault (no recorder, a collapsed provider chain) is reported and offers you a typed turn *without* leaving live mode, so a dead microphone cannot strand you.
+
 Eight commands (`/voice`, `/manual`, `/voice-setup`, `/voice-status`, `/wake`, `/say`, `/tts`, `/eyes`) folded into this one; typing an old name prints where it went.
 
 Helix has a **persona**, not a default assistant register: it answers first, keeps replies short because most of them are read aloud, says "I ran it" about things it ran, and will tell you when it thinks you are about to do something unwise. The persona shapes tone only — every safety gate sits downstream of it.

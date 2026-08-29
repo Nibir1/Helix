@@ -98,6 +98,18 @@ type voiceSidecar struct {
 	// binary is self-sufficient.
 	Verify func(binary string) (reason string, ok bool)
 
+	// PreStart reports a reason this sidecar cannot START, checked after it is
+	// installed and immediately before launch.
+	//
+	// Distinct from Unmet, which runs FIRST and blocks the whole setup. Some
+	// preconditions only apply to running: csm.rs builds perfectly well without
+	// a Hugging Face account and then exits with 401 Unauthorized fetching its
+	// tokenizer, because the weights are gated. Blocking that at Unmet would
+	// refuse to build it at all; not checking at all — which is what happened —
+	// starts a server Helix already knows cannot serve, and reports the crash
+	// instead of the cause.
+	PreStart func() (reason string, blocked bool)
+
 	// Unmet reports a precondition Helix will NOT resolve for the user, and
 	// why. Distinct from a missing binary, which Helix offers to install: this
 	// is for a dependency the project has decided not to require at all.
@@ -186,6 +198,24 @@ func voiceSidecars() map[string]voiceSidecar {
 			// the old refusal into something Helix can honestly do.
 			GoInstall: installCSMServer,
 			Prereqs:   []string{"git", "rust"},
+			PreStart: func() (string, bool) {
+				// csm.rs fetches its tokenizer from the gated repo on startup.
+				// Without a token that is a 401 a second after launch, and the
+				// user reads a stack of HTTP errors instead of the one thing
+				// they have to do.
+				bin, ok := findHuggingFaceCLI()
+				if ok && hfLoggedIn(bin) {
+					return "", false
+				}
+				step := "huggingface-cli login"
+				if ok {
+					step = strings.Join(hfAuthArgv(bin, "login"), " ")
+				}
+				return "csm.rs downloads sesame/csm-1b at startup and those weights " +
+					"are gated, so it exits with 401 Unauthorized until this machine " +
+					"is signed in. Accept the terms at " + csmModelURL +
+					" then run: " + step, true
+			},
 			InstallCmd: func() (string, bool) {
 				// Not a single command: GoInstall above detects the backend,
 				// fetches the source and builds it. The old refusal here read
@@ -429,6 +459,16 @@ func offerSidecarSetup(kind, provider string) bool {
 		return true
 	}
 
+	if spec.PreStart != nil {
+		if reason, blocked := spec.PreStart(); blocked {
+			fmt.Println(shell.Step(shell.StateWarn, provider, "installed, but cannot start yet"))
+			for _, l := range shell.StepDetail(reason, shell.Muted) {
+				fmt.Println(l)
+			}
+			return false
+		}
+	}
+
 	return startVoiceSidecar(kind, provider, binary, spec)
 }
 
@@ -623,9 +663,15 @@ func startVoiceSidecar(kind, provider, binary string, spec voiceSidecar) bool {
 	fmt.Println(shell.Step(shell.StateIdle, provider,
 		fmt.Sprintf("starting — pid %d, port %d", proc.PID, port)))
 
-	// Containers cold-start slower than a native binary even once pulled.
+	// Containers cold-start slower than a native binary even once pulled, and a
+	// 1B model has to be read off disk and mapped before the port answers —
+	// which is startup, not a download, and so belongs in this budget. The
+	// download itself is fetched separately; see settleCSMWeights.
 	budget := 90 * time.Second
-	if provider == "kokoro-local" {
+	switch provider {
+	case "kokoro-local":
+		budget = 180 * time.Second
+	case "csm-local":
 		budget = 180 * time.Second
 	}
 	ready := runCancellableProgressWithTimeout(
@@ -639,7 +685,20 @@ func startVoiceSidecar(kind, provider, binary string, spec voiceSidecar) bool {
 		},
 	)
 	if ready != nil {
-		fmt.Println(shell.Step(shell.StateBad, provider, fmt.Sprintf("did not come up: %v", ready)))
+		// Rendered line by line, because this error is usually several.
+		//
+		// A local-sidecar diagnosis carries the address it dialled AND the
+		// command that starts it, separated by newlines. Handing that whole
+		// string to Step printed the first line inside the panel and let the
+		// rest escape its gutter — "Start it:" and half a command sitting
+		// outside the box, with the other half back inside it.
+		lines := strings.Split(strings.TrimSpace(ready.Error()), "\n")
+		fmt.Println(shell.Step(shell.StateBad, provider, "did not come up: "+strings.TrimSpace(lines[0])))
+		for _, line := range lines[1:] {
+			for _, l := range shell.StepDetail(strings.TrimSpace(line), shell.Muted) {
+				fmt.Println(l)
+			}
+		}
 		// Wrapped, not truncated. At 160 characters a Python traceback loses
 		// exactly its payload: the real failure printed
 		// "(ModuleNotFoundError: No modul…" and cut off before naming the

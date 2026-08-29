@@ -249,6 +249,10 @@ container-hosted voice: Helix will not install a container runtime, refuses
 early when no daemon answers, and marks it `no docker` in the provider table so
 the constraint is visible before the choice.
 
+**Live mode is left on your word, not on a timer.** Silence carries no budget —
+Helix waits indefinitely for you to speak — and the only two ways out are "manual
+mode" and `/blackbox off`.
+
 Those default ports are frequently taken — whisper.cpp collides with llama.cpp
 on 8080, and macOS AirPlay Receiver owns 5000. Helix moves a sidecar to a free
 port and records it **per provider**, so a local service works as a fallback and

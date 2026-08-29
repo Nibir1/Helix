@@ -562,6 +562,30 @@ have caught the original bug had **encoded the conflation as its expectation**
 (`visionSvc = nil // stands in for a host with no ffmpeg`), which is why it did
 not.
 
+### 3f. Sidecar Readiness (`cmd/helix/voice_sidecars.go`)
+
+A readiness budget answers one question — *did the server bind its port?* — and
+it is wrong the moment it is made to measure anything else.
+
+Two sidecars download on first run, and both broke this the same way. Kokoro's
+`docker run` pulls a multi-gigabyte image before the container starts; csm.rs
+fetches `sesame/csm-1b` before it serves. In each case the download ran inside
+the readiness window, and Helix reported a sidecar as dead while its own log
+showed it working. **Downloads are pulled as a separate step** — `docker pull`,
+`hf download` — so the wait measures startup and the fetch gets its own progress
+display.
+
+Startup itself still varies: the default budget is 90s, and both kokoro and
+csm-local get 180s because a container cold-start and a 1B model being read off
+disk are genuinely slower than binding a socket. That is the distinction the
+budget is allowed to encode.
+
+`PreStart` is the companion seam. `Unmet` runs first and blocks setup entirely,
+which is right for "Helix will not install Docker for you" and wrong for
+"csm.rs builds fine but cannot run without a token" — that one is only true at
+launch, so it is checked immediately before it, and reports the cause instead of
+letting the server start and die with a 401.
+
 ### 5i. The Daemon (`internal/daemon/`)
 
 Helix also runs headless. The daemon owns the same Agent the interactive shell

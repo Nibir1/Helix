@@ -176,6 +176,9 @@ Late additions to v1.5.0, from a live `/blackbox setup` on an Intel Mac and an A
 - **One provider, one key prompt.** A vendor on both sides of a chain — Deepgram does both — was asked for the same credential twice in a single wizard run.
 - **A sidecar's moved port survives the save.** A local provider chosen as a *fallback* and reassigned off an occupied port had its address written to a field that belongs to the primary, so the move was lost and the adapter dialled the default anyway. There is one writer for that address now.
 - **The CSM licence gate is walked, not just described.** Helix installs the Hugging Face CLI, opens the terms page in a browser and runs the login — stopping at the token, which is the only part that is actually consent.
+- **Live mode never ends itself.** Silence had a retry budget: three quiet turns and the shell reported "voice unavailable" and dropped to a typed prompt. Being quiet is the ordinary state of someone who is not talking, and leaving live mode is your decision — "manual mode" or `/blackbox off`, and nothing else.
+- **A readiness budget measures readiness.** Both sidecars that download on first run — kokoro's container image and CSM's model weights — were fetching inside the window that asks "did the server bind its port?", so Helix reported them dead while their own logs showed them working. Downloads are pulled as their own step now.
+- **The Hugging Face CLI is located, not merely installed.** `pip install --user` writes console scripts to a directory it warns is not on `PATH`; Helix asks Python where that is rather than telling you to open a new shell. Its login command is probed too, since `huggingface_hub` 1.x moved authentication under `hf auth`.
 
 ---
 

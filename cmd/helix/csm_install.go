@@ -134,6 +134,10 @@ func csmBuildEnv(feature string) []string {
 // reported by the time it does.
 func installCSMServer() (string, bool) {
 	if bin, ok := findCSMServer(); ok {
+		// Already built, but the account and the weights are separate state and
+		// may still be missing — a previous run can have built the server and
+		// stopped at the licence. Both steps below are no-ops when already done.
+		settleCSMWeights()
 		return bin, true
 	}
 

@@ -247,9 +247,14 @@ func voiceTurn() (input.InputEvent, error) {
 	return batchVoiceTurn()
 }
 
-// maxVoiceRetries is how many times the mic re-arms after a silent/empty turn
-// before falling back to typed input. Never zero — the shell must not brick.
-const maxVoiceRetries = 3
+// quietTurnsBetweenReassurance is how many silent turns pass before Helix says
+// it is still there.
+//
+// Not a retry budget — there isn't one. A silent capture blocks until someone
+// speaks or the 45s backstop fires, so four of them is roughly three minutes of
+// quiet, which is a reasonable interval to confirm the microphone is still open
+// without narrating every pause in a conversation.
+const quietTurnsBetweenReassurance = 4
 
 // micSettleDelay is the pause between the ready chime finishing and the
 // recorder arming. Even after the last sample is played the speaker cone, the
@@ -258,12 +263,35 @@ const maxVoiceRetries = 3
 // imperceptible as a gap and clears the measured decay of the 880Hz ping.
 const micSettleDelay = 150 * time.Millisecond
 
-// voiceTurnWithRetry runs one voice turn, re-arming the mic on silence or an
-// empty transcript with a gentle prompt instead of silently switching to
-// typing. Real errors (provider down, capture failure) still degrade to the
-// typed fallback so a broken mic never strands the user.
+// silenceIsNotAFailure reports whether an error means "nothing was said".
+//
+// The distinction this function exists to make: a quiet room and a broken
+// microphone produce different errors, and only one of them is a problem.
+func silenceIsNotAFailure(err error) bool {
+	return errors.Is(err, speech.ErrNoSpeech) || errors.Is(err, speech.ErrEmptyTranscript)
+}
+
+// voiceTurnWithRetry runs voice turns until one produces something to act on.
+//
+// **Silence is not a failure and has no budget.** It used to have one: three
+// quiet turns and the shell printed "voice unavailable" and dropped to a typed
+// prompt. That is wrong twice over. Staying quiet is the ordinary state of a
+// person who is not talking — a listening assistant that gives up after two
+// minutes of it is not listening — and leaving live mode is a decision that
+// belongs to the user, who has two ways to make it ("manual mode", or
+// /blackbox off) and did not use either.
+//
+// Looping forever is safe rather than merely intended: a silent capture blocks
+// in sox's leading-silence gate until someone speaks or the 45s backstop fires,
+// so this waits, it does not spin.
+//
+// Real errors — a missing recorder, a provider chain that collapsed — still
+// return. Those are not silence, they are a broken microphone, and the caller
+// offers one typed turn WITHOUT leaving voice mode so a dead mic cannot strand
+// anyone.
 func voiceTurnWithRetry() (input.InputEvent, error) {
-	for attempt := 0; ; attempt++ {
+	quiet := 0
+	for {
 		ev, err := voiceTurn()
 		if err == nil {
 			return ev, nil
@@ -274,12 +302,15 @@ func voiceTurnWithRetry() (input.InputEvent, error) {
 			// already worked.
 			return ev, err
 		}
-		if errors.Is(err, speech.ErrNoSpeech) || errors.Is(err, speech.ErrEmptyTranscript) {
-			if attempt >= maxVoiceRetries {
-				return ev, err
+		if silenceIsNotAFailure(err) {
+			quiet++
+			if quiet%quietTurnsBetweenReassurance == 0 {
+				// Worded for both readings, because this cannot tell them
+				// apart: nobody spoke, or somebody spoke and was not heard.
+				uiIdle("still listening",
+					"nothing heard yet · /mictest checks the microphone · "+
+						"say \"manual mode\" for the keyboard")
 			}
-			uiWarn("not caught", fmt.Sprintf("please speak again (attempt %d/%d)",
-				attempt+1, maxVoiceRetries))
 			// voiceTurn plays the ready cue itself — no extra beep here.
 			continue
 		}

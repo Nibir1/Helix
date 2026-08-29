@@ -38,6 +38,9 @@ const (
 	// csmModelURL is the page where Sesame's terms are accepted.
 	csmModelURL = "https://huggingface.co/sesame/csm-1b"
 
+	// csmModelRepo is the same model as a Hub repo id, for the CLI.
+	csmModelRepo = "sesame/csm-1b"
+
 	hfLoginTimeout = 10 * time.Minute
 	hfCheckTimeout = 20 * time.Second
 )
@@ -114,6 +117,42 @@ func pythonUserScriptDirs() []string {
 	return out
 }
 
+// hfAuthArgv builds an authentication command for whichever CLI is installed.
+//
+// huggingface_hub 1.x moved these under an `auth` group: `hf auth login` and
+// `hf auth whoami`. The 0.x form was `huggingface-cli login`. Hardcoding the
+// old shape produced, on a fresh install of the CURRENT library:
+//
+//	Error: No such command 'login'.
+//
+// Which shape applies is DETECTED rather than inferred from the binary's name,
+// because the name is not the version: huggingface_hub 1.x installs both `hf`
+// and a `huggingface-cli` that only prints "deprecated and no longer works".
+// `<bin> auth --help` exits 0 where the group exists and non-zero where it does
+// not, which is the whole test.
+func hfAuthArgv(bin, verb string) []string {
+	if hfHasAuthGroup(bin) {
+		return []string{bin, "auth", verb}
+	}
+	return []string{bin, verb}
+}
+
+// hfAuthGroup caches the probe: it runs a subprocess, and the answer cannot
+// change while Helix is running.
+var hfAuthGroup = map[string]bool{}
+
+func hfHasAuthGroup(bin string) bool {
+	if v, ok := hfAuthGroup[bin]; ok {
+		return v
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), hfCheckTimeout)
+	defer cancel()
+	err := exec.CommandContext(ctx, bin, "auth", "--help").Run() //nolint:gosec // resolved path
+	has := err == nil
+	hfAuthGroup[bin] = has
+	return has
+}
+
 // hfLoggedIn reports whether the CLI already has a token.
 //
 // Checked before doing anything, because a user who logged in last week should
@@ -121,7 +160,8 @@ func pythonUserScriptDirs() []string {
 func hfLoggedIn(bin string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), hfCheckTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "whoami").CombinedOutput() //nolint:gosec // resolved from PATH
+	argv := hfAuthArgv(bin, "whoami")
+	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput() //nolint:gosec // resolved path
 	if err != nil {
 		return false
 	}
@@ -233,8 +273,7 @@ func settleCSMWeights() {
 
 	if hfLoggedIn(bin) {
 		fmt.Println(shell.Step(shell.StateGood, "hugging face", "already signed in"))
-		fmt.Println(shell.Step(shell.StateIdle, "terms",
-			"accept them once at "+csmModelURL+" if you have not"))
+		fetchCSMWeights(bin)
 		return
 	}
 
@@ -245,24 +284,76 @@ func settleCSMWeights() {
 			"could not be opened here — visit the link above"))
 	}
 
-	fmt.Println(shell.Step(shell.StateIdle, "sign in",
-		"accept the terms in the browser, then paste an access token below"))
-	for _, l := range shell.StepDetail(
-		"tokens live at https://huggingface.co/settings/tokens", shell.Muted) {
+	// Hand over explicitly.
+	//
+	// What follows is the Hugging Face CLI's own interactive prompt — its
+	// wording, its layout, its numbered choice — and it lands in the middle of
+	// Helix's panels looking like Helix stopped drawing them. It cannot be
+	// restyled: it is another program's stdout, and `hf auth login` has no flag
+	// to skip the question. So the seam is NAMED instead of hidden, which is
+	// the honest version of polish here — the user is told whose UI they are
+	// about to be in and what to pick.
+	fmt.Println()
+	fmt.Println(shell.PanelTitle("over to hugging face"))
+	for _, l := range shell.PanelWrap(
+		"The next few lines are the Hugging Face CLI's own prompt, not Helix's. "+
+			"It asks how you want to sign in — choosing the browser option is "+
+			"easiest, and it will show you a short code to confirm. Helix picks "+
+			"up again when it finishes.", shell.Muted) {
 		fmt.Println(l)
 	}
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelLine(shell.Muted("if you prefer a token, they live at")))
+	fmt.Println(shell.StepCommand("https://huggingface.co/settings/tokens"))
+	fmt.Println(shell.PanelEnd())
+	fmt.Println()
 
-	if !runVisibleArgv([]string{bin, "login"}, "", nil, hfLoginTimeout) {
+	if !runVisibleArgv(hfAuthArgv(bin, "login"), "", nil, hfLoginTimeout) {
 		fmt.Println(shell.Step(shell.StateWarn, "hugging face",
 			"not signed in — csm.rs cannot fetch the weights until you are"))
-		fmt.Println(shell.StepCommand(bin + " login"))
+		fmt.Println(shell.StepCommand(strings.Join(hfAuthArgv(bin, "login"), " ")))
 		return
 	}
+	fmt.Println()
 	if hfLoggedIn(bin) {
 		fmt.Println(shell.Step(shell.StateGood, "hugging face", "signed in"))
+		fetchCSMWeights(bin)
 		return
 	}
 	fmt.Println(shell.Step(shell.StateWarn, "hugging face",
 		"the login command finished but no account is active"))
-	fmt.Println(shell.StepCommand(bin + " login"))
+	fmt.Println(shell.StepCommand(strings.Join(hfAuthArgv(bin, "login"), " ")))
+}
+
+// csmWeightsTimeout bounds the model download. Several gigabytes over whatever
+// connection the user has; generous, and still bounded.
+const csmWeightsTimeout = 60 * time.Minute
+
+// fetchCSMWeights pulls the model BEFORE the server is started.
+//
+// This is the same mistake kokoro already taught, in a different shape. csm.rs
+// downloads sesame/csm-1b on first run, inside the window Helix was measuring
+// as "did the server come up?" — so a ~2 GB fetch over a normal connection blew
+// a 90-second readiness budget and Helix reported a sidecar as dead while its
+// own log showed it working:
+//
+//	[INFO csm_rs] Fetching model from Hugging Face Hub: sesame/csm-1b
+//
+// Pulling it separately means the readiness check measures STARTUP, which is
+// what it is for, and the download gets the CLI's own progress display instead
+// of a spinner that says nothing about how far along it is.
+//
+// Run unconditionally rather than gated on a cache check: `hf download` is a
+// fast no-op when the files are already local, and asking the CLI is more
+// reliable than reproducing its cache layout — which moves with HF_HOME and
+// HF_HUB_CACHE, and would be one more thing to get wrong.
+func fetchCSMWeights(bin string) {
+	fmt.Println(shell.Step(shell.StateIdle, "weights",
+		"fetching "+csmModelRepo+" — several GB on first run, cached afterwards"))
+	if !runVisibleArgv([]string{bin, "download", csmModelRepo}, "", nil, csmWeightsTimeout) {
+		fmt.Println(shell.Step(shell.StateWarn, "weights",
+			"could not be fetched — csm.rs will try again on first run"))
+		return
+	}
+	fmt.Println(shell.Step(shell.StateGood, "weights", "cached locally"))
 }

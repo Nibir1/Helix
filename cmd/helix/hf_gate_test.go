@@ -147,3 +147,160 @@ func stripComments(src string) string {
 	}
 	return b.String()
 }
+
+// The CLI's command shape is DETECTED, never inferred from its name.
+//
+// huggingface_hub 1.x moved authentication under an `auth` group, so
+// `hf auth login` is the current form and `hf login` produces
+// "Error: No such command 'login'." — which is exactly what a fresh install
+// produced. The name is not the version, either: 1.x installs both `hf` and a
+// `huggingface-cli` that only prints "deprecated and no longer works".
+func TestAuthCommandShapeIsProbedNotGuessed(t *testing.T) {
+	src := readSourceFile(t, "hf_gate.go")
+	code := stripComments(src)
+
+	if !strings.Contains(code, `"auth", "--help"`) {
+		t.Error("the auth group is not probed; the CLI's shape would be a guess")
+	}
+	// The old form must never be hardcoded at a call site.
+	for _, bad := range []string{`{bin, "login"}`, `bin + " login"`} {
+		if strings.Contains(code, bad) {
+			t.Errorf("a login command is built as %s, bypassing hfAuthArgv — on "+
+				"huggingface_hub 1.x that is \"No such command 'login'\"", bad)
+		}
+	}
+	fn := functionBody(src, "func hfAuthArgv(")
+	if fn == "" {
+		t.Fatal("hfAuthArgv not found")
+	}
+	for _, want := range []string{`"auth"`, "verb"} {
+		if !strings.Contains(fn, want) {
+			t.Errorf("hfAuthArgv does not mention %s", want)
+		}
+	}
+}
+
+// Both shapes must be constructible, whichever CLI a host has.
+func TestAuthArgvCoversBothCLIGenerations(t *testing.T) {
+	// A binary that cannot run at all: the probe fails, so the 0.x shape is
+	// used. That is the safe default — it is what every pre-1.0 install wants.
+	argv := hfAuthArgv("helix-no-such-binary-xyz", "login")
+	if len(argv) != 2 || argv[1] != "login" {
+		t.Errorf("with no auth group, argv = %v, want [<bin> login]", argv)
+	}
+
+	// And on this host, if a real CLI is present, whichever shape it declares.
+	bin, ok := findHuggingFaceCLI()
+	if !ok {
+		t.Skip("no hf CLI on this machine")
+	}
+	got := hfAuthArgv(bin, "login")
+	if hfHasAuthGroup(bin) {
+		if len(got) != 3 || got[1] != "auth" || got[2] != "login" {
+			t.Errorf("this CLI has an auth group but argv = %v", got)
+		}
+	} else if len(got) != 2 || got[1] != "login" {
+		t.Errorf("this CLI has no auth group but argv = %v", got)
+	}
+}
+
+// A sidecar that cannot serve must not be started to fail.
+func TestCSMRefusesToStartWithoutCredentials(t *testing.T) {
+	sc, ok := voiceSidecars()["csm-local"]
+	if !ok {
+		t.Fatal("csm-local is not in the sidecar table")
+	}
+	if sc.PreStart == nil {
+		t.Fatal("csm-local has no PreStart check — it is launched without a " +
+			"Hugging Face token and dies with 401 Unauthorized fetching its " +
+			"tokenizer, so the user reads a crash instead of the cause")
+	}
+	reason, blocked := sc.PreStart()
+	if bin, have := findHuggingFaceCLI(); have && hfLoggedIn(bin) {
+		if blocked {
+			t.Errorf("signed in, but csm-local is still blocked: %s", reason)
+		}
+		return
+	}
+	if !blocked {
+		t.Error("not signed in, yet csm-local reports it can start")
+		return
+	}
+	// The reason has to name the fix, not just the failure.
+	for _, want := range []string{"401", csmModelURL, "login"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("the reason does not mention %q: %s", want, reason)
+		}
+	}
+}
+
+// The weights must be fetched BEFORE the readiness check, not during it.
+//
+// csm.rs downloads sesame/csm-1b on first run, inside the window Helix measures
+// as "did the server come up?". A ~2GB fetch blew a 90-second budget and Helix
+// declared a sidecar dead while its own log showed it working:
+//
+//	[INFO csm_rs] Fetching model from Hugging Face Hub: sesame/csm-1b
+//
+// kokoro-local taught this once already, with `docker run` pulling a
+// multi-gigabyte image inside the same window. The lesson is that a readiness
+// budget must measure readiness.
+func TestWeightsAreFetchedBeforeStartup(t *testing.T) {
+	src := readSourceFile(t, "hf_gate.go")
+	fn := functionBody(src, "func settleCSMWeights(")
+	if fn == "" {
+		t.Fatal("settleCSMWeights not found")
+	}
+	if !strings.Contains(stripComments(fn), "fetchCSMWeights(") {
+		t.Error("settleCSMWeights does not fetch the weights, so the first-run " +
+			"download happens inside the readiness budget and the sidecar is " +
+			"reported dead while it is downloading")
+	}
+
+	fetch := functionBody(src, "func fetchCSMWeights(")
+	if fetch == "" {
+		t.Fatal("fetchCSMWeights not found")
+	}
+	code := stripComments(fetch)
+	if !strings.Contains(code, `"download"`) {
+		t.Error("fetchCSMWeights does not run the CLI's download subcommand")
+	}
+	if !strings.Contains(code, "csmModelRepo") {
+		t.Error("fetchCSMWeights does not name the repo it is fetching")
+	}
+	// A failed pre-fetch must not block the sidecar: csm.rs retries on its own.
+	if !strings.Contains(code, "StateWarn") {
+		t.Error("a failed pre-fetch is treated as fatal; csm.rs will try again " +
+			"on first run, so this is a warning")
+	}
+}
+
+// An already-built csm must still reach the licence and weights steps.
+//
+// A previous run can have built the server and stopped at the login; returning
+// early on "already built" would skip both forever.
+func TestAlreadyBuiltCSMStillSettlesWeights(t *testing.T) {
+	src := readSourceFile(t, "csm_install.go")
+	fn := functionBody(src, "func installCSMServer(")
+	if fn == "" {
+		t.Fatal("installCSMServer not found")
+	}
+	head := fn
+	if i := strings.Index(head, "feature, why := csmBackend()"); i > 0 {
+		head = head[:i] // the early-return branch only
+	}
+	if !strings.Contains(stripComments(head), "settleCSMWeights()") {
+		t.Error("the already-built path returns without settling the licence or " +
+			"the weights, so a run that stopped at the login can never finish")
+	}
+}
+
+// The readiness budget must allow for loading a 1B model off disk.
+func TestCSMGetsAStartupBudgetForLoadingAModel(t *testing.T) {
+	src := readSourceFile(t, "voice_sidecars.go")
+	fn := functionBody(src, "func startVoiceSidecar(")
+	if !strings.Contains(stripComments(fn), `case "csm-local"`) {
+		t.Error("csm-local uses the default startup budget; a 1B model has to be " +
+			"read off disk and mapped before its port answers")
+	}
+}
