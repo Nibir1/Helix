@@ -586,6 +586,24 @@ which is right for "Helix will not install Docker for you" and wrong for
 launch, so it is checked immediately before it, and reports the cause instead of
 letting the server start and die with a 401.
 
+### 3g. Provider Chains (`internal/speech/registry.go`)
+
+A chain is an ORDER, and only failure moves down it.
+
+Two things have broken that, both by letting something other than failure
+reorder it. **Capability**: the streaming path walked the chain and skipped any
+provider without a streaming adapter, so `csm-local → piper-local` silently
+became piper — the streamed turn succeeded, and the buffered path where the
+order is honoured was never reached. A buffered-only primary now stops the
+streaming attempt instead of being passed over. **Time**: each sentence of a
+reply re-resolved the chain from scratch, so a primary that failed mid-answer
+handed the rest to the fallback in a different voice, and every later sentence
+paid the dead provider's timeout again. An utterance-scoped pin holds the
+decision for the length of a reply.
+
+Both fixes share a rule: the chain expresses what the user wants, and the only
+thing allowed to override it is that provider being unable to serve.
+
 ### 5i. The Daemon (`internal/daemon/`)
 
 Helix also runs headless. The daemon owns the same Agent the interactive shell

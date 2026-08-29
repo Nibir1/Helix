@@ -204,7 +204,12 @@ without ending the conversation.
 
 For the most natural local voice, `/blackbox setup` offers a **"Most natural,
 local"** chain (tagged *needs a GPU*): whisper.cpp ears with Sesame CSM-1B as the voice
-and Piper as the fallback. Picking it **builds CSM** — the compute backend is
+and Piper as the fallback. It also turns **conversational context on** — four
+turns — because that conditioning IS what the preset's name promises, and CSM
+without it synthesizes each reply cold and sounds like any other voice. It is
+announced when applied rather than switched on quietly, since retaining turns
+means holding recent audio in memory beyond the turn that produced it. Picking
+it **builds CSM** — the compute backend is
 detected (CUDA if `nvidia-smi` answers, Metal on Apple Silicon, otherwise a
 tuned CPU build) and printed with the evidence for the choice before anything
 compiles, `git` and `cargo` are installed if the host lacks them, and the build
@@ -469,6 +474,16 @@ question: the transcript is **submitted**, reaching the classifier, the planner
 and the shell as input, where a newline is a second line of something. Every
 transcript is collapsed to a single line before it goes anywhere, on the batch
 path and the streaming one alike.
+
+**The provider you chose is the provider that speaks.** Streaming is an
+optimisation, not a ranking: a chain of `csm-local → piper-local` used to skip
+CSM entirely, because CSM has no streaming adapter and the streaming path
+`continue`d past it to a fallback that has one. The turn then succeeded, so the
+buffered path — where the chain order is honoured — was never reached. CSM was
+built, its weights downloaded, its server started and health-checked, and its
+log recorded not one synthesis request. A capability must not overrule a choice,
+so a buffered-only primary now stops the streaming attempt and the buffered path
+takes the turn in order.
 
 **One reply keeps one voice.** A spoken answer is synthesized sentence by
 sentence so the first words start playing while the rest are still being made,

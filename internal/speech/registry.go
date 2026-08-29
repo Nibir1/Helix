@@ -479,7 +479,22 @@ func (r *Registry) SynthesizeStream(
 		}
 		sp, ok := p.(StreamingTTSProvider)
 		if !ok {
-			continue // buffered-only provider; not an error, so not "failed"
+			// STOP, do not skip.
+			//
+			// Continuing past a buffered-only provider let a LOWER-priority one
+			// serve the turn, because streaming succeeds and speakOnce then
+			// never reaches the buffered path where the chain order is honoured.
+			// The user's chain was [csm-local, piper-local]; csm cannot stream,
+			// so it was silently passed over and piper answered every single
+			// time. csm.rs was built, its 6 GB of weights downloaded, the server
+			// started and health-checked — and its log recorded not one
+			// synthesis request.
+			//
+			// Streaming is an OPTIMISATION. Which provider speaks is the user's
+			// choice, and a capability must not quietly overrule it. Breaking
+			// here reports "no streaming available" and hands over to the
+			// buffered path, which tries the chain in order.
+			break
 		}
 
 		stream, err := sp.SynthesizeStream(ctx, text, opts)

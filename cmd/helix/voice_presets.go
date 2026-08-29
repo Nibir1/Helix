@@ -41,6 +41,22 @@ type speechPreset struct {
 	TTSModel     string
 	TTSVoice     string
 	TTSFallbacks []string
+
+	// TTSContextTurns turns on conversational conditioning for a voice whose
+	// point IS the conditioning.
+	//
+	// Off everywhere by default, and rightly: retaining recent turns means
+	// holding captured AUDIO in memory beyond the turn that produced it, which
+	// is a privacy-relevant change (threat V5b). But a preset that advertises
+	// "conversational prosody" and ships it disabled delivers a voice
+	// indistinguishable from the fallback it was chosen over — which is what
+	// happened: CSM was built, downloaded, started, and then sounded, in the
+	// user's words, like "stale walkie-talkie style just like other voice
+	// modes".
+	//
+	// Choosing this chain IS the request for that behaviour. It is announced
+	// when applied rather than switched on quietly.
+	TTSContextTurns int
 }
 
 // speechPresets returns the recommended chains, cheapest first.
@@ -100,6 +116,11 @@ func speechPresets() []speechPreset {
 			TTSProvider:  "csm-local",
 			TTSVoice:     "0",
 			TTSFallbacks: []string{"piper-local"},
+			// Four turns is what makes this chain what its name says. Without
+			// it CSM synthesizes each reply cold and sounds like any other
+			// voice — the feature the preset is named for is the conditioning,
+			// not the model file.
+			TTSContextTurns: 4,
 		},
 		{
 			Name: "Fully local / private",
@@ -278,6 +299,15 @@ func (p speechPreset) apply(catalog []speech.PricingEntry) appliedPreset {
 		out.tts.Provider = p.TTSProvider
 		out.tts.Model = presetAPIModel(catalog, "tts", p.TTSProvider, p.TTSModel)
 		out.tts.Voice = p.TTSVoice
+		out.tts.ContextTurns = p.TTSContextTurns
+		if p.TTSContextTurns > 0 {
+			// Announced, because it retains audio in memory for longer than a
+			// turn. Silent would be the wrong kind of convenient.
+			fmt.Println(shell.Step(shell.StateIdle, "conversational context",
+				fmt.Sprintf("keeping the last %d turns so the voice follows the "+
+					"conversation — in memory only, dropped on /blackbox off",
+					p.TTSContextTurns)))
+		}
 		out.tts.BaseURL = autoAssignSidecarPort("tts", p.TTSProvider, cfg.Speech.TTS.BaseURL)
 		prepareSpeechProvider("tts", p.TTSProvider)
 		out.tts.Fallbacks = p.TTSFallbacks

@@ -43,6 +43,16 @@ const (
 	// slower still — the budget has to fit the worst honest case, not the best.
 	csmBuildTimeout = 90 * time.Minute
 	csmFetchTimeout = 20 * time.Minute
+
+	// csmBuildDiskBytes is what a release build of candle needs for its object
+	// files and archives. Measured at roughly 8 GB on a completed build; the
+	// margin is deliberate, because running out at 95% costs the whole compile.
+	csmBuildDiskBytes = 12 << 30
+
+	// csmWeightsDiskBytes covers model.safetensors plus the small files beside
+	// it. The sharded second copy is excluded from the download (see
+	// csmDownloadFilters), so this is the real figure rather than the repo's.
+	csmWeightsDiskBytes = 8 << 30
 )
 
 // csmSourceDir is where Helix keeps the checkout it builds.
@@ -159,6 +169,18 @@ func installCSMServer() (string, bool) {
 	fmt.Println(shell.KV("BUILD IN", shell.Muted(dir), w))
 	fmt.Println(shell.KV("TAKES", shell.Muted("tens of minutes — it compiles candle from source"), w))
 	fmt.Println(shell.PanelEnd())
+
+	// Refuse before starting, not halfway through.
+	//
+	// A release build of candle writes several gigabytes of object files, and
+	// cargo does not check first — it compiles for minutes and then dies with
+	// "No space left on device" across a dozen crates at once. Everything after
+	// it fails too, in ways that look unrelated: a curl that cannot write a
+	// voice model, and a config save that reports the same thing. The disk is
+	// the cause and it is the least visible line on the screen.
+	if !enoughDiskFor("the CSM build", dir, csmBuildDiskBytes) {
+		return "", false
+	}
 
 	if !fetchCSMSource(dir) {
 		return "", false

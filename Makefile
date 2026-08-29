@@ -47,40 +47,101 @@ lint:
 	 echo "CI uses, so local and CI enforce the same rules:" && \
 	 echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0" && exit 1)
 
-# Clean build artifacts AND generated data (but keep models)
+# Reset generated state. Build artifacts, indexes, logs, caches.
+#
+# What this deliberately does NOT touch is credentials. The previous version
+# ended with
+#
+#     find "$(HELIX_HOME)" -name "*.json" -not -path "*/models/*" -delete
+#
+# which deleted secrets.json — the API keystore — along with session.json and
+# every other record. Nobody running `make clean` expects to re-enter their API
+# keys, and the target's own message said "preserving models", not "removing
+# your credentials". Files are named individually now, so adding a new one is a
+# decision rather than an accident.
 clean:
 	$(fix-perms)
-	@echo "Cleaning build artifacts and generated data..."
+	@echo "Cleaning build artifacts..."
 	./$(SCRIPTS_DIR)/build.sh clean
-	@echo "Cleaning user data (preserving models)..."
-	# Remove RAG indexes
-	-rm -rf "$(HELIX_HOME)/rag_index"
-	-rm -rf "$(HELIX_HOME)/vector_index"
-	-rm -rf "$(HELIX_HOME)/man_index"
-	# Remove the knowledge database
+	-rm -f "$(PROJECT_ROOT)/coverage.out" "$(PROJECT_ROOT)/coverage.html"
+	-find "$(PROJECT_ROOT)" -maxdepth 1 -name "*.log" -delete
+	@echo "Cleaning generated state (models and credentials preserved)..."
+	# Derived indexes: rebuilt on demand from sources Helix still has.
+	-rm -rf "$(HELIX_HOME)/rag_index" "$(HELIX_HOME)/vector_index" "$(HELIX_HOME)/man_index"
 	-rm -f "$(HELIX_HOME)/helix.db"
-	# Remove history and logs
-	-rm -f "$(HELIX_HOME)/helix_history"
-	-rm -f "$(HELIX_HOME)/.helix_history"
+	# History and per-run records.
+	-rm -f "$(HELIX_HOME)/helix_history" "$(HELIX_HOME)/.helix_history"
 	-rm -f "$(HELIX_HOME)/config.json"
-	-rm -f "$(HELIX_HOME)/*.log"
-	-rm -f "$(HELIX_HOME)/llama_*.log"
-	-rm -f "$(PROJECT_ROOT)/*.log"
-	# Remove temporary files but KEEP models directory
+	-rm -f "$(HELIX_HOME)/session.json" "$(HELIX_HOME)/reboot.json"
+	-rm -f "$(HELIX_HOME)/daemon.conn.json" "$(HELIX_HOME)/active.lock"
+	-rm -rf "$(HELIX_HOME)/crash" "$(HELIX_HOME)/voice_log" "$(HELIX_HOME)/metrics"
+	# Logs. `rm -f "$(HELIX_HOME)/*.log"` did nothing at all for months: the
+	# quotes stop the shell expanding the glob, so it looked for one file
+	# literally named "*.log". find expands nothing and handles spaces.
+	-find "$(HELIX_HOME)" -maxdepth 1 -name "*.log" -delete
 	-find "$(HELIX_HOME)" -name "*.tmp" -delete
-	-find "$(HELIX_HOME)" -name "*.json" -not -path "*/models/*" -delete
-	@echo "Clean completed (models preserved in $(HELIX_HOME)/models/)"
+	@echo "Clean done. Kept: secrets.json, and everything under models/,"
+	@echo "  whisper-models/, piper-voices/, piper/ and csm.rs/."
 
-# Deep clean (including models) - USE WITH CAUTION
+# Everything clean does, plus every model and runtime Helix downloaded.
+#
+# The list is the same one /purge offers, because they answer the same question
+# and drifting apart is how a "deep clean" leaves 6 GB behind. HELIX_MODEL_DIR
+# is honoured for the same reason /purge honours it: on a machine that moved its
+# GGUFs, the default path is not where they are.
 deep-clean: clean
-	@echo "Deep cleaning (including models)..."
+	@echo "Removing downloaded models and runtimes..."
 	-rm -rf "$(HELIX_HOME)/models"
-	@echo "All data including models have been removed"
+	-rm -rf "$${HELIX_MODEL_DIR:-/nonexistent-helix-model-dir}"
+	-rm -rf "$(HELIX_HOME)/whisper-models"
+	-rm -rf "$(HELIX_HOME)/piper-voices"
+	-rm -rf "$(HELIX_HOME)/piper"
+	-rm -rf "$(HELIX_HOME)/csm.rs"
+	-rm -f "$(HELIX_HOME)/secrets.json"
+	@echo ""
+	@echo "Removed everything Helix owns under $(HELIX_HOME), including API keys."
+	@echo ""
+	@echo "NOT removed — these are shared with anything else that uses them:"
+	@echo "  Ollama models       $${OLLAMA_MODELS:-$(USER_HOME)/.ollama/models}"
+	@echo "  CSM weights (~6GB)  $${HF_HUB_CACHE:-$(USER_HOME)/.cache/huggingface/hub}/models--sesame--csm-1b"
+	@echo ""
+	@echo "  A Makefile cannot show you their sizes and ask. /purge can, and does."
+
+# Remove every credential Helix stores, and nothing else.
+#
+# Separate from clean and deep-clean on purpose. `make clean` must NOT take
+# credentials — it used to, through a blanket delete of every .json under
+# ~/.helix, and re-entering API keys is not part of cleaning a build. But
+# revoking what is on this machine is a real thing to want on its own: handing a
+# laptop on, filing a bug with a transcript, or after a key has leaked.
+#
+# What this removes:
+#   secrets.json       every provider API key (OpenAI, Anthropic, Deepgram, …)
+#   daemon.conn.json   the daemon's per-start auth token
+#   voice_log/         spoken transcripts, if the opt-in log was ever enabled
+#
+# The Hugging Face token is named rather than deleted: it lives in a shared
+# cache that other tools authenticate against, and `hf auth logout` is the
+# command that revokes it properly rather than leaving a half-removed login.
+delete-secrets:
+	@echo "Removing credentials from $(HELIX_HOME)..."
+	-rm -f "$(HELIX_HOME)/secrets.json"
+	-rm -f "$(HELIX_HOME)/daemon.conn.json"
+	-rm -rf "$(HELIX_HOME)/voice_log"
+	@echo ""
+	@echo "Removed: provider API keys, the daemon token, and any voice transcripts."
+	@echo ""
+	@echo "NOT removed, because it is shared and has its own revoke:"
+	@echo "  Hugging Face token   $${HF_HOME:-$(USER_HOME)/.cache/huggingface}/token"
+	@echo "    revoke with:  hf auth logout"
+	@echo ""
+	@echo "Keys set in the environment are not files and survive this."
+	@echo "  check with:  env | grep -iE 'API_KEY|_TOKEN'"
 
 # Development build (fast, for testing)
 dev: current
 	@echo "Running development build..."
-	./$(DIST_DIR)/helix
+	./$(DIST_DIR)/$(BINARY_NAME)
 
 # Run the built application
 run: dev
@@ -94,14 +155,29 @@ install: current
 	@chmod +x $(SCRIPTS_DIR)/install.sh
 	@./$(SCRIPTS_DIR)/install.sh
 
-# Show build info
+# Show build info and what every target does.
+#
+# The old version listed six targets out of twenty and had not been updated
+# since they were added — a help text that is wrong is worse than none, because
+# it is believed.
 info:
-	@echo "Build Information:"
-	@echo "Binary: $(BINARY_NAME)"
-	@echo "Dist dir: $(DIST_DIR)"
-	@echo "Scripts dir: $(SCRIPTS_DIR)"
-	@echo "Helix home: $(HELIX_HOME)"
-	@echo "Available targets: current, macos, linux, windows, all, clean, deep-clean"
+	@echo "Helix $(shell grep -oE 'HelixVersion[[:space:]]*=[[:space:]]*\"[^\"]+\"' internal/config/config.go | grep -oE '\"[^\"]+\"' | tr -d '\"')"
+	@echo "  binary      $(BINARY_NAME)"
+	@echo "  dist        $(DIST_DIR)"
+	@echo "  scripts     $(SCRIPTS_DIR)"
+	@echo "  helix home  $(HELIX_HOME)"
+	@echo ""
+	@echo "BUILD    current macos linux windows build-all install"
+	@echo "RUN      dev run start"
+	@echo "TEST     test e2e fuzz fuzz-ci live-sidecar live-csm"
+	@echo "CHECK    lint lint-workflows sec-scan work"
+	@echo "RELEASE  release release-check"
+	@echo "CLEAN    clean          generated state; keeps keys and models"
+	@echo "         deep-clean     + every model and runtime under ~/.helix"
+	@echo "         delete-secrets API keys, daemon token, voice transcripts"
+	@echo ""
+	@echo "  /purge inside Helix also reaches Ollama's models and the Hugging"
+	@echo "  Face cache, with sizes, and asks before each group."
 
 # To run the project without building first
 start:
@@ -121,38 +197,50 @@ sec-scan:
 
 
 FUZZTIME ?= 30s
+# CI trades depth for wall-clock; everything else is identical, so the target
+# list must not be.
+FUZZTIME_CI ?= 20s
 
-# Run continuous fuzzing across all safety-critical parsers.
-# Go's native fuzzing only allows ONE -fuzz target per `go test` invocation,
-# so we explicitly list every target to avoid wildcard collisions.
+# Every fuzz target in the tree, as one list.
+#
+# It was written out twice — once for `fuzz` and once for `fuzz-ci` — and the
+# copies had already drifted: FuzzRequestJSON and FuzzSanitizeOutput existed in
+# the code and appeared in neither, so "fuzzing the safety surface" quietly
+# skipped two of its parsers. Go's native fuzzing allows one -fuzz target per
+# invocation, which is why this is a list rather than a wildcard.
+FUZZ_TARGETS = \
+	./internal/commands/safety:FuzzValidateAndCleanShellCommand \
+	./internal/commands/safety:FuzzAnalyzeShellRisk \
+	./internal/shell:FuzzClassify \
+	./internal/ai:FuzzParsePlanFromModelOutput \
+	./internal/commands:FuzzSandboxValidateCommand \
+	./internal/commands:FuzzValidateSafePath \
+	./internal/speech:FuzzWAVHeaderInfo \
+	./internal/speech:FuzzPricingMerge \
+	./internal/ambient:FuzzAnalyzer \
+	./internal/agent:FuzzTranscriptPolicyParsers \
+	./internal/agent:FuzzSanitizeOutput \
+	./internal/journal:FuzzRedact \
+	./internal/daemon:FuzzRequestJSON
+
+# run-fuzz <duration> — one `go test` per target, stopping at the first failure.
+define run-fuzz
+	@for t in $(FUZZ_TARGETS); do \
+		pkg=$${t%%:*}; fn=$${t##*:}; \
+		echo "  $$fn  ($$pkg)"; \
+		go test $$pkg -run='^$$$$' -fuzz=$$fn -fuzztime=$(1) || exit 1; \
+	done
+endef
+
+# Continuous fuzzing across the whole safety surface.
 fuzz:
-	@echo "Fuzzing safety surface..."
-	@go test ./internal/commands/safety -run=^$$ -fuzz=FuzzValidateAndCleanShellCommand -fuzztime=$(FUZZTIME)
-	@go test ./internal/commands/safety -run=^$$ -fuzz=FuzzAnalyzeShellRisk -fuzztime=$(FUZZTIME)
-	@go test ./internal/shell -run=^$$ -fuzz=FuzzClassify -fuzztime=$(FUZZTIME)
-	@go test ./internal/ai -run=^$$ -fuzz=FuzzParsePlanFromModelOutput -fuzztime=$(FUZZTIME)
-	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=$(FUZZTIME)
-	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=$(FUZZTIME)
-	@go test ./internal/speech -run=^$$ -fuzz=FuzzWAVHeaderInfo -fuzztime=$(FUZZTIME)
-	@go test ./internal/speech -run=^$$ -fuzz=FuzzPricingMerge -fuzztime=$(FUZZTIME)
-	@go test ./internal/ambient -run=^$$ -fuzz=FuzzAnalyzer -fuzztime=$(FUZZTIME)
-	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=$(FUZZTIME)
-	@go test ./internal/journal -run=^$$ -fuzz=FuzzRedact -fuzztime=$(FUZZTIME)
+	@echo "Fuzzing safety surface ($(FUZZTIME) per target)..."
+	$(call run-fuzz,$(FUZZTIME))
 
 # CI smoke test: shorter duration to keep the pipeline fast.
 fuzz-ci:
-	@echo "Running CI fuzz smoke test (20s per target)..."
-	@go test ./internal/commands/safety -run=^$$ -fuzz=FuzzValidateAndCleanShellCommand -fuzztime=20s
-	@go test ./internal/commands/safety -run=^$$ -fuzz=FuzzAnalyzeShellRisk -fuzztime=20s
-	@go test ./internal/shell -run=^$$ -fuzz=FuzzClassify -fuzztime=20s
-	@go test ./internal/ai -run=^$$ -fuzz=FuzzParsePlanFromModelOutput -fuzztime=20s
-	@go test ./internal/commands -run=^$$ -fuzz=FuzzSandboxValidateCommand -fuzztime=20s
-	@go test ./internal/commands -run=^$$ -fuzz=FuzzValidateSafePath -fuzztime=20s
-	@go test ./internal/speech -run=^$$ -fuzz=FuzzWAVHeaderInfo -fuzztime=20s
-	@go test ./internal/speech -run=^$$ -fuzz=FuzzPricingMerge -fuzztime=20s
-	@go test ./internal/ambient -run=^$$ -fuzz=FuzzAnalyzer -fuzztime=20s
-	@go test ./internal/agent -run=^$$ -fuzz=FuzzTranscriptPolicyParsers -fuzztime=20s
-	@go test ./internal/journal -run=^$$ -fuzz=FuzzRedact -fuzztime=20s
+	@echo "Running CI fuzz smoke test ($(FUZZTIME_CI) per target)..."
+	$(call run-fuzz,$(FUZZTIME_CI))
 
 # Run the live sidecar measurements: real whisper.cpp + Piper servers, driven
 # through Helix's own adapters. Needs the binaries and a downloaded model/voice;
@@ -206,4 +294,6 @@ lint-workflows:
 work: lint lint-workflows sec-scan fuzz-ci e2e build test install
 
 
-.PHONY: all build current macos linux windows build-all clean deep-clean dev run info start test lint lint-workflows work sec-scan install fuzz fuzz-ci e2e release release-check
+.PHONY: all build current macos linux windows build-all clean deep-clean delete-secrets \
+	dev run info start test lint lint-workflows work sec-scan install fuzz fuzz-ci \
+	live-sidecar live-csm e2e release release-check

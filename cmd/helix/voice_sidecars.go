@@ -824,6 +824,29 @@ func runVisibleCommandIn(cmdLine, dir string, env []string, timeout time.Duratio
 // "/Users/Jo Smith/Library/Python/3.14/bin/hf login" into four arguments and a
 // binary that does not exist. Callers holding a resolved path pass argv.
 func runVisibleArgv(fields []string, dir string, env []string, timeout time.Duration) bool {
+	return runVisibleArgvOpts(fields, dir, env, timeout, false)
+}
+
+// runVisibleStreamed hands the child the REAL terminal instead of a pipe.
+//
+// For a long download this is the difference between a progress bar and a
+// frozen line. os/exec only passes the terminal's file descriptor through when
+// cmd.Stdout is an *os.File; wrap it in an io.MultiWriter to capture the output
+// and os/exec inserts an os.Pipe, the child's isatty check fails, and a tool
+// like `hf download` falls back to a display that cannot redraw. The same
+// mechanism is documented in internal/commands/sandbox.go, where capture is
+// opt-in for exactly this reason — it was simply not applied here.
+//
+// The cost is the captured copy used by diagnoseInstallFailure. That is the
+// right trade for a multi-gigabyte fetch: the failure output is on screen
+// either way, and what a download needs is to be watchable while it works.
+func runVisibleStreamed(fields []string, dir string, env []string, timeout time.Duration) bool {
+	return runVisibleArgvOpts(fields, dir, env, timeout, true)
+}
+
+func runVisibleArgvOpts(
+	fields []string, dir string, env []string, timeout time.Duration, streamed bool,
+) bool {
 	if len(fields) == 0 {
 		return false
 	}
@@ -854,8 +877,13 @@ func runVisibleArgv(fields []string, dir string, env []string, timeout time.Dura
 	if len(env) > 0 {
 		c.Env = append(os.Environ(), env...)
 	}
-	c.Stdout = io.MultiWriter(os.Stdout, &captured)
-	c.Stderr = io.MultiWriter(os.Stderr, &captured)
+	if streamed {
+		// The terminal's own descriptors, so the child sees a TTY.
+		c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	} else {
+		c.Stdout = io.MultiWriter(os.Stdout, &captured)
+		c.Stderr = io.MultiWriter(os.Stderr, &captured)
+	}
 
 	if err := c.Run(); err != nil {
 		fmt.Println()

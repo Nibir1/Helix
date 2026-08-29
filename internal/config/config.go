@@ -631,6 +631,22 @@ func applyWakeWordDefaults(w *SpeechWakeConfig) {
 }
 
 // SavePreferences saves user preferences to config file.
+//
+// Written to a temporary file and renamed, never in place.
+//
+// os.WriteFile opens with O_TRUNC: it EMPTIES the file and then writes. If the
+// write fails halfway — and the way it fails in practice is a full disk, which
+// is exactly when several things fail at once — the user is left with an empty
+// or half-written config, having lost their provider, their voice chain and
+// every preference in it. That was observed one step away from happening:
+//
+//	✘ preferences  could not be saved: open ~/.helix/config.json:
+//	  no space left on device
+//
+// A rename within one directory is atomic, so the old file survives every
+// failure before it. The temp file is created alongside the target rather than
+// in TMPDIR because rename cannot cross a filesystem, and on a machine where
+// /tmp is a separate volume the "atomic" move would silently become a copy.
 func (cfg *Config) SavePreferences() error {
 	if err := cfg.EnsureConfigDir(); err != nil {
 		return err
@@ -639,7 +655,35 @@ func (cfg *Config) SavePreferences() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cfg.ConfigPath, data, 0o644)
+
+	dir := filepath.Dir(cfg.ConfigPath)
+	tmp, err := os.CreateTemp(dir, ".config-*.json")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// Any failure from here leaves the original untouched; the temp file is
+	// removed on the way out.
+	defer func() { _ = os.Remove(tmpName) }()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	// fsync before rename: a rename that lands before the data reaches disk
+	// gives a valid directory entry pointing at an empty file after a crash,
+	// which is the failure this whole function is avoiding.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, cfg.ConfigPath)
 }
 
 // Versioning and model metadata.

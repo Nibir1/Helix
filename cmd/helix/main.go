@@ -217,8 +217,18 @@ func main() {
 			}
 		}
 	case <-time.After(2 * time.Second):
-		uiWarn("audio engine", "timed out starting — continuing silent")
-		uiDetail("/audio on retries once the sound device is available.")
+		// "Still starting", not "continuing silent".
+		//
+		// The initialisation is NOT abandoned here — the goroutine runs on, the
+		// channel is buffered so it cannot leak, and audio.Init sets its state
+		// whenever it lands. On a machine busy with a sidecar start or a large
+		// download, 2s is simply short: this warning has been printed and then
+		// followed, seconds later, by a spoken reply with 60ms time-to-first-
+		// audio. Announcing silence that does not happen teaches the user to
+		// ignore the line.
+		uiWarn("audio engine", "slower than 2s to start — carrying on without waiting")
+		uiDetail("It keeps initialising in the background and will be used as soon " +
+			"as it is ready. If it never arrives, /audio on retries.")
 		if dbg {
 			uiDetail("debug: startup initialization exceeded 2s")
 		}

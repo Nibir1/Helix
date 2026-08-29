@@ -338,7 +338,7 @@ hours old, and wiped by `/purge`.
 | Command | Description |
 | :--- | :--- |
 | `/reboot [now\|check]` | **Self-update and restart.** Checks GitHub releases and locally built binaries, installs automatically, and comes back in the same mode, directory, provider and conversation. A download is installed only if its SHA-256 matches the release's checksums file; the previous binary is kept and restored automatically if the new one cannot start. `now` skips the check, `check` only reports. Say **"reboot"** in live mode |
-| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, the piper runtime binary, and the CSM source and build tree) with their sizes, and closes by pointing at `/reboot` — open database handles only release when the process exits |
+| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, the piper runtime binary, the CSM source and build tree, **Ollama's model blobs**, and **the CSM weights in the Hugging Face cache**) with their sizes. The last two live outside `~/.helix` and are shared with anything else on the machine that uses them, so the manifest says so before you answer, and closes by pointing at `/reboot` — open database handles only release when the process exits |
 
 ### Aliases
 `/?` `/h` `/sos` → `/help` · `/v` → `/version` · `/reset` → `/clear` · `/usage` → `/cost` · `/mode` → `/permissions` · `/intel` → `/vuln`
@@ -737,7 +737,23 @@ Ideas, issues, and PRs are welcome:
 4. Open a PR with a clear description and demo steps
 
 Before opening a PR, `make work` runs the whole gate — lint, workflow lint,
-vulnerability scan, fuzzing, e2e, build, tests. `make lint-workflows` on its own
+vulnerability scan, fuzzing, e2e, build, tests. `make clean` resets generated state — build output, indexes, history, logs —
+and deliberately keeps your API keys and every downloaded model.
+`make deep-clean` adds the models and runtimes Helix downloaded under `~/.helix`
+(including the CSM build tree) and your keys; it names Ollama's model store and
+the Hugging Face cache rather than deleting them, because those are shared with
+anything else on the machine and a Makefile cannot show you their sizes and ask.
+`/purge` can, and does.
+
+`make delete-secrets` removes credentials and nothing else — provider API keys,
+the daemon's auth token, and any voice transcripts — for handing a machine on or
+after a key leaks. It names the Hugging Face token rather than deleting it,
+since that lives in a shared cache with its own `hf auth logout`, and says
+plainly that keys set in the environment are not files and survive it.
+
+`make info` lists every target with what it does.
+
+`make lint-workflows` on its own
 checks `.github/workflows`: actionlint, plus one rule actionlint cannot enforce
 — a multi-line `run:` in a job whose matrix includes Windows must declare
 `shell:`, because the default there is PowerShell and `runs-on` is a runtime

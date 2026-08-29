@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"helix/internal/ollama"
 	"helix/internal/shell"
 )
 
@@ -167,7 +168,7 @@ func purgeWeightTargets(helixDir string) []purgeTarget {
 	if modelDir == "" {
 		modelDir = filepath.Join(helixDir, "models")
 	}
-	return []purgeTarget{
+	out := []purgeTarget{
 		{modelDir, "LLM model weights (GGUF)", groupRuntime},
 		{filepath.Join(helixDir, "whisper-models"), "speech-to-text models", groupRuntime},
 		{filepath.Join(helixDir, "piper-voices"), "text-to-speech voices", groupRuntime},
@@ -178,6 +179,49 @@ func purgeWeightTargets(helixDir string) []purgeTarget {
 		// which is exactly the criterion the rest of this list is built on.
 		{filepath.Join(helixDir, "csm.rs"), "the CSM voice server source and build", groupRuntime},
 	}
+
+	// Two model stores live OUTSIDE ~/.helix, and leaving them out made
+	// "wipe all local Helix data" untrue by tens of gigabytes.
+	//
+	// Both are SHARED: Ollama's store holds whatever the user pulled with
+	// Ollama directly, and the Hugging Face cache is used by any tool on the
+	// machine that speaks to the Hub. That is why they are named plainly in
+	// the manifest, with their sizes, in the group /purge asks about
+	// separately — the answer belongs to the user, not to this list.
+	if dir, err := ollama.ModelsDir(); err == nil {
+		out = append(out, purgeTarget{
+			dir, "Ollama model blobs (shared with any other Ollama use)", groupRuntime,
+		})
+	}
+	// Scoped to the one model Helix downloads, not the whole cache: everything
+	// else under it belongs to something else.
+	if hub := huggingFaceHubDir(); hub != "" {
+		out = append(out, purgeTarget{
+			filepath.Join(hub, "models--sesame--csm-1b"),
+			"the CSM voice weights (~6 GB)", groupRuntime,
+		})
+	}
+	return out
+}
+
+// huggingFaceHubDir resolves the Hub cache the way huggingface_hub does.
+//
+// HF_HUB_CACHE wins, then $HF_HOME/hub, then ~/.cache/huggingface/hub. Guessing
+// the last one unconditionally would miss the weights entirely on a machine
+// that moved them, and /purge would report a clean sweep having left 6 GB
+// behind.
+func huggingFaceHubDir() string {
+	if dir := strings.TrimSpace(os.Getenv("HF_HUB_CACHE")); dir != "" {
+		return dir
+	}
+	if home := strings.TrimSpace(os.Getenv("HF_HOME")); home != "" {
+		return filepath.Join(home, "hub")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cache", "huggingface", "hub")
 }
 
 // existingWeights keeps only what is on disk, measured.

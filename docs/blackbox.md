@@ -235,7 +235,10 @@ box simply uses the fast voice. `/blackbox setup` **builds it for you**: the com
 backend is detected rather than guessed — CUDA if `nvidia-smi` answers, Metal on
 Apple Silicon, a tuned CPU build otherwise — and printed with its evidence
 before anything compiles, so a choice you can see is not a choice made on your
-behalf. The one remaining step is yours: the weights are licence-gated, and
+behalf. Choosing this chain also enables **conversational context** (four turns), which
+is the conditioning the name refers to — without it CSM synthesizes each reply
+cold and is indistinguishable from the fallback. The one remaining step is
+yours: the weights are licence-gated, and
 consent tied to an account is not something a program supplies. Everything
 around it is automated — the Hugging Face CLI is installed if missing, the terms
 page opens in a browser, and `huggingface-cli login` runs so you can paste a

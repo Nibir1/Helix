@@ -10,6 +10,7 @@
 package main
 
 import (
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -302,5 +303,147 @@ func TestCSMGetsAStartupBudgetForLoadingAModel(t *testing.T) {
 	if !strings.Contains(stripComments(fn), `case "csm-local"`) {
 		t.Error("csm-local uses the default startup budget; a 1B model has to be " +
 			"read off disk and mapped before its port answers")
+	}
+}
+
+// The fetch must not pull the model twice.
+//
+// sesame/csm-1b ships the same weights in two formats: model.safetensors, which
+// csm.rs opens, and a sharded transformers set for a library Helix does not
+// use. An unfiltered `hf download` pulls both — measured on a real machine as
+// 6.2GB already present and a further 7.8GB of shards being fetched on top,
+// which is what "stuck at 85%" was: the bar counts files, and the second copy
+// is the last few.
+func TestCSMDownloadExcludesTheDuplicateCopies(t *testing.T) {
+	// The repo's real listing, and the size of each part in GB. Written out
+	// because the first version of this filter was built from a GUESSED
+	// filename — "transformers.safetensors*", inferred from the index file
+	// beside the shards — and it matched 4 KB of the 13.3 GB it was meant to
+	// stop. A pattern is only as good as the names it was checked against.
+	repo := []struct {
+		name string
+		gb   float64
+	}{
+		{"README.md", 0},
+		{"chat_template.jinja", 0},
+		{"ckpt.pt", 4.9},
+		{"config.json", 0},
+		{"generation_config.json", 0},
+		{"model.safetensors", 6.2},
+		{"preprocessor_config.json", 0},
+		{"special_tokens_map.json", 0},
+		{"tokenizer.json", 0.017},
+		{"tokenizer_config.json", 0},
+		{"transformers-00001-of-00002.safetensors", 6.2},
+		{"transformers-00002-of-00002.safetensors", 2.2},
+		{"transformers.safetensors.index.json", 0},
+	}
+
+	var pats []string
+	filters := csmDownloadFilters()
+	for i := 0; i < len(filters); i += 2 {
+		if filters[i] != "--exclude" {
+			t.Fatalf("filter %q is not an exclusion — an allow-list can omit a "+
+				"file csm.rs needs, and that failure appears at startup", filters[i])
+		}
+		pats = append(pats, filters[i+1])
+	}
+
+	kept := map[string]bool{}
+	var total float64
+	for _, f := range repo {
+		excluded := false
+		for _, p := range pats {
+			if ok, _ := filepath.Match(p, f.name); ok {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			kept[f.name] = true
+			total += f.gb
+		}
+	}
+
+	// What csm.rs actually opens, established by watching it run unattended:
+	// it fetched these two and nothing else.
+	for _, need := range []string{"model.safetensors", "tokenizer.json"} {
+		if !kept[need] {
+			t.Errorf("%s is excluded — csm.rs cannot start without it", need)
+		}
+	}
+	// And the duplicates must go.
+	for _, dup := range []string{
+		"ckpt.pt",
+		"transformers-00001-of-00002.safetensors",
+		"transformers-00002-of-00002.safetensors",
+	} {
+		if kept[dup] {
+			t.Errorf("%s is still downloaded; it is another copy of the same "+
+				"weights in a format csm.rs does not load", dup)
+		}
+	}
+	// The whole point, as a number.
+	if total > 7 {
+		t.Errorf("the filtered download is ~%.1f GB, want about 6.2 — the "+
+			"unfiltered repo is 19.6 GB and the exclusions are not working", total)
+	}
+}
+
+// The download must get a real terminal, or its progress cannot redraw.
+func TestWeightsDownloadIsStreamedNotCaptured(t *testing.T) {
+	src := readSourceFile(t, "hf_gate.go")
+	fn := functionBody(src, "func fetchCSMWeights(")
+	code := stripComments(fn)
+	if !strings.Contains(code, "runVisibleStreamed(") {
+		t.Error("the weights download is captured through a pipe, so the CLI's " +
+			"isatty check fails and a multi-gigabyte fetch renders as a frozen line")
+	}
+	if strings.Contains(code, "runVisibleArgv(") {
+		t.Error("the weights download still uses the capturing runner")
+	}
+}
+
+// A preset that advertises conversational prosody must enable it.
+//
+// "Most natural, local" sells "Sesame CSM-1B — conversational prosody" and
+// shipped with ContextTurns unset, so CSM synthesized every reply cold. The
+// user's verdict: "no conversational pattern at all, rather stale walkie-talkie
+// style just like other voice modes." They were right — the conditioning IS the
+// feature, and the model file without it is just another voice.
+func TestCSMPresetEnablesTheConversationalContextItAdvertises(t *testing.T) {
+	var csm *speechPreset
+	for i := range speechPresets() {
+		p := speechPresets()[i]
+		if p.TTSProvider == "csm-local" {
+			csm = &p
+			break
+		}
+	}
+	if csm == nil {
+		t.Skip("no CSM preset in this build")
+	}
+	if !strings.Contains(strings.ToLower(csm.Note), "conversational") {
+		t.Skip("this preset no longer advertises conversational prosody")
+	}
+	if csm.TTSContextTurns <= 0 {
+		t.Error("the preset advertises conversational prosody and leaves " +
+			"ContextTurns at 0, so CSM synthesizes each reply cold and sounds " +
+			"like the fallback it was chosen over")
+	}
+}
+
+// Presets that do NOT advertise it must leave it off: retaining audio in memory
+// beyond a turn is a privacy-relevant change (threat V5b) and must follow from
+// something the user asked for.
+func TestOtherPresetsLeaveContextOff(t *testing.T) {
+	for _, p := range speechPresets() {
+		if p.TTSProvider == "csm-local" {
+			continue
+		}
+		if p.TTSContextTurns != 0 {
+			t.Errorf("preset %q retains %d turns of audio without advertising it",
+				p.Name, p.TTSContextTurns)
+		}
 	}
 }

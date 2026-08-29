@@ -460,6 +460,19 @@ both `hf` and a `huggingface-cli` that only prints *"deprecated and no longer
 works"* — so Helix asks the CLI whether it has an `auth` group and builds the
 command that exists.
 
+**Only one copy of the weights is fetched.** `sesame/csm-1b` ships the same
+model three times — `model.safetensors` (6.2 GB, which csm.rs loads), a sharded
+`transformers-*` set (8.4 GB) and `ckpt.pt` (4.9 GB). Pulling the repo whole is
+**19.6 GB where 6.2 will do**, so Helix excludes the two formats it cannot use.
+
+`/purge` reclaims them: the weights live in the Hugging Face cache rather than
+under `~/.helix`, and a purge that missed them left 6 GB behind while reporting
+a clean sweep.
+
+**Helix refuses work the disk cannot hold.** The build needs about 12 GB and the
+weights about 8 GB; both are checked first and declined with the numbers, rather
+than compiling for twenty minutes and failing at 95%.
+
 **The weights are fetched before the server starts, not during.** csm.rs
 downloads `sesame/csm-1b` on first run — several gigabytes — and that used to
 happen inside the window Helix measures as *"did the server come up?"*, so a

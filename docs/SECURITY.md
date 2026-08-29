@@ -120,6 +120,32 @@ under `os.Root` (§5a). Sources it builds — currently only csm.rs — are clon
 from a pinned URL into `~/.helix` and compiled there; the build is ordinary
 `cargo`, with no privilege beyond the user's.
 
+### 5d. Configuration Is Replaced, Never Truncated
+`~/.helix/config.json` is written to a temporary file beside it, fsynced, and
+renamed into place. A rename within one directory is atomic, so the previous
+file survives every failure before it.
+
+This is not theoretical tidiness. The previous implementation used
+`os.WriteFile`, which opens with `O_TRUNC` — it empties the file and *then*
+writes — and the way that fails in practice is a full disk, which is also the
+moment several other things fail at once and nobody is reading carefully. It was
+observed one step from destroying a live configuration:
+
+```text
+✘ preferences  could not be saved: open ~/.helix/config.json: no space left on device
+```
+
+Losing that file loses the provider, the voice chain and every preference in it.
+The temporary file is created in the config's own directory rather than
+`TMPDIR`, because a rename cannot cross a filesystem and would silently degrade
+to a copy.
+
+**Multi-gigabyte work is refused before it starts.** Helix measures free space
+ahead of the CSM build and the model download and declines with the numbers,
+rather than compiling for twenty minutes and dying at 95%. A filesystem that
+cannot be measured is allowed through: guessing that a disk is too small where
+the syscall failed would block a machine that is probably fine.
+
 ### 6. Telemetry-Free Local Records
 Crash reports are written ONLY to local disk (0600), contain redacted
 environment values (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`), are never

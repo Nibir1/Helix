@@ -348,12 +348,113 @@ const csmWeightsTimeout = 60 * time.Minute
 // reliable than reproducing its cache layout — which moves with HF_HOME and
 // HF_HUB_CACHE, and would be one more thing to get wrong.
 func fetchCSMWeights(bin string) {
-	fmt.Println(shell.Step(shell.StateIdle, "weights",
-		"fetching "+csmModelRepo+" — several GB on first run, cached afterwards"))
-	if !runVisibleArgv([]string{bin, "download", csmModelRepo}, "", nil, csmWeightsTimeout) {
+	fmt.Println()
+	fmt.Println(shell.PanelTitle("fetching the weights"))
+	for _, l := range shell.PanelWrap(
+		"Several gigabytes on first run, cached afterwards. The CLI's bar counts "+
+			"FILES, not bytes — the small config and tokenizer files finish in "+
+			"seconds, so it pauses near the end while the model itself arrives. "+
+			"That pause is the download, not a stall. Helix fetches only the "+
+			"copy csm.rs loads — the repo also carries a second, sharded copy "+
+			"for a library Helix does not use.", shell.Muted) {
+		fmt.Println(l)
+	}
+	fmt.Println(shell.PanelEnd())
+	fmt.Println()
+
+	if !enoughDiskFor("the CSM weights", helixPath(""), csmWeightsDiskBytes) {
+		return
+	}
+
+	// Streamed, not captured: see runVisibleStreamed. Through a pipe the CLI
+	// cannot redraw, and a multi-gigabyte fetch looks frozen.
+	argv := append([]string{bin, "download", csmModelRepo}, csmDownloadFilters()...)
+	if !runVisibleStreamed(argv, "", nil, csmWeightsTimeout) {
 		fmt.Println(shell.Step(shell.StateWarn, "weights",
 			"could not be fetched — csm.rs will try again on first run"))
 		return
 	}
+	fmt.Println()
 	fmt.Println(shell.Step(shell.StateGood, "weights", "cached locally"))
+}
+
+// csmDownloadFilters keep the fetch to the copy of the model csm.rs loads.
+//
+// sesame/csm-1b ships the SAME weights THREE times:
+//
+//	model.safetensors                        6.2 GB  ← csm.rs loads this
+//	transformers-0000{1,2}-of-00002.safetensors  8.4 GB  for the transformers library
+//	ckpt.pt                                  4.9 GB  the original PyTorch checkpoint
+//
+// Downloading the repo whole is 19.6 GB where 6.2 will do.
+//
+// The exclusions are taken from the repo's ACTUAL file listing, which matters
+// because the first attempt was not: it excluded "transformers.safetensors*",
+// a name inferred from the index file `transformers.safetensors.index.json`.
+// The shards are called `transformers-00001-of-00002.safetensors`, so the
+// pattern matched only the index — 4 KB of the 13.3 GB it was meant to stop —
+// and the user downloaded all three copies. Guessing a filename from a
+// neighbouring filename is guessing.
+//
+// Excluding rather than allow-listing, still: an allow-list drops anything
+// csm.rs needs that this does not know about, and that failure appears as a
+// mystery at startup. This can only ever be wrong toward downloading too much.
+// What csm.rs actually needs is known from evidence — left alone, it fetched
+// model.safetensors and tokenizer.json and nothing else.
+func csmDownloadFilters() []string {
+	return []string{
+		"--exclude", "transformers-*",
+		"--exclude", "transformers.safetensors.index.json",
+		"--exclude", "ckpt.pt",
+		"--exclude", "*.gguf",
+	}
+}
+
+// enoughDiskFor refuses an operation the disk cannot hold, and says the numbers.
+//
+// Reported rather than silently skipped, and reported BEFORE the work starts:
+// the alternative is what actually happened — a twenty-minute compile ending in
+// "No space left on device" repeated across a dozen crates, followed by a
+// download and a config save failing for the same reason, with nothing on
+// screen connecting them.
+//
+// A filesystem that cannot be measured is allowed through. Guessing that a
+// disk is too small on a host where Statfs failed would block a machine that is
+// probably fine, and the operation's own error is the fallback.
+func enoughDiskFor(what, path string, need uint64) bool {
+	free, ok := freeBytes(path)
+	if !ok {
+		return true // unmeasurable; let the operation speak for itself
+	}
+	if free >= need {
+		return true
+	}
+	fmt.Println(shell.Step(shell.StateBad, "disk",
+		fmt.Sprintf("not enough room for %s", what)))
+	for _, l := range shell.StepDetail(fmt.Sprintf(
+		"needs about %s, and %s is free. Nothing has been started — a build that "+
+			"runs out partway wastes the time as well as the space.",
+		humanBytes(need), humanBytes(free)), shell.Muted) {
+		fmt.Println(l)
+	}
+	for _, l := range shell.StepDetail(
+		"`/purge` reclaims Helix's own downloads, and the Hugging Face cache "+
+			"lives in ~/.cache/huggingface.", shell.Muted) {
+		fmt.Println(l)
+	}
+	return false
+}
+
+// humanBytes renders a size the way a person reads one.
+func humanBytes(n uint64) string {
+	const unit = 1 << 10
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := uint64(unit), 0
+	for v := n / unit; v >= unit && exp < 3; v /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGT"[exp])
 }
