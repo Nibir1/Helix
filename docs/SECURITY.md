@@ -293,6 +293,29 @@ plainly because an updater is the highest-consequence code in the project:
   The check is negative-only: it never asserts what a valid key looks like, since
   vendors change formats and a positive rule would start rejecting good keys.
 
+### Removing them
+`make delete-secrets` removes every credential Helix stores and nothing else:
+`secrets.json` (all provider keys), `daemon.conn.json` (the daemon's per-start
+auth token), and `voice_log/` if the opt-in transcript log was ever enabled.
+
+It is deliberately **not** part of `make clean`. Cleaning a build must not cost
+you your API keys — `clean` used to delete them through a blanket `*.json`
+sweep, which is a bug rather than a policy — but revoking what is on a machine
+is a real thing to want on its own: handing a laptop on, attaching a transcript
+to a bug report, or after a key has leaked.
+
+Two things it deliberately does not do, and says so when it runs:
+
+- **The Hugging Face token is named, not deleted.** It lives in a shared cache
+  that other tools authenticate against, and removing the file leaves a
+  half-revoked login. `hf auth logout` is the command that actually revokes it.
+- **Keys set in the environment are not files** and survive it. A target called
+  "delete secrets" invites the opposite assumption, so it prints the check
+  (`env | grep -iE 'API_KEY|_TOKEN'`) rather than letting you infer it.
+
+`/purge` remains the broader wipe — it reaches models, caches and the stores
+outside `~/.helix`, with sizes, and asks about each group.
+
 ## Supply-Chain Security & Release Integrity
 
 Every official Helix release is built with a verified supply chain. We generate a Software Bill of Materials (SBOM) in SPDX format and cryptographically sign every release artifact using [Sigstore](https://sigstore.dev/) keyless signing.
