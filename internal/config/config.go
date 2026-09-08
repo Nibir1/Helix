@@ -537,10 +537,19 @@ type UpdateConfig struct {
 
 // UpdateDefaults returns the shipped update policy.
 //
-// Checking is ON and installing is never automatic. The check costs one HTTPS
-// request on a restart the user asked for; the install always requires a typed
-// confirmation, because replacing the program someone is running is not
-// something to do because they wanted a fresh process.
+// Checking is ON, and — since the owner's decision of 2026-08-27 — a found
+// update INSTALLS automatically, with no prompt and no voice carve-out. The
+// earlier version of this comment said the opposite ("the install always
+// requires a typed confirmation"), which stopped being true when the confirm
+// was removed and is a claim worth getting right: whoever can publish a release
+// to Repo can replace this binary with no human present. The reasoning, the
+// residual risk and the transport controls that remain mandatory are ADR-019
+// and threat V5e in docs/BlackBox_Development.md; the code is
+// cmd/helix/reboot_update.go.
+//
+// Check:false is how a machine declines that bet — it keeps /reboot check
+// available while never looking on an ordinary restart. The check itself costs
+// one HTTPS request on a restart the user asked for.
 func UpdateDefaults() UpdateConfig {
 	return UpdateConfig{
 		Channel: "auto",

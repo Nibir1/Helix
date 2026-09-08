@@ -5,6 +5,7 @@
 package metrics
 
 import (
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
@@ -378,5 +379,68 @@ func TestSummarizeAvailabilityWithSingleSample(t *testing.T) {
 	}
 	if av.Percent != 0 {
 		t.Errorf("a single sample cannot yield a percentage, got %.2f", av.Percent)
+	}
+}
+
+// A line whose timestamp cannot be read must not become a data point.
+//
+// Load keeps such a line on purpose — a latency or category summary needs no
+// clock — so it arrives here carrying the zero time, which sorts before every
+// real heartbeat. That made the untimestamped record the series' first sample:
+// the gap to the first real one was measured from year 1 and saturated at
+// 2562047h, and the step up from its uptime counter read as the counter falling,
+// which is how a restart is detected. It also counted toward Samples while being
+// excluded from the window, so availability was inflated against Expected.
+//
+// The precondition matters as much as the outcome (§9 rule 8): the record has to
+// actually survive Load and reach the summary, or this test passes for the wrong
+// reason.
+func TestSummarizeAvailabilityIgnoresUntimestampedRecords(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+
+	var b strings.Builder
+	for i := 0; i <= 60; i++ {
+		fmt.Fprintf(&b, `{"ts":%q,"metric":%q,"uptime_s":%d}`+"\n",
+			base.Add(time.Duration(i)*time.Minute).Format(time.RFC3339),
+			MetricUptime, (i+1)*60)
+	}
+	// Parses as JSON, so Load keeps it; the timestamp does not parse, so it has
+	// no place in a time series.
+	fmt.Fprintf(&b, `{"ts":"yesterday","metric":%q,"uptime_s":900}`+"\n", MetricUptime)
+
+	if err := os.WriteFile(filepath.Join(dir, FileUptime+".jsonl"),
+		[]byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := Load(dir, FileUptime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 62 {
+		t.Fatalf("Load kept %d records, want 62 — the malformed line must reach the summary", len(recs))
+	}
+	var untimed int
+	for _, r := range recs {
+		if r.TS.IsZero() {
+			untimed++
+		}
+	}
+	if untimed != 1 {
+		t.Fatalf("%d untimestamped records reached the summary, want exactly 1", untimed)
+	}
+
+	av := SummarizeAvailability(recs)
+	if av.Samples != 61 {
+		t.Errorf("samples = %d, want 61 (the untimestamped line is not a sample)", av.Samples)
+	}
+	if av.Restarts != 0 {
+		t.Errorf("restarts = %d, want 0 — a monotonic hour has none", av.Restarts)
+	}
+	if av.LongestGap != time.Minute {
+		t.Errorf("longest gap = %v, want 1m", av.LongestGap)
+	}
+	if av.Percent < 99.5 {
+		t.Errorf("availability = %.2f%%, want 100%% for an unbroken hour", av.Percent)
 	}
 }

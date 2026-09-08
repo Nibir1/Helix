@@ -951,12 +951,29 @@ func logSpeechLatency() {
 	})
 }
 
-// activeTTSProvider names the head of the TTS chain, so a recorded latency can
-// be judged against the cloud or local column of §10 rather than an assumed one.
+// activeTTSProvider names the provider that ACTUALLY SPOKE, so a recorded
+// latency is judged against the cloud or local column of §10 rather than an
+// assumed one.
+//
+// It used to return the head of the chain, which is the assumption its own
+// comment said it existed to avoid. The two differ in exactly one case, and it
+// is the case that matters: a failover. With `piper-local` primary and `openai`
+// behind it, a 900 ms cloud synthesis was filed as piper-local and graded
+// against the 1500 ms LOCAL budget — a miss of the 800 ms cloud target recorded
+// as "meets target", in a table that gates a release. The registry already
+// knows who answered (ChainHealth.Used, kept precisely so callers need not
+// probe), so nothing had to be measured to fix this; it had to be asked.
+//
+// The head remains the fallback answer for the case where it is the only thing
+// known: a chain that has not run yet, which is what /blackbox status renders
+// before the first spoken reply.
 func activeTTSProvider() string {
 	reg := speech.Default()
 	if reg == nil {
 		return ""
+	}
+	if h := reg.LastTTSHealth(); h.Attempted && h.OK && h.Used != "" {
+		return h.Used
 	}
 	if chain := reg.TTSChain(); len(chain) > 0 {
 		return chain[0]

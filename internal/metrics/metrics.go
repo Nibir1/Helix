@@ -333,13 +333,33 @@ type Availability struct {
 // Expected samples come from the window and UptimeInterval, so a daemon that
 // stopped writing for an hour scores that hour as unavailable even though no
 // record says so — which is the only honest reading of a heartbeat that stopped.
+//
+// **Untimestamped records are dropped first**, which the rest of this package
+// already did and this function did not. `Load` keeps a line whose `ts` is
+// missing or unparseable — deliberately, since a latency or category summary
+// needs no clock — and every such record carries the zero time. Here that
+// poisoned three numbers at once: the record sorted BEFORE every real sample,
+// so `LongestGap` became the distance from year 1 (reported as 2562047h, the
+// saturated maximum) and the step into the first real heartbeat looked like the
+// uptime counter falling, which is exactly how a restart is detected. Meanwhile
+// it still counted toward `Samples`, inflating availability against an
+// `Expected` computed from a window it was excluded from. One malformed line in
+// a 72-hour soak was enough to make the daemon read as having a phantom restart
+// and a three-century outage.
 func SummarizeAvailability(recs []Record) Availability {
-	av := Availability{Samples: len(recs)}
-	if len(recs) == 0 {
+	timed := make([]Record, 0, len(recs))
+	for _, r := range recs {
+		if !r.TS.IsZero() {
+			timed = append(timed, r)
+		}
+	}
+
+	av := Availability{Samples: len(timed)}
+	if len(timed) == 0 {
 		return av
 	}
 
-	window, ok := Window(recs)
+	window, ok := Window(timed)
 	if !ok {
 		// A single sample proves the daemon ran once and supports no rate.
 		return av
@@ -355,8 +375,8 @@ func SummarizeAvailability(recs []Record) Availability {
 
 	// Restarts and gaps need chronological order; the file is append-only, but
 	// a reader should not depend on that.
-	ordered := make([]Record, len(recs))
-	copy(ordered, recs)
+	ordered := make([]Record, len(timed))
+	copy(ordered, timed)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].TS.Before(ordered[j].TS) })
 
 	for i := 1; i < len(ordered); i++ {
@@ -402,10 +422,26 @@ var Targets = map[string]Target{
 // which decides WHICH §10 column a sample is judged against. Deriving the
 // verdict from the sample's own provider is the only honest way to apply a table
 // with separate cloud and local targets.
+//
+// This is a hand-kept copy of something the speech adapters already know
+// (`IsLocal()`), and it has to be: this package imports nothing but the standard
+// library — `TestNoNetworkImports` enforces that, because these files never
+// leave the machine — so it cannot ask the registry. A copy that cannot be
+// derived gets a drift guard instead: `TestMetricsKnowsEveryLocalSpeechProvider`
+// in internal/speech fails if an adapter reports IsLocal and is missing here.
+//
+// It was written without one and drifted immediately. `csm-local` (ADR-017)
+// shipped as a local TTS provider and was never added, so its samples were
+// graded against the CLOUD first-audio budget of 800 ms — and CSM's measured
+// RTF on an M4 Air is 1.69×, so every one of them read as a hard failure
+// against a target that does not apply to it. That is precisely the blended
+// verdict the cloud/local split exists to prevent, arriving through the copy
+// rather than through the arithmetic.
 var LocalProviders = map[string]bool{
 	"whisper-local": true,
 	"piper-local":   true,
 	"kokoro-local":  true,
+	"csm-local":     true,
 	"ollama":        true,
 	"llamacpp":      true,
 }

@@ -116,7 +116,12 @@ func withUpdateConfig(t *testing.T) {
 	t.Cleanup(func() { cfg = old })
 }
 
-// The shipped policy: check on, install never automatic.
+// The shipped policy: check on, and a found update installs (ADR-019's
+// 2026-08-27 amendment). The test name predates that reversal and the comment
+// used to repeat the old rule; what these assertions actually pin is the
+// default CHANNEL and REPO, which is worth keeping — a channel of "" would
+// silently disable both the release and the local path, and an empty repo
+// points the updater at nothing.
 func TestUpdateDefaultsCheckButDoNotInstall(t *testing.T) {
 	d := config.UpdateDefaults()
 	if !d.Check {
