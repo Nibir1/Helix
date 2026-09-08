@@ -422,6 +422,26 @@ yet do:
 
 ---
 
+## 7b. Waking from the keyboard
+
+`/blackbox wake always on` arms an idle manual prompt: the microphone stays open
+while you work and a wake event switches Helix into live mode without a
+keystroke. `off` closes it; `status` reports armed, not armed, or unavailable
+with the reason.
+
+The mechanism is worth knowing because it explains the one limit. A blocked
+terminal read cannot be interrupted — measured three ways against a real PTY,
+all three dead ends — so the read is never *started* until `poll(2)` says a
+keystroke is waiting, and the keystroke is not consumed. The editor is
+therefore completely unmodified, armed or not. The cost is that a word spoken
+*mid-line* is not seen until the line is submitted; an **idle** prompt is what
+this covers, which is the case that matters.
+
+Enabling is typed-only (ADR-005: voice may reduce what is collected, never
+increase it) and disabling by voice always works. Nothing is transcribed while
+armed. With the default energy engine any sound wakes it; only the sidecar
+engine matches a phrase. Unix-only for now.
+
 ## 8. Measured performance
 
 `/blackbox stats` summarizes what Helix has actually measured on this machine —

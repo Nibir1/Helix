@@ -183,6 +183,42 @@ Pacing adapts by backing OFF — the gap is `max(interval, smoothed last look)` 
 so a slow host never queues behind itself. It deliberately does not speed up on
 a fast one: a companion is bounded by how often a person wants to be spoken to.
 
+### 3d-bis. Always-Listen Wake (`cmd/helix/wake_always.go`, `internal/shell/armedwait.go`)
+
+The wake word reaching the KEYBOARD prompt, so speech alone switches Helix into
+live mode. Opt-in (`speech.wake_word.always_listen`), typed-only to enable, and
+Unix-only.
+
+- **The blocking read is never pre-empted; it is never started.** `ReadLine`
+  blocks in `bufio.Reader.ReadRune` over stdin, and three ways to interrupt that
+  were measured against a real PTY and rejected: `os.Stdin.SetReadDeadline`
+  ("file type does not support deadline" — Go does not register character
+  devices with its poller), the same on a self-opened `/dev/tty`, and `TIOCSTI`
+  (gated behind `CAP_SYS_ADMIN` and shipped disabled on Linux 6.2+; a feature
+  that must fake keyboard input is built on the wrong foundation). What works is
+  `poll(2)`, called directly, which reports that a keystroke is waiting **without
+  consuming it** — so the editor is entered only when there is something to read
+  and runs completely unmodified. That is what keeps Phase 4A's byte-identical
+  guarantee intact, and an e2e test asserts an un-armed prompt is unchanged.
+- **Raw mode is the reason it works at all**, not an implementation detail. In
+  canonical mode the line discipline buffers input until Enter, so `poll` reports
+  nothing readable however much has been typed — the wait would only notice the
+  keyboard once a whole line was submitted. Raw mode also disables echo, which
+  is what stops the first keystroke appearing twice (once from the terminal, once
+  from the editor's redraw). The terminal is restored before `ReadLine` runs, so
+  it finds the state it expects.
+- **One wake service, two callers.** `newWakeService` was extracted rather than
+  copied when the armed prompt became the second consumer of the detector,
+  scanner, chunk length, ambient tee and cooldown — the repo has paid four times
+  for a second copy of one decision.
+- **The idle wait is unbounded, and that is not an ADR-005 §5 exception.** That
+  rule caps how long an armed session may sit before falling back to *wake-only
+  listening*; wake-only listening is exactly what an armed prompt is. There is no
+  open capture to time out into, and nothing is transcribed.
+- **Waking routes through `blackBoxOn`**, not `enterVoiceMode`, so the mode
+  reached by speaking is the mode reached by typing — camera, companion loop,
+  banner and persistence included. Phase 13 records what the alternative costs.
+
 ### 3e. Host Dependencies (`internal/deps/`)
 What Helix needs from the machine, how to detect it, and how to install it on
 this particular host (brew/apt/dnf/pacman/zypper/apk/winget/choco). Detection is

@@ -478,6 +478,10 @@ func voiceCommandAllowed(line string) (bool, string) {
 		return false, "Starting a transcript log has to be typed. " +
 			"I can stop one whenever you ask."
 	}
+	if voiceStartsAlwaysListen(line) {
+		return false, "Opening the microphone at the keyboard prompt has to be typed. " +
+			"I can switch it off whenever you ask."
+	}
 	return true, ""
 }
 

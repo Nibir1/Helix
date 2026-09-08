@@ -122,6 +122,24 @@ type SpeechWakeConfig struct {
 	SensitivityPreset string `json:"sensitivity_preset"` // strict | balanced | loose
 	CooldownS         int    `json:"cooldown_s"`
 	ChunkMs           int    `json:"chunk_ms"` // scanner chunk length
+
+	// AlwaysListen makes the wake word reach the KEYBOARD prompt: at an idle
+	// manual prompt Helix keeps the microphone open and enters live mode when
+	// it hears a wake, instead of only holding wake-only between voice turns.
+	//
+	// Off by default, and this default is a privacy decision rather than a
+	// conservative one. Wake_word.Enabled already means "listen between spoken
+	// turns", which is a state the user entered by going live. This means
+	// "listen while I am typing, indefinitely, from boot" — an open microphone
+	// during work that has nothing to do with voice. ADR-005's rule that voice
+	// may reduce what is collected but never increase it makes enabling this a
+	// TYPED-only act (`/blackbox wake always on`); a spoken word can switch it
+	// off but never on.
+	//
+	// Requires Enabled too: this widens where the wake word is heard, it does
+	// not turn the wake word on. Unsupported on Windows — see
+	// shell.KeyWaitSupported.
+	AlwaysListen bool `json:"always_listen,omitempty"`
 }
 
 // SpeechConfig is the speech subsystem section of ~/.helix/config.json.
@@ -616,6 +634,13 @@ func mergeWakeWord(dst *SpeechWakeConfig, src SpeechWakeConfig) {
 	}
 	if src.ChunkMs > 0 {
 		dst.ChunkMs = src.ChunkMs
+	}
+	// Layered like Enabled: a file that says true turns it on, and a file that
+	// omits it cannot turn it off. Both are booleans whose false is
+	// indistinguishable from absent, and for a microphone switch the safe
+	// reading of "absent" is off — which is what the zero value already gives.
+	if src.AlwaysListen {
+		dst.AlwaysListen = true
 	}
 }
 

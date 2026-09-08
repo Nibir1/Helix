@@ -707,17 +707,15 @@ const (
 	wakeCompanionSpoke
 )
 
-// wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns the wake
-// event and how the listen ended; only wakeFired carries a usable event. The
-// DetectedAt timestamp feeds the §10 wake→execution latency metric.
-func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
-	if speech.Default() == nil || !cfg.Speech.WakeWord.Enabled {
-		return wakeword.WakeEvent{}, wakeNotEngaged
-	}
-	if _, err := speech.DetectRecorder(); err != nil {
-		return wakeword.WakeEvent{}, wakeNotEngaged
-	}
-
+// newWakeService builds the wake detector, scanner and service from config.
+//
+// Extracted because there are now TWO callers — the between-turns hold inside
+// live mode, and the always-listen wait at an idle keyboard prompt — and a
+// second copy of this would be a second place for the engine choice, the chunk
+// length, the ambient tee and the cooldown to disagree. The repo has paid for
+// that shape three times (speech endpoints, the metrics provider list, a linter
+// version), so the second caller arrives by extracting rather than by copying.
+func newWakeService() (wakeword.Service, error) {
 	preset := wakeword.Preset(cfg.Speech.WakeWord.SensitivityPreset)
 	var detector wakeword.Detector
 	switch cfg.Speech.WakeWord.Engine {
@@ -738,7 +736,7 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 		scanner = ambient.Tee(scanner, interactiveAmbientMonitor())
 	}
 
-	svc, err := wakeword.NewService(
+	return wakeword.NewService(
 		scanner,
 		detector,
 		wakeword.Config{
@@ -746,6 +744,20 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 			Cooldown: time.Duration(cfg.Speech.WakeWord.CooldownS) * time.Second,
 			OnError:  func(error) {},
 		})
+}
+
+// wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns the wake
+// event and how the listen ended; only wakeFired carries a usable event. The
+// DetectedAt timestamp feeds the §10 wake→execution latency metric.
+func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
+	if speech.Default() == nil || !cfg.Speech.WakeWord.Enabled {
+		return wakeword.WakeEvent{}, wakeNotEngaged
+	}
+	if _, err := speech.DetectRecorder(); err != nil {
+		return wakeword.WakeEvent{}, wakeNotEngaged
+	}
+
+	svc, err := newWakeService()
 	if err != nil {
 		return wakeword.WakeEvent{}, wakeScannerFailed
 	}

@@ -451,6 +451,25 @@ func main() {
 				ev = input.InputEvent{Text: strings.TrimSpace(line), Channel: input.ChannelText}
 			}
 		} else {
+			// Always-listen wake: hold the prompt open to the microphone as
+			// well as the keyboard. Only when armed — otherwise this is the
+			// blocking read it has always been, byte for byte, which is what
+			// the PTY suite proves and what keeps this feature from being a
+			// change to everyone's shell.
+			if alwaysListenArmed() {
+				ev, outcome := armedIdleWait()
+				switch outcome {
+				case armedWake:
+					lastWakeAt = ev.DetectedAt
+					enterVoiceModeFromWake(ev)
+					continue // the next iteration takes the turn by voice
+				case armedUnavailable:
+					// Arming failed (no scanner, a dead device). Say so once
+					// and fall through to the keyboard: a broken microphone
+					// must never cost the user their shell.
+					noteArmingLapse()
+				}
+			}
 			line, err := shell.ReadLine(shell.GetContext(), highlighter, history)
 			if err != nil {
 				if err.Error() == "EOF" {

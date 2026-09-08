@@ -22,10 +22,15 @@ func handleWakeCommand(c cmdArgs) {
 		cfg.Speech.WakeWord.Enabled = false
 		_ = cfg.SavePreferences()
 		uiIdle("wake word", "off — hands-free listening is disabled")
+	case "always":
+		// Always-listen extends WHERE the wake word is heard (an idle keyboard
+		// prompt, not just the gaps between spoken turns), so it lives under
+		// the wake command rather than beside it.
+		handleWakeAlwaysCommand(c.Shift())
 	case "", "status":
 		printWakeStatus()
 	default:
-		uiUsage("/blackbox wake <on|off|status>")
+		uiUsage("/blackbox wake <on|off|always|status>")
 	}
 }
 
@@ -121,7 +126,7 @@ func printWakeStatus() {
 	engine := engineOrDefault(ww.Engine)
 	phrase := orDefault(ww.Phrase, "hey helix")
 
-	w := shell.KVWidth("STATE", "DETECTOR", "PHRASE", "RECORDER")
+	w := shell.KVWidth("STATE", "DETECTOR", "PHRASE", "RECORDER", "AT THE PROMPT")
 	fmt.Println(shell.PanelTitle("wake word"))
 
 	if ww.Enabled {
@@ -150,6 +155,9 @@ func printWakeStatus() {
 	} else {
 		fmt.Println(shell.KV("RECORDER", shell.Badge(shell.StateGood, "ready"), w))
 	}
+	// Where the wake word is heard, which is a different question from whether
+	// it is on: between spoken turns only, or also at an idle keyboard prompt.
+	fmt.Println(shell.KV("AT THE PROMPT", alwaysListenStatusLine(), w))
 	fmt.Println(shell.PanelEnd())
 
 	if engine != "sidecar" {

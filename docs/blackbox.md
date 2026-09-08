@@ -139,6 +139,51 @@ defaults (phrase `"hey helix"`, engine `"energy"`, preset `"balanced"`),
 persists them, and tells you how to go always-on. Equivalently, set
 `speech.wake_word.enabled = true` in `~/.helix/config.json`.
 
+### Waking from the keyboard prompt (`/blackbox wake always on`)
+
+By default the wake word only gates the gaps **between spoken turns**: you type
+`/blackbox on` to start talking and the wake word takes over from there. Turn on
+always-listen and it reaches the keyboard prompt too — an idle prompt keeps the
+microphone open, and a wake event switches Helix into live mode by itself:
+
+```text
+/blackbox wake always on      # arm the idle prompt (typed only — see below)
+/blackbox wake always off     # close the microphone at the prompt
+/blackbox wake always status  # armed, not armed, or unavailable, with the reason
+```
+
+An armed prompt says so, on its own line, above a breathing standby HUD:
+
+```text
+◉ listening  ·  say the wake word to go live  ·  type normally to stay here
+```
+
+Four things worth knowing before you turn it on:
+
+- **It is typed-only to enable.** A spoken "switch always-listen on" is refused.
+  An armed prompt holds the microphone open through work that has nothing to do
+  with voice, which is an *increase* in what is collected, and ADR-005 lets voice
+  reduce that but never increase it. Switching it **off** by voice always works.
+- **Nothing is transcribed while it waits.** Only the wake detector runs; chunks
+  are scored and discarded. Same construction as the between-turns lockout.
+- **With the default engine, any sound wakes it** — a cough, a door, a sentence
+  addressed to someone else. The energy detector scores loudness, not words. For
+  a prompt that only answers to "hey helix" you need the sidecar engine (§5.1).
+- **Typing wins while you type.** The wake word is checked at an *idle* prompt;
+  a word spoken mid-line is not seen until that line is submitted. This is a
+  consequence of how it works — the keyboard read is never interrupted, it is
+  simply not started until a key is waiting — and it is the reason the editor
+  behaves identically whether armed or not.
+
+Live mode never ends itself, so once woken Helix stays live until you say
+"manual mode" or type `/blackbox off`. Returning to the keyboard re-arms the
+prompt; `/blackbox wake always off` is what stops it listening altogether.
+
+**Not available on Windows yet.** Arming needs a "is a keystroke waiting?"
+call, which is `poll(2)` on Unix and a genuine piece of console work on
+Windows. `/blackbox wake always on` says so there rather than silently doing
+nothing.
+
 Once on, Helix holds in **wake-only listening** between turns — nothing is
 transcribed until a wake event fires, so ambient speech between turns is never
 executed (ADR-005 §5).

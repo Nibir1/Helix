@@ -17,6 +17,34 @@ It remains local-first and telemetry-free. The whole voice stack runs offline if
 - **Barge-in** — Ctrl+C stops a spoken reply mid-sentence (~50 ms), not at the next sentence boundary. Opt-in voice interruption stops it by speaking in the pause between sentences, with no echo cancellation required.
 - **A sci-fi HUD** — listening waveform driven by the real microphone level (log-scaled, because speech RMS on a linear meter barely leaves the floor), decode sweep, speaking wave, wake-standby pulse. Terminal-native; no GUI dependency.
 
+### Waking without touching the keyboard
+
+`/blackbox wake always on` arms an idle prompt: Helix keeps the microphone open
+while you work, and a wake event switches it into live mode by itself. The
+Siri-shaped flow, in a terminal — and the piece that had been missing, since the
+wake word previously only gated the gaps between spoken turns.
+
+- **The line editor is completely unmodified**, which is what makes this safe to
+  ship. A blocked terminal read cannot be pre-empted — three ways were measured
+  against a real PTY and all three are dead ends (Go registers no deadline on a
+  character device; `TIOCSTI` is disabled on modern Linux) — so the read is never
+  *started* until `poll(2)` reports a keystroke waiting, and that keystroke is
+  not consumed. An e2e test asserts an un-armed prompt behaves exactly as before.
+- **Off by default, typed-only to enable.** An armed prompt holds the microphone
+  open through work that has nothing to do with voice, which is an increase in
+  what is collected — so ADR-005 makes switching it on a keyboard act. Switching
+  it off by voice always works.
+- **Nothing is transcribed while it waits.** Only the detector runs; chunks are
+  scored and discarded.
+- **Live mode never ends itself**, so once woken Helix stays live until you say
+  "manual mode" or type `/blackbox off`.
+- **Two honest limits.** With the default engine *any* sound wakes it — the
+  energy detector scores loudness, not words, so the sidecar engine remains the
+  phrase-accurate option. And a word spoken *while you are typing* is not seen
+  until the line is submitted, which is the direct consequence of never
+  interrupting the read. Unix only: Windows needs console work that has not been
+  written, and says so rather than doing nothing.
+
 ### Sesame CSM-1B — a local voice that sounds like a conversation
 
 The speech model behind Sesame's "crossing the uncanny valley of voice" demo, running on your own machine with **no Python, no Docker and no API calls**. Not the whole demo — what Sesame open-sourced is the speech *generator*, which cannot produce text — so Helix's planner still decides what to say. What it changes is how that sounds.
