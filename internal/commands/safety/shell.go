@@ -120,6 +120,23 @@ var pipeIntoShellRe = regexp.MustCompile(
 	`\|\s*(?:sudo\s+(?:-[a-z0-9]+\s+)*)?(?:env\s+)?(?:exec\s+)?(?:/[a-z0-9_./-]+/)?(sh|bash|zsh|dash|ksh|ash|fish)\b`,
 )
 
+// The remaining validator patterns, compiled once — same reason as the block in
+// risk.go, and the same measurement: these five were recompiled on every call to
+// the HARD blocker, the one function every command must pass through.
+//
+// sudoShellRe and shellFromTmpRe are not redeclared here: risk.go already owns
+// those two patterns and this file used byte-identical copies of them. Two
+// compiled copies of one security rule is how the copies drift, which this repo
+// has paid for three times with speech Endpoints and once with the voice deny
+// list — so the validator and the risk analyser now share one definition and
+// cannot disagree about what "sudo bash" is.
+var (
+	sudoWordRe     = regexp.MustCompile(`(?i)\bsudo\b`)
+	downloaderRe   = regexp.MustCompile(`\b(curl|wget|fetch)\b`)
+	chmod777RootRe = regexp.MustCompile(`(?i)chmod\s+777\s+/`)
+	chownRootRe    = regexp.MustCompile(`(?i)chown\s+root\s+/`)
+)
+
 // extraDangerousPatternChecks adds higher-level safety rules.
 func extraDangerousPatternChecks(cmd string) error {
 	lc := strings.ToLower(cmd)
@@ -128,22 +145,22 @@ func extraDangerousPatternChecks(cmd string) error {
 	// go through the package manager or explicit typed confirmations, not raw shell sudo.
 	// This prevents sandbox escapes where sudo spawns a privileged child process
 	// that ignores the kernel confinement profile.
-	if regexp.MustCompile(`(?i)\bsudo\b`).MatchString(lc) {
+	if sudoWordRe.MatchString(lc) {
 		return fmt.Errorf("command contains 'sudo', which is blocked for safety; use the package manager or explicit administrative tools")
 	}
 
 	if pipeIntoShellRe.MatchString(lc) {
-		if regexp.MustCompile(`\b(curl|wget|fetch)\b`).MatchString(lc) {
+		if downloaderRe.MatchString(lc) {
 			return fmt.Errorf("command appears to download a script and pipe it into a shell (possibly via sudo/env), which is blocked for safety")
 		}
 		return fmt.Errorf("command contains pipe into a shell (e.g. '| sh' or '| sudo bash'), which is too dangerous to run automatically")
 	}
 
-	if regexp.MustCompile(`(?i)sudo\s+(?:/[a-z0-9_./-]+/)?(bash|sh|zsh|dash|ksh|ash|fish)\b`).MatchString(lc) {
+	if sudoShellRe.MatchString(lc) {
 		return fmt.Errorf("command attempts to run a shell interpreter with sudo (e.g., 'sudo bash'), which is blocked for safety")
 	}
 
-	if regexp.MustCompile(`(?i)(bash|sh|zsh|dash|ksh|ash|fish)\s+(/tmp/|/var/tmp/|/dev/shm/)`).MatchString(lc) {
+	if shellFromTmpRe.MatchString(lc) {
 		return fmt.Errorf("command attempts to execute a script from a temporary directory, which is blocked for safety")
 	}
 
@@ -156,10 +173,10 @@ func extraDangerousPatternChecks(cmd string) error {
 	if strings.Contains(lc, " mkfs") || strings.HasPrefix(lc, "mkfs") {
 		return fmt.Errorf("command appears to format a filesystem (mkfs), blocked for safety")
 	}
-	if regexp.MustCompile(`(?i)chmod\s+777\s+/`).MatchString(lc) {
+	if chmod777RootRe.MatchString(lc) {
 		return fmt.Errorf("command attempts 'chmod 777' on a root path, blocked for safety")
 	}
-	if regexp.MustCompile(`(?i)chown\s+root\s+/`).MatchString(lc) {
+	if chownRootRe.MatchString(lc) {
 		return fmt.Errorf("command attempts 'chown root' on a root path, blocked for safety")
 	}
 	return nil
@@ -169,7 +186,7 @@ func extraDangerousPatternChecks(cmd string) error {
 func basicPathSafetyChecks(cmd string) error {
 	lc := strings.ToLower(cmd)
 
-	if regexp.MustCompile(`rm\s+-rf\s+(/\s*$|/\*\s*$|~\s*$)`).MatchString(lc) {
+	if rmRfBroadRe.MatchString(lc) {
 		return fmt.Errorf("command looks like a mass delete (rm -rf) on a broad target, blocked for safety")
 	}
 

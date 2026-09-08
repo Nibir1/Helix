@@ -96,10 +96,14 @@ func IsOnline(timeout time.Duration) bool {
 func SafeTrim(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimRight(s, ";\n")
-	space := regexp.MustCompile(`[ \t]+`)
-	s = space.ReplaceAllString(s, " ")
+	s = horizontalSpaceRe.ReplaceAllString(s, " ")
 	return s
 }
+
+// horizontalSpaceRe is compiled once. SafeTrim runs on every command and every
+// piece of model output; compiling this from a constant on each call was pure
+// waste on the hot path.
+var horizontalSpaceRe = regexp.MustCompile(`[ \t]+`)
 
 //
 // ──────────────────────────────────────────────────────────────
@@ -107,18 +111,36 @@ func SafeTrim(s string) string {
 // ──────────────────────────────────────────────────────────────
 //
 
+// maliciousPatterns are the hard-block rules, compiled once at package load.
+//
+// They were rebuilt — four regexes compiled from constant strings — on every
+// call to ValidateCommand, which every command Helix runs must pass through.
+//
+// **The fourth pattern had never matched anything.** It was written
+// `>:\\s*/dev/sd[a-z]`, and inside a raw string `\\s` is an escaped backslash
+// followed by a literal `s`, so the rule read "a `>`, then a colon, then a
+// backslash, then optional letters s, then /dev/sd?" — a string no shell
+// produces. The rule intended to hard-block writes to a raw disk device, and
+// for as long as it existed `cat /dev/zero > /dev/sda` passed it. Measured, not
+// deduced: the shipped pattern matched exactly one of five real device-write
+// commands, and that one was the nonsense literal `>:\s/dev/sda`.
+//
+// The replacement covers the devices this actually has to mean on the hardware
+// Helix runs on. Naming only `sd[a-z]` would have fixed the letter of the rule
+// and not the rule: every modern Linux box boots off `nvme0n1`, and macOS
+// writes to `/dev/disk*` and `/dev/rdisk*`. `>` and `>>` are both covered
+// because the operator repeats, and spacing is irrelevant to the match.
+var maliciousPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)rm\s+-rf\s+/\s*`),
+	regexp.MustCompile(`(?i)format\s+[c-z]:`),
+	regexp.MustCompile(`(?i)dd\s+if=/dev/zero`),
+	regexp.MustCompile(`(?i)>\s*/dev/(?:sd[a-z]|hd[a-z]|vd[a-z]|nvme\d+n\d+|r?disk\d+)`),
+}
+
 // ValidateCommand performs basic command validation
 func ValidateCommand(command string) error {
 	if strings.TrimSpace(command) == "" {
 		return fmt.Errorf("empty command")
-	}
-
-	// Basic malicious pattern checks
-	maliciousPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)rm\s+-rf\s+/\s*`),
-		regexp.MustCompile(`(?i)format\s+[c-z]:`),
-		regexp.MustCompile(`(?i)dd\s+if=/dev/zero`),
-		regexp.MustCompile(`>:\\s*/dev/sd[a-z]`),
 	}
 
 	for _, pattern := range maliciousPatterns {

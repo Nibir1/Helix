@@ -23,7 +23,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: '1.27'
 
       - name: Install actionlint
         shell: bash
@@ -52,7 +52,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.26']
+        # 1.27, not 1.26, because of the fuzzing harness — see the note on the
+        # "Run Fuzzing Smoke Test" step below. The language version the code is
+        # written against is still go.mod's; this is the toolchain that runs it.
+        go-version: ['1.27']
 
     steps:
       - name: Checkout code
@@ -106,6 +109,23 @@ jobs:
       - name: Run Tests
         run: go test ./... -count=1
       
+      # Needs Go >= 1.27. On 1.26 this step fails intermittently with a bare
+      # "context deadline exceeded" and no failing input written to testdata —
+      # which is the tell, because a genuine fuzz failure always writes the
+      # crasher and prints a reproducer. It is a race in the fuzzing coordinator
+      # itself: when -fuzztime expires there is a window where the parent
+      # context is done but the worker context is not yet cancelled, so a
+      # worker's deadline error escapes the suppression that exists for exactly
+      # this and is reported as a test failure. Fixed upstream in 1.27
+      # (go.dev/issue/75804); the suppression there now also compares against
+      # the parent's ctx.Err().
+      #
+      # Do NOT "fix" a recurrence by retrying this step. A retry is the absence
+      # of a diagnosis. The previous red fuzz run WAS a real bug — a blocked
+      # worker in the sandbox path — so "it is probably the toolchain" is a
+      # conclusion to reach after looking, not before. The tell that separates
+      # them is above: a real crasher is written to testdata and printed as a
+      # reproducer, and a harness race is not.
       - name: Run Fuzzing Smoke Test
         run: make fuzz-ci
         
@@ -132,7 +152,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: '1.27'
 
       - name: Download Dependencies
         run: go mod download

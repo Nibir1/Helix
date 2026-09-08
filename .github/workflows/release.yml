@@ -20,10 +20,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Same toolchain CI tests with. This is the build that SHIPS, so a
+      # version that differs from the one the suite ran against means the tested
+      # binary and the published binary were produced by different compilers —
+      # a small risk, and a pointless one to carry. See ci.yml's fuzz step for
+      # why the pin moved off 1.26.
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: '1.27'
 
       # Install Syft for SBOM generation
       - name: Install Syft
