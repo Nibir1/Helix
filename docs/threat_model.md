@@ -66,3 +66,15 @@ The firewall therefore does not claim to "solve" prompt injection — it makes a
 successful attack require defeating five independent layers, and limits blast
 radius via the existing safety pipeline (validation, risk tiers, sandbox,
 typed confirmations).
+
+**That blast-radius argument is only as good as the pipeline behind it, and on
+2026-09-08 two of its rules turned out to be ornamental** (both fixed; see
+`SECURITY.md` §1). The hard-block rule against writing to a raw block device had
+a mis-escaped pattern and had never matched a real command, and the Medium tier
+for redirection required spaces on both sides of `>`, so `echo x >/dev/sda` was
+graded Low — the tier that does not ask. Neither was reachable *by* injection
+specifically; both were reachable by any planner output, which is the same
+population. The lesson this file should carry is about the shape of the claim
+rather than the two rules: "limits blast radius via the safety pipeline" is a
+statement about code that must be tested by behaviour, and a layer nobody has
+watched fire is a layer nobody knows is there.

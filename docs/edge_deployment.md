@@ -329,6 +329,13 @@ Run these inside Helix after install:
   availability, each judged against the project's targets with local and cloud
   paths graded separately. On an edge box this is the honest answer to "is this
   fast enough here", replacing a guess with the numbers from your own hardware.
+  Three defects in that grading were fixed on 2026-09-08 and two of them bite
+  hardest on exactly this hardware: a local voice missing from the reader's
+  provider list was measured against the *cloud* budget, and the TTS sample named
+  the head of the failover chain instead of the voice that answered — which on a
+  board configured cloud-primary-with-local-fallback is the difference between
+  grading the sidecar and grading the network. If you ran a soak before that
+  date, re-read the numbers rather than trusting the verdicts.
 - `/mictest` — 3-second capture self-test: proves the mic is actually being heard (level + dBFS +
   speech-gate verdict). The fastest way to catch a wrong input device on a headless board.
 - `/reboot check` — reports whether a newer Helix exists without installing or

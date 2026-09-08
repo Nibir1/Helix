@@ -28,8 +28,30 @@ The entry point for all user input. It uses a weighted evidence system to classi
 
 ### 3. Shell Safety & Sandbox (`internal/commands/safety/`, `internal/commands/sandbox.go`)
 A defensive pipeline; each stage can only refuse, never grant:
-1. **Validation**: Unicode hazard detection, quote/brace balancing, and malicious pattern blocking.
+1. **Validation**: Unicode hazard detection, quote/brace balancing, and malicious
+   pattern blocking (including redirection onto a raw block device — `/dev/sd*`,
+   `hd*`, `vd*`, `nvme*`, `disk*`, `rdisk*`).
 2. **Risk Classification**: Categorizes commands into Low, Medium, and High risk.
+   Redirection is detected by operator shape rather than by surrounding spaces,
+   so `echo x >f` grades the same as `echo x > f`, while `2>&1` — which writes no
+   file — stays Low.
+
+> **Two rules in stages 1 and 2 were inert until 2026-09-08**, and the pair is
+> worth keeping in front of anyone reading this pipeline as a design. The
+> device-write blocker's pattern was mis-escaped (`>:\\s*/dev/sd[a-z]`, where a
+> Go raw string turns `\\s` into a backslash and a literal `s`), so it demanded
+> a string no shell emits and `cat /dev/zero > /dev/sda` passed stage 1. Stage 2
+> then classified `echo x >/dev/sda` as **Low** — no confirmation — because its
+> redirection test was `strings.Contains(" > ")`. A pipeline whose stages "can
+> only refuse" still needs each stage to be capable of refusing, and neither of
+> these was tested by behaviour. Both now are, including a test asserting the old
+> pattern could not match, since a fix whose regression test would also pass
+> against the bug proves nothing.
+>
+> The same reading pass found the eleven `regexp.MustCompile` calls that sat
+> inside these two functions, recompiling constant patterns for every command
+> Helix considers: 995 allocations to classify five ordinary commands, now 5. An
+> AST test fails on any regexp compiled inside a function in that package.
 3. **Approval Posture** (`internal/agent/permission.go`): the session's
    `/permissions` mode decides which of those tiers is asked about. It layers on
    top of the tiers and never replaces them — high risk stays blocked in every
@@ -414,6 +436,18 @@ voice, speech (TTS first audio), vision and ambient, each an NDJSON file under
   and local budgets, so a whisper-local turn is graded against the 6s local
   target and a Groq turn against the 3s cloud one. A blended figure would be
   measured against a threshold that applies to neither half.
+
+  Two bugs sat in that sentence until 2026-09-08, and both were about *which*
+  provider. The TTS sample recorded the head of the failover chain rather than
+  the voice that answered, which differ in exactly the case that matters — a
+  failover — so a cloud synthesis over the 800ms budget was filed under a local
+  primary and passed the 1.5s one. `ChainHealth.Used` had been recorded for
+  precisely this and was not being read. And `LocalProviders` omitted
+  `csm-local`, grading a deliberately slow local voice against the cloud budget.
+  The map is a hand-kept copy of what the adapters know, and has to be — this
+  package may import nothing but the standard library — so it now has a drift
+  guard in `internal/speech` that fails in both directions: a local provider
+  missing, or a cloud provider listed.
 - **The summaries refuse to overstate.** A p95 is reported only above 20 samples;
   below that the maximum is shown as the maximum. A metric whose median passes
   while its worst case fails reads "typical only". An absent file is "not
@@ -426,6 +460,16 @@ voice, speech (TTS first audio), vision and ambient, each an NDJSON file under
   (each process counts from its own start). The longest gap is reported beside the
   percentage because a percentage cannot distinguish one long outage from many
   short ones.
+- **An untimestamped record is not a data point.** `Load` deliberately keeps a
+  line whose `ts` is missing or unparseable, because a latency or category
+  summary needs no clock — but such a record carries the zero time, and the
+  availability summary was including it. It sorted ahead of every heartbeat, so
+  the first gap was measured from year 1 (printed as 2562047h), the step up from
+  its counter read as a restart, and it inflated the observed count against a
+  window it was excluded from. The time-series summaries now filter to
+  timestamped records first, which the rest of the package already did — the
+  wake summary had guarded this from the start, which is what made the omission
+  visible.
 - **Telemetry-free, grep-enforced**, like `diagnostics` and `journal`.
 
 ### 5f. Restart Continuity (`internal/session/continuity.go`)

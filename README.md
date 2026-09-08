@@ -115,6 +115,12 @@ make current   # Builds the optimized binary
 ./dist/helix   # Launches Helix
 ```
 
+Building needs Go 1.25+ (the badge above, and `go.mod`). If you intend to run the fuzz
+targets, use Go 1.27+ — see the note under
+[Enterprise Hardening](#enterprise-hardening--supply-chain-security). `make info` lists every
+target with what it does, and `make release-check` runs everything a release checks while
+tagging nothing.
+
 ---
 
 ## The "Helix Inversion": One Prompt to Rule Them All
@@ -396,13 +402,16 @@ Every shell step flows through `ValidateAndCleanShellCommand`:
 - **Quick unmatched quote detection** with auto‑fix attempt.
 - **Strict balanced quote & brace validation**.
 - **Extra high‑level rules:** Blocks `curl ... | sh`, `wget ... | bash`, `eval`, and `mkfs`.
+- **Raw block devices:** Blocks redirection onto a disk itself — `> /dev/sda`, `>> /dev/nvme0n1`, and the `hd*`/`vd*`/`disk*`/`rdisk*` families — whatever the spacing. Reading a device, and writing to `/dev/null`, are untouched.
 - **Light path sanity checks:** Catches `rm -rf /` and parent directory traversals (`..`) combined with write operators.
 
 ### 2. Risk Classification (Low / Medium / High)
 `AnalyzeShellRisk` classifies commands:
 - **Low** – harmless, read‑only (e.g. `ls`, `cat`). Executes directly.
-- **Medium** – file‑modifying (e.g. `sed -i`, redirections `>`). Shows reasons and asks: `Execute anyway? [y/N]`
+- **Medium** – file‑modifying (e.g. `sed -i`, `chmod`, `chown`, and any redirection that writes). Shows reasons and asks: `Execute anyway? [y/N]`. **Spacing is irrelevant** — `echo x > f`, `echo x >f` and `cat a 2>err.log` are all Medium, while `2>&1` writes no file and stays Low.
 - **High** – catastrophic patterns (e.g. `rm -rf`, pipe‑into‑shell). Hard-blocked.
+
+> Those two lines describe a fix, not a design: until 2026-09-08 the Medium tier tested for `" > "` with a space on each side, so `echo x >f` — the same command, one space apart — was **Low**, the tier that runs without asking. The device-write hard block had a mis-escaped pattern and had never matched anything. Both are now asserted by behaviour, and the details are in [docs/SECURITY.md](docs/SECURITY.md) §1.
 
 ### 3. Directory Sandbox (Advisory)
 All shell commands execute via a `DirectorySandbox`:
@@ -518,7 +527,7 @@ helix ./scripts/build.sh
 Helix is built with a verified, mathematically defensible supply chain and rigorous testing harnesses:
 
 - **SBOM & Cryptographic Signing:** Every release artifact ships with an SPDX Software Bill of Materials (via `syft`) and is cryptographically signed using Sigstore keyless signing (`cosign`).
-- **Continuous Fuzzing:** The safety surface (shell validation, JSON planner parsing, sandbox path resolution) is continuously fuzzed with invariant assertions to prevent ReDoS and state-machine bypasses.
+- **Continuous Fuzzing:** The safety surface (shell validation, JSON planner parsing, sandbox path resolution, WAV and pricing parsers, the voice-log redactor, the daemon's NDJSON IPC) is continuously fuzzed with invariant assertions to prevent ReDoS and state-machine bypasses. Thirteen targets, one list shared by `make fuzz` and `make fuzz-ci` so the deep run and the smoke run cannot cover different things. Fuzzing needs **Go 1.27** or newer: 1.26's coordinator can fail a run at its own deadline (go.dev/issue/75804), which looks exactly like a red test and is not one — the difference is that a genuine failure writes the crashing input to `testdata/` and prints a reproducer.
 - **E2E TTY Harness:** A pseudo-terminal (PTY) test suite boots the real Helix binary against a mock provider, proving the safety pipeline end-to-end with zero real AI and zero network.
 - **Telemetry-Free Crash Diagnostics:** Panics and fatal signals generate local, 0600, secret-redacted JSON crash reports (`~/.helix/crash-*.json`). The diagnostics package imports zero networking primitives (grep-verified in CI), ensuring field failures are debuggable without violating user privacy.
 
@@ -673,8 +682,8 @@ API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions,
 * Multi-layer safety pipeline (Unicode validation → risk scoring → sandbox → execution)
 * **Kernel-Grade Confinement** (Landlock/Seatbelt) for `/sandbox strict`
 * Automatic quote/brace/syntax repairs for minor command issues
-* Detection of destructive patterns (e.g., `rm -rf /`, `curl | sh`, `eval`)
-* Medium-risk command confirmation prompts (`sed -i`, redirections)
+* Detection of destructive patterns (e.g., `rm -rf /`, `curl | sh`, `eval`, `> /dev/sda`)
+* Medium-risk command confirmation prompts (`sed -i`, `chmod`, any writing redirection — spacing-independent)
 * Cross-shell integration: bash, zsh, fish, PowerShell, CMD
 
 ### Git Automation (Safe + Dangerous Modes)

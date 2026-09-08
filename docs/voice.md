@@ -435,6 +435,17 @@ measurement of them.
 
 Samples are local NDJSON under `~/.helix/metrics/`, wiped by `/purge`.
 
+**"Graded separately" was getting the provider wrong in two ways until
+2026-09-08.** The TTS sample recorded the *head of the failover chain* rather
+than the voice that answered — the same in the ordinary case, and different in
+the one that matters, so a cloud synthesis that missed its 800 ms budget was
+filed under a local primary and graded against 1.5 s. And `csm-local` was
+missing from the reader's list of local providers, so CSM, which is slower than
+playback by design on anything without a discrete GPU, was measured against the
+cloud budget and always read as failing. The registry already knew both facts
+(`ChainHealth.Used`, and each adapter's `IsLocal()`); the reader was not asking.
+A test now fails if any adapter's own answer disagrees with the metrics reader.
+
 ---
 
 ## 9. Setup

@@ -69,11 +69,23 @@ jobs:
       - name: Download Dependencies
         run: go mod download
 
-      # ROOT-CAUSE FIX: golangci-lint v1.59.1 predates Go 1.25 and cannot read
-      # its type information, which produced bogus
-      # "undefined: beep / isatty / runewidth (typecheck)" errors even with all
-      # modules downloaded. The v2 release line is the first with full Go 1.25+
-      # support. `go install` works identically on bash and PowerShell runners.
+      # **The linter version and the Go version are ONE decision.** golangci-lint
+      # embeds a type-checker built against a specific Go release and cannot read
+      # export data from a newer one. This has now bitten twice, identically:
+      # v1.59.1 could not read Go 1.25 ("undefined: beep / isatty / runewidth"),
+      # and v2.5.0 could not read Go 1.27 —
+      #
+      #   could not load export data: internal error in importing
+      #   "internal/byteorder" (cannot decode ..., export data version 4 is
+      #   greater than maximum supported version 2)
+      #
+      # — on all three OSes, before a line of Helix was type-checked. The tell is
+      # that the errors name the STANDARD LIBRARY inside the toolchain cache, not
+      # this repository, and Windows reported "0 issues" while exiting 1.
+      #
+      # So: v2.13.2 is built with go1.27.0 and is the pin that matches the
+      # go-version above. Moving one without the other is the failure, not the
+      # fix. `go install` works identically on bash and PowerShell runners.
       # Retried, because this step's failures are not this project's failures.
       # A build of golangci-lint pulls ~200 modules from proxy.golang.org, and a
       # single HTTP/2 stream error there ("INTERNAL_ERROR; received from peer")
@@ -88,11 +100,11 @@ jobs:
       # every Windows run with "Missing opening '(' after keyword 'for'". The
       # single-line `go install` it replaced worked in both shells by accident
       # of being one command; a loop has to say which shell it is written for.
-      - name: Install golangci-lint (Go 1.25-compatible)
+      - name: Install golangci-lint (matched to the Go version above)
         shell: bash
         run: |
           for attempt in 1 2 3; do
-            if go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0; then
+            if go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2; then
               exit 0
             fi
             echo "::warning::golangci-lint install failed (attempt $attempt/3) — retrying"

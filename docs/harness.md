@@ -85,6 +85,19 @@ The mode is a **filter on the question**, not on the gates:
 - Voice-originated plans stay capped at medium risk regardless of posture.
 - Hooks still run, and a blocking one can still refuse.
 
+**The table is only as good as the tier each command gets**, which is a
+different package (`internal/commands/safety`) and was wrong in two ways until
+2026-09-08. Under the default `ask` posture, Low **runs**, so a command graded
+Low is a command that happens without a question — and redirection was graded by
+testing for `" > "` with a space on each side. `echo x > f` asked; `echo x >f`
+ran. `echo key >~/.ssh/authorized_keys` ran. Separately, the hard block against
+redirecting onto a raw disk device had a mis-escaped pattern and had never
+matched anything, so `cat /dev/zero > /dev/sda` reached the tiers at all rather
+than being refused before them. Both are fixed and pinned by behaviour tests;
+the detail is in `SECURITY.md` §1. Worth keeping in mind when reading any row
+above: this table describes what a posture does with a tier, and says nothing
+about whether the tier is right.
+
 `/permissions auto` asks for confirmation before it takes effect, because it is
 the only mode that removes a prompt the user would otherwise have seen. The
 choice persists to `~/.helix/config.json`, and a non-default posture is announced

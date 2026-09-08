@@ -94,6 +94,45 @@ Full model: `docs/threat_model_voice.md`. Policy summary: `docs/SECURITY.md`.
 
 The report refuses to flatter: it will not print a p95 a small sample cannot support, it says "not measured" rather than implying a pass, and where the median meets a budget but the worst case does not it says **typical only**.
 
+### Fixed after auditing the code against its own documents
+
+Read top-to-bottom against this repository's roadmap, five defects turned up that
+no test had reached and no hardware was needed to find. Four sat in the layer
+that *reports* on Helix rather than in a feature, which is the pattern worth
+naming: the numbers a release is judged by get less review than the code they
+judge.
+
+- **A hard-block rule had never matched anything.** The pattern refusing
+  redirection onto a raw disk was written `>:\\s*/dev/sd[a-z]`, and in a Go raw
+  string `\\s` is a backslash followed by a literal `s` — so it demanded the text
+  `>:\` and matched nothing a shell produces. `cat /dev/zero > /dev/sda` passed
+  it. Writes to `/dev/sd*`, `hd*`, `vd*`, `nvme*`, `disk*` and `rdisk*` are now
+  refused whatever the spacing; reads and `/dev/null` are untouched.
+- **A one-space gap in the risk tiers.** Redirection was detected with
+  `strings.Contains(" > ")`, so `echo x > f` was Medium and asked for
+  confirmation while `echo x >f` — the same command — was **Low** and did not.
+  `echo key >~/.ssh/authorized_keys` was Low. Redirection is now matched by
+  operator shape; `2>&1` writes no file and stays Low.
+- **The TTS latency sample named the wrong provider.** It recorded the head of
+  the failover chain rather than the voice that actually spoke, and those differ
+  in exactly the case that matters — so a cloud synthesis over its 800 ms budget
+  was filed under a local primary and graded against 1.5 s.
+- **`csm-local` was graded against the cloud budget**, having been left out of
+  the metrics reader's list of local providers. CSM is deliberately slower than
+  playback without a GPU, so every honest measurement of it read as a hard
+  failure.
+- **One unparsable timestamp broke the daemon panel.** Such a line is kept on
+  purpose (a latency summary needs no clock) but carries the zero time, and the
+  availability summary was counting it: the longest gap came out as **2562047 h**,
+  a phantom restart appeared, and the observed total was inflated against a
+  window the line was excluded from.
+
+Along the way, eleven `regexp.MustCompile` calls were removed from inside the two
+functions every command passes through — 995 allocations to classify five
+ordinary commands, now 5. Each fix is pinned by a test that fails against the old
+code, including one asserting the old device pattern really was inert, because a
+regression test that also passes against the bug proves nothing.
+
 ### Fixed after real-hardware testing
 
 A live session on a second machine surfaced defects no test had reached:
@@ -254,6 +293,13 @@ cd Helix
 make current   # Builds the optimized binary
 ./dist/helix   # Launches Helix
 ```
+
+Building needs Go 1.25+. Running the fuzz targets (`make fuzz`, `make fuzz-ci`)
+needs **Go 1.27+**: on 1.26 the fuzzing coordinator can fail a run at its own
+deadline with `context deadline exceeded` (go.dev/issue/75804), which is
+indistinguishable from a red test until you notice that no crashing input was
+written to `testdata/`. CI, the release build and the security scan are all
+pinned to 1.27 for that reason.
 
 ---
 

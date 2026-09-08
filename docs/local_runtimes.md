@@ -518,6 +518,16 @@ make live-csm     # attaches to a running csm.rs and reports the real-time facto
 It skips loudly if no sidecar is listening, and prints the RTF plus a note when
 the machine is slower than real time.
 
+`/blackbox stats` is the other half of this, and it was **grading CSM against the
+wrong budget until 2026-09-08**: `csm-local` had been left out of the metrics
+reader's list of local providers, so its time-to-first-audio was judged against
+the 800 ms *cloud* target rather than the 1.5 s local one. On the hardware this
+table describes as expected-slow, that turned an honest measurement into a
+reported failure — the report agreeing with the table would have been the useful
+outcome. A test now walks the speech registry and fails if any adapter's own
+`IsLocal()` disagrees with the reader, in either direction, so a future local
+voice cannot be added without the report learning about it.
+
 ## 3.6 Conversational context — the part that makes CSM CSM
 
 CSM's distinguishing capability is not its voice, it is that its prosody is

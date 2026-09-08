@@ -90,4 +90,64 @@ if problems:
 print("shell declarations: every Windows-capable multi-line step names its shell")
 PY
 
+# --- 3. Toolchain pins that must agree -------------------------------------
+#
+# Three files name the golangci-lint version and four name the Go version, and
+# they are not independent choices. golangci-lint carries a type-checker built
+# against a specific Go release and cannot read export data from a newer one, so
+# a Go bump without a linter bump fails every job before a line of this
+# repository is type-checked — with errors naming the STANDARD LIBRARY inside
+# the toolchain cache rather than any file here. That has now happened twice
+# (v1.59.1 against Go 1.25, v2.5.0 against Go 1.27), which is twice more than a
+# version string copied into three files deserves.
+python3 - <<'PIN' || fail=1
+import glob
+import re
+import sys
+
+lint_pin = re.compile(r"golangci-lint@(v[0-9]+\.[0-9]+\.[0-9]+)")
+
+found = {}
+for path in [".github/workflows/ci.yml", "Makefile", ".golangci.yml"]:
+    try:
+        text = open(path).read()
+    except OSError:
+        continue
+    versions = set(lint_pin.findall(text))
+    if versions:
+        found[path] = versions
+
+if not found:
+    print("no golangci-lint pin found to check")
+else:
+    everything = set().union(*found.values())
+    if len(everything) != 1:
+        print("golangci-lint pins disagree:\n")
+        for path, versions in sorted(found.items()):
+            print("  %s: %s" % (path, ", ".join(sorted(versions))))
+        print("\nAll three must name one version: CI installs it, the Makefile hint")
+        print("tells a developer what to install, and .golangci.yml declares what")
+        print("the config was verified against.")
+        sys.exit(1)
+    print("golangci-lint pin: %s agrees across %d files" % (everything.pop(), len(found)))
+
+go_pin = re.compile(r"go-version:\s*\[?'([0-9]+\.[0-9]+)'\]?")
+go_found = {}
+for path in sorted(glob.glob(".github/workflows/*.yml")):
+    versions = set(go_pin.findall(open(path).read()))
+    if versions:
+        go_found[path] = versions
+
+if go_found:
+    everything = set().union(*go_found.values())
+    if len(everything) != 1:
+        print("\nGo version pins disagree across workflows:\n")
+        for path, versions in sorted(go_found.items()):
+            print("  %s: %s" % (path, ", ".join(sorted(versions))))
+        print("\nThe build that ships, the suite that tests it and the scan that")
+        print("audits it should agree on the compiler. See SECURITY.md.")
+        sys.exit(1)
+    print("go-version pin: %s agrees across %d workflows" % (everything.pop(), len(go_found)))
+PIN
+
 exit $fail

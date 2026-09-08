@@ -16,9 +16,25 @@ While it includes reconnaissance engines (`/scan`) and exploit references (via E
 Helix treats AI-generated output as untrusted. To prevent catastrophic accidents, the following safety layers are enforced:
 
 ### 1. Shell Safety Pipeline
-- **Hard Blocks**: Destructive patterns like `rm -rf /`, `mkfs`, `curl | sh`, and `eval` are blocked at the parser level.
-- **Risk Tiering**: Medium-risk commands (e.g., `sed -i`, redirections) require explicit user confirmation.
+- **Hard Blocks**: Destructive patterns like `rm -rf /`, `mkfs`, `curl | sh`, `eval`, and
+  redirection onto a **raw block device** (`> /dev/sda`, `>> /dev/nvme0n1`, and the `hd*`,
+  `vd*`, `disk*`, `rdisk*` families) are blocked at the parser level. Reading a device and
+  writing to `/dev/null` are untouched.
+- **Risk Tiering**: Medium-risk commands (e.g., `sed -i`, `chmod`, `chown`, and any
+  redirection that writes) require explicit user confirmation. Spacing does not change the
+  tier: `echo x > f`, `echo x >f` and `cat a 2>err.log` are all Medium. A descriptor
+  duplication (`2>&1`) writes no file and stays Low.
 - **Directory Sandbox**: Write and delete operations are confined to the current working directory and its subdirectories. Absolute paths outside the sandbox are rejected.
+
+> **Both of the guarantees above were false until 2026-09-08, and are recorded here rather
+> than quietly corrected.** The hard-block rule against device writes was written
+> `>:\\s*/dev/sd[a-z]`, where a Go raw string makes `\\s` a literal backslash and an `s` — so
+> it demanded the text `>:\` and matched nothing a shell produces. `cat /dev/zero > /dev/sda`
+> passed it. Separately, the risk tier for redirection tested for `" > "` with spaces on both
+> sides, so `echo x >/dev/sda` was classified **Low** — the tier that does not ask — and
+> `echo key >~/.ssh/authorized_keys` with it. Both rules are now asserted by behaviour rather
+> than by pattern text, including a test that the old expression really was inert, so a future
+> rewrite cannot make them ornamental again.
 
 ### 2. Git & Package Safeguards
 - **Typed Confirmations**: Dangerous Git operations (`push --force`, `reset --hard`, `clean -fdx`) require the user to type an exact confirmation phrase.
@@ -345,6 +361,24 @@ syft helix_Linux_x86_64.tar.gz
 
 ### Continuous Security Scanning
 Every commit and pull request is automatically scanned for known vulnerabilities in Go dependencies using `govulncheck` and for static application security testing (SAST) using GitHub CodeQL. See `.github/workflows/security.yml` for details. You can run these checks locally via `make sec-scan`.
+
+**One toolchain across all three workflows (Go 1.27).** `govulncheck` reports against the
+standard library of the Go it runs under, so scanning with an older toolchain than the one
+that builds the release answers a question nobody asked. CI, the release build and the
+security scan are pinned to the same version for that reason; `go.mod`'s `go 1.25.1` is the
+language floor the source is written against, which is a different thing. The pin moved off
+1.26 because the fuzzing coordinator there could fail a green run at its own deadline
+(go.dev/issue/75804) — see `.github/workflows/ci.yml`.
+
+**The linter pin moves with it.** `golangci-lint` embeds a type-checker built against a
+specific Go release and cannot read export data from a newer one, so a Go bump alone fails
+every job before a line of Helix is checked — with errors naming the *standard library*
+inside the toolchain cache rather than any file in this repository. That has happened twice
+now (v1.59.1 against Go 1.25, v2.5.0 against Go 1.27), so the version is pinned to
+**v2.13.2** — built with go1.27.0 — in `.github/workflows/ci.yml`, the `Makefile`'s
+install hint and `.golangci.yml`'s header, and `scripts/check-workflows.sh` fails if those
+three ever disagree or if the workflows stop agreeing about Go. A version string copied into
+three files needs a guard, not a convention.
 
 ## Reporting a Vulnerability
 If you discover a security vulnerability in Helix (e.g., a sandbox escape, a planner injection flaw, or a bypass of the safety pipeline), please report it responsibly.

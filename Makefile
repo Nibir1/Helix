@@ -43,9 +43,12 @@ lint:
 	@echo "Running golangci-lint..."
 	@golangci-lint run ./... --timeout=5m || (echo "" && \
 	 echo "If this failed to RUN (rather than reporting issues), your golangci-lint" && \
-	 echo "is probably v1 — it cannot read the v2 .golangci.yml. Install the version" && \
-	 echo "CI uses, so local and CI enforce the same rules:" && \
-	 echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0" && exit 1)
+	 echo "is the wrong version. Two ways that happens: a v1 binary cannot read the" && \
+	 echo "v2 .golangci.yml, and a binary built with an older Go cannot read this" && \
+	 echo "toolchain's export data ('export data version N is greater than maximum" && \
+	 echo "supported version M' naming files inside the Go cache, not this repo)." && \
+	 echo "Install the version CI uses, so local and CI enforce the same rules:" && \
+	 echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2" && exit 1)
 
 # Reset generated state. Build artifacts, indexes, logs, caches.
 #

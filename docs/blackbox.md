@@ -379,6 +379,17 @@ flatters is worse than none:
   6s for a voice turn; 800ms vs 1.5s for first audio), so each sample is judged
   by the provider that produced it. A blended average would be measured against
   a threshold that applies to neither half.
+
+  *Two ways this was getting the provider wrong, both fixed 2026-09-08.* A TTS
+  sample recorded the **head of the failover chain** rather than the voice that
+  actually spoke, so on a failover — local primary, cloud fallback — a 900ms
+  cloud synthesis was filed under the local provider and passed the 1.5s local
+  budget instead of missing the 800ms cloud one. And `csm-local` was absent from
+  the list of local providers, so CSM — whose real-time factor is 1.69× by
+  design, because it wants a discrete GPU — was graded against the cloud budget
+  and every honest measurement of it read as a hard failure. A test now walks
+  the speech registry and fails if any adapter's own `IsLocal()` disagrees with
+  the metrics reader, in either direction.
 - **It will not show a p95 it cannot support.** Below 20 samples you get the
   maximum, labelled as the maximum.
 - **It distinguishes "typical" from "always".** When the median meets the budget
@@ -390,6 +401,15 @@ heartbeats observed against heartbeats expected, restarts, and the longest gap
 between them. The gap is shown next to the percentage on purpose — 99.5% of three
 days is 21 minutes of downtime, and it matters a great deal whether that was one
 outage or four hundred.
+
+A heartbeat line whose timestamp cannot be parsed is **not** a data point, which
+took a fix (2026-09-08). The reader keeps such a line on purpose — a latency or
+category summary needs no clock — but it carries the zero time, and it used to
+sort ahead of every real heartbeat: the gap to the first one was measured from
+year 1 and printed as **2562047h**, the step up from its counter read as the
+counter falling and invented a restart, and it still counted toward the observed
+total while being excluded from the window. One malformed line in a 72-hour soak
+was enough to report a phantom restart and a three-century outage.
 
 The wake section reports events per hour and how many wakes produced no turn.
 That second number is an **upper bound on false positives, not a measurement**:

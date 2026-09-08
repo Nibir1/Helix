@@ -111,3 +111,19 @@ such attempts loud (spoken confirmations, chimes, journal entries) and bounded
 (no High risk, no destructive git, no typed-confirmation actions). This is the
 accepted trade-off for a voice-first assistant; it cannot be eliminated without
 eliminating voice.
+
+**The Medium cap is a ceiling, and until 2026-09-08 the floor had a hole worth
+recording here.** Every control above is stated in terms of tiers, which assumes
+the tiers are assigned correctly — and the Medium tier for redirection tested for
+`" > "` with a space on each side. So a plan step written `echo key
+>~/.ssh/authorized_keys` was graded **Low**: not capped, not confirmed, not
+loud, just run. Nothing about the voice channel caused it (a typed turn reached
+the same tier), but the voice channel is where it mattered most, because "the
+attempt is loud" is the entire residual-risk argument and a Low-risk step makes
+no sound at all. Redirection is now matched by operator shape rather than by
+spacing, and the separate hard block against writing to a raw disk device — which
+had never matched anything, being mis-escaped — works too. See `SECURITY.md` §1.
+
+The general lesson, since this file will be read again after the next feature:
+a control expressed as "capped at Medium" inherits every bug in how Medium is
+decided, and those bugs live in a different package from this policy.
