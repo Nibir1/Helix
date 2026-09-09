@@ -51,10 +51,21 @@ type InputEvent struct {
 // what ships; InputEvent and Channel are the load-bearing parts of this package.
 //
 // Nothing in cmd/ or internal/ outside this package consumes Source today, so
-// HybridSource is built and tested but not reachable by a user. Wiring it means
-// letting a blocking raw-mode line read and a voice capture race, which is a real
-// change to the REPL rather than a plumbing job — see the P7.1 note in the
-// roadmap. Keep this comment honest if that changes.
+// HybridSource is built and tested but not reachable by a user.
+//
+// UPDATE 2026-09-09, keeping this comment honest as it asked to be: hybrid
+// input SHIPPED, and not through here. `shell.ArmedWait` holds an idle prompt
+// open to the keyboard and the microphone at once and it is on by default, so
+// P7.1's user-facing capability is delivered — but by never starting the
+// blocking read (poll(2) reports a waiting keystroke without consuming it)
+// rather than by racing two sources and cancelling the loser. That inverts the
+// premise HybridSource was built on: there is no loser to cancel, so a
+// multiplexer over two live sources is not what the REPL needs.
+//
+// So this type is not "waiting to be wired" any more; it is a design that was
+// superseded. It stays because InputEvent and Channel around it are
+// load-bearing, and deleting it is a separate decision from recording that it
+// is no longer the plan.
 type Source interface {
 	// Events starts the source and returns its event stream. The channel
 	// closes when ctx is cancelled or Close is called.

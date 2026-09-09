@@ -24,8 +24,8 @@ func withWakeConfig(t *testing.T, enabled, always bool) {
 	saved := cfg
 	t.Cleanup(func() { cfg = saved })
 	cfg = &config.Config{}
-	cfg.Speech.WakeWord.Enabled = enabled
-	cfg.Speech.WakeWord.AlwaysListen = always
+	cfg.Speech.WakeWord.Enabled = config.BoolPtr(enabled)
+	cfg.Speech.WakeWord.AlwaysListen = config.BoolPtr(always)
 }
 
 // Enabling the wake word opens the microphone at a prompt the user may sit at
@@ -123,9 +123,9 @@ func TestVoiceStartsAlwaysListenPredicate(t *testing.T) {
 // This test asserted the opposite and is rewritten rather than deleted: a
 // default-on microphone is defensible only while these hold, so they are what a
 // future change must trip over.
-func TestAlwaysListenIsOffByDefault(t *testing.T) {
+func TestWakeAndTheArmedPromptAreOnByDefault(t *testing.T) {
 	def := config.WakeWordDefaults()
-	if !def.Enabled || !def.AlwaysListen {
+	if !def.Listening() || !def.PromptArmed() {
 		t.Fatal("the wake word and the armed prompt are both on by default now")
 	}
 
@@ -147,7 +147,7 @@ func TestAlwaysListenIsOffByDefault(t *testing.T) {
 	if body == "" {
 		t.Fatal("disableWakeWord not found — the test cannot reach what it checks")
 	}
-	if !strings.Contains(body, "AlwaysListen = false") {
+	if !strings.Contains(body, "AlwaysListen = config.BoolPtr(false)") {
 		t.Error("disableWakeWord leaves the prompt armed — one command turned both on, so " +
 			"one command has to turn both off")
 	}
@@ -288,5 +288,94 @@ func TestDeadScannerStillFallsThrough(t *testing.T) {
 	}
 	if notice := wakeLapseNotice(wakeInterrupted); notice != "" {
 		t.Errorf("Ctrl+C is an explicit act and needs no explanation, got %q", notice)
+	}
+}
+
+// TestHelpBlackBoxStatesTheDefault renders `/help /blackbox` and reads it.
+//
+// This is the surface the owner actually consulted when nothing listened, and
+// it said "hands-free waking between turns" — a description of the feature
+// BEFORE the two switches merged, and one that answers neither "is it on?" nor
+// "why is it not?". Both questions had answers the help text withheld.
+//
+// Rendered rather than inspected as a slice (§9 rule 12): the detail block is
+// assembled from three sources and printed through a panel, and asserting on
+// blackBoxDetail() alone would pass if the panel dropped it.
+func TestHelpBlackBoxStatesTheDefault(t *testing.T) {
+	out := shell.Plain(captureStdout(t, func() { printCommandDetail("/blackbox") }))
+	if out == "" {
+		t.Fatal("/help /blackbox rendered nothing — the test cannot reach what it checks")
+	}
+	for _, want := range []string{
+		// That it is already on, in words a reader does not have to infer.
+		"already listening",
+		// How to use it without a command.
+		"make any sound to go live",
+		// The keyboard is not taken away — the owner's actual worry.
+		"keep typing and nothing",
+		// The upgrade case, which is the one live install that does NOT listen.
+		"/blackbox wake on once",
+	} {
+		if !strings.Contains(strings.ToLower(out), strings.ToLower(want)) {
+			t.Errorf("/help /blackbox never says %q\n--- rendered ---\n%s", want, out)
+		}
+	}
+
+	// And the one-line summary in the subcommand column must not go back to
+	// describing the between-turns half as if it were the whole feature.
+	var wake string
+	for _, line := range blackBoxUsage {
+		if strings.Contains(line, "wake on|off") {
+			wake = line
+		}
+	}
+	if wake == "" {
+		t.Fatal("blackBoxUsage no longer lists the wake switch")
+	}
+	if !strings.Contains(wake, "default") {
+		t.Errorf("the wake usage line does not say it is on by default: %q", wake)
+	}
+	if strings.Contains(strings.ToLower(wake), "between turns") &&
+		!strings.Contains(strings.ToLower(wake), "prompt") {
+		t.Errorf("the wake usage line describes only the between-turns half: %q", wake)
+	}
+}
+
+// TestWakeStatusOffNamesTheConfig renders the panel a confused user reaches for.
+//
+// OFF can only be an explicit `"enabled": false`, because an absent key reads
+// as the default and the default is on — so the panel can say WHY without
+// guessing. It matters because the most common reason a reader sees this row is
+// a `false` no human wrote: older builds stored the setting as a plain bool,
+// which is always marshalled, so every config they saved carries one.
+//
+// The old text was "/blackbox wake on enables hands-free conversation", which
+// answers "what do I type" and not "why is an on-by-default feature off" — the
+// question the owner actually had, twice.
+func TestWakeStatusOffNamesTheConfig(t *testing.T) {
+	withWakeConfig(t, false, false)
+	out := shell.Plain(captureStdout(t, printWakeStatus))
+	if out == "" {
+		t.Fatal("printWakeStatus rendered nothing")
+	}
+	for _, want := range []string{
+		"enabled: false", // the key in their file, spelled as it appears
+		"on by default",  // so they know this is a deviation, not the norm
+		"/blackbox wake on",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the off state never says %q\n--- rendered ---\n%s", want, out)
+		}
+	}
+
+	// And the ON state must not claim the prompt is listening: that is the row
+	// below, which checks a recorder and a transcriber this one does not.
+	withWakeConfig(t, true, true)
+	on := shell.Plain(captureStdout(t, printWakeStatus))
+	if strings.Contains(on, "enabled: false") {
+		t.Errorf("the on state reports a config value that is not set:\n%s", on)
+	}
+	if !strings.Contains(on, "AT THE PROMPT") {
+		t.Error("the panel must report where the wake word is heard, not only whether it is on")
 	}
 }

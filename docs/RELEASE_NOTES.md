@@ -51,6 +51,21 @@ The default is a reversal of the strict opt-in this feature shipped with, made
 deliberately. `speech.wake_word.enabled: false` turns it off, and
 `docs/threat_model_voice.md` V2b records what the reversed default costs.
 
+An upgrade honours a config you already have. `enabled` and `always_listen` are
+tri-state (`*bool`): absent means the new default, and an explicit `false` stays
+false — the same shape `llm.enabled` uses, for the same reason. Without it a
+reversed default is silently inert on every config that has ever been written,
+which is exactly how the first attempt at this shipped: on by default, and off
+in every real session.
+
+**If you are upgrading, expect to type `/blackbox wake on` once.** The old build
+stored these as plain bools, so every config it ever saved has a literal
+`"enabled": false` on disk — a marshalled zero value, not a choice you made. The
+new default only reaches a config where the key is *absent*, and an explicit
+`false` is deliberately never overridden: it is the documented opt-out, so
+reading it as consent to open a microphone would be a guess in the one direction
+ADR-005 forbids. One typed command, and it persists.
+
 ### Sesame CSM-1B — a local voice that sounds like a conversation
 
 The speech model behind Sesame's "crossing the uncanny valley of voice" demo, running on your own machine with **no Python, no Docker and no API calls**. Not the whole demo — what Sesame open-sourced is the speech *generator*, which cannot produce text — so Helix's planner still decides what to say. What it changes is how that sounds.
@@ -210,7 +225,7 @@ All 57 slash commands, the first-run stages, the startup path and the `helix dae
 
 This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
 
-- **Hybrid mode is not reachable.** `input.HybridSource` exists and is unit-tested, but nothing constructs one: simultaneous typing and speaking would mean racing a blocking raw-mode line read against a voice capture, which is a change to the interactive loop rather than plumbing.
+- ~~**Hybrid mode is not reachable.**~~ **Shipped 2026-09-08, on by default 2026-09-09** — see *Waking without touching the keyboard* above. It arrived by inverting the premise: the blocking read is never *started* rather than raced, so `input.HybridSource` is superseded rather than finally wired. It is **Unix-only**; Windows reports unavailable and says why.
 - **Music ducking was specified and is not implemented** — and as written it cannot be: Helix controls only its own voice, so "ducking" would make it *less* audible. Music is recognised and deliberately not remarked upon.
 - **Cloud-path latency numbers are unmeasured.** The one figure anyone measured (2,280 ms TTS) was against the buffered path that streaming replaced, so quoting it would defame code that no longer exists.
 - **Real keyword spotting needs the sidecar.** The default engine detects speech onset; it will wake on "hey helix", on "hello there" and on a dropped mug.
@@ -224,7 +239,11 @@ This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
 
 ### Upgrading from v1.0.0
 
-Nothing is required. Voice is entirely opt-in: existing configs keep working, every new subsystem is off until you enable it, and typed behaviour is unchanged by design (the PTY end-to-end suite is the proof). To start talking:
+Existing configs keep working and typed behaviour is unchanged by design (the PTY end-to-end suite is the proof). One thing to know rather than nothing at all:
+
+**Wake listening is on for a fresh install and off for an upgrade, and that is not a bug.** v1.0.0 stored `speech.wake_word.enabled` as a plain `bool`, which is always written out, so any config it saved holds a literal `false` nobody chose. The new default fills the key only when it is **absent**, and an explicit `false` is never overridden — it is the documented opt-out. Type `/blackbox wake on` once and it persists. Everything else is still off until you ask for it.
+
+To start talking:
 
 ```text
 /blackbox setup     # pick a chain — or take the recommended one

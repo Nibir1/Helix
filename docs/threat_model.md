@@ -42,7 +42,12 @@ planner into executing attacker-chosen commands.
 ## The voice channel is a different threat, deliberately
 A transcript is **not** data-only. Once speech is transcribed it becomes text
 with user authority, which is precisely what this firewall does not cover: a
-TV, a podcast, or a person in the room becomes an instruction. That surface has
+TV, a podcast, or a person in the room becomes an instruction. **And since
+2026-09-09 that surface is open by default:** wake listening ships on, so a
+fresh install is holding the microphone at an idle prompt without anyone
+enabling it. Nothing is transcribed until a sound wakes it, which is what keeps
+the exposure to entering live mode rather than to acting on room noise — the
+full accounting, including how to decline it, is threat **V2b**. That surface has
 its own model and its own controls (risk capped at Medium, typed confirmations
 structurally unreachable by voice, fail-closed prompts, a wake lockout) in
 `docs/threat_model_voice.md`. One control belongs here because it is a routing

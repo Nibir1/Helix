@@ -21,9 +21,14 @@
 // WHAT IT COSTS, stated because it is a privacy posture and not a convenience.
 // An armed prompt holds the microphone open for as long as the shell sits
 // idle — which is most of a working day, on a channel the user is not thinking
-// about. That is why it is off by default and why turning it ON must be typed:
-// ADR-005 says voice may reduce what is collected but never increase it, and
-// this increases it. Nothing is transcribed while armed (the detector scores
+// about. It is ON by default as of 2026-09-09 (owner decision; threat V2b
+// records the cost), and turning it on is still typed-only: ADR-005 says voice
+// may reduce what is collected but never increase it, and this increases it.
+//
+// The default reaches a config with no `enabled` key. It does NOT resurrect an
+// explicit `false`, including the one older builds wrote to disk as a plain
+// bool's zero value — `"enabled": false` is the documented opt-out, so reading
+// it as consent would be a guess in the one direction ADR-005 forbids. Nothing is transcribed while armed (the detector scores
 // chunks and discards them), which is the same construction ADR-005 §5's
 // between-turns lockout relies on — enforced there by
 // TestWakeLoopNeverTranscribes walking the wakeword package for a transcription
@@ -65,7 +70,7 @@ const (
 // mid-session.
 func alwaysListenArmed() bool {
 	ww := cfg.Speech.WakeWord
-	if !ww.AlwaysListen || !ww.Enabled {
+	if !ww.PromptArmed() {
 		return false
 	}
 	if !shell.KeyWaitSupported() {
@@ -192,7 +197,7 @@ func wakeHeardDetail(ev wakeword.WakeEvent) string {
 // subcommand's own report.
 func alwaysListenStatusLine() string {
 	ww := cfg.Speech.WakeWord
-	if !ww.AlwaysListen {
+	if !ww.PromptArmed() {
 		return shell.Badge(shell.StateIdle, "off") +
 			shell.Muted("  /blackbox wake on  ·  listens at the prompt and between turns")
 	}
@@ -203,7 +208,7 @@ func alwaysListenStatusLine() string {
 	if err := voiceEntryPreflight(); err != nil {
 		return shell.Badge(shell.StateWarn, "not armed") + shell.Muted("  "+err.Error())
 	}
-	if !ww.Enabled {
+	if !ww.Listening() {
 		return shell.Badge(shell.StateWarn, "not armed") +
 			shell.Muted("  wake word is off  ·  /blackbox wake on")
 	}

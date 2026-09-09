@@ -185,6 +185,20 @@ command. If you want only the narrow behaviour, set
 `speech.wake_word.always_listen: false` in `~/.helix/config.json`; there is no
 verb for it because nobody needs one.
 
+**Upgrading from a build before 2026-09-09? Type `/blackbox wake on` once.**
+Your config almost certainly holds a literal `"enabled": false` that you never
+chose: the old build stored this as a plain `bool`, and a plain bool is always
+written out, so every save recorded its zero value. The new default reaches a
+config where the key is **absent**, and it deliberately does not override an
+explicit `false` — that is the opt-out this document tells you to use, so
+resurrecting it would open a microphone on a guess. One typed command, and it
+persists for every session after.
+
+Both keys are tri-state (`*bool`) for that reason: absent, `true` and `false`
+are three different answers. A plain `bool` collapses the first two, and the
+first cut of this shipped that way — on by default in the code, off in every
+session that had a config file, with a passing test to match.
+
 Four things worth knowing:
 
 - **Turning it OFF works by voice; turning it ON is typed-only.** Opening a

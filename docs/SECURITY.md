@@ -217,7 +217,22 @@ structural rather than advisory:
   spoken path — so the rule below survives without an exception.
 - **Confirmations fail closed.** Silence, timeout, or an unintelligible answer
   counts as "no".
-- **The microphone opens only for a turn — unless you ask otherwise.** Enabling
+- **The microphone is open at an idle prompt on a fresh install.** This changed
+  on 2026-09-09 by owner decision and is stated here rather than left to be
+  discovered: wake listening (`/blackbox wake on|off`) defaults to **on**, so a
+  new install holds the recorder open while the shell sits idle and enters live
+  mode on any sound. What holds it up: nothing is transcribed while it waits
+  (the detector scores chunks and discards them), the state is announced once
+  per session and shown continuously by the standby HUD, it arms only where a
+  recorder, a transcriber and keystroke readiness all exist, turning it **on**
+  is typed-only while turning it **off** always works by voice, and one command
+  closes both the prompt and the between-turns halves. Set
+  `speech.wake_word.enabled: false` in `~/.helix/config.json` to decline it —
+  that value is honoured and never overridden by the default. Unix-only;
+  Windows reports unavailable. The residual risk — someone who installs Helix
+  and reads no banner — is recorded as threat **V2b** in
+  `docs/threat_model_voice.md`.
+- **Otherwise the microphone opens only for a turn — unless you ask otherwise.** Enabling
   sentence-boundary barge-in (`/config barge-in on`) lets Helix sample the mic in
   the pause between its own spoken sentences, so it can be interrupted by voice.
   That clip follows the same path as every capture — the recorder writes a temp

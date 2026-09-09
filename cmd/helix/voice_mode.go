@@ -101,7 +101,7 @@ func printLiveBanner() {
 	fmt.Println(shell.KV("EXIT", shell.Muted("say ")+shell.Value("\"manual mode\"")+
 		shell.Muted("  ·  or type /blackbox off"), w))
 
-	for _, line := range voiceModeWakeNotes(cfg.Speech.WakeWord.Enabled, cfg.Speech.WakeWord.Engine) {
+	for _, line := range voiceModeWakeNotes(cfg.Speech.WakeWord.Listening(), cfg.Speech.WakeWord.Engine) {
 		fmt.Println(shell.PanelLine(shell.Muted(line)))
 	}
 	fmt.Println(shell.PanelEnd())
@@ -851,7 +851,7 @@ func newWakeService() (wakeword.Service, error) {
 // event and how the listen ended; only wakeFired carries a usable event. The
 // DetectedAt timestamp feeds the §10 wake→execution latency metric.
 func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
-	if speech.Default() == nil || !cfg.Speech.WakeWord.Enabled {
+	if speech.Default() == nil || !cfg.Speech.WakeWord.Listening() {
 		return wakeword.WakeEvent{}, wakeNotEngaged
 	}
 	if _, err := speech.DetectRecorder(); err != nil {

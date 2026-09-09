@@ -434,6 +434,12 @@ for me" is one intention and the split confused people who enabled half of it.
 The narrow behaviour lives on as `speech.wake_word.always_listen: false` in
 config.
 
+Both keys are tri-state: **absent means the default (on)**, and an explicit
+`false` is honoured. That distinction is the feature, not a detail — a plain
+`bool` reads an absent key and `false` as the same value, so an existing config
+would pin the old opt-in default forever while `/status` and the docs both
+claimed listening was on.
+
 The mechanism explains the one limit. A blocked terminal read cannot be
 interrupted — measured three ways against a real PTY, all dead ends — so the
 read is never *started* until `poll(2)` says a keystroke is waiting, and that

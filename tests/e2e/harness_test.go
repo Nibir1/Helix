@@ -127,6 +127,39 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 			},
 		}
 	}
+	// A separate knob, because it changes what the shell DOES rather than what
+	// it can say: an STT chain is one of the three conditions alwaysListenArmed
+	// requires, so no e2e could reach the armed prompt without it. It is opt-in
+	// rather than folded into HELIX_E2E_SPEECH so the tests that assert voice
+	// is REFUSED without a transcriber keep asserting that.
+	//
+	// The endpoint is never called. Arming asks whether a chain exists, not
+	// whether it answers — which is the honest question, since a transcriber
+	// that is merely unreachable should still let the prompt listen.
+	if os.Getenv("HELIX_E2E_STT") != "" {
+		sp, ok := cfg["speech"].(map[string]interface{})
+		if !ok {
+			sp = map[string]interface{}{}
+			cfg["speech"] = sp
+		}
+		sp["stt"] = map[string]interface{}{
+			"provider": "openai",
+			"base_url": srv.URL + "/v1",
+		}
+	}
+	if wake := os.Getenv("HELIX_E2E_WAKE_JSON"); wake != "" {
+		sp, ok := cfg["speech"].(map[string]interface{})
+		if !ok {
+			sp = map[string]interface{}{}
+			cfg["speech"] = sp
+		}
+		var ww map[string]interface{}
+		if err := json.Unmarshal([]byte(wake), &ww); err != nil {
+			srv.Close()
+			t.Fatalf("HELIX_E2E_WAKE_JSON is not an object: %v", err)
+		}
+		sp["wake_word"] = ww
+	}
 	cfgBytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		srv.Close()

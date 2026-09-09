@@ -52,8 +52,17 @@ func TestWakeWordDefaultsAppliedWhenEmpty(t *testing.T) {
 	if ww.CooldownS <= 0 || ww.ChunkMs <= 0 {
 		t.Errorf("cooldown/chunk must be positive: %+v", ww)
 	}
-	if ww.Enabled {
-		t.Error("wake word must stay opt-in (off) by default")
+	// This asserted "wake word must stay opt-in (off) by default" and PASSED
+	// while the reversed default was broken — which makes it the test that
+	// should have caught the bug and instead concealed it. It was reading a
+	// plain bool that the load path never filled from the defaults, so it was
+	// agreeing with the old intention about a value the new code believed it
+	// had changed. A passing test that describes an intention nobody holds any
+	// more is worse than a missing one.
+	if !ww.Listening() || !ww.PromptArmed() {
+		t.Error("an empty wake_word section must inherit the ON default, at the prompt and " +
+			"between turns — read through the accessors, because the pointers are what " +
+			"distinguish absent from explicitly false")
 	}
 }
 
@@ -69,7 +78,7 @@ func TestWakeWordCustomPhraseSurvives(t *testing.T) {
 		t.Fatalf("LoadPreferences: %v", err)
 	}
 	ww := cfg.Speech.WakeWord
-	if !ww.Enabled {
+	if !ww.Listening() {
 		t.Error("enabled flag lost on reload")
 	}
 	if ww.Phrase != "computer" {
@@ -97,11 +106,11 @@ func TestWakeWordDefaults(t *testing.T) {
 	if d.Phrase == "" || d.Engine == "" || d.SensitivityPreset == "" {
 		t.Fatalf("defaults must be complete: %+v", d)
 	}
-	if !d.Enabled {
+	if !d.Listening() {
 		t.Error("the wake word is on by default now — a default nobody turns on was not " +
 			"\"Helix alive and my keyboard at the same time\"")
 	}
-	if !d.AlwaysListen {
+	if !d.PromptArmed() {
 		t.Error("and it listens at the PROMPT by default, which is the half that makes it " +
 			"one feature instead of two switches")
 	}
@@ -187,5 +196,92 @@ func TestLLMDefaults(t *testing.T) {
 	}
 	if d.Fallback.Provider == "" || d.Fallback.Threshold <= 0 || d.Fallback.RetryAfterS <= 0 {
 		t.Fatalf("defaults must be complete: %+v", d.Fallback)
+	}
+}
+
+// TestWakeListeningSurvivesTheLoadPath is the test that should have existed
+// when the default was reversed, and did not.
+//
+// The default was changed to true and had NO EFFECT on any real session:
+// applyWakeWordDefaults fills empty strings and zero ints and never touched the
+// booleans, so `Enabled` came from the file or from the zero value.
+// TestWakeWordDefaults asserted the DEFAULTS FUNCTION returned true and passed
+// the whole time — a test of a mechanism, not a behaviour (§9 rule 8). The
+// owner's config said `"enabled": true` with no `always_listen`, the prompt
+// never armed, and talking to it did nothing.
+//
+// So this asserts the config a user actually ends up with, through
+// LoadPreferences, for the four cases that differ.
+func TestWakeListeningSurvivesTheLoadPath(t *testing.T) {
+	cases := []struct {
+		name          string
+		wake          string
+		wantListening bool
+		wantArmed     bool
+	}{{
+		// The case that broke: enabled explicitly, always_listen absent.
+		name:          "enabled with always_listen absent",
+		wake:          `{"enabled": true}`,
+		wantListening: true,
+		wantArmed:     true,
+	}, {
+		// A config from before this feature existed at all.
+		name:          "empty section",
+		wake:          `{}`,
+		wantListening: true,
+		wantArmed:     true,
+	}, {
+		// Explicit OFF must stay off. With a plain bool this was
+		// indistinguishable from absent, so the feature could not be disabled.
+		name:          "explicitly disabled",
+		wake:          `{"enabled": false}`,
+		wantListening: false,
+		wantArmed:     false,
+	}, {
+		// The owner's file, verbatim: enabled by an earlier `wake on`, every
+		// tunable present, no always_listen key. The tunables travel through
+		// applyWakeWordDefaults, so a future version of that function that
+		// resets the booleans when the section is non-empty fails here.
+		name: "owner's config, every tunable set, no always_listen",
+		wake: `{"enabled": true, "engine": "energy", "phrase": "hey helix",
+                "sensitivity_preset": "balanced", "cooldown_s": 2, "chunk_ms": 1500}`,
+		wantListening: true,
+		wantArmed:     true,
+	}, {
+		// The narrow behaviour: listen between turns, leave the prompt alone.
+		// This is the escape hatch that replaces a second command.
+		name:          "listening but prompt not armed",
+		wake:          `{"enabled": true, "always_listen": false}`,
+		wantListening: true,
+		wantArmed:     false,
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := writeConfig(t, t.TempDir(), `{
+  "speech": {"stt": {"provider": "openai"}, "tts": {"provider": "openai"},
+             "wake_word": `+tc.wake+`}
+}`)
+			if err := cfg.LoadPreferences(); err != nil {
+				t.Fatalf("LoadPreferences: %v", err)
+			}
+			ww := cfg.Speech.WakeWord
+			if got := ww.Listening(); got != tc.wantListening {
+				t.Errorf("Listening() = %v, want %v — this is the value the session uses, "+
+					"not the one WakeWordDefaults returns", got, tc.wantListening)
+			}
+			if got := ww.PromptArmed(); got != tc.wantArmed {
+				t.Errorf("PromptArmed() = %v, want %v", got, tc.wantArmed)
+			}
+		})
+	}
+}
+
+// An armed prompt requires listening. Arming without the wake word would be a
+// microphone held open for a detector nobody asked to run.
+func TestPromptArmedImpliesListening(t *testing.T) {
+	off := SpeechWakeConfig{Enabled: BoolPtr(false), AlwaysListen: BoolPtr(true)}
+	if off.PromptArmed() {
+		t.Error("the prompt is armed while listening is off")
 	}
 }

@@ -186,8 +186,11 @@ a fast one: a companion is bounded by how often a person wants to be spoken to.
 ### 3d-bis. Always-Listen Wake (`cmd/helix/wake_always.go`, `internal/shell/armedwait.go`)
 
 The wake word reaching the KEYBOARD prompt, so speech alone switches Helix into
-live mode. Opt-in (`speech.wake_word.always_listen`), typed-only to enable, and
-Unix-only.
+live mode. **On by default** since 2026-09-09; typed-only to enable, and
+Unix-only. `speech.wake_word.enabled` and `.always_listen` are `*bool`, because
+a default of true makes an absent key and an explicit `false` two different
+answers — read them through `Listening()` and `PromptArmed()`, never through the
+fields.
 
 - **The blocking read is never pre-empted; it is never started.** `ReadLine`
   blocks in `bufio.Reader.ReadRune` over stdin, and three ways to interrupt that
@@ -761,6 +764,28 @@ the run fully offline). It proves, with zero real AI and zero network:
 - High-risk commands are hard-blocked.
 - Non-interactive mode blocks high-risk commands with a non-zero exit.
 - `/help` renders and `/purge` respects a declined confirmation.
+- A **fresh install arms the keyboard prompt** and an explicit
+  `"enabled": false` does not — see below.
+
+Three environment knobs shape the seeded config, because some behaviour cannot
+be reached without one and folding them together would break the tests that
+assert the opposite:
+
+| Knob | Adds to the seeded config | Why separate |
+| :--- | :--- | :--- |
+| `HELIX_E2E_SPEECH` | a TTS provider pointed at the mock | `/blackbox say` needs somewhere to send audio |
+| `HELIX_E2E_STT` | an STT provider pointed at the mock | an STT chain is one of arming's three conditions, so no test could reach the armed prompt while the harness configured TTS only. `TestE2E_VoiceRefusedWithoutSTT` still needs a config with none |
+| `HELIX_E2E_WAKE_JSON` | a verbatim `speech.wake_word` object | the upgrade cases are about the exact bytes on disk, so the test supplies them rather than describing them |
+
+The endpoint is never called for arming. Arming asks whether a transcriber is
+*configured*, not whether it answers — the honest question, since a transcriber
+that is merely unreachable should still let the prompt listen.
+
+`tests/e2e/wake_arms_e2e_test.go` **skips** when the host has no `sox`/`rec`
+rather than asserting nothing. That distinction is the reason it exists:
+`TestE2E_WakeIsOnByDefaultAndKeyboardStillWorks` asserts only that the status
+panel renders, because a CI host cannot arm whatever the config says — and it
+passed for a day while the on-by-default change was inert.
 
 Run with `make e2e` (Linux/macOS only).
 

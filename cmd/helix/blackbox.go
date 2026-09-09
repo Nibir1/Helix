@@ -44,7 +44,7 @@ var blackBoxUsage = []string{
 	"",
 	"/blackbox look [question]  capture a frame and answer a question on it",
 	"/blackbox eyes on|off      camera only, without changing the mode",
-	"/blackbox wake on|off      hands-free waking between turns",
+	"/blackbox wake on|off      on by default — listens even at the prompt",
 	"/blackbox tts on|off       whether ordinary replies are spoken aloud",
 	"/blackbox say <text>       speak text through the TTS chain",
 	"/blackbox log on|off       keep a local text record of what was said",
@@ -240,7 +240,7 @@ func blackBoxHearingLine() string {
 // third place making a promise the detector does not keep.
 func blackBoxWakeLine() string {
 	ww := cfg.Speech.WakeWord
-	if !ww.Enabled {
+	if !ww.Listening() {
 		return shell.Badge(shell.StateIdle, "off") +
 			shell.Muted("  /blackbox wake on for hands-free turns")
 	}
@@ -424,6 +424,15 @@ func blackBoxDetail() []string {
 	// No restatement of Summary here: /help <command> prints the summary
 	// directly above this block, and the two said the same sentence twice.
 	out := []string{
+		"Helix is already listening. On a fresh install the microphone is open at",
+		"an idle prompt: make any sound to go live, keep typing and nothing",
+		"changes. You have the keyboard and the microphone at the same time, with",
+		"nothing to switch on.",
+		"",
+		"Upgrading from a build before 2026-09-09? Run /blackbox wake on once.",
+		"Older versions wrote enabled:false into your config, and an explicit",
+		"false is never overridden — that key is the documented way to opt out.",
+		"",
 		"Say \"manual mode\" at any time to return to the keyboard. Ctrl+C stops a",
 		"reply mid-sentence. \"Turn off your eyes\" closes the camera without",
 		"leaving the conversation.",

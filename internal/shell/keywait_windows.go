@@ -13,8 +13,11 @@
 // nobody ran it on.
 //
 // So it reports unsupported, the caller degrades to an ordinary blocking
-// prompt, and `/blackbox wake always on` says why rather than silently doing
-// nothing. Recorded as open work rather than pretended away.
+// prompt, and `/blackbox wake on|off` says why rather than silently doing
+// nothing. That matters more since 2026-09-09 than it did when arming was
+// opt-in: listening is now on by default, so a Windows user gets the default
+// without the capability, and the status row has to say "unavailable here"
+// instead of "armed". Recorded as open work rather than pretended away.
 package shell
 
 import (

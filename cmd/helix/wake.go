@@ -2,7 +2,8 @@
 // Purpose: /blackbox wake on|off|status — the UI for true hands-free conversation.
 // Enabling turns on wake-word listening (between turns in the interactive
 // shell; continuously in `helix daemon`), applying safe defaults the first
-// time. Privacy stays opt-in: off by default, instant to disable.
+// time. On by default since 2026-09-09; typed-only to enable, instant to
+// disable, and an explicit `false` in config is never overridden.
 package main
 
 import (
@@ -48,8 +49,8 @@ func handleWakeCommand(c cmdArgs) {
 // Both, because one command turned them on. Leaving the prompt armed after
 // "wake off" would be a microphone the user believes they have just closed.
 func disableWakeWord() {
-	cfg.Speech.WakeWord.Enabled = false
-	cfg.Speech.WakeWord.AlwaysListen = false
+	cfg.Speech.WakeWord.Enabled = config.BoolPtr(false)
+	cfg.Speech.WakeWord.AlwaysListen = config.BoolPtr(false)
 	_ = cfg.SavePreferences()
 	uiIdle("wake word", "off — the microphone is closed, at the prompt and between turns")
 }
@@ -74,12 +75,12 @@ func enableWakeWord() {
 	if ww.ChunkMs <= 0 {
 		ww.ChunkMs = def.ChunkMs
 	}
-	ww.Enabled = true
+	ww.Enabled = config.BoolPtr(true)
 	// The prompt is armed too. See handleWakeCommand for why this is not a
 	// second switch: someone who says "listen for me" does not mean "listen
 	// for me only while I am already talking to you".
 	if shell.KeyWaitSupported() {
-		ww.AlwaysListen = true
+		ww.AlwaysListen = config.BoolPtr(true)
 	}
 	_ = cfg.SavePreferences()
 
@@ -185,12 +186,22 @@ func printWakeStatus() {
 	w := shell.KVWidth("STATE", "DETECTOR", "PHRASE", "RECORDER", "AT THE PROMPT")
 	fmt.Println(shell.PanelTitle("wake word"))
 
-	if ww.Enabled {
+	// STATE reports the between-turns half and AT THE PROMPT reports the other;
+	// said as a pair rather than as one summary, because "listening between
+	// turns" on its own is what the owner read as "nothing is happening".
+	if ww.Listening() {
 		fmt.Println(shell.KV("STATE", shell.Badge(shell.StateGood, "on")+
-			shell.Muted("  listening between turns"), w))
+			shell.Muted("  between spoken turns  ·  the prompt is the row below"), w))
 	} else {
+		// OFF can only be an explicit `enabled: false`, since an absent key
+		// reads as the default (on) — so name the file rather than leave the
+		// user to wonder why an on-by-default feature is off. Older builds
+		// wrote that false themselves, which is the single most likely reason
+		// a reader is looking at this row.
 		fmt.Println(shell.KV("STATE", shell.Badge(shell.StateIdle, "off")+
-			shell.Muted("  /blackbox wake on enables hands-free conversation"), w))
+			shell.Muted("  your config sets enabled: false — listening is on by "+
+				"default, so this is being honoured, not defaulted"), w))
+		fmt.Println(shell.KV("", shell.Muted("/blackbox wake on turns it on and persists"), w))
 	}
 
 	if engine == "sidecar" {

@@ -115,7 +115,24 @@ type SpeechTTSConfig struct {
 
 // SpeechWakeConfig controls wake-word listening (BlackBox §7).
 type SpeechWakeConfig struct {
-	Enabled           bool   `json:"enabled"`
+	// Enabled and AlwaysListen are POINTERS, for the reason
+	// LLMFallbackConfig.Enabled already documents: both default to TRUE, and
+	// with a plain bool an absent key and an explicit `false` are the same zero
+	// value — so a user could not turn listening off, and a default-true
+	// constant could not turn it on.
+	//
+	// That second half is not hypothetical. This shipped as a plain bool with
+	// WakeWordDefaults() changed to true, and it had NO EFFECT on any real
+	// session: applyWakeWordDefaults fills empty strings and zero ints and
+	// never touched the booleans, so the value came from the file or from the
+	// zero value. The owner's config said `"enabled": true` with no
+	// `always_listen`, the prompt never armed, and talking to it did nothing.
+	// A test asserting WakeWordDefaults() returned true passed the whole time,
+	// which is what a test of a mechanism rather than a behaviour buys.
+	//
+	// Read them through Listening() and PromptArmed(); nothing should touch the
+	// pointers except the code that writes config.
+	Enabled           *bool  `json:"enabled,omitempty"`
 	Engine            string `json:"engine"`             // "energy" (default) | "sidecar"
 	SidecarURL        string `json:"sidecar_url"`        // sidecar engine endpoint
 	Phrase            string `json:"phrase"`             // default "hey helix"
@@ -127,20 +144,41 @@ type SpeechWakeConfig struct {
 	// manual prompt Helix keeps the microphone open and enters live mode when
 	// it hears a wake, instead of only holding wake-only between voice turns.
 	//
-	// Off by default, and this default is a privacy decision rather than a
-	// conservative one. Wake_word.Enabled already means "listen between spoken
-	// turns", which is a state the user entered by going live. This means
+	// ON by default since 2026-09-09, and it has no command of its own: the
+	// single switch `/blackbox wake on|off` moves this and Enabled together,
+	// because "listen for me" is one intention and shipping it as two confused
+	// the same person twice in one session. What survives here is the narrow
+	// preference — listen between spoken turns but leave the keyboard prompt
+	// alone — for someone who wants it and does not need a verb for it.
+	//
+	// What that default costs is real and is recorded, not absorbed: this means
 	// "listen while I am typing, indefinitely, from boot" — an open microphone
-	// during work that has nothing to do with voice. ADR-005's rule that voice
-	// may reduce what is collected but never increase it makes enabling this a
-	// TYPED-only act (`/blackbox wake always on`); a spoken word can switch it
-	// off but never on.
+	// during work that has nothing to do with voice. See threat V2b in
+	// docs/threat_model_voice.md. ADR-005's rule that voice may reduce what is
+	// collected but never increase it still makes turning it ON a TYPED-only
+	// act (`/blackbox wake on`, guarded by voiceStartsAlwaysListen); a spoken
+	// word can switch it off but never on.
 	//
 	// Requires Enabled too: this widens where the wake word is heard, it does
 	// not turn the wake word on. Unsupported on Windows — see
 	// shell.KeyWaitSupported.
-	AlwaysListen bool `json:"always_listen,omitempty"`
+	AlwaysListen *bool `json:"always_listen,omitempty"`
 }
+
+// Listening reports whether wake listening is on. nil → the default, true.
+func (w SpeechWakeConfig) Listening() bool { return w.Enabled == nil || *w.Enabled }
+
+// PromptArmed reports whether an idle keyboard prompt should hold the
+// microphone open. nil → the default, true.
+//
+// Separate from Listening because the narrow behaviour — wake between spoken
+// turns only — stays reachable by setting this false without a command.
+func (w SpeechWakeConfig) PromptArmed() bool {
+	return w.Listening() && (w.AlwaysListen == nil || *w.AlwaysListen)
+}
+
+// BoolPtr returns a pointer to v, for writing these settings.
+func BoolPtr(v bool) *bool { return &v }
 
 // SpeechConfig is the speech subsystem section of ~/.helix/config.json.
 type SpeechConfig struct {
@@ -615,8 +653,8 @@ func WakeWordDefaults() SpeechWakeConfig {
 		// before. ADR-005's rule that voice may reduce collection but never
 		// increase it is unchanged: turning this OFF works by voice, turning it
 		// ON is still typed-only. Threat V2b records the trade.
-		Enabled:           true,
-		AlwaysListen:      true,
+		Enabled:           BoolPtr(true),
+		AlwaysListen:      BoolPtr(true),
 		Engine:            "energy",
 		Phrase:            "hey helix",
 		SensitivityPreset: "balanced",
@@ -630,8 +668,11 @@ func WakeWordDefaults() SpeechWakeConfig {
 // them. Enabled only flips to true from the file (default is off, so an
 // explicit disable needs no special case).
 func mergeWakeWord(dst *SpeechWakeConfig, src SpeechWakeConfig) {
-	if src.Enabled {
-		dst.Enabled = true
+	// Pointer semantics: a key PRESENT in the file wins, in either direction.
+	// The old `if src.Enabled { dst.Enabled = true }` could only ever turn the
+	// feature on, which is the bug the pointer exists to prevent.
+	if src.Enabled != nil {
+		dst.Enabled = src.Enabled
 	}
 	if src.Engine != "" {
 		dst.Engine = src.Engine
@@ -651,12 +692,8 @@ func mergeWakeWord(dst *SpeechWakeConfig, src SpeechWakeConfig) {
 	if src.ChunkMs > 0 {
 		dst.ChunkMs = src.ChunkMs
 	}
-	// Layered like Enabled: a file that says true turns it on, and a file that
-	// omits it cannot turn it off. Both are booleans whose false is
-	// indistinguishable from absent, and for a microphone switch the safe
-	// reading of "absent" is off — which is what the zero value already gives.
-	if src.AlwaysListen {
-		dst.AlwaysListen = true
+	if src.AlwaysListen != nil {
+		dst.AlwaysListen = src.AlwaysListen
 	}
 }
 

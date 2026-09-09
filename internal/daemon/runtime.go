@@ -283,9 +283,9 @@ func (d *Daemon) statusResponse() Response {
 	}
 	// Hands-free readiness: is the wake loop actually running?
 	cfg, _ := config.DefaultConfig()
-	state["wake_enabled"] = cfg.Speech.WakeWord.Enabled
+	state["wake_enabled"] = cfg.Speech.WakeWord.Listening()
 	state["wake_phrase"] = cfg.Speech.WakeWord.Phrase
-	state["voice_loop"] = cfg.Speech.WakeWord.Enabled && speech.Default() != nil
+	state["voice_loop"] = cfg.Speech.WakeWord.Listening() && speech.Default() != nil
 	d.healthMu.Lock()
 	if len(d.sidecars) > 0 {
 		state["sidecar_health"] = d.sidecars
@@ -397,7 +397,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	spawn("daemon-uptime", d.recordUptimeLoop)
 	spawn("daemon-llm-ready", d.ensureLocalBrainReady)
 
-	if cfg, err := config.DefaultConfig(); err == nil && cfg.Speech.WakeWord.Enabled {
+	if cfg, err := config.DefaultConfig(); err == nil && cfg.Speech.WakeWord.Listening() {
 		spawn("daemon-voice-loop", d.voiceLoop)
 	}
 

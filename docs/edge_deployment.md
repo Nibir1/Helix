@@ -363,6 +363,16 @@ the board with `/blackbox stats` and `make live-sidecar`. They are here because
 "will the always-listening parts eat my Pi?" is the first question an edge
 deployment raises, and it now has an answer instead of an assurance.
 
+**These are default-install costs now, not opt-in ones.** Wake listening turned
+on by default on 2026-09-09, and `helix daemon` reads the same key
+(`internal/daemon/runtime.go` gates its voice loop on it), so a fresh flash of a
+board starts the detector rather than waiting to be asked. The duty cycle below
+is why that is defensible on a Pi; `speech.wake_word.enabled: false` is how you
+decline it on a board that should not be listening, and it is honoured — the
+default only fills the key when it is absent. A board upgraded from an older
+build carries the previous plain-bool `false` and will need one
+`/blackbox wake on` if you want it listening.
+
 | Always-on component | Cost per 1.5 s chunk | Duty cycle |
 | :--- | :--- | :--- |
 | Wake-word detection (energy engine) | 21 µs, zero allocations | **0.0014 %** |
