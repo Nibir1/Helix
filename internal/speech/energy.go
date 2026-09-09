@@ -19,6 +19,14 @@ var ErrNoSpeech = errors.New("no speech detected")
 // text). Also retryable — the provider heard audio but found no words.
 var ErrEmptyTranscript = errors.New("empty transcript")
 
+// SpeechRMSFloor is speechRMSFloor, exported for callers that need to set a bar
+// RELATIVE to it rather than an absolute number of their own.
+//
+// One caller today: the spoken kill phrase, which ends the session and so wants
+// more evidence than "audible". Hardcoding 0.004 there would be the same
+// constant written twice, free to drift from the floor it is a multiple of.
+const SpeechRMSFloor = speechRMSFloor
+
 // speechRMSFloor is the default "something audible" level: ≈ −54 dBFS.
 // Digital silence is 0; quiet-but-real speech is typically ≳ 0.01 RMS, so
 // this floor rejects dead-mic/silence clips without rejecting soft speech.
@@ -27,6 +35,11 @@ const speechRMSFloor = 0.002
 // ClipRMS returns the root-mean-square level of a WAV clip normalized to
 // [0,1] (relative to 16-bit full scale). Returns 0 for undecodable or empty
 // buffers so callers never have to special-case malformed audio.
+// It decodes WAV only. Every capture path in Helix produces WAV (RecordClip and
+// the chunk scanner both do), so this is not a limitation in practice — but a
+// KindPCM clip handed here reads as SILENCE rather than as an error, which is
+// the kind of quiet wrong answer worth naming at the signature. wakeword.RMS is
+// the one that accepts both.
 func ClipRMS(audio AudioFormat) float64 {
 	samples, err := DecodeWAVMono(audio.Bytes)
 	if err != nil || len(samples) == 0 {

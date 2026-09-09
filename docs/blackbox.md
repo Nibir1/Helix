@@ -79,6 +79,16 @@ Say **"manual mode"** to leave without touching the keyboard — matched at the
 end of a sentence, so "okay, now switch to manual mode" works and is not
 confused with a question about the feature.
 
+**A stop phrase heard on weak evidence asks before it acts.** Ending the
+session is the one decision a mis-transcription can make that the user cannot
+undo by speaking again, and it happened: three turns of room noise, the last
+transcribed as *"Manual mode."*, and live mode ended by itself. So a stop phrase
+now needs either a confidence the provider vouches for or a clip clearly above
+the audible floor; short of that Helix asks *"Did you say manual mode? Say it
+again and I will go."* — and the second time it goes, however weak, so a quiet
+microphone cannot trap you. Nothing to measure (a streaming turn holds no single
+clip) is trusted rather than refused, for the same reason.
+
 Say **"reboot"** (or "please reboot") to restart the shell itself. It is matched
 the same way and, like the safety valve, ends the turn rather than being answered
 by it — a question such as "what happens when you reboot" is answered instead.

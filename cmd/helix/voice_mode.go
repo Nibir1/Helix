@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"helix/internal/agent"
 	"helix/internal/ambient"
 	"helix/internal/audio"
 	"helix/internal/commands"
@@ -560,6 +561,17 @@ func finishVoiceTranscript(text string, transcript speech.Transcript, audio spee
 	// Hands-free kill switches (ADR-005 wake controls): recognized before
 	// dispatch.
 	if isVoiceKillPhrase(text) {
+		if !killPhraseTrusted(transcript, audio) {
+			// Weak evidence for a decision that ENDS the session: ask once
+			// instead of acting or ignoring. See killPhraseTrusted.
+			logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeKillPhrase)
+			killPhrasePending = true
+			speakDirect("Did you say manual mode? Say it again and I will go.")
+			fmt.Println(shell.Step(shell.StateWarn, "not sure",
+				"heard a stop phrase in a clip too weak to trust — say it again to confirm"))
+			return input.InputEvent{}, speech.ErrNoSpeech
+		}
+		killPhrasePending = false
 		logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeKillPhrase)
 		// blackBoxOff, not exitVoiceMode: live mode opened the camera and the
 		// companion loop too, and a safety valve that leaves either running has
@@ -567,6 +579,10 @@ func finishVoiceTranscript(text string, transcript speech.Transcript, audio spee
 		blackBoxOff()
 		return input.InputEvent{}, errVoiceStopped
 	}
+	// Anything else clears a pending confirmation: the user moved on, so a
+	// stop phrase heard two turns ago is not an answer to a question nobody
+	// remembers being asked.
+	killPhrasePending = false
 
 	// Restart, recognized in the same place and for the same reason as the
 	// kill phrases: it ENDS the turn rather than being served by it, so the
@@ -642,7 +658,70 @@ var killPhrases = []string{
 	"i want to type", "blackbox off", "black box off",
 }
 
-// isVoiceKillPhrase reports whether the user asked to go back to the keyboard.
+// killPhrasePending is true when a stop phrase arrived on evidence too weak to
+// act on, and Helix asked for it again.
+//
+// Session state rather than a parameter because the two halves are different
+// turns: the question is asked at the end of one and answered at the start of
+// the next. Cleared by any other utterance, so it cannot be satisfied by a
+// phrase heard minutes earlier.
+var killPhrasePending bool
+
+// killPhraseMinRMSMultiple is how much louder than "audible" a session-ending
+// phrase must be.
+//
+// A judgment, not a measurement, and small on purpose. The real safety net is
+// the confirmation round, not this number: getting it slightly wrong costs one
+// extra "say it again" rather than either a trapped user or a false exit, which
+// is why it is 2 and not the 10 the barge-in probe uses. That probe wants to be
+// deliberately deaf; this one only wants to tell a spoken sentence from a
+// hallucination out of room noise.
+const killPhraseMinRMSMultiple = 2.0
+
+// killPhraseTrusted reports whether a stop phrase came with enough evidence to
+// end the session on the spot.
+//
+// WHY THIS EXISTS. The kill phrase used to be acted on unconditionally, with
+// the transcript's confidence printed on the line directly above the check and
+// ignored by it. A live session showed the cost: three turns of room noise, the
+// last transcribed as "Manual mode.", and live mode ended by itself — breaking
+// the one promise the owner had asked for in writing. Removing the ungated
+// capture that produced those clips made it rare; it did not make the valve
+// robust, because any capture whose transcript happens to read "manual mode"
+// still ends the session.
+//
+// Two signals, and the ORDER is deliberate:
+//
+//  1. A reported confidence below the Voice Risk Policy's gate is a refusal.
+//     The provider is telling us it guessed.
+//  2. Otherwise the CLIP's energy decides. whisper-local reports no confidence
+//     at all — it was the provider in the session that failed — so a
+//     confidence-only rule would have changed nothing for the case that
+//     prompted this. Energy is the signal that discriminates a sentence from a
+//     fan.
+//
+// It fails toward ASKING, never toward silence. A streaming turn holds no
+// contiguous clip (documented on finishVoiceTranscript) and a mic-less path has
+// no audio at all; in both cases there is nothing to measure, and refusing a
+// valve because a measurement is missing would trap someone in live mode whose
+// only other exit is Ctrl+C. So an unmeasurable clip is TRUSTED, and the
+// confirmation round is what stands between noise and an unwanted exit
+// everywhere else.
+func killPhraseTrusted(transcript speech.Transcript, audio speech.AudioFormat) bool {
+	if killPhrasePending {
+		return true // this is the confirmation; the first one already asked
+	}
+	if transcript.Confidence > 0 &&
+		transcript.Confidence < agent.DefaultVoicePolicy().MinTranscriptConfidence {
+		return false
+	}
+	if len(audio.Bytes) == 0 {
+		return true // nothing to measure — see the comment above
+	}
+	return speech.HasSpeech(audio, speech.SpeechRMSFloor*killPhraseMinRMSMultiple)
+}
+
+// isVoiceKillPhrase reports whether the user asked to go back to the keyboard.// isVoiceKillPhrase reports whether the user asked to go back to the keyboard.
 //
 // Suffix matching, because people do not speak in bare commands. QA said
 // "Excellent. Now switch to manual mode." and Helix — which required the whole

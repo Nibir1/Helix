@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"helix/internal/shell"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -327,4 +328,62 @@ func homeDirOrEmpty() string {
 		return ""
 	}
 	return home
+}
+
+// nestedDaemonInvocation reports whether an input line is an attempt to start
+// the daemon from INSIDE Helix.
+//
+// Narrow on purpose. `helix remote status` from this prompt is perfectly good —
+// it spawns a client that talks to the socket and exits — and `helix --version`
+// is harmless. What cannot work is the daemon itself: it runs in the
+// foreground, so starting it here means a Helix inside a Helix, both holding
+// the same terminal. Those are the forms this catches and nothing else.
+//
+// It exists because `/blackbox wake on` printed "run: helix daemon" without
+// saying where, a user did exactly that at this prompt, and the line reached
+// the planner — which investigated with `ps aux | grep helix` rather than
+// starting anything. The hint now names the shell; this catches the attempt
+// either way, including by voice, where there is no shell to have meant.
+func nestedDaemonInvocation(text string) bool {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(text)))
+	if len(fields) < 2 || fields[0] != "helix" {
+		return false
+	}
+	if fields[1] != "daemon" {
+		return false
+	}
+	// `helix daemon status` answers a question and spawns a client that exits,
+	// so it is allowed through like `helix remote`. The blocking forms are the
+	// bare daemon and the service installers.
+	if len(fields) >= 3 && fields[2] == "status" {
+		return false
+	}
+	return true
+}
+
+// explainNestedDaemon says why nothing happened, and what to do instead.
+//
+// Spoken and typed get different endings for a real reason: someone who SAID
+// it has no shell in front of them, so telling them to open one is the actual
+// instruction, and `/blackbox wake on` already promises hands-free without a
+// terminal. Someone who typed it is one `exit` away.
+func explainNestedDaemon(spoken bool) {
+	fmt.Println(shell.Step(shell.StateWarn, "helix daemon",
+		"is a CLI entry point, not a command inside this prompt"))
+	for _, l := range shell.StepDetail(
+		"Starting it here would run a second Helix in the foreground of this one, both "+
+			"holding this terminal. Nothing was started.", shell.Muted) {
+		fmt.Println(l)
+	}
+	if spoken {
+		for _, l := range shell.StepDetail(
+			"You are already talking to Helix — the daemon is for when no terminal is open. "+
+				"To install it as a background service, exit and run: helix daemon install",
+			shell.Muted) {
+			fmt.Println(l)
+		}
+		speakDirect("The daemon runs from a shell, not from here. You are already talking to me.")
+		return
+	}
+	fmt.Println(shell.Hint("exit, then run  helix daemon  ·  or  helix daemon install  for a service"))
 }

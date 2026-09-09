@@ -488,6 +488,12 @@ func main() {
 		if ev.Text == "exit" || ev.Text == "quit" {
 			break
 		}
+		// `helix daemon` typed or spoken AT this prompt is a mistake Helix's own
+		// hint used to invite. Answer it here rather than planning it.
+		if nestedDaemonInvocation(ev.Text) {
+			explainNestedDaemon(ev.Channel == input.ChannelVoice)
+			continue
+		}
 		if agentCore.PersistsHistory() {
 			_ = utils.AppendHistory(histPath, ev.Text)
 		}

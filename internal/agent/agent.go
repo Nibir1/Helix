@@ -211,6 +211,16 @@ func (a *Agent) EnableStealth(on bool) {
 	}
 }
 
+// StealthAvailable reports whether a private-execution engine exists at all.
+//
+// Distinct from IsStealthEnabled, and the distinction is what lets a status
+// report tell "you turned this off" from "this host never had it". Without it
+// the two are one false, and a panel reporting deviations from the default
+// would flag an unsupported platform as a user choice.
+//
+// Args: none. Returns: bool. Complexity: O(1).
+func (a *Agent) StealthAvailable() bool { return a.stealth != nil }
+
 // IsStealthEnabled returns the current state of the stealth toggle.
 //
 // Args: none. Returns: bool. Complexity: O(1).

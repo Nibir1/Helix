@@ -284,6 +284,22 @@ func UpdateAll(ctx context.Context, db *sql.DB, interactive bool) error {
 	}); err != nil && utils.IsDebugMode() {
 		color.Yellow("FTS reindex failed: %v", err)
 	}
+	// Stamp the update HERE, where the work happened, not at one call site.
+	//
+	// This was written only by KnowledgeBootstrap, which is one of three
+	// callers — so `/knowledge-update` and the first-run path filled the
+	// database and left the timestamp unset. `/status` then printed the
+	// contradiction a user reported from their own screen:
+	//
+	//   KNOWLEDGE  16000 CVEs · 46687 exploits · 1699 KEV · 858 MITRE
+	//              · updated never
+	//
+	// Tens of thousands of records that arrived from nowhere, apparently. A
+	// fact recorded by one caller of a shared function is a fact the other
+	// callers silently omit; recording it in the function that does the
+	// fetching is what makes every path agree.
+	setMeta(db, metaKnowledgeUpdated, time.Now().UTC().Format(time.RFC3339))
+
 	notifyStage("KNOWLEDGE UPDATE COMPLETE")
 	if utils.IsDebugMode() {
 		color.Green("Knowledge base update completed in %v", time.Since(start))

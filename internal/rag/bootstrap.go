@@ -29,11 +29,13 @@ func KnowledgeBootstrap(ctx context.Context, db *sql.DB) error {
 	defer cancel()
 
 	// FIX: Pass `false` for interactive (background bootstraps never prompt).
-	if err := UpdateAll(ctx, db, false); err != nil {
-		return err
-	}
-	setMeta(db, metaKnowledgeUpdated, time.Now().UTC().Format(time.RFC3339))
-	return nil
+	//
+	// The timestamp is no longer stamped here. UpdateAll records it, because it
+	// has three callers and only this one used to — see the comment at the end
+	// of UpdateAll for what that cost. The sentinel read above still works, and
+	// now works better: a user who ran /knowledge-update by hand has knowledge,
+	// so a background bootstrap should not run again.
+	return UpdateAll(ctx, db, false)
 }
 
 // KnowledgeLastUpdate returns the last successful knowledge update timestamp.

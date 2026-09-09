@@ -355,29 +355,44 @@ func handleStatus() {
 	fmt.Println(shell.PanelEnd())
 }
 
-// sessionToggleLine renders the on/off switches as one line.
+// sessionToggleLine names the switches that are NOT where they started.
 //
-// Each used to own a row and say "DISABLED", so the default configuration
-// produced four lines of nothing-is-happening. Only what is ON is named; when
-// everything is at its default the line says so once.
+// Each used to own a row and say "DISABLED", so a default configuration
+// produced four lines of nothing-is-happening. The fix listed what was ON
+// instead — and two of these default to on, so a normal machine always read
+//
+//	TOGGLES  audio  ·  stealth
+//
+// which is noise wearing the shape of signal. Worse, it inverted the useful
+// case: audio turned OFF, or private execution turned OFF, are the states worth
+// seeing, and neither appeared. And "all at defaults" was unreachable on any
+// host where audio and stealth both work, so the one line that means "nothing
+// to worry about here" could never print. Reported from a real /status.
+//
+// So the rule is DEVIATION, which is what the comment on the call site claimed
+// all along: audio and stealth default on and are named when off; typewrite-all
+// and debug default off and are named when on.
 func sessionToggleLine() string {
-	var on []string
-	if audio.IsEnabled() {
-		on = append(on, "audio")
+	var changed []string
+	if !audio.IsEnabled() {
+		changed = append(changed, "audio off")
 	}
-	if agentCore != nil && agentCore.IsStealthEnabled() {
-		on = append(on, "stealth")
+	// Only when a private-execution engine EXISTS. On a host without one,
+	// "stealth off" is not a choice anybody made, and reporting it as a
+	// deviation would put a permanent warning on an unsupported platform.
+	if agentCore != nil && agentCore.StealthAvailable() && !agentCore.IsStealthEnabled() {
+		changed = append(changed, "private execution off")
 	}
 	if cfg.UserPrefs.TypewriteAll {
-		on = append(on, "typewrite-all")
+		changed = append(changed, "typewrite-all")
 	}
 	if utils.IsDebugMode() {
-		on = append(on, "debug")
+		changed = append(changed, "debug")
 	}
-	if len(on) == 0 {
+	if len(changed) == 0 {
 		return shell.Muted("all at defaults")
 	}
-	return shell.Value(strings.Join(on, shell.Muted("  ·  ")))
+	return shell.Value(strings.Join(changed, shell.Muted("  ·  ")))
 }
 
 // ragIndexLine summarises the MAN-page index.
@@ -402,15 +417,49 @@ func knowledgeLine() string {
 		return shell.Badge(shell.StateWarn, "not initialized")
 	}
 	stats := ragSystem.GetSystemStats()
-	last := rag.KnowledgeLastUpdate(ragSystem.GetDB())
-	if last == "" {
-		last = "never — auto-bootstraps in the background when online"
-	}
+	last := knowledgeFreshness(rag.KnowledgeLastUpdate(ragSystem.GetDB()), statTotal(stats))
 	// One line, no embedded newline: KV wraps its value itself, and a raw "\n"
 	// here would escape the gutter instead of hanging under the value column.
 	return shell.Value(fmt.Sprintf("%v", stats["db_cves"])) +
-		shell.Muted(fmt.Sprintf(" CVEs  ·  %v exploits  ·  %v KEV  ·  %v MITRE  ·  updated %s",
+		shell.Muted(fmt.Sprintf(" CVEs  ·  %v exploits  ·  %v KEV  ·  %v MITRE  ·  %s",
 			stats["db_exploits"], stats["db_kev"], stats["db_mitre"], last))
+}
+
+// knowledgeFreshness turns a stored timestamp and a corpus size into a claim
+// Helix can support.
+//
+// Three states, because there are three, and collapsing them produced a line a
+// user quoted back from their own screen:
+//
+//	KNOWLEDGE  16000 CVEs · 46687 exploits · 1699 KEV · 858 MITRE · updated never
+//
+// "Never" was read off an empty meta key, and the key was written by one of
+// UpdateAll's three callers (fixed there). But an existing database still
+// carries no timestamp, so the REPORT has to stop asserting a history it cannot
+// see: an empty corpus genuinely has never been updated, and a populated one
+// with no timestamp was filled by something — before this field was recorded,
+// or by a path that did not stamp it. Those are different sentences.
+func knowledgeFreshness(last string, records int) string {
+	switch {
+	case last != "":
+		return "updated " + last
+	case records == 0:
+		return "updated never — auto-bootstraps in the background when online"
+	default:
+		return "update time not recorded — /knowledge-update stamps it"
+	}
+}
+
+// statTotal counts the records the knowledge line is about to print, so
+// "populated" is judged on the same numbers the user is reading.
+func statTotal(stats map[string]interface{}) int {
+	total := 0
+	for _, key := range []string{"db_cves", "db_exploits", "db_kev", "db_mitre"} {
+		if n, ok := stats[key].(int); ok {
+			total += n
+		}
+	}
+	return total
 }
 
 func handleSandboxCommand(c cmdArgs) {
@@ -1099,11 +1148,19 @@ func handleKnowledgeStats() {
 		}
 	}
 
-	if last := rag.KnowledgeLastUpdate(ragSystem.GetDB()); last != "" {
+	// The same three states /status distinguishes, decided by the same
+	// function. Two panels reporting one fact from two copies of the logic is
+	// how they end up disagreeing — and this copy carried the identical
+	// "never" bug, one screen away.
+	switch last := rag.KnowledgeLastUpdate(ragSystem.GetDB()); {
+	case last != "":
 		fmt.Println(shell.KV("LAST UPDATE", shell.Value(last), w))
-	} else {
+	case statTotal(stats) == 0:
 		fmt.Println(shell.KV("LAST UPDATE", shell.Badge(shell.StateIdle, "never")+
 			shell.Muted("  auto-bootstraps in the background when online"), w))
+	default:
+		fmt.Println(shell.KV("LAST UPDATE", shell.Badge(shell.StateWarn, "not recorded")+
+			shell.Muted("  the corpus is populated  ·  /knowledge-update stamps it"), w))
 	}
 	fmt.Println(shell.PanelEnd())
 }

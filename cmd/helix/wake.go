@@ -102,7 +102,14 @@ func wakeBannerLines(engine, phrase string) []string {
 	}
 	return append(lines,
 		"The wake word gates turns AFTER this one — a voice turn already in progress needs no wake.",
-		"For always-on conversation (no terminal open), run:  helix daemon",
+		// "run: helix daemon" without saying WHERE sent a user to type it at
+		// this prompt, where it is not a slash command: it reached the planner,
+		// which investigated with `ps aux | grep helix` instead of starting
+		// anything. The same words from their shell worked first try. A hint
+		// that names a command has to name the place, or it is a trap the
+		// hint itself set.
+		"For always-on conversation (no terminal open), exit Helix and run  helix daemon",
+		"from your shell — it is a CLI entry point, not a command inside this prompt.",
 		"Say \"go to sleep\" or \"stop listening\" anytime to pause; /blackbox wake off to disable.")
 }
 
