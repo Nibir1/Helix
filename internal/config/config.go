@@ -600,7 +600,23 @@ func mergeUpdate(dst *UpdateConfig, src UpdateConfig) {
 // detection (ADR-002 honesty: energy onset is the default engine).
 func WakeWordDefaults() SpeechWakeConfig {
 	return SpeechWakeConfig{
-		Enabled:           false, // strict opt-in (privacy)
+		// ON by default, by owner decision on 2026-09-09, reversing the strict
+		// opt-in this shipped with. The ask was "Helix alive and my keyboard at
+		// the same time, without activating anything", and a default nobody
+		// turns on is not that.
+		//
+		// What it costs, stated because it is a privacy posture and not a
+		// convenience: a fresh install holds the microphone open whenever its
+		// prompt is idle. Three things keep it honest rather than hidden — the
+		// armed prompt SAYS it is listening and names the switch that stops it,
+		// nothing is transcribed until a wake fires (the detector scores chunks
+		// and discards them), and it arms only where there is a recorder and a
+		// transcriber, so a machine that cannot listen behaves exactly as
+		// before. ADR-005's rule that voice may reduce collection but never
+		// increase it is unchanged: turning this OFF works by voice, turning it
+		// ON is still typed-only. Threat V2b records the trade.
+		Enabled:           true,
+		AlwaysListen:      true,
 		Engine:            "energy",
 		Phrase:            "hey helix",
 		SensitivityPreset: "balanced",

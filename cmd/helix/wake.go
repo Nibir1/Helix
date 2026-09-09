@@ -14,24 +14,44 @@ import (
 )
 
 // handleWakeCommand implements /blackbox wake <on|off|status>.
+//
+// ONE switch, by owner decision. There were two — `wake on` for the gaps
+// between spoken turns and `wake always on` for the keyboard prompt — and the
+// split confused a real user twice in one session: they enabled the first and
+// asked "now how do I wake it up?", because nothing was listening and no banner
+// said so. "Listen for me" is one intention, so it is one command. The narrow
+// behaviour survives as `speech.wake_word.always_listen: false` in config,
+// which is the right home for a preference that needs no verb.
+//
+// The switch is on Sub() — the FIRST argument — not Lower(), which is the whole
+// argument string. That was a live bug for as long as a nested subcommand
+// existed: `/blackbox wake always on` produced Rest = "always on", matched no
+// case, and printed the usage line while changing nothing. Every one-word form
+// worked, which is exactly why it survived a test suite and had to be found by
+// a user.
 func handleWakeCommand(c cmdArgs) {
-	switch c.Lower() {
+	switch c.Sub() {
 	case "on", "enable":
 		enableWakeWord()
 	case "off", "disable":
-		cfg.Speech.WakeWord.Enabled = false
-		_ = cfg.SavePreferences()
-		uiIdle("wake word", "off — hands-free listening is disabled")
-	case "always":
-		// Always-listen extends WHERE the wake word is heard (an idle keyboard
-		// prompt, not just the gaps between spoken turns), so it lives under
-		// the wake command rather than beside it.
-		handleWakeAlwaysCommand(c.Shift())
+		disableWakeWord()
 	case "", "status":
 		printWakeStatus()
 	default:
-		uiUsage("/blackbox wake <on|off|always|status>")
+		uiUsage("/blackbox wake <on|off|status>")
 	}
+}
+
+// disableWakeWord closes both halves: no wake between turns, and no microphone
+// at the prompt.
+//
+// Both, because one command turned them on. Leaving the prompt armed after
+// "wake off" would be a microphone the user believes they have just closed.
+func disableWakeWord() {
+	cfg.Speech.WakeWord.Enabled = false
+	cfg.Speech.WakeWord.AlwaysListen = false
+	_ = cfg.SavePreferences()
+	uiIdle("wake word", "off — the microphone is closed, at the prompt and between turns")
 }
 
 // enableWakeWord applies defaults on first enable (phrase/engine/sensitivity),
@@ -55,6 +75,12 @@ func enableWakeWord() {
 		ww.ChunkMs = def.ChunkMs
 	}
 	ww.Enabled = true
+	// The prompt is armed too. See handleWakeCommand for why this is not a
+	// second switch: someone who says "listen for me" does not mean "listen
+	// for me only while I am already talking to you".
+	if shell.KeyWaitSupported() {
+		ww.AlwaysListen = true
+	}
 	_ = cfg.SavePreferences()
 
 	uiOK("wake word", fmt.Sprintf("%q  ·  %s  ·  %s", ww.Phrase, ww.Engine, ww.SensitivityPreset))
@@ -90,15 +116,38 @@ func wakeBannerLines(engine, phrase string) []string {
 	}
 
 	var lines []string
+	// The FIRST line now answers the question this banner used to leave hanging.
+	//
+	// It said "hands-free is live in THIS shell: after each turn I listen before
+	// the next one", which presupposes there are turns — and a user who had just
+	// run this command was at the keyboard with nothing listening. They asked
+	// "now how do I wake it up?", which is the banner's fault, not theirs. It
+	// says what is listening RIGHT NOW and how to use it.
+	armed := shell.KeyWaitSupported()
 	if engine == "sidecar" {
-		lines = append(lines,
-			fmt.Sprintf("Hands-free is live in THIS shell: after each turn I listen for %q before the next one.", phrase))
+		if armed {
+			lines = append(lines,
+				fmt.Sprintf("Listening now, at this prompt: say %q and I go live. Keep typing and nothing changes.", phrase))
+		} else {
+			lines = append(lines,
+				fmt.Sprintf("Hands-free is live in THIS shell: after each turn I listen for %q before the next one.", phrase))
+		}
 	} else {
+		if armed {
+			lines = append(lines,
+				"Listening now, at this prompt: make any sound and I go live. Keep typing and nothing changes.")
+		} else {
+			lines = append(lines,
+				"Hands-free is live in THIS shell: after each turn I listen before the next one.")
+		}
 		lines = append(lines,
-			"Hands-free is live in THIS shell: after each turn I listen before the next one.",
 			fmt.Sprintf("Engine %q wakes on ANY speech or loud sound — say anything to continue; it cannot", engineOrDefault(engine)),
 			fmt.Sprintf("match the phrase %q. For true phrase spotting, run an openWakeWord-class", phrase),
 			"sidecar and set speech.wake_word.engine=sidecar (see docs/edge_deployment.md §5.1).")
+	}
+	if shell.KeyWaitSupported() {
+		lines = append(lines,
+			"Once live, it never ends itself: say \"manual mode\" or type /blackbox off to come back.")
 	}
 	return append(lines,
 		"The wake word gates turns AFTER this one — a voice turn already in progress needs no wake.",

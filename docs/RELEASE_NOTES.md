@@ -19,31 +19,37 @@ It remains local-first and telemetry-free. The whole voice stack runs offline if
 
 ### Waking without touching the keyboard
 
-`/blackbox wake always on` arms an idle prompt: Helix keeps the microphone open
-while you work, and a wake event switches it into live mode by itself. The
-Siri-shaped flow, in a terminal — and the piece that had been missing, since the
-wake word previously only gated the gaps between spoken turns.
+`/blackbox wake on` — **on by default** — keeps the microphone open at an idle
+prompt and switches Helix into live mode on any sound. The keyboard and the
+microphone at the same time, with nothing to activate.
 
 - **The line editor is completely unmodified**, which is what makes this safe to
-  ship. A blocked terminal read cannot be pre-empted — three ways were measured
-  against a real PTY and all three are dead ends (Go registers no deadline on a
-  character device; `TIOCSTI` is disabled on modern Linux) — so the read is never
-  *started* until `poll(2)` reports a keystroke waiting, and that keystroke is
-  not consumed. An e2e test asserts an un-armed prompt behaves exactly as before.
-- **Off by default, typed-only to enable.** An armed prompt holds the microphone
-  open through work that has nothing to do with voice, which is an increase in
-  what is collected — so ADR-005 makes switching it on a keyboard act. Switching
-  it off by voice always works.
+  ship on by default. A blocked terminal read cannot be pre-empted — three ways
+  were measured against a real PTY and all are dead ends (Go registers no
+  deadline on a character device; `TIOCSTI` is disabled on modern Linux) — so
+  the read is never *started* until `poll(2)` reports a keystroke waiting, and
+  that keystroke is not consumed. An e2e test asserts a default install still
+  types.
+- **One switch, both places.** It shipped as two (`wake on` for the gaps between
+  spoken turns, `wake always on` for the prompt) and that split confused people
+  who enabled the first and reasonably asked how to wake it. `always_listen`
+  survives as a config key for the narrow behaviour.
+- **Off works by voice; on is typed-only.** Opening a microphone is an increase
+  in what is collected, and ADR-005 reserves that for the keyboard. Say "stop
+  listening" and it stops.
 - **Nothing is transcribed while it waits.** Only the detector runs; chunks are
-  scored and discarded.
-- **Live mode never ends itself**, so once woken Helix stays live until you say
-  "manual mode" or type `/blackbox off`.
-- **Two honest limits.** With the default engine *any* sound wakes it — the
-  energy detector scores loudness, not words, so the sidecar engine remains the
-  phrase-accurate option. And a word spoken *while you are typing* is not seen
-  until the line is submitted, which is the direct consequence of never
-  interrupting the read. Unix only: Windows needs console work that has not been
-  written, and says so rather than doing nothing.
+  scored and discarded. The armed state is announced once per session and shown
+  continuously by the standby HUD.
+- **It arms only where it can work** — a recorder, a transcriber and keystroke
+  readiness — so a host that cannot listen behaves exactly as before.
+- **Three honest limits.** With the default engine *any* sound wakes it (loudness,
+  not words; the sidecar engine is the phrase-accurate option); a word spoken
+  *while you are typing* is not seen until the line is submitted; and it is
+  Unix-only, with Windows reporting unavailable rather than doing nothing.
+
+The default is a reversal of the strict opt-in this feature shipped with, made
+deliberately. `speech.wake_word.enabled: false` turns it off, and
+`docs/threat_model_voice.md` V2b records what the reversed default costs.
 
 ### Sesame CSM-1B — a local voice that sounds like a conversation
 

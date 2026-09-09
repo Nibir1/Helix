@@ -424,22 +424,27 @@ yet do:
 
 ## 7b. Waking from the keyboard
 
-`/blackbox wake always on` arms an idle manual prompt: the microphone stays open
-while you work and a wake event switches Helix into live mode without a
-keystroke. `off` closes it; `status` reports armed, not armed, or unavailable
-with the reason.
+`/blackbox wake on` — on by default — listens in two places at once: at an idle
+keyboard prompt, and in the gaps between spoken turns. Make any sound and Helix
+goes live; keep typing and nothing changes. `off` closes both, `status` reports
+which are armed and why not.
 
-The mechanism is worth knowing because it explains the one limit. A blocked
-terminal read cannot be interrupted — measured three ways against a real PTY,
-all three dead ends — so the read is never *started* until `poll(2)` says a
-keystroke is waiting, and the keystroke is not consumed. The editor is
-therefore completely unmodified, armed or not. The cost is that a word spoken
-*mid-line* is not seen until the line is submitted; an **idle** prompt is what
-this covers, which is the case that matters.
+It was two switches (`wake on`, `wake always on`) and is one, because "listen
+for me" is one intention and the split confused people who enabled half of it.
+The narrow behaviour lives on as `speech.wake_word.always_listen: false` in
+config.
 
-Enabling is typed-only (ADR-005: voice may reduce what is collected, never
-increase it) and disabling by voice always works. Nothing is transcribed while
-armed. With the default energy engine any sound wakes it; only the sidecar
+The mechanism explains the one limit. A blocked terminal read cannot be
+interrupted — measured three ways against a real PTY, all dead ends — so the
+read is never *started* until `poll(2)` says a keystroke is waiting, and that
+keystroke is not consumed. The editor is therefore unmodified, armed or not, and
+the cost is that a word spoken *mid-line* is not seen until the line is
+submitted. An **idle** prompt is what this covers, which is the case that
+matters.
+
+Turning listening on is typed-only (ADR-005: voice may reduce what is collected,
+never increase it); turning it off always works by voice. Nothing is transcribed
+while armed. With the default energy engine any sound wakes it; only the sidecar
 engine matches a phrase. Unix-only for now.
 
 ## 8. Measured performance

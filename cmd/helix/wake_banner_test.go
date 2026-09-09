@@ -32,7 +32,13 @@ func TestWakeBannerEnergyEngineDoesNotPromisePhraseDetection(t *testing.T) {
 func TestWakeBannerSidecarEngineKeepsThePhrasePromise(t *testing.T) {
 	banner := strings.Join(wakeBannerLines("sidecar", "hey helix"), "\n")
 
-	if !strings.Contains(banner, `listen for "hey helix"`) {
+	// The phrase must appear — the sidecar engine really does match it. The
+	// wording moved when arming became the default: the banner now leads with
+	// what is listening RIGHT NOW ("say \"hey helix\" and I go live") instead of
+	// "after each turn I listen for …", which presupposed turns and left a user
+	// at the keyboard asking how to wake it. So this asserts the promise, not
+	// the sentence it used to live in.
+	if !strings.Contains(banner, `"hey helix"`) {
 		t.Errorf("the sidecar engine really does match the phrase:\n%s", banner)
 	}
 	if strings.Contains(banner, "ANY speech") {

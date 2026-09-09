@@ -28,16 +28,22 @@ func withWakeConfig(t *testing.T, enabled, always bool) {
 	cfg.Speech.WakeWord.AlwaysListen = always
 }
 
-// Enabling always-listen opens the microphone at a prompt the user may sit at
+// Enabling the wake word opens the microphone at a prompt the user may sit at
 // all day. ADR-005 lets voice REDUCE what is collected and never increase it,
 // so switching it on must be typed — and switching it off must always work by
 // voice, because a privacy control has to fail toward collecting less.
+//
+// The guarded FORM changed with the two switches merging: it was
+// `/blackbox wake always on`, and it is `/blackbox wake on` now. That move was
+// the whole risk of the merge — leaving the guard on the old wording would have
+// kept the rule in the threat model and lost it in the code, so a spoken
+// "blackbox wake on" could have opened the microphone at the keyboard.
 func TestVoiceCannotOpenTheMicrophoneAtThePrompt(t *testing.T) {
 	refused := []string{
-		"/blackbox wake always on",
-		"/blackbox wake always enable",
-		"/bb wake always on",
-		"/BlackBox Wake Always On",
+		"/blackbox wake on",
+		"/blackbox wake enable",
+		"/bb wake on",
+		"/BlackBox Wake On",
 	}
 	for _, line := range refused {
 		ok, reason := voiceCommandAllowed(line)
@@ -52,11 +58,11 @@ func TestVoiceCannotOpenTheMicrophoneAtThePrompt(t *testing.T) {
 	}
 
 	allowed := []string{
-		"/blackbox wake always off",
-		"/blackbox wake always disable",
-		"/bb wake always off",
-		"/blackbox wake always status",
-		"/blackbox wake always",
+		"/blackbox wake off",
+		"/blackbox wake disable",
+		"/bb wake off",
+		"/blackbox wake status",
+		"/blackbox wake",
 	}
 	for _, line := range allowed {
 		if ok, reason := voiceCommandAllowed(line); !ok {
@@ -66,15 +72,15 @@ func TestVoiceCannotOpenTheMicrophoneAtThePrompt(t *testing.T) {
 	}
 }
 
-// The guard must not over-reach: the wake word's own switches, and every other
-// /blackbox subcommand, stay reachable by voice.
+// The guard must not over-reach: every other /blackbox subcommand stays
+// reachable by voice, including the safety valve itself.
 func TestAlwaysListenGuardDoesNotBlockOtherWakeCommands(t *testing.T) {
 	for _, line := range []string{
-		"/blackbox wake on",
 		"/blackbox wake off",
 		"/blackbox wake status",
 		"/blackbox status",
 		"/blackbox off",
+		"/blackbox on",
 	} {
 		if ok, reason := voiceCommandAllowed(line); !ok {
 			t.Errorf("voiceCommandAllowed(%q) = false (%s), want allowed", line, reason)
@@ -86,17 +92,17 @@ func TestAlwaysListenGuardDoesNotBlockOtherWakeCommands(t *testing.T) {
 // negative here is a hole and a false positive is a lockout.
 func TestVoiceStartsAlwaysListenPredicate(t *testing.T) {
 	yes := []string{
-		"/blackbox wake always on",
-		"/bb wake always enable",
-		"  /blackbox   wake   always   on  ",
+		"/blackbox wake on",
+		"/bb wake enable",
+		"  /blackbox   wake   on  ",
 	}
 	no := []string{
-		"/blackbox wake always off",
-		"/blackbox wake always",
-		"/blackbox wake on",
+		"/blackbox wake off",
+		"/blackbox wake status",
+		"/blackbox wake",
 		"/blackbox log on",
 		"/blackbox on",
-		"wake always on", // not a command at all
+		"wake on", // not a command at all
 		"",
 	}
 	for _, line := range yes {
@@ -111,16 +117,39 @@ func TestVoiceStartsAlwaysListenPredicate(t *testing.T) {
 	}
 }
 
-// Off by default, and the default is the guarantee: an unconfigured Helix does
-// not hold the microphone open at its prompt.
+// ON by default now (owner decision, 2026-09-09), and the guarantees that
+// replace "off by default" are the ones asserted here.
+//
+// This test asserted the opposite and is rewritten rather than deleted: a
+// default-on microphone is defensible only while these hold, so they are what a
+// future change must trip over.
 func TestAlwaysListenIsOffByDefault(t *testing.T) {
 	def := config.WakeWordDefaults()
-	if def.AlwaysListen {
-		t.Error("always-listen must default to off — it opens the microphone during work " +
-			"that has nothing to do with voice")
+	if !def.Enabled || !def.AlwaysListen {
+		t.Fatal("the wake word and the armed prompt are both on by default now")
 	}
-	if def.Enabled {
-		t.Error("wake word itself must still default to off")
+
+	// It arms only where it can actually work. A default that pretends is worse
+	// than one that is off.
+	withWakeConfig(t, true, true)
+	if alwaysListenArmed() != (shell.KeyWaitSupported() && voiceEntryPreflight() == nil) {
+		t.Error("arming must still require keystroke readiness, a recorder and a transcriber " +
+			"— being on by default does not mean claiming to listen on a host that cannot")
+	}
+
+	// And turning it off must close BOTH halves, or "wake off" leaves a
+	// microphone the user believes they just closed.
+	src, err := os.ReadFile("wake.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripLineComments(functionBody(string(src), "func disableWakeWord("))
+	if body == "" {
+		t.Fatal("disableWakeWord not found — the test cannot reach what it checks")
+	}
+	if !strings.Contains(body, "AlwaysListen = false") {
+		t.Error("disableWakeWord leaves the prompt armed — one command turned both on, so " +
+			"one command has to turn both off")
 	}
 }
 

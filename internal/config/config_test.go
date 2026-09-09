@@ -83,13 +83,34 @@ func TestWakeWordCustomPhraseSurvives(t *testing.T) {
 	}
 }
 
+// The wake word is ON by default, reversing the strict opt-in this shipped
+// with — an owner decision of 2026-09-09, after the two-switch opt-in confused
+// a real user twice in one session.
+//
+// This test used to assert the opposite, and is REWRITTEN rather than deleted
+// because the guarantees that survive are the load-bearing ones. Defaulting on
+// means a fresh install listens at an idle prompt; what keeps that honest is
+// not the default but the three properties below, and those are what a future
+// change must not quietly drop.
 func TestWakeWordDefaults(t *testing.T) {
 	d := WakeWordDefaults()
 	if d.Phrase == "" || d.Engine == "" || d.SensitivityPreset == "" {
 		t.Fatalf("defaults must be complete: %+v", d)
 	}
-	if d.Enabled {
-		t.Fatal("wake word must default to disabled (opt-in)")
+	if !d.Enabled {
+		t.Error("the wake word is on by default now — a default nobody turns on was not " +
+			"\"Helix alive and my keyboard at the same time\"")
+	}
+	if !d.AlwaysListen {
+		t.Error("and it listens at the PROMPT by default, which is the half that makes it " +
+			"one feature instead of two switches")
+	}
+	// The engine matters to the default in a way worth pinning: `energy` needs
+	// no sidecar, so a default-on wake word works on a fresh install. Defaulting
+	// to `sidecar` would ship a feature that is on and cannot run.
+	if d.Engine != "energy" {
+		t.Errorf("default engine = %q — a default-ON wake word must use the engine that "+
+			"needs no sidecar, or it is enabled and broken out of the box", d.Engine)
 	}
 }
 

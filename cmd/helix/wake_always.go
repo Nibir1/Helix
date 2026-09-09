@@ -137,14 +137,29 @@ func armedIdleWait() (wakeword.WakeEvent, armedOutcome) {
 // printArmedPrompt says the microphone is open, because an open microphone the
 // user cannot see is the thing this feature must never be.
 //
-// One line, above the HUD's animated row, and it names the way out: the switch
-// that closes the microphone entirely, not just the mode.
+// ONCE per session, and that changed when arming became the default. As an
+// opt-in it printed before every idle prompt, which was fine for something rare
+// and deliberate; on by default it would put a line above every prompt in every
+// session — noise that teaches people to stop reading the one line that matters.
+//
+// What carries the signal the rest of the time is the standby HUD: an animated
+// row that is present exactly while the microphone is, and gone the moment it
+// closes. So the explanation is said once, in full, with the way out; the
+// indicator is continuous.
 func printArmedPrompt() {
+	if armedPromptAnnounced {
+		return
+	}
+	armedPromptAnnounced = true
 	fmt.Println("  " + shell.Fg(shell.HexMuted, "◉ ") +
 		shell.Fg(shell.HexText, "listening") +
-		shell.Muted("  ·  say the wake word to go live  ·  type normally to stay here") +
-		shell.Muted("  ·  /blackbox wake always off"))
+		shell.Muted("  ·  make any sound to go live  ·  type normally to stay here") +
+		shell.Muted("  ·  /blackbox wake off"))
 }
+
+// armedPromptAnnounced keeps the explanation to once per session. The HUD is
+// the continuous indicator; see printArmedPrompt.
+var armedPromptAnnounced bool
 
 // enterVoiceModeFromWake performs the transition a spoken word asked for.
 //
@@ -173,104 +188,13 @@ func wakeHeardDetail(ev wakeword.WakeEvent) string {
 	return fmt.Sprintf("speech onset (level %.2f) — going live", ev.Score)
 }
 
-// handleWakeAlwaysCommand: /blackbox wake always <on|off|status>
-//
-// Enabling is TYPED-ONLY, enforced in voiceStartsAlwaysListen: it opens the
-// microphone at a prompt the user may sit at all day, which is an increase in
-// what is collected, and ADR-005 lets voice reduce that but never increase it.
-// Switching it off by voice is always allowed — the same asymmetry the camera
-// and the transcript log carry.
-func handleWakeAlwaysCommand(c cmdArgs) {
-	switch c.Sub() {
-	case "on", "enable":
-		setAlwaysListen(true)
-	case "off", "disable":
-		setAlwaysListen(false)
-	case "", "status":
-		fmt.Println(shell.PanelTitle("always listening"))
-		fmt.Println(shell.PanelLine(alwaysListenStatusLine()))
-		for _, l := range shell.PanelWrap(
-			"When on, an idle keyboard prompt keeps the microphone open and a wake "+
-				"event switches Helix into live mode. Nothing is transcribed while it "+
-				"waits — only the wake detector runs.", shell.Muted) {
-			fmt.Println(l)
-		}
-		fmt.Println(shell.PanelEnd())
-	default:
-		uiUsage("/blackbox wake always <on|off|status>")
-	}
-}
-
-// setAlwaysListen flips the preference, persists it, and reports honestly what
-// the machine can actually do with it.
-func setAlwaysListen(on bool) {
-	if on && !shell.KeyWaitSupported() {
-		uiFail("always listening", shell.ErrKeyWaitUnsupported.Error())
-		for _, l := range shell.StepDetail(
-			"The wake word still works between spoken turns inside live mode; only the "+
-				"idle-keyboard trigger is unavailable.", shell.Muted) {
-			fmt.Println(l)
-		}
-		return
-	}
-
-	cfg.Speech.WakeWord.AlwaysListen = on
-	// Always-listen extends the wake word; it does not switch it on. Asking a
-	// user who just requested hands-free wake to also discover a second switch
-	// would be a puzzle, so turning this on turns that on and says so.
-	turnedOnWake := false
-	if on && !cfg.Speech.WakeWord.Enabled {
-		cfg.Speech.WakeWord.Enabled = true
-		turnedOnWake = true
-	}
-	if err := cfg.SavePreferences(); err != nil {
-		uiFail("always listening", "could not be saved: "+err.Error())
-		return
-	}
-
-	if !on {
-		fmt.Println(shell.Badge(shell.StateIdle, "always listening off") +
-			shell.Muted("  the microphone is closed at the keyboard prompt"))
-		return
-	}
-
-	fmt.Println(shell.Badge(shell.StateGood, "always listening on"))
-	if turnedOnWake {
-		for _, l := range shell.StepDetail(
-			"Wake word switched on with it — always-listen extends where the wake word "+
-				"is heard, it does not enable it.", shell.Muted) {
-			fmt.Println(l)
-		}
-	}
-	for _, l := range shell.StepDetail(alwaysListenExpectation(), shell.Muted) {
-		fmt.Println(l)
-	}
-	if err := voiceEntryPreflight(); err != nil {
-		fmt.Println(shell.Step(shell.StateWarn, "not armed yet", err.Error()))
-	}
-}
-
-// alwaysListenExpectation sets the expectation the engine can actually meet.
-func alwaysListenExpectation() string {
-	if engineOrDefault(cfg.Speech.WakeWord.Engine) == "sidecar" {
-		return "An idle prompt now waits for " +
-			orDefault(cfg.Speech.WakeWord.Phrase, "hey helix") +
-			" as well as for the keyboard. Live mode never ends itself — say " +
-			"\"manual mode\" or type /blackbox off."
-	}
-	return "An idle prompt now waits for ANY speech or loud sound as well as for the " +
-		"keyboard — the default engine detects onset, not a phrase, so a cough will " +
-		"do it. /blackbox wake engine sidecar is the phrase-accurate option. Live " +
-		"mode never ends itself: say \"manual mode\" or type /blackbox off."
-}
-
 // alwaysListenStatusLine is the one-liner for /blackbox status and the
 // subcommand's own report.
 func alwaysListenStatusLine() string {
 	ww := cfg.Speech.WakeWord
 	if !ww.AlwaysListen {
 		return shell.Badge(shell.StateIdle, "off") +
-			shell.Muted("  /blackbox wake always on  ·  wake from the keyboard prompt")
+			shell.Muted("  /blackbox wake on  ·  listens at the prompt and between turns")
 	}
 	if !shell.KeyWaitSupported() {
 		return shell.Badge(shell.StateWarn, "unavailable here") +
@@ -295,16 +219,22 @@ func alwaysListenStatusLine() string {
 // mode" safety valve lives on it, so the rule lands on the subcommand.
 func voiceStartsAlwaysListen(line string) bool {
 	fields := strings.Fields(strings.ToLower(line))
-	if len(fields) < 4 {
+	if len(fields) < 3 {
 		return false
 	}
 	if fields[0] != "/blackbox" && fields[0] != "/bb" {
 		return false
 	}
-	if fields[1] != "wake" || fields[2] != "always" {
+	if fields[1] != "wake" {
 		return false
 	}
-	return fields[3] == "on" || fields[3] == "enable"
+	// `wake on` is the form to guard now. It used to be `wake always on` — the
+	// two switches merged, and the guard had to move with them or a spoken
+	// "blackbox wake on" would open the microphone at the keyboard prompt,
+	// which is precisely the increase in collection ADR-005 reserves for the
+	// keyboard. Missing this would have left the rule intact in the threat
+	// model and broken in the code.
+	return fields[2] == "on" || fields[2] == "enable"
 }
 
 // armingLapseAnnounced keeps the lapse notice to once per session.
