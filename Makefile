@@ -38,10 +38,38 @@ windows:
 build-all: all
 	./$(SCRIPTS_DIR)/build.sh all
 
+# Where `go install` puts a tool, whether or not that directory is on PATH.
+#
+# GOBIN wins when set, GOPATH/bin otherwise — the same rule the go command
+# follows. This exists because every recipe below used to invoke its tool by
+# BARE NAME, which assumes the install directory is on PATH, and when that
+# assumption is wrong the user gets make's own error and nothing else:
+#
+#   Running govulncheck...
+#   make: govulncheck: No such file or directory
+#   make: *** [sec-scan] Error 1
+#
+# That is a dead end from a target whose job is to help. A tool this Makefile
+# installs is a tool this Makefile can locate — the same conclusion
+# findHuggingFaceCLI reached for the same reason.
+GOTOOLBIN := $(shell go env GOBIN)
+ifeq ($(strip $(GOTOOLBIN)),)
+GOTOOLBIN := $(shell go env GOPATH)/bin
+endif
+
+# find-tool <name> — absolute path to a tool, or empty. PATH first, so a
+# system-installed or brew-installed copy still wins over a stale go install.
+find-tool = $(shell command -v $(1) 2>/dev/null || ([ -x "$(GOTOOLBIN)/$(1)" ] && echo "$(GOTOOLBIN)/$(1)"))
+
 # Lint the codebase using golangci-lint
 lint:
 	@echo "Running golangci-lint..."
-	@golangci-lint run ./... --timeout=5m || (echo "" && \
+	@test -n "$(call find-tool,golangci-lint)" || (echo "" && \
+	 echo "golangci-lint is not installed, or not where this shell can see it." && \
+	 echo "Install the version CI pins, so local and CI enforce the same rules:" && \
+	 echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2" && \
+	 echo "Looked on PATH and in $(GOTOOLBIN)." && exit 1)
+	@$(call find-tool,golangci-lint) run ./... --timeout=5m || (echo "" && \
 	 echo "If this failed to RUN (rather than reporting issues), your golangci-lint" && \
 	 echo "is the wrong version. Two ways that happens: a v1 binary cannot read the" && \
 	 echo "v2 .golangci.yml, and a binary built with an older Go cannot read this" && \
@@ -173,7 +201,8 @@ info:
 	@echo "BUILD    current macos linux windows build-all install"
 	@echo "RUN      dev run start"
 	@echo "TEST     test e2e fuzz fuzz-ci live-sidecar live-csm"
-	@echo "CHECK    lint lint-workflows sec-scan work"
+	@echo "CHECK    lint lint-workflows sec-scan work (all of them)"
+	@echo "         work-install   work, then install (asks for your password)"
 	@echo "RELEASE  release release-check"
 	@echo "CLEAN    clean          generated state; keeps keys and models"
 	@echo "         deep-clean     + every model and runtime under ~/.helix"
@@ -195,8 +224,23 @@ test:
 # Run local security vulnerability scan using govulncheck
 sec-scan:
 	@echo "Running govulncheck..."
-	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
-	@govulncheck ./...
+	@# The install is allowed to FAIL without aborting the target. Without the
+	@# `|| true` this line's non-zero status ends the recipe and the friendly
+	@# report below never runs — which is the bug being fixed, moved one line
+	@# down. Caught by simulating a host where the install cannot succeed.
+	@test -n "$(call find-tool,govulncheck)" || \
+	 (echo "  installing govulncheck (first run only)..." && \
+	  go install golang.org/x/vuln/cmd/govulncheck@latest) || true
+	@tool="$(call find-tool,govulncheck)"; \
+	 if [ -z "$$tool" ]; then tool="$(GOTOOLBIN)/govulncheck"; fi; \
+	 if [ ! -x "$$tool" ]; then \
+	   echo "  ! govulncheck could not be installed — NOTHING WAS SCANNED"; \
+	   echo "    go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+	   echo "    then ensure $(GOTOOLBIN) is on your PATH"; \
+	   echo "    CI scans every push regardless: .github/workflows/security.yml"; \
+	   exit 0; \
+	 fi; \
+	 "$$tool" ./...
 
 
 FUZZTIME ?= 30s
@@ -293,10 +337,22 @@ release-check:
 lint-workflows:
 	@./$(SCRIPTS_DIR)/check-workflows.sh
 
-# Run all tasks: lint, sec-scan, fuzz-ci, e2e, build, test, install
-work: lint lint-workflows sec-scan fuzz-ci e2e build test install
+# Every check, in the order that fails cheapest first.
+#
+# `install` is deliberately NOT here. It writes to /usr/local/bin and therefore
+# asks for a sudo password, which turned "run all the checks" into a target that
+# cannot finish unattended and cannot finish at all without a terminal — and it
+# sat at the END, so the password prompt arrived after four minutes of work.
+# Checking and installing are also different intentions: `make work` answers "is
+# this tree good?", `make install` answers "put it on my machine". They are one
+# word apart when you want both.
+work: lint lint-workflows sec-scan fuzz-ci e2e build test
+
+# Everything work does, and then put the binary on this machine. Separate
+# because this is the step that needs your password.
+work-install: work install
 
 
 .PHONY: all build current macos linux windows build-all clean deep-clean delete-secrets \
-	dev run info start test lint lint-workflows work sec-scan install fuzz fuzz-ci \
+	dev run info start test lint lint-workflows work work-install sec-scan install fuzz fuzz-ci \
 	live-sidecar live-csm e2e release release-check

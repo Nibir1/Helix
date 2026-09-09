@@ -37,8 +37,23 @@ fi
 fail=0
 
 # --- 1. actionlint ---------------------------------------------------------
-if command -v actionlint >/dev/null 2>&1; then
-    if actionlint; then
+# Found on PATH, or where `go install` put it.
+#
+# "not installed" was reported on a machine where the binary existed in
+# ~/go/bin the whole time — a tool installed by `go install` is not
+# necessarily on PATH, and reporting it absent sends the user to install
+# something they already have. Same conclusion the Makefile reached for
+# govulncheck and findHuggingFaceCLI reached for the HF CLI.
+gotoolbin="$(go env GOBIN 2>/dev/null || true)"
+[[ -n "$gotoolbin" ]] || gotoolbin="$(go env GOPATH 2>/dev/null || true)/bin"
+
+actionlint_bin="$(command -v actionlint 2>/dev/null || true)"
+if [[ -z "$actionlint_bin" && -x "$gotoolbin/actionlint" ]]; then
+    actionlint_bin="$gotoolbin/actionlint"
+fi
+
+if [[ -n "$actionlint_bin" ]]; then
+    if "$actionlint_bin"; then
         echo "actionlint: clean"
     else
         fail=1
@@ -46,6 +61,7 @@ if command -v actionlint >/dev/null 2>&1; then
 else
     echo "actionlint not installed; skipping (CI runs it)"
     echo "  go install github.com/rhysd/actionlint/cmd/actionlint@latest"
+    echo "  (looked on PATH and in $gotoolbin)"
 fi
 
 # --- 2. The shell every Windows-capable step is written for ----------------

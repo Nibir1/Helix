@@ -101,3 +101,61 @@ func TestTestsRedirectingHomeAlsoRedirectUserprofile(t *testing.T) {
 		}
 	}
 }
+
+// goInstalledTools are the tools this repo's Makefile obtains with `go install`.
+//
+// They share a trap: `go install` writes to GOBIN or GOPATH/bin, neither of
+// which is guaranteed to be on PATH, so invoking one by bare name in a recipe
+// works on the maintainer's machine and dies on someone else's with make's own
+// error and no guidance:
+//
+//	Running govulncheck...
+//	make: govulncheck: No such file or directory
+//	make: *** [sec-scan] Error 1
+var goInstalledTools = []string{"govulncheck", "actionlint", "golangci-lint"}
+
+// TestMakefileResolvesGoInstalledTools fails when a recipe invokes one of those
+// tools by bare name.
+//
+// The fix they must use instead is the find-tool function at the top of the
+// Makefile, which looks on PATH and then in the directory `go install` actually
+// writes to. This is a guard rather than a convention because the failure is
+// invisible to whoever writes it: the tool is on THEIR path.
+func TestMakefileResolvesGoInstalledTools(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+
+	checked := 0
+	for i, line := range strings.Split(string(data), "\n") {
+		// Recipe lines only: they start with a tab. Variable definitions and
+		// comments that merely NAME a tool are not invocations.
+		if !strings.HasPrefix(line, "\t") {
+			continue
+		}
+		body := strings.TrimLeft(line, "\t")
+		body = strings.TrimPrefix(body, "@")
+		body = strings.TrimPrefix(body, "-")
+		body = strings.TrimSpace(body)
+		if strings.HasPrefix(body, "#") || strings.HasPrefix(body, "echo ") {
+			continue
+		}
+		checked++
+		for _, tool := range goInstalledTools {
+			// A bare invocation is the tool at the START of a command, not the
+			// same word inside `command -v x`, an echo, or a find-tool call.
+			if body == tool || strings.HasPrefix(body, tool+" ") {
+				t.Errorf("Makefile:%d invokes %q by bare name:\n  %s\n"+
+					"Use $(call find-tool,%s) — `go install` writes to GOBIN or "+
+					"GOPATH/bin, and neither is guaranteed to be on PATH. A bare name "+
+					"works on the machine that wrote it and dies elsewhere with make's "+
+					"own error and no guidance.", i+1, tool, body, tool)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no recipe lines were examined — this guard would pass vacuously")
+	}
+}
