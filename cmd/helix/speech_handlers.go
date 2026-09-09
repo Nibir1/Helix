@@ -296,6 +296,13 @@ func handleVoiceSetup() {
 	fmt.Println(shell.PanelLine(shell.Muted("pick what hears you and what answers — locally or in the cloud")))
 	fmt.Println(shell.PanelEnd())
 	verifiedThisRun = map[string]bool{}
+	// A setup run is exactly when the host may have changed under us — the
+	// user may have installed an interpreter since the last refusal. The
+	// interpreter choice and its pip probes are memoized for the session, so
+	// without this a "install a Python and re-run setup" instruction would be
+	// answered from a stale verdict.
+	resetPythonPick()
+	piperProbes = nil
 
 	catalog, err := speech.LoadMergedCatalog()
 	if err != nil {
@@ -1423,7 +1430,11 @@ func sidecarSpecs() map[string]sidecarSpec {
 // So the binary is resolved the same way the launcher resolves it, and a
 // sidecar with no server to start says so instead of inventing a command.
 func launchCommandFor(name string, sc voiceSidecar) func(int) string {
-	binary, found := findFirstBinary(sc.Binaries)
+	// Resolved the way the LAUNCHER resolves it, which for piper is now a
+	// capability question rather than a PATH one — but through the offline half
+	// only. Rendering a command must not reach the network, and this function
+	// is called from status output.
+	binary, found := piperOrPathBinary(sc)
 	if !found {
 		// Nothing installed yet: name the preferred runtime, which is what the
 		// install step is about to provide.

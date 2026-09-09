@@ -813,12 +813,40 @@ A live session hit exactly this: an Intel MacBook on Python 3.14, minutes of
 wheels-only dry run *before* installing and refuses in seconds, naming the
 interpreter and the packages that lack wheels (`piperPythonBlocked`).
 
-Two things this table does not promise. It is **dated** because upstream wheel
-coverage moves — onnxruntime dropped Intel macOS between 1.23.2 and 1.25.0, and
-could add or drop a Python tag in any release; re-run the query rather than
-trusting the row. And Helix uses whatever `python3` resolves to: installing a
-3.13 alongside a 3.14 changes nothing unless `python3` points at it in the shell
-you start Helix from.
+**Helix picks the interpreter itself.** It no longer uses whatever `python3`
+resolves to. Setup discovers every distinct interpreter on the host — PATH plus
+Homebrew's prefixes, pyenv shims, `~/.local/bin` and python.org framework
+builds — deduplicates them by identity (their own version and
+`sysconfig.get_platform()`, so one interpreter under three names is probed once)
+and chooses in this order:
+
+1. one that **already imports** `piper.http_server`. Offline, and after an
+   install it is the interpreter that did the installing, so a restart re-finds
+   it with no network;
+2. your **own `python3`**, if pip resolves the install for it — Helix does not
+   move you off your default Python to satisfy its own preference;
+3. **any other** interpreter that can, saying so, because reaching past a broken
+   default should be visible rather than surprising.
+
+The install command is then built with that interpreter, not with the literal
+`python3`, and the choice is printed. When nothing works, the refusal names
+every interpreter it tried and what each one is, so "the only Python here is
+the one without wheels" is a thing you can see.
+
+It reports the difference between **measured** and **assumed**. A pip that
+answered gives "can install piper"; a pip that could not be asked — too old for
+`--dry-run`, no network, a proxy — gives "the interpreter Helix will use (pip
+could not be asked in advance)". The first version of this said "can install"
+for both, and on the machine it was written on that was a claim about a pip
+which had refused to answer.
+
+This table is **dated** because upstream wheel coverage moves — onnxruntime
+dropped Intel macOS between 1.23.2 and 1.25.0 and could add or drop a Python tag
+in any release; re-run the query rather than trusting the row. What Helix will
+**not** do is install a different Python version: which one to install is
+exactly this moving fact, and putting a second system-wide interpreter on your
+machine to satisfy a TTS voice is a bigger decision than a voice is worth. It
+tells you what is missing and leaves the choice with you.
 
 ### Edge boards: libstdc++ is the gate, not glibc
 

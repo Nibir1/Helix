@@ -50,20 +50,24 @@ func TestMissingWheelNamesFallsBackToTheUsualCause(t *testing.T) {
 // The probe must be MEMOIZED. It spawns a subprocess and reaches the package
 // index, the wizard can ask more than once in a run, and the answer cannot
 // change while Helix is running.
-func TestPiperProbeIsAskedAtMostOnce(t *testing.T) {
-	savedDone, savedBlocked, savedReason :=
-		piperProbeDone, piperProbeBlocked, piperProbeReason
-	t.Cleanup(func() {
-		piperProbeDone, piperProbeBlocked, piperProbeReason =
-			savedDone, savedBlocked, savedReason
-	})
+func TestPiperProbeIsAskedAtMostOncePerInterpreter(t *testing.T) {
+	saved := piperProbes
+	t.Cleanup(func() { piperProbes = saved })
 
-	piperProbeDone, piperProbeBlocked, piperProbeReason = true, true, "cached verdict"
-	reason, blocked := piperPythonBlocked()
-	if !blocked || reason != "cached verdict" {
-		t.Fatalf("piperPythonBlocked() = (%q, %v) — a completed probe must be reused, "+
-			"not repeated; each run is a subprocess and an index round trip",
-			reason, blocked)
+	piperProbes = map[string]piperProbeResult{
+		"/usr/bin/python3.13": {reason: "", blocked: false, conclusive: true},
+		"/usr/bin/python3.14": {reason: "no wheels", blocked: true, conclusive: true},
+	}
+
+	// The memo is keyed on the INTERPRETER. Two interpreters on one machine
+	// routinely give opposite answers — that is the whole reason the picker
+	// exists — so a single global verdict would apply whichever was probed
+	// last to both.
+	if _, blocked := piperInstallBlocked("/usr/bin/python3.13"); blocked {
+		t.Error("a cached PASS was reported as blocked")
+	}
+	if _, blocked := piperInstallBlocked("/usr/bin/python3.14"); !blocked {
+		t.Error("a cached refusal was reported as usable")
 	}
 }
 
@@ -76,19 +80,22 @@ func TestPiperProbeIsAskedAtMostOnce(t *testing.T) {
 // piper-local on a host where it may install perfectly well. No network, an
 // http proxy and a corporate index do the same thing.
 func TestPiperProbeFailsOpenOnAnUnusableProbe(t *testing.T) {
-	savedDone, savedBlocked, savedReason :=
-		piperProbeDone, piperProbeBlocked, piperProbeReason
-	t.Cleanup(func() {
-		piperProbeDone, piperProbeBlocked, piperProbeReason =
-			savedDone, savedBlocked, savedReason
-	})
-	piperProbeDone = false
+	saved := piperProbes
+	t.Cleanup(func() { piperProbes = saved })
+	piperProbes = nil
 
 	// A pip too old for the flag: non-zero exit, usage text, no verdict.
-	reason, blocked := piperProbeAsk("/usr/bin/false")
+	reason, blocked, conclusive := piperProbeAsk("/usr/bin/false")
 	if blocked {
 		t.Errorf("a probe that could not run returned a verdict (%q) — an unusable probe "+
 			"must never refuse a path that might work", reason)
+	}
+	// And it must not be MISTAKEN for a pass. Fail-open means "not known to be
+	// blocked"; reporting it as "this interpreter can install piper" is a claim
+	// Helix has not earned, and the picker's wording depends on this flag.
+	if conclusive {
+		t.Error("a probe that could not run reported itself conclusive — the caller would " +
+			"then announce that the interpreter can install piper")
 	}
 }
 
@@ -190,4 +197,22 @@ func stripLineComments(src string) string {
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
+}
+
+// The three outcomes must produce three different sentences. Two of them
+// ("can install" vs "will be tried") are the difference between a measurement
+// and an assumption.
+func TestCanInstallPhraseDistinguishesMeasuredFromAssumed(t *testing.T) {
+	measured := canInstallPhrase(true)
+	assumed := canInstallPhrase(false)
+	if measured == assumed {
+		t.Fatal("a verified interpreter and an unverified one read identically")
+	}
+	if !strings.Contains(measured, "can install") {
+		t.Errorf("conclusive phrasing = %q, want it to state the capability", measured)
+	}
+	if strings.Contains(assumed, "can install") {
+		t.Errorf("inconclusive phrasing = %q — pip was not asked, so this must not claim "+
+			"the interpreter can install anything", assumed)
+	}
 }

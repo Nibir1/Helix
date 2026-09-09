@@ -52,6 +52,14 @@ saved key is verified, and only one the provider actually *rejects* prompts for
 a replacement. A key entered for an AI provider is adopted for the same vendor's
 speech services.
 
+- **The Python interpreter is chosen, not assumed.** `piper-local` needs one on
+  macOS (no native binary exists there — upstream's archive ships no `.dylib`),
+  and `python3` is not always the one that works: on an Intel Mac running Python
+  3.14 it cannot be, because onnxruntime publishes no macOS x86_64 wheel for
+  cp314. Setup discovers every interpreter on the host, prefers one that already
+  has piper, then your own `python3`, then any other that pip says can install
+  it — and names the one it picked. See
+  [local_runtimes.md](local_runtimes.md) §3.7.
 - **Private-by-default:** configure the local sidecars (`whisper-local` STT,
   `piper-local` TTS) to keep audio on your machine. See §5.
 - `/blackbox status` is the one report: mode, hearing, sight, wake, initiative,

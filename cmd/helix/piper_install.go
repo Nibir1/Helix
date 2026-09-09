@@ -367,8 +367,8 @@ func shortSum(sum string) string {
 	return sum[:16] + "…"
 }
 
-// piperPythonBlocked refuses the piper-local Python path when this interpreter
-// cannot install it, BEFORE pip is run.
+// piperInstallBlocked reports whether ONE named interpreter can install
+// piper-tts, BEFORE pip is run.
 //
 // This is the "walked into something that cannot work" failure this codebase
 // keeps having to remove, arriving one layer down. On an Intel Mac running
@@ -385,56 +385,67 @@ func shortSum(sum string) string {
 //
 // Fails OPEN on purpose. A probe that cannot run — no network, a pip too old
 // for --dry-run, a proxy — must not block a path that might work; the real
-// install then reports its own failure as before.
-func piperPythonBlocked() (string, bool) {
-	// The standalone binary needs none of this, so a host that can use it is
-	// never blocked by the Python path's problems.
-	if _, ok := speech.PiperReleaseAsset(); ok {
-		if _, usable := speech.PiperBinaryUsableHere(); usable {
-			return "", false
-		}
-	}
-	if _, err := speech.FindPiperBinary(); err == nil {
-		return "", false // already installed, by us or by hand
-	}
-
-	python, ok := findFirstBinary([]string{"python3", "python"})
-	if !ok {
-		return "", false // no interpreter: Prereqs handles that, with an install
-	}
-
-	if piperProbeDone {
-		return piperProbeReason, piperProbeBlocked
-	}
-	reason, blocked := piperProbeAsk(python)
-	piperProbeReason, piperProbeBlocked, piperProbeDone = reason, blocked, true
+// install then reports its own failure as before. Use piperInstallVerdict when
+// the DIFFERENCE between "verified usable" and "not known to be blocked"
+// matters, which is anywhere the answer is shown to a person.
+//
+// Takes an interpreter because the picker asks it of every candidate it finds,
+// and the answers differ on one machine: `python3` and `python3.13` can give
+// opposite verdicts, which is the entire reason the picker exists. The first
+// shape of this was a single global verdict, applied to whichever interpreter
+// asked last.
+func piperInstallBlocked(python string) (string, bool) {
+	reason, blocked, _ := piperInstallVerdict(python)
 	return reason, blocked
 }
 
-// The probe runs at most once: it spawns a subprocess and reaches the package
-// index, and its answer cannot change while Helix is running.
-var (
-	piperProbeDone    bool
-	piperProbeBlocked bool
-	piperProbeReason  string
-)
+// piperInstallVerdict adds the third answer the probe has always had and the
+// caller was throwing away: whether pip actually ANSWERED.
+//
+// Fail-open means "not known to be blocked", and reporting that as "this
+// interpreter can install piper" is a claim Helix has not earned. Measured on
+// the machine this was written on: the Xcode CommandLineTools python3 ships a
+// pip with no --dry-run, so the probe decides nothing — and the picker
+// cheerfully announced "Python 3.9 can install piper". Three outcomes, three
+// sentences.
+func piperInstallVerdict(python string) (reason string, blocked, conclusive bool) {
+	if v, ok := piperProbes[python]; ok {
+		return v.reason, v.blocked, v.conclusive
+	}
+	reason, blocked, conclusive = piperProbeAsk(python)
+	if piperProbes == nil {
+		piperProbes = map[string]piperProbeResult{}
+	}
+	piperProbes[python] = piperProbeResult{reason: reason, blocked: blocked, conclusive: conclusive}
+	return reason, blocked, conclusive
+}
+
+// Each interpreter is probed at most once: a probe spawns a subprocess and
+// reaches the package index, and its answer cannot change while Helix runs.
+type piperProbeResult struct {
+	reason     string
+	blocked    bool
+	conclusive bool // pip gave a resolution verdict, rather than failing to run
+}
+
+var piperProbes map[string]piperProbeResult
 
 // piperProbeAsk puts the question to pip.
-func piperProbeAsk(python string) (string, bool) {
+func piperProbeAsk(python string) (reason string, blocked, conclusive bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), piperProbeTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, python, "-m", "pip", "install",
 		"--dry-run", "--only-binary=:all:", "piper-tts", "flask").CombinedOutput() //nolint:gosec // interpreter resolved from PATH
 	if err == nil {
-		return "", false // it resolves; let the install proceed
+		return "", false, true // it resolves, and pip said so
 	}
 	if ctx.Err() != nil {
-		return "", false // slow network, not a verdict
+		return "", false, false // slow network, not a verdict
 	}
 	// pip's own words, narrowed to the line that names the cause. "no matching
 	// distribution" and "could not find a version" are the two shapes it uses.
 	if !conclusivePipRefusal(string(out)) {
-		return "", false // some other failure; do not claim to know what
+		return "", false, false // some other failure; do not claim to know what
 	}
 	// Name the interpreter, not a version matrix.
 	//
@@ -456,7 +467,7 @@ func piperProbeAsk(python string) (string, bool) {
 		"docs/local_runtimes.md §3.7 lists which interpreters do have wheels — on an " +
 		"Intel Mac it is a Python VERSION problem, not an architecture one, and an " +
 		"older interpreter fixes it. /blackbox setup also offers every alternative " +
-		"with prices.", true
+		"with prices.", true, true
 }
 
 // pythonIdentity asks the interpreter what it is: "Python 3.14 on

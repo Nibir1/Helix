@@ -39,6 +39,16 @@ type voiceSidecar struct {
 	// Binaries are the executable names to look for, in preference order.
 	Binaries []string
 
+	// Choose overrides the PATH-order lookup when presence is not the same
+	// question as capability.
+	//
+	// Only piper-local sets it, and it exists because `findFirstBinary` is
+	// right for `whisper-server` and wrong for an interpreter: `python3` is
+	// always found and is not always usable. Returning the reason alongside the
+	// path lets the caller SAY which interpreter it picked, which matters on a
+	// machine where the answer is not the obvious one.
+	Choose func() (path, why string, ok bool)
+
 	// InstallCmd is a single unambiguous install command, or "".
 	//
 	// Same rule as llama.cpp: Helix runs an install only when there is one
@@ -296,13 +306,22 @@ func voiceSidecars() map[string]voiceSidecar {
 			// The native binary first, then the Python interpreter. Order is
 			// the preference: a machine with the standalone piper needs no
 			// interpreter at all, which is the whole point of shipping it.
+			// The native binary first, then whichever interpreter can actually
+			// serve — see Choose. Listing bare "python3" here is what used to
+			// decide it, and a PATH hit is not a capability.
 			Binaries: []string{"piper", "piper-tts", "python3", "python"},
+			Choose:   choosePiperBinary,
 			InstallCmd: func() (string, bool) {
 				// The binary install is NOT expressible here: runVisibleCommand
 				// execs this string directly with no shell, so a download +
 				// checksum + extract pipeline would be split on spaces and
 				// handed to mkdir as arguments. offerSidecarInstall calls
 				// offerPiperBinary first instead, which does it in Go.
+				//
+				// The interpreter is CHOSEN, not assumed. `python3` on the
+				// user's PATH may be the one interpreter on the machine that
+				// cannot install this — measured on an Intel Mac where it was
+				// 3.14 and onnxruntime ships no cp314 x86_64 wheel.
 				//
 				// Offer the Python install ONLY to a machine that has Python.
 				//
@@ -315,10 +334,21 @@ func voiceSidecars() map[string]voiceSidecar {
 				//
 				// Without Python, the honest answer is the standalone binary,
 				// and offerPiperBinary below handles that path.
-				if _, err := exec.LookPath("python3"); err != nil {
-					if _, err := exec.LookPath("python"); err != nil {
-						return "", false
-					}
+				python, why, ok := pickPythonForPiper()
+				if ok {
+					// Say which interpreter, always. On a host where the
+					// answer is `python3` this is one quiet line; on a host
+					// where Helix reached past a broken default to a versioned
+					// interpreter, it is the difference between a surprise and
+					// an explanation.
+					fmt.Println(shell.Step(shell.StateIdle, "python", why))
+				}
+				if !ok {
+					// why names the interpreters tried and what each one is,
+					// so this is a decision the user can act on rather than
+					// "no Python with wheels".
+					fmt.Println(shell.Step(shell.StateWarn, "piper-local", why))
+					return "", false
 				}
 				// Flask is NOT a dependency of piper-tts, but piper.http_server
 				// imports it — installing only piper-tts yields a server that
@@ -334,17 +364,14 @@ func voiceSidecars() map[string]voiceSidecar {
 				// and an afternoon. Refusing source builds up front turns that
 				// into one clear resolver error. Every platform where this path
 				// works has wheels for all three packages.
-				// Refuse here rather than in Unmet: that hook is consulted
-				// while RENDERING the provider table, where its contract is a
-				// cheap local check (docker's is one `docker info`, 3s). A pip
-				// resolution is neither cheap nor local, and wiring it there
-				// would have made the pricing table hang for up to a minute
-				// per draw — a worse bug than the one it fixes.
-				if reason, blocked := piperPythonBlocked(); blocked {
-					fmt.Println(shell.Step(shell.StateWarn, "piper-local", reason))
-					return "", false
-				}
-				return "python3 -m pip install --user --only-binary=:all: piper-tts flask", true
+				// The probe lives here rather than in Unmet: that hook is
+				// consulted while RENDERING the provider table, where its
+				// contract is a cheap local check (docker's is one
+				// `docker info`, 3s). A pip resolution is neither cheap nor
+				// local, and wiring it there would have made the pricing table
+				// hang for up to a minute per draw — a worse bug than the one
+				// it fixes.
+				return python + " -m pip install --user --only-binary=:all: piper-tts flask", true
 			},
 			ModelHint: func() (string, string, bool) {
 				if _, err := os.Stat(piperVoicePath()); err == nil {
@@ -419,7 +446,7 @@ func offerSidecarSetup(kind, provider string) bool {
 		}
 	}
 
-	binary, installed := findFirstBinary(spec.Binaries)
+	binary, installed := resolveSidecarBinary(spec)
 	// A binary on PATH is necessary and not sufficient. Verify runs the real
 	// question — can this interpreter actually serve? — BEFORE the model
 	// download and the three confirmations that follow, so a machine that
@@ -536,7 +563,7 @@ func offerSidecarInstall(provider string, spec voiceSidecar) (string, bool) {
 
 	// Trust the lookup, not the exit code: a package manager can succeed while
 	// putting the binary somewhere this process cannot see yet.
-	binary, found := findFirstBinary(spec.Binaries)
+	binary, found := resolveSidecarBinary(spec)
 	if !found {
 		fmt.Println(shell.Step(shell.StateBad, provider, "installed, but still not on PATH"))
 		for _, l := range shell.StepDetail(
@@ -808,6 +835,22 @@ func probeSpeechProvider(kind, provider string, ctx context.Context) error {
 }
 
 // findFirstBinary returns the first of the names present on PATH.
+// resolveSidecarBinary finds the executable a sidecar should run.
+//
+// Choose first when a spec has one, because for an interpreter the question is
+// "which of these can serve" and only the spec knows how to ask. Everything
+// else keeps the PATH-order lookup it has always had, so this changes nothing
+// for whisper, csm or kokoro.
+func resolveSidecarBinary(spec voiceSidecar) (string, bool) {
+	if spec.Choose != nil {
+		if path, _, ok := spec.Choose(); ok {
+			return path, true
+		}
+		return "", false
+	}
+	return findFirstBinary(spec.Binaries)
+}
+
 func findFirstBinary(names []string) (string, bool) {
 	for _, n := range names {
 		if path, err := exec.LookPath(n); err == nil {
