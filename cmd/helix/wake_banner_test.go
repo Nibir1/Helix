@@ -82,17 +82,26 @@ func TestVoiceModeWakeNotes(t *testing.T) {
 
 // Wake gating lapsing back to open capture must be announced — and only for the
 // causes where something actually changed.
+//
+// The list is SHORTER than it was, which is the point: wakeWindowExpired used
+// to be here, and a notice was the whole mitigation for a gate that removed
+// itself after sixty seconds. The gate no longer does that (see
+// wakeListenUntilArmed), so the only cause left is a scanner that died — the
+// one case where falling through beats stranding the user. An interrupt is an
+// explicit act and needs no notice.
 func TestWakeLapseNotice(t *testing.T) {
 	cases := []struct {
 		outcome  wakeOutcome
 		announce bool
 		mentions string
 	}{
-		{wakeWindowExpired, true, "wake window expired"},
 		{wakeScannerFailed, true, "recorder unavailable"},
 		// Wake was never configured, so nothing lapsed and nothing is said.
 		{wakeNotEngaged, false, ""},
 		{wakeFired, false, ""},
+		// Ctrl+C during the hold: the user asked for the turn, so there is
+		// nothing to explain.
+		{wakeInterrupted, false, ""},
 	}
 	for _, tc := range cases {
 		got := wakeLapseNotice(tc.outcome)
@@ -113,22 +122,18 @@ func TestWakeLapseNotice(t *testing.T) {
 	}
 }
 
-// The notice explains a state change; the idle window expires every 60s of
-// quiet, so repeating it would bury the shell.
+// The notice explains a state change, and the hold is re-entered after every
+// turn, so repeating it would bury the shell.
 func TestNoteWakeLapseIsOncePerCause(t *testing.T) {
 	t.Cleanup(func() { wakeLapseAnnounced = map[wakeOutcome]bool{} })
 	wakeLapseAnnounced = map[wakeOutcome]bool{}
 
-	noteWakeLapse(wakeWindowExpired)
-	if !wakeLapseAnnounced[wakeWindowExpired] {
-		t.Fatal("the first lapse must be announced")
-	}
-	// A second call is a no-op; a different cause still gets its own notice.
-	noteWakeLapse(wakeWindowExpired)
 	noteWakeLapse(wakeScannerFailed)
 	if !wakeLapseAnnounced[wakeScannerFailed] {
-		t.Error("a different cause deserves its own one-time notice")
+		t.Fatal("the first lapse must be announced")
 	}
+	// A second call is a no-op.
+	noteWakeLapse(wakeScannerFailed)
 	noteWakeLapse(wakeNotEngaged)
 	if wakeLapseAnnounced[wakeNotEngaged] {
 		t.Error("a cause with no notice must not be marked announced")

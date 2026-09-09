@@ -225,9 +225,17 @@ func fallbackRow(kind, name string) fallbackDescription {
 			// the difference between an informed skip and the QA session that
 			// picked kokoro and hit a failed docker pull.
 			if vs, known := voiceSidecars()[name]; known && vs.Unmet != nil {
-				if _, unmet := vs.Unmet(); unmet {
-					out.ready, out.state = "needs docker", shell.StateBad
-					out.note = "piper-local is the docker-free voice"
+				if reason, unmet := vs.Unmet(); unmet {
+					// The REASON comes from the spec, not from here. This line
+					// used to hardcode "needs docker" and "piper-local is the
+					// docker-free voice", which was true while Docker was the
+					// only unmet precondition and becomes nonsense the moment
+					// a second one exists — a row for piper-local would have
+					// told the user it needs Docker and that the alternative
+					// to piper-local is piper-local. Same hand-kept-copy shape
+					// this repo has now paid for five times.
+					out.ready, out.state = "unavailable here", shell.StateBad
+					out.note = reason
 					return out
 				}
 			}

@@ -52,8 +52,19 @@ reduced authority**, enforced structurally (see ADR-005), not by prompting.
    answer equals *decline*.
 4. Transcripts below the confidence threshold trigger a clarification loop,
    never execution.
-5. Wake-armed sessions lock back to wake-only listening after 60 seconds of
-   inactivity.
+5. Wake-armed sessions stay in wake-only listening. **Corrected 2026-09-09:**
+   this rule used to be implemented as a 60-second *deadline on* wake-only
+   listening, after which the shell fell through to OPEN capture — the rule
+   inverted. §5 exists so an idle session needs the wake word again, and the
+   code made an idle session stop needing it. A real session showed the cost:
+   sixty quiet seconds after going live, the microphone opened unbidden, fan
+   noise became a 0.5s clip, whisper turned it into "May he leave." and Helix
+   answered a turn nobody took; two turns later a hallucinated "Manual mode."
+   matched the kill phrase and ended live mode by itself. There is now no
+   deadline — nothing is transcribed until a wake fires, for as long as that
+   takes. Ctrl+C takes a turn immediately, and a scanner that DIES still falls
+   through with a notice, because stranding a user behind a broken microphone
+   is worse than an ungated capture they can see.
 6. Every policy decision (cap applied, deny, timeout-decline) is journaled.
 7. Spoken input never takes the shell fast path. A confidently-classified command
    line runs directly when TYPED; on the voice channel it always goes to the

@@ -323,7 +323,28 @@ func voiceSidecars() map[string]voiceSidecar {
 				// Flask is NOT a dependency of piper-tts, but piper.http_server
 				// imports it — installing only piper-tts yields a server that
 				// dies on startup with ModuleNotFoundError.
-				return "python3 -m pip install --user piper-tts flask", true
+				// --only-binary=:all: is not a preference, it is the
+				// difference between a five-second answer and a five-minute
+				// one. Without it pip backtracks through every piper-tts
+				// release (1.1.0 … 1.8.0) hunting for a combination whose
+				// onnxruntime constraint can be satisfied from source, prints
+				// sixty lines of "Using cached", and then fails anyway —
+				// because onnxruntime and piper-phonemize publish no wheel for
+				// this interpreter and building them needs cmake, a compiler
+				// and an afternoon. Refusing source builds up front turns that
+				// into one clear resolver error. Every platform where this path
+				// works has wheels for all three packages.
+				// Refuse here rather than in Unmet: that hook is consulted
+				// while RENDERING the provider table, where its contract is a
+				// cheap local check (docker's is one `docker info`, 3s). A pip
+				// resolution is neither cheap nor local, and wiring it there
+				// would have made the pricing table hang for up to a minute
+				// per draw — a worse bug than the one it fixes.
+				if reason, blocked := piperPythonBlocked(); blocked {
+					fmt.Println(shell.Step(shell.StateWarn, "piper-local", reason))
+					return "", false
+				}
+				return "python3 -m pip install --user --only-binary=:all: piper-tts flask", true
 			},
 			ModelHint: func() (string, string, bool) {
 				if _, err := os.Stat(piperVoicePath()); err == nil {

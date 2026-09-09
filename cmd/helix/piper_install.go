@@ -28,6 +28,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -364,4 +365,156 @@ func shortSum(sum string) string {
 		return sum
 	}
 	return sum[:16] + "…"
+}
+
+// piperPythonBlocked refuses the piper-local Python path when this interpreter
+// cannot install it, BEFORE pip is run.
+//
+// This is the "walked into something that cannot work" failure this codebase
+// keeps having to remove, arriving one layer down. On an Intel Mac running
+// Python 3.14, `pip install piper-tts flask` spends minutes backtracking
+// through eleven piper-tts releases and then fails, because onnxruntime and
+// piper-phonemize publish no wheel for darwin/amd64 on cp314 and there is no
+// source build either. The user watched sixty lines of "Using cached" to be
+// told no.
+//
+// Asked of pip rather than answered from a table. A hardcoded matrix of which
+// interpreter/platform pairs onnxruntime ships wheels for is exactly the kind
+// of thing ADR-006 keeps out of Go source: it would be wrong within a release.
+// A wheels-only dry run is authoritative, needs no install, and costs seconds.
+//
+// Fails OPEN on purpose. A probe that cannot run — no network, a pip too old
+// for --dry-run, a proxy — must not block a path that might work; the real
+// install then reports its own failure as before.
+func piperPythonBlocked() (string, bool) {
+	// The standalone binary needs none of this, so a host that can use it is
+	// never blocked by the Python path's problems.
+	if _, ok := speech.PiperReleaseAsset(); ok {
+		if _, usable := speech.PiperBinaryUsableHere(); usable {
+			return "", false
+		}
+	}
+	if _, err := speech.FindPiperBinary(); err == nil {
+		return "", false // already installed, by us or by hand
+	}
+
+	python, ok := findFirstBinary([]string{"python3", "python"})
+	if !ok {
+		return "", false // no interpreter: Prereqs handles that, with an install
+	}
+
+	if piperProbeDone {
+		return piperProbeReason, piperProbeBlocked
+	}
+	reason, blocked := piperProbeAsk(python)
+	piperProbeReason, piperProbeBlocked, piperProbeDone = reason, blocked, true
+	return reason, blocked
+}
+
+// The probe runs at most once: it spawns a subprocess and reaches the package
+// index, and its answer cannot change while Helix is running.
+var (
+	piperProbeDone    bool
+	piperProbeBlocked bool
+	piperProbeReason  string
+)
+
+// piperProbeAsk puts the question to pip.
+func piperProbeAsk(python string) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), piperProbeTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, python, "-m", "pip", "install",
+		"--dry-run", "--only-binary=:all:", "piper-tts", "flask").CombinedOutput() //nolint:gosec // interpreter resolved from PATH
+	if err == nil {
+		return "", false // it resolves; let the install proceed
+	}
+	if ctx.Err() != nil {
+		return "", false // slow network, not a verdict
+	}
+	// pip's own words, narrowed to the line that names the cause. "no matching
+	// distribution" and "could not find a version" are the two shapes it uses.
+	if !conclusivePipRefusal(string(out)) {
+		return "", false // some other failure; do not claim to know what
+	}
+	// Name the interpreter, not a version matrix.
+	//
+	// "a Python with wheels works" was the first version of this sentence and
+	// it is useless — it does not say which Python. The temptation is to write
+	// the answer in (onnxruntime publishes macOS x86_64 wheels only up to
+	// 1.23.2, tags cp310–cp313, so Intel Macs need Python ≤ 3.13), and that is
+	// exactly the rotting table ADR-006 keeps out of Go source: upstream
+	// dropped Intel macOS between 1.23.2 and 1.25.0 and can drop a Python tag
+	// in any release. So the message reports what is TRUE HERE — asked of the
+	// interpreter itself — and points at a dated table for the rest.
+	blockers := strings.Join(missingWheelNames(string(out)), " and ")
+	who := "this Python"
+	if id := pythonIdentity(python); id != "" {
+		who = id
+	}
+	return "piper-tts cannot be installed for " + who + ": " + blockers +
+		" publish no wheel for it, and there is no source build. " +
+		"docs/local_runtimes.md §3.7 lists which interpreters do have wheels — on an " +
+		"Intel Mac it is a Python VERSION problem, not an architecture one, and an " +
+		"older interpreter fixes it. /blackbox setup also offers every alternative " +
+		"with prices.", true
+}
+
+// pythonIdentity asks the interpreter what it is: "Python 3.14 on
+// macosx-10.9-x86_64".
+//
+// Both halves matter and neither can be inferred from Helix's own build:
+// runtime.GOARCH describes the Go binary, and a universal2 or Rosetta Python
+// can disagree with it — which is precisely the case that produced this
+// refusal. sysconfig.get_platform() is the tag pip matches wheels against, so
+// it is the thing to print.
+//
+// Returns "" when the interpreter cannot answer; the caller then says "this
+// Python", which is vaguer but never wrong.
+func pythonIdentity(python string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, python, "-c",
+		"import sys,sysconfig;print('Python %d.%d on %s' % "+
+			"(sys.version_info[0], sys.version_info[1], sysconfig.get_platform()))",
+	).Output() //nolint:gosec // interpreter resolved from PATH
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// piperProbeTimeout bounds the dry run. Generous enough for a slow index,
+// short enough that a hung probe is not the new version of the problem.
+const piperProbeTimeout = 90 * time.Second
+
+// missingWheelNames pulls the unsatisfiable package names out of pip's output,
+// so the refusal names the actual blocker rather than "a dependency".
+//
+// Falls back to the two packages that are always the cause here, because a
+// refusal that cannot say why is worse than one that names the usual suspects.
+func missingWheelNames(out string) []string {
+	var found []string
+	for _, name := range []string{"onnxruntime", "piper-phonemize", "piper_phonemize"} {
+		if strings.Contains(out, name) {
+			found = append(found, name)
+		}
+	}
+	if len(found) == 0 {
+		return []string{"onnxruntime"}
+	}
+	return found
+}
+
+// conclusivePipRefusal reports whether pip's output is a RESOLUTION verdict
+// rather than any other kind of failure.
+//
+// The distinction is the whole safety of this probe. A pip too old for
+// --dry-run, a missing index, a proxy, a broken interpreter — all exit non-zero
+// and none of them say anything about whether piper-tts is installable. Only
+// these three phrases do.
+func conclusivePipRefusal(out string) bool {
+	lower := strings.ToLower(out)
+	return strings.Contains(lower, "no matching distribution") ||
+		strings.Contains(lower, "could not find a version") ||
+		strings.Contains(lower, "resolutionimpossible")
 }

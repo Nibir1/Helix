@@ -784,6 +784,42 @@ newer standalone build to move to.
 On macOS, Helix keeps the Python server and says so, rather than fetching 19 MB
 that cannot start. There is no Homebrew formula either.
 
+### So which interpreters can install it? (measured 2026-09-09)
+
+Because macOS always takes the Python path, "does piper-local work here" reduces
+to "can pip install `piper-tts` for this interpreter". `piper-tts` ≥ 1.3 depends
+on `onnxruntime<2,>=1`, and **onnxruntime's wheel coverage is the whole
+question** — `piper-tts` itself ships `cp39-abi3` wheels (1.4.2–1.8.0) for both
+macOS architectures, which satisfy any Python ≥ 3.9, and Flask is pure Python.
+
+Queried from PyPI's own release metadata, not from memory:
+
+| Platform | onnxruntime wheels | Verdict |
+| :--- | :--- | :--- |
+| macOS **arm64** | 1.25.0 – 1.29.0, including **cp314** | works, current Python fine |
+| macOS **x86_64** (Intel) | up to **1.23.2**, tags **cp310–cp313** only | works **only on Python 3.10–3.13** |
+| Windows amd64 | not needed — native binary | works with no Python |
+| Linux amd64 / arm64 / armv7 | not needed — native binary | works with no Python |
+
+**The consequence for Intel Macs is a version problem, not an architecture
+one.** onnxruntime has never published a `cp314` wheel for `macosx x86_64` and
+publishes no macOS x86_64 wheel at all above 1.23.2, so an Intel Mac running
+**Python 3.14 cannot install piper-local** — pip resolves through every
+`piper-tts` release looking for one whose onnxruntime constraint it can satisfy,
+finds none, and fails. On the same machine with a **Python 3.13** it installs.
+
+A live session hit exactly this: an Intel MacBook on Python 3.14, minutes of
+`Using cached` and then `ResolutionImpossible`. Helix now asks pip in a
+wheels-only dry run *before* installing and refuses in seconds, naming the
+interpreter and the packages that lack wheels (`piperPythonBlocked`).
+
+Two things this table does not promise. It is **dated** because upstream wheel
+coverage moves — onnxruntime dropped Intel macOS between 1.23.2 and 1.25.0, and
+could add or drop a Python tag in any release; re-run the query rather than
+trusting the row. And Helix uses whatever `python3` resolves to: installing a
+3.13 alongside a 3.14 changes nothing unless `python3` points at it in the shell
+you start Helix from.
+
 ### Edge boards: libstdc++ is the gate, not glibc
 
 The binaries cover every architecture Helix targets — `aarch64` (Pi 4/5 on a

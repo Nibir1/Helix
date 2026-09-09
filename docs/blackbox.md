@@ -139,6 +139,17 @@ defaults (phrase `"hey helix"`, engine `"energy"`, preset `"balanced"`),
 persists them, and tells you how to go always-on. Equivalently, set
 `speech.wake_word.enabled = true` in `~/.helix/config.json`.
 
+**Wake-only listening has no timeout.** Once a turn finishes, nothing is
+transcribed until you wake Helix again — however long that takes. Until
+2026-09-09 there was a 60-second window after which the gate removed itself and
+the microphone opened ungated, which read ADR-005 §5 backwards and, in a real
+session, produced three turns nobody took: room noise transcribed as "May he
+leave.", then `man motor`, then "Manual mode." — which matched the kill phrase
+and ended live mode on its own. Press **Ctrl+C** during the hold to take a turn
+without making a sound. A recorder that actually dies still falls through to
+open capture and says so once, because being stranded behind a broken
+microphone is worse.
+
 ### Waking from the keyboard prompt (`/blackbox wake always on`)
 
 By default the wake word only gates the gaps **between spoken turns**: you type

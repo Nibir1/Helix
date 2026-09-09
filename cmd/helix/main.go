@@ -540,9 +540,13 @@ func main() {
 				if outcome == wakeFired {
 					lastWakeAt = wakeEv.DetectedAt
 				} else {
-					// Wake gating lapsing back to open capture is a change the
-					// user asked for wake for — say so once instead of silently
-					// listening.
+					// Only a DEAD SCANNER reaches here now. The idle window
+					// that used to expire into open capture is gone — it
+					// inverted ADR-005 §5 and, in a real session, handed three
+					// hallucinated turns to a shell nobody was talking to, the
+					// last of which was heard as "manual mode" and ended live
+					// mode. A broken microphone still falls through, because
+					// stranding a user is worse, and it still says so once.
 					noteWakeLapse(outcome)
 				}
 				break

@@ -9,6 +9,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -206,5 +207,57 @@ func wakeEventForTest(phrase string, score float64) wakeword.WakeEvent {
 		DetectedAt: time.Now(),
 		Score:      score,
 		Phrase:     phrase,
+	}
+}
+
+// TestWakeHoldHasNoDeadline is the regression for the defect a real session
+// found on 2026-09-09: the wake gate removed itself.
+//
+// It read ADR-005 §5 ("a hard 60s inactivity lockout BACK TO wake-only
+// listening") as a deadline ON wake-only listening, so sixty quiet seconds
+// after going live the microphone opened with no gate at all. Fan noise became
+// a 0.5s clip, whisper turned it into "May he leave.", and the shell answered a
+// turn nobody took; two turns later a hallucinated "Manual mode." matched the
+// kill phrase and ended live mode by itself.
+//
+// Asserted by reading the source rather than by waiting a minute, because the
+// property is the ABSENCE of a timeout and a test that waited for one to not
+// fire would have to run longer than the timeout it is checking for. §9 rule 8
+// applies: the assertions below would both have failed against the old code.
+func TestWakeHoldHasNoDeadline(t *testing.T) {
+	src, err := os.ReadFile("voice_mode.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+
+	fn := functionBody(body, "func wakeListenUntilArmed()")
+	if fn == "" {
+		t.Fatal("could not find wakeListenUntilArmed — the test cannot reach what it checks")
+	}
+	if strings.Contains(fn, "context.WithTimeout") {
+		t.Error("the wake hold has a timeout again. When it expires the caller falls " +
+			"through to OPEN capture, which is ADR-005 §5 inverted: an idle session must " +
+			"need the wake word MORE, not stop needing it.")
+	}
+	if !strings.Contains(fn, "context.WithCancel") {
+		t.Error("the hold must still be cancellable — Ctrl+C is the only way to take a " +
+			"turn without making a sound")
+	}
+	if strings.Contains(body, "wakeIdleWindow") {
+		t.Error("wakeIdleWindow is back; the window is the bug, not the duration")
+	}
+}
+
+// The complement: a dead scanner must STILL fall through, or a broken
+// microphone would trap the user in a hold that can never fire.
+func TestDeadScannerStillFallsThrough(t *testing.T) {
+	if notice := wakeLapseNotice(wakeScannerFailed); notice == "" {
+		t.Error("a scanner that died must announce itself — it is the one case where wake " +
+			"gating is genuinely lost, and silence there is how a user ends up talking to " +
+			"a shell that cannot hear")
+	}
+	if notice := wakeLapseNotice(wakeInterrupted); notice != "" {
+		t.Errorf("Ctrl+C is an explicit act and needs no explanation, got %q", notice)
 	}
 }

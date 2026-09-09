@@ -127,7 +127,8 @@ func voiceModeWakeNotes(wakeEnabled bool, engine string) []string {
 	}
 	lines := []string{
 		"Wake word is on, but it gates the gaps BETWEEN turns — this first turn starts now,",
-		"with no wake needed.",
+		"with no wake needed. After it, nothing is transcribed until you wake me again —",
+		"there is no timeout, so a quiet room stays a quiet room. Ctrl+C takes a turn now.",
 	}
 	if engine != "sidecar" {
 		lines = append(lines,
@@ -669,10 +670,28 @@ func isVoiceKillPhrase(text string) bool {
 	return false
 }
 
-// wakeIdleWindow is the ADR-005 §5 lockout window: between turns NOTHING is
-// transcribed; only wake scoring runs, for at most this long before the
-// shell falls back to push-to-talk turns.
-const wakeIdleWindow = 60 * time.Second
+// The 60-second idle window is GONE, and its removal is a correction rather
+// than a simplification.
+//
+// It read ADR-005 §5 — "wake-word-triggered sessions have a hard 60s inactivity
+// lockout back to wake-only listening" — as a deadline on wake-only listening,
+// after which the shell fell through to OPEN capture. That is the rule
+// inverted. §5 exists so that an idle session needs the wake word again; the
+// implementation made an idle session stop needing it.
+//
+// What it cost, from a real session on 2026-09-09: sixty quiet seconds after
+// going live, the gate removed itself and the microphone opened unbidden. Fan
+// noise became a 0.5s clip, whisper turned that into "May he leave.", and the
+// shell answered a turn nobody took. The next one ran `man motor`. The one
+// after that transcribed as "Manual mode." — the kill phrase — and Helix left
+// live mode on its own, which is precisely the thing the owner had just asked
+// it never to do.
+//
+// So wake-only listening now has no deadline. Nothing is transcribed until a
+// wake event fires, for as long as that takes. The escape hatches are
+// deliberate acts: Ctrl+C takes a turn immediately (wakeInterrupted), and a
+// scanner that dies still falls through, because a broken microphone must not
+// strand anyone.
 
 // wakeOutcome says how a stretch of wake listening ended.
 //
@@ -691,8 +710,11 @@ const (
 	// wakeFired: a wake event arrived; the caller runs another voice turn.
 	wakeFired
 
-	// wakeWindowExpired: the ADR-005 §5 idle window elapsed with no wake.
-	wakeWindowExpired
+	// wakeInterrupted: the user pressed Ctrl+C during the hold. An explicit
+	// "I want to talk now" gesture, so the caller takes a turn rather than
+	// treating it as a failure — and unlike the window that used to live here,
+	// it cannot happen without someone asking for it.
+	wakeInterrupted
 
 	// wakeScannerFailed: wake listening was configured and engaged but the
 	// capture stream died (device yanked, recorder killed, service refused to
@@ -762,7 +784,7 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 		return wakeword.WakeEvent{}, wakeScannerFailed
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), wakeIdleWindow)
+	ctx, cancel := context.WithCancel(context.Background())
 	unreg := utils.RegisterOperation(cancel)
 	defer unreg()
 	defer cancel()
@@ -797,7 +819,9 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 		// speaker opens or Helix transcribes its own remark.
 		return wakeword.WakeEvent{}, wakeCompanionSpoke
 	case <-ctx.Done():
-		return wakeword.WakeEvent{}, wakeWindowExpired
+		// Only reachable through the interrupt manager now that there is no
+		// timeout: someone pressed Ctrl+C.
+		return wakeword.WakeEvent{}, wakeInterrupted
 	}
 }
 
@@ -805,8 +829,6 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 // dropped wake gating, or "" when there is nothing to announce.
 func wakeLapseNotice(o wakeOutcome) string {
 	switch o {
-	case wakeWindowExpired:
-		return "wake window expired — listening without the wake word; /blackbox status for info"
 	case wakeScannerFailed:
 		return "wake listening stopped (recorder unavailable) — listening without the wake word; " +
 			"/blackbox status for info"
