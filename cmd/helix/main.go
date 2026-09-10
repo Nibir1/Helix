@@ -500,7 +500,22 @@ func main() {
 		// In-memory history always records the line (ghost-text suggestions
 		// keep working); stealth MemoryOnly only suppresses the on-disk file.
 		history = append(history, ev.Text)
-		shell.PrintTransient(ev.Text)
+
+		// TYPED lines only. PrintTransient collapses the full prompt into a
+		// minimal `❯ line` by moving the cursor UP one row and clearing it —
+		// which is right when the row above is the prompt the user just typed
+		// into, and destructive when it is not.
+		//
+		// A spoken turn has no prompt above it. finishVoiceTranscript has
+		// already printed the richer echo — indented, with the STT provider and
+		// confidence — and PrintTransient was erasing exactly that line and
+		// reprinting the bare text at column 0. Hence the two shapes of echo in
+		// one session: `  ❯ Manual mode.  ·  groq` where a voice command
+		// short-circuited before this point, and `❯ Tell me why is the sky
+		// blue?` where it did not, with the provider attribution silently lost.
+		if ev.Channel != input.ChannelVoice {
+			shell.PrintTransient(ev.Text)
+		}
 		if ev.Channel == input.ChannelVoice && !lastWakeAt.IsZero() {
 			logVoiceLatency("wake_to_exec", time.Since(lastWakeAt), ev.Meta)
 			lastWakeAt = time.Time{}
@@ -517,10 +532,17 @@ func main() {
 		// this is the hot loop. An unconditional CLEAR here used to claim the
 		// grid was fine while the STT chain was falling back to a sidecar that
 		// was not running.
+		//
+		// PRINTED ONLY WHEN DEGRADED. The line already stopped LYING when it
+		// learned to say DEGRADED; it still spoke on every single turn, so a
+		// two-line answer arrived with a third line under it confirming nothing
+		// had gone wrong. Repeated often enough, that is not reassurance — it
+		// is the line you learn to skip, and skipping it is exactly what you
+		// must not do on the turn it finally says DEGRADED. Silence is now the
+		// healthy state, so the line only ever appears when it has something to
+		// report. /status and /doctor answer "is everything fine" on demand.
 		if status := evaluateGridStatus(currentGridSignals()); status.Degraded {
 			gui.PrintWarning(status.Line)
-		} else {
-			gui.PrintSuccess(status.Line)
 		}
 		fmt.Print("\x1b]133;D;0\x07")
 

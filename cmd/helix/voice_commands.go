@@ -56,6 +56,16 @@ type voiceRoute struct {
 	// ID and discards the echo.
 	ArgLimit int
 
+	// AcceptsArg marks a route that takes a spoken remainder but does not
+	// require one. Needed only for /blackbox look, where "look at this error
+	// message" asks about the error and a bare "look at this" describes the
+	// room — so the remainder is meaningful and optional at once.
+	//
+	// Every other route either requires an argument (RequiresArg), caps one
+	// (ArgLimit), or takes none at all. That last group is the majority, and
+	// takesArg is what protects it: see matchVoiceCommand.
+	AcceptsArg bool
+
 	// Speak returns the spoken answer, read from live state after the command
 	// ran. Nil falls back to a generic acknowledgement.
 	Speak func() string
@@ -229,7 +239,10 @@ func voiceRoutes() []voiceRoute {
 				"describe what you see", "take a look"},
 			Command: "/blackbox", FixedArgs: "look",
 			// The remainder becomes the question, so "look at this error message"
-			// asks about the error rather than describing the room.
+			// asks about the error rather than describing the room. This is the
+			// one route where a trailing sentence is content rather than
+			// evidence that the utterance was not a command.
+			AcceptsArg: true,
 		},
 		{
 			Phrases: []string{"stop talking", "be quiet", "mute yourself", "stop speaking"},
@@ -242,8 +255,15 @@ func voiceRoutes() []voiceRoute {
 			Speak: func() string { return "Spoken replies back on." },
 		},
 		{
+			// "can you hear me" is deliberately NOT here. It is the one phrase in
+			// this table that is a genuine conversational question rather than
+			// an instruction, and it is the single most natural thing a person
+			// says to a voice assistant — so routing it to a diagnostic answered
+			// a question the user asked with a 3-second mic test and no reply at
+			// all. Asking whether Helix can hear you is a question for Helix;
+			// the four imperatives below are how you ask for the test.
 			Phrases: []string{"how's the microphone", "how is the microphone", "test the microphone",
-				"microphone test", "can you hear me"},
+				"microphone test"},
 			Command: "/mictest",
 		},
 		{
@@ -312,6 +332,22 @@ func matchVoiceCommand(text string) (string, func() string, bool) {
 	if bestRoute.RequiresArg && rest == "" {
 		return "", nil, false
 	}
+	// A route that takes no argument, with words left over, was not a command.
+	//
+	// Phrases match as PREFIXES, so before this check every argument-less route
+	// swallowed whatever followed it and pasted it onto the command line. Asking
+	// "can you hear me properly now?" ran `/mictest properly now`; "stop talking
+	// about the weather" would have run `/blackbox tts off about the weather`.
+	// Both are the same mistake: a spoken sentence that merely BEGINS with a
+	// command phrase is a sentence, and the trailing words are the evidence.
+	//
+	// Rejecting hands it to the planner as ordinary conversation, which is the
+	// direction this file's own default-deny rule points: a misheard phrase must
+	// never silently do something else. Filler is stripped first, so "status
+	// please" is still /status.
+	if !bestRoute.takesArg() && rest != "" {
+		return "", nil, false
+	}
 
 	line := bestRoute.Command
 	switch {
@@ -323,6 +359,11 @@ func matchVoiceCommand(text string) (string, func() string, bool) {
 		line = strings.TrimSpace(line + " " + rest)
 	}
 	return line, bestRoute.Speak, true
+}
+
+// takesArg reports whether this route can carry a spoken remainder at all.
+func (r voiceRoute) takesArg() bool {
+	return r.RequiresArg || r.ArgLimit > 0 || r.AcceptsArg
 }
 
 // matchSpokenSlashForm handles the explicit "slash <command> [args]" form.

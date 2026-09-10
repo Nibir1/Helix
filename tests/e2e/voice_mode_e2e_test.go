@@ -42,13 +42,15 @@ func TestE2E_ManualModeSafetyValve(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.project, "voice_mode_probe.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	turns := h.turnsCompleted()
 	h.WriteLine("ls voice_mode_probe.txt")
-	// Command output first, THEN the grid line — the order they are actually
-	// printed in. Expecting the grid first consumed past the filename.
+	// Command output first, THEN the turn-end marker — the order they are
+	// actually printed in. Waiting on the marker first consumed past the
+	// filename.
 	if err := h.Expect("voice_mode_probe.txt", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("GRID STATUS", 10*time.Second); err != nil {
+	if err := h.ExpectTurnAfter(turns, 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -70,8 +72,7 @@ func TestE2E_VoiceRefusedWithoutSTT(t *testing.T) {
 		t.Fatalf("refusal must explain why voice mode was refused; got: %s", out)
 	}
 
-	h.WriteLine("echo mode_refused_check")
-	if err := h.Expect("GRID STATUS", 15*time.Second); err != nil {
+	if err := h.SendTurn("echo mode_refused_check", 15*time.Second); err != nil {
 		t.Fatalf("text loop must remain fully functional after a refused /blackbox on: %v", err)
 	}
 }

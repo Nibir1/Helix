@@ -99,6 +99,12 @@ func (d *SidecarDetector) Wake(clip speech.AudioFormat) (score float64, woke boo
 	return score, score >= d.Threshold, nil
 }
 
+// Bar reports the confidence the sidecar's scores are compared against,
+// satisfying Thresholder so the scan instrumentation can print the number.
+// Fixed here, unlike the energy detector's measured bar: a keyword model
+// scores phrase likelihood, which is already normalized across devices.
+func (d *SidecarDetector) Bar() float64 { return d.Threshold }
+
 // Health probes the sidecar (any HTTP response = alive).
 func (d *SidecarDetector) Health(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.BaseURL+"/health", nil)

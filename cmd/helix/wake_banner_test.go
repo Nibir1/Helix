@@ -65,11 +65,11 @@ func TestWakeBannerFallsBackToTheDefaultPhrase(t *testing.T) {
 }
 
 func TestVoiceModeWakeNotes(t *testing.T) {
-	if notes := voiceModeWakeNotes(false, "energy"); notes != nil {
+	if notes := voiceModeWakeNotes(false, "energy", true); notes != nil {
 		t.Errorf("with wake off there is nothing to clarify, got %q", notes)
 	}
 
-	on := strings.Join(voiceModeWakeNotes(true, "energy"), "\n")
+	on := strings.Join(voiceModeWakeNotes(true, "energy", true), "\n")
 	if !strings.Contains(on, "BETWEEN turns") {
 		t.Errorf("/voice on must say wake gating sits between turns:\n%s", on)
 	}
@@ -80,7 +80,7 @@ func TestVoiceModeWakeNotes(t *testing.T) {
 		t.Errorf("the energy engine's behavior belongs here too:\n%s", on)
 	}
 
-	sidecar := strings.Join(voiceModeWakeNotes(true, "sidecar"), "\n")
+	sidecar := strings.Join(voiceModeWakeNotes(true, "sidecar", true), "\n")
 	if strings.Contains(sidecar, "any speech") {
 		t.Errorf("the sidecar engine does match a phrase:\n%s", sidecar)
 	}
@@ -101,7 +101,10 @@ func TestWakeLapseNotice(t *testing.T) {
 		announce bool
 		mentions string
 	}{
-		{wakeScannerFailed, true, "recorder unavailable"},
+		// The notice says listening stopped; it deliberately does NOT name a
+		// cause any more (it used to guess "recorder unavailable"). The real
+		// error reaches the screen from the scan loop's OnError hook.
+		{wakeScannerFailed, true, "wake listening stopped"},
 		// Wake was never configured, so nothing lapsed and nothing is said.
 		{wakeNotEngaged, false, ""},
 		{wakeFired, false, ""},

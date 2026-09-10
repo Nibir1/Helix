@@ -151,6 +151,28 @@ func (h *fwHarness) Expect(substr string, timeout time.Duration) error {
 
 func (h *fwHarness) WriteLine(line string) { _, _ = h.ptmx.Write([]byte(line + "\r")) }
 
+// turnsCompleted counts finished turns via the OSC 133;D marker in the raw
+// capture — see turnEndMarker in harness_test.go for why this and not the
+// GRID STATUS line.
+func (h *fwHarness) turnsCompleted() int {
+	h.outMu.Lock()
+	defer h.outMu.Unlock()
+	return strings.Count(h.outBuf.String(), turnEndMarker)
+}
+
+// ExpectTurnAfter waits for a turn to complete beyond the given baseline.
+func (h *fwHarness) ExpectTurnAfter(base int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if h.turnsCompleted() > base {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for a turn to complete (had %d)\n----- output -----\n%s",
+		base, h.stripped())
+}
+
 func (h *fwHarness) Close() {
 	h.closeOnce.Do(func() {
 		_, _ = h.ptmx.WriteString("exit\r")
@@ -184,11 +206,12 @@ func TestE2E_FirewallQuarantinesInjectedPlan(t *testing.T) {
 	})
 	defer h.Close()
 
+	turns := h.turnsCompleted()
 	h.WriteLine("please create a marker file for me")
 	if err := h.Expect("quarantined", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Expect("GRID STATUS", 10*time.Second); err != nil {
+	if err := h.ExpectTurnAfter(turns, 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(h.project, "injected.txt")); err == nil {

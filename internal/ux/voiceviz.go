@@ -57,14 +57,45 @@ type VoiceViz struct {
 	level   float64 // 0..1 live amplitude; <0 = synthetic animation
 	start   time.Time
 	tty     bool
+
+	// standbyHint is the wake instruction shown on the standby ring. Settable
+	// because only the CALLER knows which engine is running, and the two
+	// engines can honestly promise different things — see SetStandbyHint.
+	standbyHint string
 }
 
 // NewVoiceViz creates an idle voice HUD.
 func NewVoiceViz() *VoiceViz {
 	return &VoiceViz{
-		level: -1,
-		tty:   term.IsTerminal(int(os.Stdout.Fd())),
+		level:       -1,
+		tty:         term.IsTerminal(int(os.Stdout.Fd())),
+		standbyHint: DefaultStandbyHint,
 	}
+}
+
+// DefaultStandbyHint is what the standby ring says when the caller has not said
+// which engine is listening.
+//
+// It used to read "say the wake phrase", which the shipped default engine
+// cannot deliver: energy detection wakes on speech ONSET and has no idea what
+// words were said, so telling someone to say a phrase invites them to say it
+// carefully and quietly and conclude the feature is broken. cmd/helix already
+// carries this correction in three other places (blackBoxWakeLine,
+// wakeBannerLines, printWakeStatus) — the animated HUD was the one that still
+// promised words.
+const DefaultStandbyHint = "── make any sound to wake ──"
+
+// SetStandbyHint replaces the standby instruction. Safe on a running HUD.
+//
+// Only the sidecar engine is scoring a phrase, so only the sidecar engine may
+// name one; every other engine gets a promise it can actually keep.
+func (v *VoiceViz) SetStandbyHint(hint string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if strings.TrimSpace(hint) == "" {
+		hint = DefaultStandbyHint
+	}
+	v.standbyHint = hint
 }
 
 // Start begins the animation loop in the given state. No-op on non-TTY
@@ -270,7 +301,11 @@ func (v *VoiceViz) renderPulseLocked() string {
 	var b strings.Builder
 	b.WriteString(color + glyph + thinkReset + " ")
 	b.WriteString(thinkSubtle + "HELIX :: STANDBY" + thinkReset + " ")
-	b.WriteString(thinkCyan + "── say the wake phrase ──" + thinkReset + " ")
+	hint := v.standbyHint
+	if hint == "" {
+		hint = DefaultStandbyHint
+	}
+	b.WriteString(thinkCyan + hint + thinkReset + " ")
 	b.WriteString(thinkOrange +
 		fmt.Sprintf("%.0fs", time.Since(v.start).Seconds()) + thinkReset)
 	return b.String()

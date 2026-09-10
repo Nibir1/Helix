@@ -77,24 +77,57 @@ func TestRMSRejectsGarbage(t *testing.T) {
 	}
 }
 
+// pcmToneRMS builds a sine chunk at a TARGET normalized RMS rather than a
+// target peak amplitude, because RMS is what the detector measures and the
+// levels worth testing are the ones a microphone actually produces (see
+// real_capture_test.go). A sine's RMS is its amplitude over root two.
+func pcmToneRMS(samples int, targetRMS, freq float64, rate int) []byte {
+	return pcmTone(samples, targetRMS*math.Sqrt2, freq, rate)
+}
+
+// TestEnergyDetectorPresets checks the two behaviours the presets promise, at
+// levels a real microphone reaches: a quiet room never wakes anything, and
+// speech over that room does.
+//
+// The floor is measured, so a detector must hear the room BEFORE it can judge
+// an utterance against it — the first chunk defines the room by construction
+// (arming happens at an idle prompt) and cannot itself wake. A test that hands
+// a fresh detector one loud chunk is testing a state the scan loop never
+// reaches.
 func TestEnergyDetectorPresets(t *testing.T) {
 	const rate = 16000
-	speechChunk := wavFromPCM(pcmTone(rate/4, 0.35, 220, rate), rate)
+	const samples = rate * 3 / 2 // 1500ms, the shipped chunk
 
-	balanced := NewEnergyDetector(PresetBalanced)
-	if _, woke, err := balanced.Wake(speechChunk); err != nil || !woke {
-		t.Fatalf("normal speech must wake balanced: woke=%v err=%v", woke, err)
+	// Low-gain built-in mic: measured on a MacBook Pro at input volume 38.
+	room := wavFromPCM(pcmToneRMS(samples, 0.0012, 120, rate), rate)
+	speechChunk := wavFromPCM(pcmToneRMS(samples, 0.006, 220, rate), rate)
+
+	for _, preset := range []Preset{PresetStrict, PresetBalanced, PresetLoose} {
+		d := NewEnergyDetector(preset)
+		for i := 0; i < 4; i++ {
+			if _, woke, err := d.Wake(room); err != nil || woke {
+				t.Fatalf("%s: room chunk %d woke=%v err=%v", preset, i, woke, err)
+			}
+		}
+		if _, woke, err := d.Wake(speechChunk); err != nil || !woke {
+			t.Fatalf("%s: speech over a measured room must wake: woke=%v err=%v "+
+				"(bar %.5f, floor %.5f)", preset, woke, err, d.Bar(), d.Floor())
+		}
 	}
 
-	quiet := wavFromPCM(pcmTone(rate/4, 0.05, 220, rate), rate)
-	strict := NewEnergyDetector(PresetStrict)
-	if _, woke, _ := strict.Wake(quiet); woke {
-		t.Fatal("quiet chunk must not wake strict")
-	}
-
+	// An unknown preset must behave like balanced, checked by behaviour rather
+	// than by reading the field back.
 	unknown := NewEnergyDetector(Preset("gibberish"))
-	if unknown.Threshold != PresetThresholds[PresetBalanced] {
-		t.Fatal("unknown preset must default to balanced")
+	balanced := NewEnergyDetector(PresetBalanced)
+	for i := 0; i < 4; i++ {
+		_, _, _ = unknown.Wake(room)
+		_, _, _ = balanced.Wake(room)
+	}
+	_, unknownWoke, _ := unknown.Wake(speechChunk)
+	_, balancedWoke, _ := balanced.Wake(speechChunk)
+	if unknownWoke != balancedWoke {
+		t.Fatalf("unknown preset must default to balanced: unknown=%v balanced=%v",
+			unknownWoke, balancedWoke)
 	}
 }
 

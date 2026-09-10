@@ -107,23 +107,41 @@ func armedIdleWait() (wakeword.WakeEvent, armedOutcome) {
 	}
 	defer func() { _ = svc.Stop() }()
 
-	// One channel for ArmedWait to select on, fed by the first wake event.
+	// One channel for ArmedWait to select on, fed by the first wake event OR
+	// by the scan loop dying.
+	//
+	// Both have to travel the same wire. shell.ArmedWait selects on `fired` and
+	// otherwise polls the keyboard forever; a closed `events` channel writes
+	// nothing to `fired`, so a dead listener and a quiet room are literally the
+	// same program state — which is what made "it says it is listening and
+	// nothing happens" the shape of every wake failure. (An earlier comment
+	// here claimed "the poll below reports unavailable". It could not: there is
+	// nothing for the poll to observe.) So the death is delivered as an event
+	// and told apart by scannerDied, which is safe to read after the receive
+	// because the channel send orders the write before it.
 	fired := make(chan struct{}, 1)
 	var got wakeword.WakeEvent
-	go func() {
-		ev, ok := <-events
-		if !ok {
-			return // scanner closed: the poll below reports unavailable
-		}
-		got = ev
+	var scannerDied bool
+	signal := func() {
 		select {
 		case fired <- struct{}{}:
 		default:
 		}
+	}
+	go func() {
+		ev, ok := <-events
+		if !ok {
+			scannerDied = true
+			signal()
+			return
+		}
+		got = ev
+		signal()
 	}()
 
 	printArmedPrompt()
 	viz := ux.NewVoiceViz()
+	viz.SetStandbyHint(standbyHint())
 	viz.Start(ux.VizStandby)
 	defer viz.Stop()
 
@@ -132,11 +150,34 @@ func armedIdleWait() (wakeword.WakeEvent, armedOutcome) {
 	case waitErr != nil, res == shell.ArmedUnavailable:
 		return wakeword.WakeEvent{}, armedUnavailable
 	case res == shell.ArmedOther:
+		// The HUD comes down first on both branches: it is the indicator that
+		// the microphone is open, and on the died branch it no longer is.
 		viz.Stop()
+		if scannerDied {
+			noteArmingDied(svc.Err())
+			return wakeword.WakeEvent{}, armedUnavailable
+		}
 		return got, armedWake
 	default:
 		return wakeword.WakeEvent{}, armedKeyboard
 	}
+}
+
+// noteArmingDied reports that hands-free listening stopped mid-wait.
+//
+// The "◉ listening" line is printed once per session and the HUD is the
+// continuous indicator, so a scan loop that dies has to retract both — the HUD
+// by stopping it (the caller does that before calling here), the line by
+// clearing the announced flag so the next successfully armed prompt says it
+// again. Between those two, a wake loop that died leaves nothing on screen
+// claiming the microphone is open.
+func noteArmingDied(cause error) {
+	armedPromptAnnounced = false
+	detail := "the wake scanner stopped — /mictest checks the microphone"
+	if cause != nil {
+		detail = cause.Error() + " — /mictest checks the microphone"
+	}
+	fmt.Println(shell.Step(shell.StateWarn, "stopped listening at the prompt", detail))
 }
 
 // printArmedPrompt says the microphone is open, because an open microphone the
@@ -166,6 +207,23 @@ func printArmedPrompt() {
 // the continuous indicator; see printArmedPrompt.
 var armedPromptAnnounced bool
 
+// standbyHint is what the standby HUD tells the user to do, worded for the
+// engine that is actually listening.
+//
+// The fourth place this correction was needed. The default energy engine wakes
+// on speech ONSET — it cannot match words at all — so instructing someone to
+// "say the wake phrase" tells them to do a careful, quiet thing that is exactly
+// the wrong move, and then looks broken. Only the sidecar engine scores a
+// phrase, so only it names one. Kept beside wakeHeardDetail, which makes the
+// same distinction for the event that ends standby.
+func standbyHint() string {
+	ww := cfg.Speech.WakeWord
+	if engineOrDefault(ww.Engine) == "sidecar" && ww.Phrase != "" {
+		return fmt.Sprintf("── say %q ──", ww.Phrase)
+	}
+	return ux.DefaultStandbyHint
+}
+
 // enterVoiceModeFromWake performs the transition a spoken word asked for.
 //
 // It routes through blackBoxOn rather than calling enterVoiceMode directly, so
@@ -178,6 +236,15 @@ func enterVoiceModeFromWake(ev wakeword.WakeEvent) {
 	fmt.Println()
 	fmt.Println(shell.Step(shell.StateGood, "wake heard", wakeHeardDetail(ev)))
 	blackBoxOn()
+
+	// Spoken only once live mode is actually up. blackBoxOn can refuse — a
+	// failed preflight, or a mode that was already on — and saying "I'm
+	// listening" into either of those would be the readiness lie this file
+	// spends its length avoiding. voiceModeActive is the fact, so it is what
+	// gets asked.
+	if voiceModeActive {
+		speakWakeAcknowledgement()
+	}
 }
 
 // wakeHeardDetail describes what actually triggered, without overstating it.
@@ -190,7 +257,13 @@ func wakeHeardDetail(ev wakeword.WakeEvent) string {
 	if engineOrDefault(cfg.Speech.WakeWord.Engine) == "sidecar" && ev.Phrase != "" {
 		return fmt.Sprintf("%q (score %.2f) — going live", ev.Phrase, ev.Score)
 	}
-	return fmt.Sprintf("speech onset (level %.2f) — going live", ev.Score)
+	// Four decimals for the energy engine, two for the sidecar. They are not
+	// the same quantity: a sidecar score is a 0..1 confidence where 0.91 is
+	// meaningful, while an energy level is a normalized RMS that lives between
+	// 0.001 and 0.03 on a built-in microphone — at %.2f every wake this engine
+	// will ever report prints as "0.01", which is the number rounded away to
+	// nothing.
+	return fmt.Sprintf("speech onset (level %.4f) — going live", ev.Score)
 }
 
 // alwaysListenStatusLine is the one-liner for /blackbox status and the

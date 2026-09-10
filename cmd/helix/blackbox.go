@@ -219,17 +219,52 @@ func blackBoxStatus() {
 // what will transcribe it. The summary answers "will this work" so the chain
 // tables below can answer "and how".
 func blackBoxHearingLine() string {
-	if _, err := speech.DetectRecorder(); err != nil {
+	switch classifyHearing() {
+	case hearingNoRecorder:
 		return shell.Badge(shell.StateBad, "no recorder") +
 			shell.Muted("  /setup installs sox")
+	case hearingNoTranscription:
+		return shell.Badge(shell.StateWarn, "no transcription") +
+			shell.Muted("  /blackbox setup picks one")
+	default:
+		return shell.Badge(shell.StateGood, "ready") +
+			shell.Muted("  ") + shell.Value(sttChainDescription())
+	}
+}
+
+// hearingCondition is what the microphone path can actually do right now.
+//
+// Split out from the line that renders it because there are now two renderings
+// — the full LIVE panel and the collapsed re-entry line — and a second copy of
+// this decision would be a second place for "ready" to mean something
+// different. The repo has paid for that shape before (see newWakeService).
+type hearingCondition int
+
+const (
+	hearingReady hearingCondition = iota
+	hearingNoRecorder
+	hearingNoTranscription
+)
+
+// classifyHearing decides the hearing condition from state already held.
+func classifyHearing() hearingCondition {
+	if _, err := speech.DetectRecorder(); err != nil {
+		return hearingNoRecorder
 	}
 	reg := speech.Default()
 	if reg == nil || len(reg.STTChain()) == 0 {
-		return shell.Badge(shell.StateWarn, "no transcription") +
-			shell.Muted("  /blackbox setup picks one")
+		return hearingNoTranscription
 	}
-	return shell.Badge(shell.StateGood, "ready") +
-		shell.Muted("  ") + shell.Value(strings.Join(reg.STTChain(), " → "))
+	return hearingReady
+}
+
+// sttChainDescription renders the transcription chain, e.g. "groq → whisper-local".
+func sttChainDescription() string {
+	reg := speech.Default()
+	if reg == nil {
+		return ""
+	}
+	return strings.Join(reg.STTChain(), " → ")
 }
 
 // blackBoxWakeLine summarises hands-free triggering in one line.
@@ -256,29 +291,66 @@ func blackBoxWakeLine() string {
 // blackBoxEyesLine is the camera's honest one-liner, used by both the merged
 // status and the eyes subcommand.
 func blackBoxEyesLine() string {
-	ready, why := visionReady()
-	switch {
-	case cfg.Vision.Enabled && ready && cameraDeliveredNothing():
-		// Enabled, ffmpeg present, model can see — and the camera has never
-		// actually produced a frame. Saying "watching" here is the readiness lie
-		// this file exists to prevent: on macOS an unauthorized camera passes
-		// every check that can be made cheaply and delivers nothing forever.
+	switch cond, why := classifyEyes(); cond {
+	case eyesNoFrames:
 		return shell.Badge(shell.StateBad, "no frames") +
 			shell.Muted("  camera opens but delivers nothing — likely an OS "+
 				"permission  ·  /blackbox look shows why")
-	case cfg.Vision.Enabled && ready:
+	case eyesWatching:
 		return shell.Badge(shell.StateGood, "watching") + shell.Muted("  ") +
 			shell.Value(visionRouteDescription()) +
 			shell.Muted(fmt.Sprintf("  ·  %d frame/turn", visionMaxFrames()))
-	case cfg.Vision.Enabled && !ready:
-		// Enabled but unusable is the state the old status report could not
-		// express, and the one most worth saying out loud.
+	case eyesOnButBlind:
 		return shell.Badge(shell.StateBad, "on but blind") + shell.Muted("  "+why)
-	case ready:
+	case eyesOffReady:
 		return shell.Badge(shell.StateIdle, "off") +
 			shell.Muted("  ready when you are  ·  ") + shell.Value(visionRouteDescription())
 	default:
 		return shell.Badge(shell.StateIdle, "off") + shell.Muted("  "+why)
+	}
+}
+
+// eyesCondition is what the camera can actually do right now. Extracted from
+// the line that renders it for the same reason as hearingCondition: two
+// renderings, one decision.
+type eyesCondition int
+
+const (
+	// eyesWatching: on, usable, and has delivered at least one frame.
+	eyesWatching eyesCondition = iota
+
+	// eyesNoFrames: on, passes every cheap check, and delivers nothing. Saying
+	// "watching" here is the readiness lie blackbox.go exists to prevent — on
+	// macOS an unauthorized camera passes every check that can be made cheaply
+	// and delivers nothing forever.
+	eyesNoFrames
+
+	// eyesOnButBlind: on and unusable. Enabled-but-broken is the state the old
+	// status report could not express, and the one most worth saying out loud.
+	eyesOnButBlind
+
+	// eyesOffReady: off by choice, would work if turned on.
+	eyesOffReady
+
+	// eyesOffUnavailable: off, and could not run here anyway.
+	eyesOffUnavailable
+)
+
+// classifyEyes decides the camera condition, with the reason when it is off or
+// broken.
+func classifyEyes() (eyesCondition, string) {
+	ready, why := visionReady()
+	switch {
+	case cfg.Vision.Enabled && ready && cameraDeliveredNothing():
+		return eyesNoFrames, why
+	case cfg.Vision.Enabled && ready:
+		return eyesWatching, why
+	case cfg.Vision.Enabled && !ready:
+		return eyesOnButBlind, why
+	case ready:
+		return eyesOffReady, why
+	default:
+		return eyesOffUnavailable, why
 	}
 }
 

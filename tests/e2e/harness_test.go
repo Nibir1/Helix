@@ -285,6 +285,52 @@ func (h *harness) stripped() string {
 	return ansiRe.ReplaceAllString(h.outBuf.String(), "")
 }
 
+// turnEndMarker is the OSC 133;D shell-integration sequence main prints after
+// every completed turn.
+//
+// This is what "the turn finished" means, and these tests used to wait for the
+// GRID STATUS line instead — a human-facing status line that happened to be
+// printed unconditionally. It no longer is: an always-green status line carries
+// no information, so it now appears only when something IS degraded, and every
+// test that used it as a clock stopped synchronizing. The lesson is the reason
+// for this helper: a test must wait on the SEMANTIC marker, which exists for
+// exactly this purpose and is invisible to the user, not on cosmetics that are
+// free to change.
+//
+// ansiRe strips OSC sequences, so matching happens on the raw buffer.
+const turnEndMarker = "\x1b]133;D;0\a"
+
+// turnsCompleted counts finished turns in the raw (unstripped) capture.
+func (h *harness) turnsCompleted() int {
+	h.outMu.Lock()
+	defer h.outMu.Unlock()
+	return strings.Count(h.outBuf.String(), turnEndMarker)
+}
+
+// ExpectTurnAfter waits for a turn to complete beyond the given baseline count.
+//
+// Take the baseline BEFORE sending the line, or a turn that finished earlier
+// satisfies the wait while the command under test is still running — the same
+// stale-match trap SendExpect was written to avoid.
+func (h *harness) ExpectTurnAfter(base int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if h.turnsCompleted() > base {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for a turn to complete (had %d)\n"+
+		"----- captured output -----\n%s", base, h.stripped())
+}
+
+// SendTurn sends a line and waits for the turn it starts to finish.
+func (h *harness) SendTurn(line string, timeout time.Duration) error {
+	base := h.turnsCompleted()
+	h.WriteLine(line)
+	return h.ExpectTurnAfter(base, timeout)
+}
+
 // Expect polls the ANSI-stripped output until substr appears or timeout elapses.
 func (h *harness) Expect(substr string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
@@ -417,8 +463,7 @@ func TestE2E_DirectShellBypassesPlanner(t *testing.T) {
 		t.Fatalf("create marker: %v", err)
 	}
 	before := h.ChatHits()
-	h.WriteLine("ls -la")
-	if err := h.Expect("GRID STATUS", 15*time.Second); err != nil {
+	if err := h.SendTurn("ls -la", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.Expect(marker, 5*time.Second); err != nil {
@@ -436,8 +481,7 @@ func TestE2E_NaturalLanguageUsesPlanner(t *testing.T) {
 	defer h.Close()
 
 	before := h.ChatHits()
-	h.WriteLine("please create a marker file for me")
-	if err := h.Expect("GRID STATUS", 20*time.Second); err != nil {
+	if err := h.SendTurn("please create a marker file for me", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.ChatHits(); got <= before {
@@ -470,8 +514,7 @@ func TestE2E_HighRiskBlocked(t *testing.T) {
 	defer h.Close()
 
 	before := h.ChatHits()
-	h.WriteLine("rm -rf /")
-	if err := h.Expect("GRID STATUS", 15*time.Second); err != nil {
+	if err := h.SendTurn("rm -rf /", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.Expect("dangerous pattern", 5*time.Second); err != nil {

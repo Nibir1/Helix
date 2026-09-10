@@ -109,6 +109,79 @@ func TestMatchVoiceCommandIgnoresOrdinarySpeech(t *testing.T) {
 	}
 }
 
+// TestArgumentlessRouteRejectsTrailingSpeech is the regression for a live
+// session: "Can you hear me?" ran /mictest, and "Can you hear me properly now?"
+// ran `/mictest properly now`.
+//
+// Phrases match as prefixes, so an argument-less route used to swallow whatever
+// followed it and paste it onto the command line. Every case below is a
+// sentence that merely BEGINS with a command phrase, and the trailing words are
+// the evidence that it was a sentence — so all of them belong to the planner.
+func TestArgumentlessRouteRejectsTrailingSpeech(t *testing.T) {
+	sentences := []string{
+		// The reported pair. "can you hear me" is no longer a route at all, but
+		// these must stay conversation whatever the vocabulary does next.
+		"can you hear me",
+		"can you hear me properly now",
+		// The same shape on routes that do still match their bare phrase.
+		"stop talking about the weather",
+		"what changed in my sleep schedule",
+		"status of the deployment pipeline",
+		"undo that knot in my headphones",
+		"review the book I sent you",
+		"diff between mitosis and meiosis",
+		"what do you remember about my sister",
+		"how are you doing on the new job",
+	}
+	for _, text := range sentences {
+		if line, _, ok := matchVoiceCommand(text); ok {
+			t.Errorf("%q became the command %q — a sentence that starts with a "+
+				"command phrase is still a sentence", text, line)
+		}
+	}
+}
+
+// TestArgumentlessRouteStillMatchesItsBarePhrase is the other half: the fix
+// above must not make the vocabulary unreachable. Filler is stripped before the
+// leftover-words check, so a politely spoken command still works.
+func TestArgumentlessRouteStillMatchesItsBarePhrase(t *testing.T) {
+	want := map[string]string{
+		"status":               "/status",
+		"status please":        "/status",
+		"test the microphone":  "/mictest",
+		"microphone test":      "/mictest",
+		"stop talking":         "/blackbox tts off",
+		"what changed":         "/diff",
+		"undo that":            "/undo",
+		"what do you remember": "/memory",
+	}
+	for text, cmd := range want {
+		line, _, ok := matchVoiceCommand(text)
+		if !ok {
+			t.Errorf("%q no longer reaches a command; expected %q", text, cmd)
+			continue
+		}
+		if line != cmd {
+			t.Errorf("%q became %q, want %q", text, line, cmd)
+		}
+	}
+}
+
+// TestAcceptsArgRouteStillTakesItsRemainder pins the one route that legitimately
+// carries a trailing sentence, so the check above cannot silently break it.
+func TestAcceptsArgRouteStillTakesItsRemainder(t *testing.T) {
+	line, _, ok := matchVoiceCommand("look at this error message")
+	if !ok {
+		t.Fatal("look at this error message must still reach /blackbox look")
+	}
+	if line != "/blackbox look error message" {
+		t.Errorf("got %q, want the remainder carried as the question", line)
+	}
+	if line, _, ok := matchVoiceCommand("look at the screen"); !ok || line != "/blackbox look" {
+		t.Errorf("bare look got %q ok=%v, want /blackbox look", line, ok)
+	}
+}
+
 // TestVoiceCommandRequiringArgFallsThrough: "plan" alone is a word someone might
 // say in conversation, so without an argument it must not become /plan.
 func TestVoiceCommandRequiringArgFallsThrough(t *testing.T) {

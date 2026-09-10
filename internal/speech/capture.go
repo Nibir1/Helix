@@ -322,6 +322,14 @@ type ChunkScanner struct {
 	chunkDuration time.Duration
 	sampleRate    int
 
+	// Notice receives capture problems that this scanner RECOVERED from — the
+	// persistent stream refusing to start, or dying mid-run — and which it
+	// therefore does not return as errors. Without it the degradation is
+	// invisible: the caller keeps getting audio, at per-chunk latency, from a
+	// path that was supposed to be the fallback. Set before first use; nil is
+	// legal and means the old silent behaviour.
+	Notice func(error)
+
 	mu       sync.Mutex
 	rec      *StreamRecorder
 	fallback bool
@@ -347,6 +355,7 @@ func (c *ChunkScanner) NextChunk(ctx context.Context) (AudioFormat, error) {
 		rec, err := NewStreamRecorder(context.Background(), c.sampleRate)
 		if err != nil {
 			c.fallback = true
+			c.notice(fmt.Errorf("gapless capture unavailable, recording per chunk instead: %w", err))
 		} else {
 			c.rec = rec
 		}
@@ -370,6 +379,7 @@ func (c *ChunkScanner) NextChunk(ctx context.Context) (AudioFormat, error) {
 		if ctx.Err() != nil {
 			return AudioFormat{}, err
 		}
+		c.notice(fmt.Errorf("capture stream dropped, recording this chunk directly: %w", err))
 	}
 
 	return RecordClip(ctx, CaptureOptions{
@@ -377,6 +387,13 @@ func (c *ChunkScanner) NextChunk(ctx context.Context) (AudioFormat, error) {
 		SampleRate:    c.sampleRate,
 		NoSilenceStop: true,
 	})
+}
+
+// notice reports a recovered capture problem, if anyone is listening.
+func (c *ChunkScanner) notice(err error) {
+	if c.Notice != nil {
+		c.Notice(err)
+	}
 }
 
 // Close releases the persistent recorder (if any).

@@ -760,7 +760,10 @@ func (d *Daemon) awaitWake(ctx context.Context) bool {
 
 	select {
 	case ev := <-events:
-		d.journal.Record("wake", "", ev.Phrase, fmt.Sprintf("score %.2f", ev.Score))
+		// %.4f: the energy engine's score is a normalized RMS around 0.001-0.03,
+		// which %.2f rounds to "0.01" or "0.00" — a journal entry that cannot
+		// tell a strong wake from a marginal one is not worth writing.
+		d.journal.Record("wake", "", ev.Phrase, fmt.Sprintf("score %.4f", ev.Score))
 		return true
 	case <-ctx.Done():
 		return false
@@ -789,7 +792,25 @@ func (d *Daemon) buildWakeService() (wakeword.Service, error) {
 		chunkMs = 1500
 	}
 
-	scanner := wakeword.Scanner(wakeword.NewSoXScanner(time.Duration(chunkMs)*time.Millisecond, 16000))
+	// A headless daemon has no screen to warn on, so wake failures go to the
+	// journal — the only place `helix status` and the user can find out that
+	// hands-free listening stopped. It used to be `OnError: func(error) {}`,
+	// the same empty callback as the interactive path, which meant a daemon
+	// whose microphone died reported nothing anywhere.
+	onErr := func(err error) {
+		if err == nil {
+			return
+		}
+		d.journal.Record("wake", "", "", "listening problem: "+err.Error())
+	}
+
+	scanner := wakeword.Scanner(wakeword.NewSoXScanner(
+		time.Duration(chunkMs)*time.Millisecond, 16000,
+		wakeword.OnCaptureNotice(func(err error) {
+			if err != nil {
+				d.journal.Record("wake", "", "", "capture degraded: "+err.Error())
+			}
+		})))
 	if cfg.Ambient.Enabled {
 		scanner = ambient.Tee(scanner, d.ambientMonitor(cfg))
 	}
@@ -800,7 +821,7 @@ func (d *Daemon) buildWakeService() (wakeword.Service, error) {
 		wakeword.Config{
 			Phrase:   cfg.Speech.WakeWord.Phrase,
 			Cooldown: time.Duration(cfg.Speech.WakeWord.CooldownS) * time.Second,
-			OnError:  func(error) {},
+			OnError:  onErr,
 		})
 }
 

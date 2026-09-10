@@ -31,11 +31,11 @@ func TestE2E_StrictConfinementKernelEnforced(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Outside-root write must be denied by the kernel. SendExpect waits for
-	// THIS command's completion marker, not the one the /sandbox slash
-	// command already printed.
+	// Outside-root write must be denied by the kernel. SendTurn waits for THIS
+	// command's turn-end marker, not the one the /sandbox slash command already
+	// printed.
 	evil := fmt.Sprintf("/tmp/helix_e2e_evil_%d", time.Now().UnixNano())
-	if err := h.SendExpect("touch "+evil, "GRID STATUS", 20*time.Second); err != nil {
+	if err := h.SendTurn("touch "+evil, 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(evil); err == nil {
@@ -43,7 +43,7 @@ func TestE2E_StrictConfinementKernelEnforced(t *testing.T) {
 	}
 
 	// Inside-root write must succeed.
-	if err := h.SendExpect("touch confined_ok.txt", "GRID STATUS", 20*time.Second); err != nil {
+	if err := h.SendTurn("touch confined_ok.txt", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	h.ExpectFile(t, filepath.Join(h.project, "confined_ok.txt"), 10*time.Second)

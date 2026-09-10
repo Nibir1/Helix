@@ -49,4 +49,10 @@ type Service interface {
 
 	// Stop halts detection and releases the audio stream.
 	Stop() error
+
+	// Err reports why the event channel closed: nil for a clean stop, non-nil
+	// when the scan loop died (persistent capture failure). A closed channel
+	// looks exactly like a quiet room, so callers that show a "listening"
+	// indicator MUST ask this before continuing to show it.
+	Err() error
 }

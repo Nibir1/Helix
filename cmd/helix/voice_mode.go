@@ -86,7 +86,28 @@ func enterVoiceMode(persist bool) {
 // online, and how to get back out. The old single cyan line carried the exit
 // instruction and nothing else, so a user could not tell from the screen
 // whether the camera had opened.
+//
+// FULL ONCE, THEN ONE LINE. Live mode is now entered by speaking, which makes
+// it cheap to enter and therefore frequent — a seven-line panel on every wake
+// is the same repetition problem the per-turn status line had, and it pushes
+// the conversation off the screen. The panel earns its height the first time,
+// when it is telling the user something they do not know; after that a single
+// line carries the same four facts.
+//
+// The collapse is CONDITIONAL on nothing being wrong, and that is the load-
+// bearing part. blackBoxEyesLine exists because "watching" over a camera that
+// delivers no frames is a readiness lie; abbreviating a fault into "eyes on"
+// would reintroduce exactly that lie in a new place. So a degraded sense
+// re-opens the full panel, however many times live mode has been entered.
 func printLiveBanner() {
+	first := !liveBannerShown
+	liveBannerShown = true
+
+	if !first && liveStateNominal() {
+		printLiveReentryLine()
+		return
+	}
+
 	fmt.Println(shell.PanelTitle("live"))
 
 	w := shell.KVWidth("HEARING", "SIGHT", "VOICE", "EXIT")
@@ -101,10 +122,65 @@ func printLiveBanner() {
 	fmt.Println(shell.KV("EXIT", shell.Muted("say ")+shell.Value("\"manual mode\"")+
 		shell.Muted("  ·  or type /blackbox off"), w))
 
-	for _, line := range voiceModeWakeNotes(cfg.Speech.WakeWord.Listening(), cfg.Speech.WakeWord.Engine) {
+	// Full explanation on the first panel, a reminder on any later one. A
+	// later panel only appears because a sense is degraded, and someone reading
+	// a fault report does not need the wake rules restated at four lines.
+	for _, line := range voiceModeWakeNotes(cfg.Speech.WakeWord.Listening(),
+		cfg.Speech.WakeWord.Engine, first) {
 		fmt.Println(shell.PanelLine(shell.Muted(line)))
 	}
 	fmt.Println(shell.PanelEnd())
+}
+
+// liveBannerShown records that the full panel has been printed this session.
+// Same discipline as printArmedPrompt and noteWakeLapse: a message that
+// explains a RULE is said in full the first time and referenced after.
+var liveBannerShown bool
+
+// liveStateNominal reports whether every sense is in a state that can be
+// honestly abbreviated.
+//
+// TTS is not consulted: spoken or silent are both choices the user made, not
+// faults, and the collapsed line says which one is in force either way.
+func liveStateNominal() bool {
+	if classifyHearing() != hearingReady {
+		return false
+	}
+	switch cond, _ := classifyEyes(); cond {
+	case eyesNoFrames, eyesOnButBlind:
+		return false
+	}
+	return true
+}
+
+// printLiveReentryLine is the collapsed form: the same four facts the panel
+// carries, on one row.
+//
+// Shaped like printArmedPrompt's "◉ listening" line rather than like a panel,
+// because it is doing that job — a continuous indicator of which channels are
+// open, not an explanation. The exit instruction stays: it is the one thing on
+// the panel that is an instruction rather than a status, and the one a user in
+// live mode is most likely to want and least able to guess.
+func printLiveReentryLine() {
+	parts := []string{}
+	if chain := sttChainDescription(); chain != "" {
+		parts = append(parts, chain)
+	}
+	if cond, _ := classifyEyes(); cond == eyesWatching {
+		parts = append(parts, "eyes on")
+	} else {
+		parts = append(parts, "eyes off")
+	}
+	if speech.TTSEnabled() {
+		parts = append(parts, "spoken aloud")
+	} else {
+		parts = append(parts, "silent")
+	}
+	parts = append(parts, `say "manual mode" to leave`)
+
+	fmt.Println("  " + shell.Fg(shell.HexSecondary, "◉ ") +
+		shell.Fg(shell.HexText, "live") +
+		shell.Muted("  ·  "+strings.Join(parts, "  ·  ")))
 }
 
 // voiceModeWakeNotes explains how wake word and voice mode interact, which is
@@ -119,12 +195,23 @@ func printLiveBanner() {
 // Args:
 //   - wakeEnabled: cfg.Speech.WakeWord.Enabled.
 //   - engine: the configured wake engine.
+//   - full: print the whole explanation. False returns the one-line reminder
+//     used on re-entry, once the rules have already been stated this session.
 //
 // Returns: the extra banner lines (nil when wake is off).
 // Complexity: O(1).
-func voiceModeWakeNotes(wakeEnabled bool, engine string) []string {
+func voiceModeWakeNotes(wakeEnabled bool, engine string, full bool) []string {
 	if !wakeEnabled {
 		return nil
+	}
+	if !full {
+		// One line, and it still has to carry the fact that surprises people:
+		// this turn is open capture, the NEXT one needs waking. Dropping to
+		// "wake word is on" would save the same space and lose the only part
+		// that was ever load-bearing.
+		return []string{
+			"This turn starts now; wake me again for the next one  ·  /blackbox status",
+		}
 	}
 	lines := []string{
 		"Wake word is on, but it gates the gaps BETWEEN turns — this first turn starts now,",
@@ -369,15 +456,23 @@ func batchVoiceTurn() (input.InputEvent, error) {
 	defer tcancel()
 	transcript, err := speech.Transcribe(tctx, clip)
 	viz.Stop()
-	if d := speech.ClipDuration(clip); d > 0 && err == nil {
-		// A turn marker, not a stat line. "captured 0.8s" floating at column
-		// zero between replies read like debug output that had escaped.
-		fmt.Println(shell.Muted(fmt.Sprintf("  ◟ heard %.1fs", d)))
-	}
+	// The clip duration used to get its own row here, immediately above the
+	// transcript echo — two lines per turn where the second one already had a
+	// metadata field with room in it. It is now folded into that field by
+	// finishVoiceTranscript, which receives the clip and can measure it.
 	if err != nil {
 		return input.InputEvent{}, fmt.Errorf("transcribe: %w", err)
 	}
 	return finishVoiceTranscript(strings.TrimSpace(transcript.Text), transcript, clip)
+}
+
+// joinField appends one "  ·  "-separated field, skipping the separator when
+// there is nothing to separate from.
+func joinField(base, add string) string {
+	if base == "" {
+		return add
+	}
+	return base + "  ·  " + add
 }
 
 // errStreamDial marks a failure to open the streaming connection (distinct
@@ -544,19 +639,32 @@ func finishVoiceTranscript(text string, transcript speech.Transcript, audio spee
 	}
 	transcript.Text = text
 
-	conf := fmt.Sprintf(", confidence %.2f", transcript.Confidence)
-	if transcript.Confidence <= 0 {
-		conf = ""
-	}
-	// "  ·  " between the words and the provider, not three spaces.
+	// "  ·  " between the words and every field after them, not whitespace.
 	//
 	// Whitespace alone left the label looking like part of what was said:
 	// `❯ reboot.   whisper-local` was reported as the transcript being
 	// contaminated with a provider name. It never was — but a separator that
 	// can be mistaken for a pause in speech is the wrong separator, and this
 	// is the one the rest of Helix already uses to mean "different field".
-	fmt.Println("  " + shell.Fg(shell.HexSecondary, "❯ ") +
-		shell.Fg(shell.HexText, text) + shell.Muted("  ·  "+transcript.Provider+conf))
+	//
+	// Everything known about the turn lands on this ONE line. The clip length
+	// used to print on a row of its own directly above, which cost a line per
+	// turn to say something the eye reads as part of the same fact; the field
+	// separator that already existed here is what made merging free. The
+	// streaming path holds no single clip, so it contributes no duration and
+	// the field is simply absent.
+	meta := transcript.Provider
+	if d := speech.ClipDuration(audio); d > 0 {
+		meta = joinField(meta, fmt.Sprintf("heard %.1fs", d))
+	}
+	if transcript.Confidence > 0 {
+		meta = joinField(meta, fmt.Sprintf("confidence %.2f", transcript.Confidence))
+	}
+	line := "  " + shell.Fg(shell.HexSecondary, "❯ ") + shell.Fg(shell.HexText, text)
+	if meta != "" {
+		line += shell.Muted("  ·  " + meta)
+	}
+	fmt.Println(line)
 
 	// Hands-free kill switches (ADR-005 wake controls): recognized before
 	// dispatch.
@@ -831,8 +939,12 @@ func newWakeService() (wakeword.Service, error) {
 	if chunkMs <= 0 {
 		chunkMs = 1500
 	}
+	hooks := newWakeScanHooks()
+
 	// Phase 6: ambient awareness shares the wake capture stream when opted in.
-	scanner := wakeword.Scanner(wakeword.NewSoXScanner(time.Duration(chunkMs)*time.Millisecond, 16000))
+	scanner := wakeword.Scanner(wakeword.NewSoXScanner(
+		time.Duration(chunkMs)*time.Millisecond, 16000,
+		wakeword.OnCaptureNotice(hooks.Notice)))
 	if cfg.Ambient.Enabled {
 		scanner = ambient.Tee(scanner, interactiveAmbientMonitor())
 	}
@@ -843,7 +955,8 @@ func newWakeService() (wakeword.Service, error) {
 		wakeword.Config{
 			Phrase:   cfg.Speech.WakeWord.Phrase,
 			Cooldown: time.Duration(cfg.Speech.WakeWord.CooldownS) * time.Second,
-			OnError:  func(error) {},
+			OnError:  hooks.OnError,
+			OnScan:   hooks.OnScan,
 		})
 }
 
@@ -875,6 +988,7 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 	defer func() { _ = svc.Stop() }()
 
 	viz := ux.NewVoiceViz()
+	viz.SetStandbyHint(standbyHint())
 	viz.Start(ux.VizStandby)
 	defer viz.Stop()
 	select {
@@ -909,8 +1023,13 @@ func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
 func wakeLapseNotice(o wakeOutcome) string {
 	switch o {
 	case wakeScannerFailed:
-		return "wake listening stopped (recorder unavailable) — listening without the wake word; " +
-			"/blackbox status for info"
+		// No cause named here on purpose. This used to assert "recorder
+		// unavailable", which was a guess: the scan loop's real error now
+		// reaches the screen through the OnError hook (wake_scan.go), and
+		// two explanations for one event, one of them invented, is worse
+		// than one.
+		return "wake listening stopped — listening without the wake word; " +
+			"/mictest checks the microphone, /blackbox status for info"
 	default:
 		return ""
 	}
@@ -983,7 +1102,13 @@ func handleMicTest() {
 	if speech.HasSpeech(clip, 0) {
 		status = "speech detected ✓"
 	}
-	fmt.Printf("Captured %.1fs — level %.3f (%.0f dBFS) — %s\n",
+	// Five decimals, not three. The levels that matter here are the ones a
+	// built-in microphone actually produces — a quiet room measures ~0.0011
+	// and speech ~0.012 on the machine this was calibrated against — and at
+	// %.3f the room and a dead mic both print "0.001". This readout is the
+	// number a user is asked to paste when hands-free wake is not firing, so
+	// it has to resolve the range wake decisions are made in.
+	fmt.Printf("Captured %.1fs — level %.5f (%.0f dBFS) — %s\n",
 		speech.ClipDuration(clip), rms, dB, status)
 	uiDetail("If this reads QUIET, /blackbox status confirms the STT chain — then check " +
 		"the OS sound input settings for the active microphone.")
