@@ -9,11 +9,27 @@
 //	modality  audio + text in, text out
 //	price     $0.017 per minute of realtime audio
 //
-// WHAT IS INFERRED, and this matters more than the list above: the dial shape,
-// the audio framing, the server event names and the session-configuration
-// JSON. None of that is public at the time of writing. It was reconstructed
-// from adapter_deepgram_stream.go (the only other WebSocket adapter here) and
-// from OpenAI's realtime conventions.
+// ALSO VERIFIED, from the realtime transcription guide, which publishes the
+// session shape naming gpt-live-transcribe directly:
+//
+//	session frame  {"type":"session.update","session":{"type":"transcription",
+//	                "audio":{"input":{"format":{"type":"audio/pcm","rate":N},
+//	                "transcription":{"model":"gpt-live-transcribe"},
+//	                "turn_detection":null}}}}
+//	audio in       input_audio_buffer.append, base64-encoded PCM
+//	end of turn    input_audio_buffer.commit
+//	beta header    "Remove the OpenAI-Beta: realtime=v1 header when calling the
+//	                GA interface" — so it is NOT sent
+//
+// The first version of this file guessed at that session frame and was wrong
+// in four places, every one a flat key where the real API nests under
+// session.audio.input. The framing and the commit were guessed right. The
+// corrections are recorded on sessionFrame itself.
+//
+// WHAT IS STILL INFERRED: the WebSocket URL. The transport pages are not
+// reachable, so the dial target is assembled from the documented endpoint path
+// and may be wrong; `route` and HELIX_OPENAI_REALTIME_URL exist to correct it
+// without a rebuild.
 //
 // A wrong guess fails SILENTLY — the socket opens, the HUD meters a live
 // microphone, and nothing is ever transcribed, which reads to the user as a
@@ -30,7 +46,10 @@
 //     error returns a dial-class failure, so the voice turn falls back to
 //     batch instead of blaming the microphone.
 //
-// OUT OF SCOPE: gpt-live-1 (v1/live/sessions, $0.05/min) is full duplex — the
+// OUT OF SCOPE, and checked again rather than assumed: gpt-live-1's only
+// endpoint is v1/live/sessions, its quickstart and transport pages are not
+// published in a form that can be read, and the Free tier cannot reach it at
+// all. It is also full duplex — the
 // model speaks as well as listens, which replaces the entire STT→LLM→TTS chain
 // rather than plugging into it, and needs simultaneous capture and playback
 // that this codebase cannot do without acoustic echo cancellation. It is
@@ -195,9 +214,12 @@ func (p *openaiRealtimeSTT) realtimeHeaders(secret string) http.Header {
 		secret = p.key
 	}
 	h.Set("Authorization", "Bearer "+secret)
-	// INFERRED. Harmless if the endpoint has gone GA and ignores it, and
-	// overridable if it has to go.
-	h.Set("OpenAI-Beta", "realtime=v1")
+	// The OpenAI-Beta: realtime=v1 header is NOT sent. An earlier version set
+	// it on the reasoning that it was harmless; the realtime guide is explicit
+	// that it must go — "Remove the OpenAI-Beta: realtime=v1 header when
+	// calling the GA interface" — so sending it is a request to be served by an
+	// interface that is no longer current. Still addable through Headers below
+	// for anyone pointing at an older deployment.
 	if p.rc != nil {
 		for k, v := range p.rc.Headers {
 			h.Set(k, v)
@@ -206,28 +228,60 @@ func (p *openaiRealtimeSTT) realtimeHeaders(secret string) http.Header {
 	return h
 }
 
-// defaultRealtimeSession is the session-configuration frame.
+// sessionFrame is the session-configuration frame.
 //
-// turn_detection is OFF deliberately. streamingVoiceTurn already owns
-// endpointing — a 3-second idle timer plus ConversationalMaxDuration — and two
-// endpointers disagreeing is how a turn ended up being cut mid-sentence
-// before. The server is asked to transcribe, not to decide when the user has
-// finished.
+// VERIFIED against OpenAI's realtime transcription guide, which publishes this
+// shape naming gpt-live-transcribe directly. The first version of this
+// function guessed, and guessed wrong in four places worth recording because
+// they are the shape of the mistake rather than one typo:
+//
+//	type:                transcription_session.update  ->  session.update
+//	session.type:        (absent)                      ->  "transcription"
+//	audio format:        "input_audio_format": "pcm16" ->  session.audio.input.format
+//	                                                        {type: audio/pcm, rate: N}
+//	transcription model: "input_audio_transcription"   ->  session.audio.input.transcription
+//
+// Every one of them was a flat key where the real API nests under
+// session.audio.input. A session built the old way would have been rejected —
+// and rejected SILENTLY, since the socket still opens.
+//
+// The rate is sent rather than hardcoded: the guide's example says 24000
+// because that is what its capture produced, while streamingVoiceTurn captures
+// at 16 kHz. Copying the number out of an example is how you send a server
+// audio at one rate and a promise about another.
+//
+// turn_detection stays null, which the guide also shows. streamingVoiceTurn
+// already owns endpointing — a 3-second idle timer plus
+// ConversationalMaxDuration — and two endpointers disagreeing is how a turn got
+// cut mid-sentence before.
 func (p *openaiRealtimeSTT) sessionFrame() ([]byte, error) {
 	if p.rc != nil && len(p.rc.Session) > 0 {
 		return p.rc.Session, nil // verbatim: the escape hatch
 	}
 	return json.Marshal(map[string]any{
-		"type": "transcription_session.update",
+		"type": "session.update",
 		"session": map[string]any{
-			"input_audio_format": "pcm16",
-			"input_audio_transcription": map[string]any{
-				"model": p.model,
+			"type": "transcription",
+			"audio": map[string]any{
+				"input": map[string]any{
+					"format": map[string]any{
+						"type": "audio/pcm",
+						"rate": realtimeCaptureRate,
+					},
+					"transcription": map[string]any{
+						"model": p.model,
+					},
+					"turn_detection": nil,
+				},
 			},
-			"turn_detection": nil,
 		},
 	})
 }
+
+// realtimeCaptureRate is the rate streamingVoiceTurn captures at, and so the
+// rate this session is told to expect. Named rather than repeated so the two
+// cannot drift into disagreeing about what is on the wire.
+const realtimeCaptureRate = 16000
 
 // Stream consumes chunked audio and emits interim/final transcripts.
 func (p *openaiRealtimeSTT) Stream(ctx context.Context, chunks <-chan AudioFormat) (<-chan Transcript, error) {

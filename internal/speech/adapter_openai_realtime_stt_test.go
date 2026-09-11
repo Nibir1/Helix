@@ -345,3 +345,87 @@ func TestEmbeddedCatalogHasTheRealtimeRow(t *testing.T) {
 	t.Fatalf("no catalogue row for %s — /blackbox setup cannot offer it",
 		openaiRealtimeSTTModel)
 }
+
+// The session frame is now VERIFIED against OpenAI's published transcription
+// shape, not inferred. It is pinned field by field because the first version
+// of this adapter guessed it and was wrong in four places — every one of them
+// a flat key where the real API nests under session.audio.input, and every one
+// of them rejected silently, since the socket still opens.
+func TestRealtimeSessionFrameMatchesThePublishedShape(t *testing.T) {
+	p := NewOpenAIRealtimeSTT("", "https://example.invalid/v1", nil).(*openaiRealtimeSTT)
+	raw, err := p.sessionFrame()
+	if err != nil {
+		t.Fatalf("session frame: %v", err)
+	}
+
+	var f struct {
+		Type    string `json:"type"`
+		Session struct {
+			Type  string `json:"type"`
+			Audio struct {
+				Input struct {
+					Format struct {
+						Type string `json:"type"`
+						Rate int    `json:"rate"`
+					} `json:"format"`
+					Transcription struct {
+						Model string `json:"model"`
+					} `json:"transcription"`
+					TurnDetection *struct{} `json:"turn_detection"`
+				} `json:"input"`
+			} `json:"audio"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, raw)
+	}
+
+	if f.Type != "session.update" {
+		t.Errorf("type = %q, want session.update (it was transcription_session.update)", f.Type)
+	}
+	if f.Session.Type != "transcription" {
+		t.Errorf("session.type = %q, want transcription", f.Session.Type)
+	}
+	if f.Session.Audio.Input.Format.Type != "audio/pcm" {
+		t.Errorf("format.type = %q, want audio/pcm (it was the string \"pcm16\")",
+			f.Session.Audio.Input.Format.Type)
+	}
+	// The rate must be OUR capture rate, not the one copied from the guide's
+	// example: telling a server 24000 while sending 16000 is a promise about
+	// audio that is not what arrives.
+	if f.Session.Audio.Input.Format.Rate != realtimeCaptureRate {
+		t.Errorf("format.rate = %d, want %d — the rate streamingVoiceTurn captures at",
+			f.Session.Audio.Input.Format.Rate, realtimeCaptureRate)
+	}
+	if f.Session.Audio.Input.Transcription.Model != openaiRealtimeSTTModel {
+		t.Errorf("transcription.model = %q, want %q",
+			f.Session.Audio.Input.Transcription.Model, openaiRealtimeSTTModel)
+	}
+	if f.Session.Audio.Input.TurnDetection != nil {
+		t.Error("turn_detection must be null — streamingVoiceTurn owns endpointing, " +
+			"and two endpointers disagreeing is how a turn got cut mid-sentence")
+	}
+}
+
+// The beta header must NOT be sent: the realtime guide says to remove it when
+// calling the GA interface, so sending it asks to be served by a version that
+// is no longer current. An earlier revision set it on "harmless" reasoning.
+func TestRealtimeDoesNotSendTheBetaHeader(t *testing.T) {
+	p := NewOpenAIRealtimeSTT("", "https://example.invalid/v1", nil).(*openaiRealtimeSTT)
+	p.SetAPIKey("k")
+	h := p.realtimeHeaders("")
+	if got := h.Get("OpenAI-Beta"); got != "" {
+		t.Errorf("OpenAI-Beta = %q, want it absent on the GA interface", got)
+	}
+	if got := h.Get("Authorization"); got != "Bearer k" {
+		t.Errorf("Authorization = %q", got)
+	}
+
+	// Still addable for anyone pointing at an older deployment.
+	p2 := NewOpenAIRealtimeSTT("", "https://example.invalid/v1",
+		&RealtimeConfig{Headers: map[string]string{"OpenAI-Beta": "realtime=v1"}}).(*openaiRealtimeSTT)
+	p2.SetAPIKey("k")
+	if got := p2.realtimeHeaders("").Get("OpenAI-Beta"); got != "realtime=v1" {
+		t.Errorf("an explicitly configured header was dropped: %q", got)
+	}
+}
