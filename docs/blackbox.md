@@ -20,14 +20,27 @@ provider and the system-package stage (`/setup` re-runs any stage later).
 
 ### Recommended chains (the one-pick route)
 
-The wizard opens with three pre-worked answers, because for most people the
+The wizard opens with five pre-worked answers, because for most people the
 provider tables are the escape hatch rather than the decision:
 
 | Chain | Hears you | Answers you | Why |
 | :--- | :--- | :--- | :--- |
 | **Cheapest cloud** ★ | `groq` whisper-large-v3-turbo | `openai` gpt-4o-mini-tts | large-model accuracy at ~$0.04/hr (ADR-011) |
 | **Lowest latency** | `deepgram` nova-3 | `deepgram` aura-2 | streaming partials, ~300 ms first byte |
+| **Talk over it** | `openai` gpt-live-1 | *the same live session* | full duplex — cut in mid-sentence, no silence timer. $0.05/min **plus** your planner, and needs libopus |
+| **Most natural, local** | `whisper-local` | `csm-local` (Sesame CSM-1B) | conversational prosody, nothing leaves the machine — needs ~8 GB VRAM |
 | **Fully local / private** | `whisper-local` | `piper-local` | no key, no per-call cost, nothing leaves the machine, no Docker |
+
+**"Talk over it" is the one chain where the two columns are the same thing.**
+`gpt-live-1` hears and speaks over a single WebRTC session, so there is no
+separate voice to pick — see §3 and `docs/voice.md` §7c. It still pre-fills an
+ordinary `openai → piper-local` voice and a `whisper-local` ear, and that is not
+redundant: the session replaces the chain for the life of a *conversation*, not
+the life of the config, so everything outside one — and every turn on a machine
+with no libopus — still needs them.
+
+It is deliberately **not** the starred recommendation. A per-minute bill is not
+what someone who has not chosen yet should be steered into.
 
 One more transcription option is registered but deliberately not a preset:
 `gpt-live-transcribe`, OpenAI's realtime model over a WebSocket
@@ -42,12 +55,10 @@ than read from a specification. `speech.stt.realtime` in `~/.helix/config.json`
 overrides every one of those reconstructed parts, including a `session` field
 sent to the server byte for byte.
 
-`gpt-live-1` — the full-duplex model that speaks as well as listens — is **not**
-supported and cannot be, yet. Its only transport is WebRTC: the session endpoint
-answers `"Only the webrtc transport is supported."` and requires an SDP offer,
-which means ICE, DTLS-SRTP and Opus rather than a WebSocket client. It is
-selectable by typed model id like any other, but selecting it produces a session
-nothing here can talk to.
+`gpt-live-1` used to be listed here as impossible — "its only transport is
+WebRTC, which means ICE, DTLS-SRTP and Opus rather than a WebSocket client".
+All of that was true and none of it was a reason. It is now the **Talk over it**
+chain above.
 
 Each cloud chain pre-fills a **local** fallback, because the point of a fallback
 is surviving the failure most likely to happen — the network — and a second
@@ -318,12 +329,14 @@ conversation, you can talk over Helix mid-sentence, and the model decides when
 you have finished speaking rather than a silence timer deciding for it.
 
 ```text
-/blackbox setup     # pick openai / gpt-live-1 when it asks what should hear you
+/blackbox setup     # pick "Talk over it" from the recommended chains
 ```
 
-It is a row in the STT table like any other provider, and choosing it is the
-whole switch — there is no separate on/off. `/blackbox status` grows a `DUPLEX`
-row once it is picked.
+It is one of the five recommended chains, tagged `needs a key · libopus`, and
+choosing it is the whole switch — there is no separate on/off. It is
+deliberately **not** the recommended default: it is the most expensive option on
+that menu by a wide margin. `/blackbox status` grows a `DUPLEX` row once it is
+picked.
 
 Three things to know before you turn it on, none of which is a detail:
 

@@ -473,21 +473,28 @@ yet do:
 
 ## 7c. Full duplex (`gpt-live-1`)
 
-Pick **gpt-live-1** as the thing that hears you — it is a row in
-`/blackbox setup`'s STT table, alongside `whisper-1` and `gpt-live-transcribe` —
-and a conversation opens a **full-duplex session** instead of taking turns: the
+Pick **"Talk over it"** from the recommended chains in `/blackbox setup` and a
+conversation opens a **full-duplex session** instead of taking turns: the
 microphone stays open the whole time, the model hears you while it is speaking,
 and it decides when you have finished talking rather than waiting for a silence
 timer. You can interrupt it mid-sentence. Nothing else in Helix changes.
 
 ```text
-/blackbox setup          # choose openai / gpt-live-1 when it asks what should hear you
+/blackbox setup          # third entry: "Talk over it"  [needs a key · libopus]
 /blackbox status         # the DUPLEX row confirms it
 ```
 
-The model id **is** the switch; there is no separate on/off. If you would rather
-edit the file, it is `speech.stt.provider: "openai"` and
-`speech.stt.model: "gpt-live-1"` in `~/.helix/config.json`.
+The **model id is the switch**; there is no separate on/off. The preset sets
+`speech.stt.provider: "openai"` and `speech.stt.model: "gpt-live-1"`, which you
+can equally write into `~/.helix/config.json` yourself, or pick from the full
+STT table after declining the recommended chains.
+
+**The preset also configures an ordinary TTS voice and a `whisper-local`
+fallback, and that is not redundant.** `gpt-live-1` replaces the chain for the
+life of a *session*, not the life of the config: `/blackbox say`, an unprompted
+remark before the first turn, and every turn on a machine where the session
+cannot open all still need a voice and a transcriber. A duplex chain with those
+left blank goes silent the moment it is not mid-conversation.
 
 **It costs money while it is open.** $0.05 a minute, billed per second, *plus*
 the planner's own model — so an idle session is not free the way an idle
@@ -718,11 +725,12 @@ most one voice change per answer, and none in the normal case. It is also
 faster when degraded — nothing waits on a provider already known to be down
 once per sentence.
 
-`/blackbox setup` opens with three **recommended chains** — cheapest cloud
-(Groq + gpt-4o-mini-tts), lowest latency (Deepgram Nova-3 + Aura-2), and fully
-local/private (whisper.cpp + Piper) — so the common case is one keystroke.
-Each cloud chain pre-fills a local fallback; the local one deliberately has
-none. Picking a preset still requests and verifies keys, still assigns and
+`/blackbox setup` opens with five **recommended chains** — cheapest cloud
+(Groq + gpt-4o-mini-tts), lowest latency (Deepgram Nova-3 + Aura-2), "Talk over
+it" (full duplex on `gpt-live-1`, §7c), most natural local (whisper.cpp + CSM-1B)
+and fully local/private (whisper.cpp + Piper) — so the common case is one
+keystroke. Each cloud chain pre-fills a local fallback; the fully-local one
+deliberately has none. Picking a preset still requests and verifies keys, still assigns and
 probes sidecar ports, and still verifies the chain: it fills in answers rather
 than skipping steps. "Choose manually" shows the full pricing tables.
 

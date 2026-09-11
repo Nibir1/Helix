@@ -200,3 +200,102 @@ func TestPresetMenuAlwaysOffersManualChoice(t *testing.T) {
 		}
 	}
 }
+
+// The duplex preset has to be REACHABLE. availablePresets drops any preset
+// whose providers this build does not register, and a duplex chain is the one
+// shape where that filter could plausibly be wrong.
+func TestDuplexPresetSurvivesTheAvailabilityFilter(t *testing.T) {
+	stt := []string{"openai", "whisper-local", "groq", "deepgram"}
+	tts := []string{"openai", "piper-local", "deepgram", "csm-local"}
+	var found bool
+	for _, p := range availablePresets(stt, tts) {
+		if p.Duplex {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the duplex preset is filtered out of the menu, so the only way to " +
+			"select full duplex is the manual table it was added to avoid")
+	}
+}
+
+// A duplex preset MUST still configure TTS. gpt-live-1 replaces the chain for
+// the life of a SESSION, not the life of the config — `/blackbox say`, an
+// unprompted remark before the first turn, and every turn on a machine with no
+// libopus all still need a voice.
+func TestTheDuplexPresetStillConfiguresAVoice(t *testing.T) {
+	p := duplexPreset(t)
+	if p.TTSProvider == "" {
+		t.Error("the duplex preset leaves TTS blank; Helix would go silent whenever it " +
+			"is not mid-conversation, and on any machine where the session cannot open")
+	}
+	if len(p.TTSFallbacks) == 0 {
+		t.Error("the duplex preset has no TTS fallback, unlike every other cloud preset")
+	}
+}
+
+// And it MUST carry an STT fallback, because its primary model cannot
+// transcribe a clip. Without one, a machine with no libopus has no ears at all.
+func TestTheDuplexPresetFallsBackToSomethingThatCanTranscribe(t *testing.T) {
+	p := duplexPreset(t)
+	if len(p.STTFallbacks) == 0 {
+		t.Fatal("the duplex preset has no STT fallback; on a machine without libopus " +
+			"its primary model cannot transcribe anything and the turn has nowhere to go")
+	}
+	for _, f := range p.STTFallbacks {
+		if speech.IsDuplexOnlyModel(f) {
+			t.Errorf("STT fallback %q is itself duplex-only", f)
+		}
+	}
+}
+
+// The summary is what the user reads immediately after choosing. Describing a
+// duplex chain as two independent halves is the one thing it must not do.
+func TestTheDuplexSummaryDescribesOneSession(t *testing.T) {
+	got := duplexPreset(t).presetSummary()
+	if strings.Contains(got, "hears you with") {
+		t.Errorf("the duplex summary uses the two-halves wording: %q", got)
+	}
+	for _, want := range []string{"one live session", "gpt-live-1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary %q does not mention %q", got, want)
+		}
+	}
+}
+
+// Both preconditions must be visible BEFORE the choice. presetMenuItems only
+// auto-adds "needs a key" when the Tag is empty, so a preset with any other
+// precondition has to state both itself or silently lose one.
+func TestTheDuplexPresetDeclaresBothPreconditions(t *testing.T) {
+	p := duplexPreset(t)
+	for _, want := range []string{"key", "libopus"} {
+		if !strings.Contains(strings.ToLower(p.Tag), want) {
+			t.Errorf("tag %q does not mention %q — the user finds out after paying for a session", p.Tag, want)
+		}
+	}
+	// And the price, which is the other thing you cannot discover from the menu.
+	if !strings.Contains(p.Note, "$0.05") {
+		t.Error("the duplex preset does not say what it costs; it is the most expensive " +
+			"option on the menu by a wide margin")
+	}
+}
+
+// It must not be the recommended one. presetMenuItems marks index 0 "recommended",
+// and a per-minute bill is not what a first-time user should be steered into.
+func TestTheDuplexPresetIsNotRecommendedByDefault(t *testing.T) {
+	if speechPresets()[0].Duplex {
+		t.Error("the duplex preset is first, so the menu marks it 'recommended' — " +
+			"that is a $0.05/min default for someone who has not chosen yet")
+	}
+}
+
+func duplexPreset(t *testing.T) speechPreset {
+	t.Helper()
+	for _, p := range speechPresets() {
+		if p.Duplex {
+			return p
+		}
+	}
+	t.Fatal("no duplex preset in this build")
+	return speechPreset{}
+}

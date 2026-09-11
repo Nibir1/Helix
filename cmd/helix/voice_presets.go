@@ -42,6 +42,22 @@ type speechPreset struct {
 	TTSVoice     string
 	TTSFallbacks []string
 
+	// Duplex marks a chain whose STT model is FULL DUPLEX — it hears and speaks
+	// over one live session, replacing the STT→LLM→TTS chain while that session
+	// is open (ADR-020).
+	//
+	// IT STILL CARRIES A TTS CHAIN, and that is not a contradiction. The
+	// replacement lasts for the life of a SESSION, not the life of the config:
+	// `/blackbox say`, an unprompted remark before the first turn, and every
+	// turn on a machine where the session could not open all still need a voice.
+	// A duplex preset that left TTS blank would configure a Helix that goes
+	// silent the moment it is not mid-conversation — which is the shape of bug
+	// the wizard's verify step exists to catch, arriving by way of a preset.
+	//
+	// It changes the SUMMARY rather than the mechanism: `apply` walks the same
+	// per-provider preparation for both directions either way.
+	Duplex bool
+
 	// TTSContextTurns turns on conversational conditioning for a voice whose
 	// point IS the conditioning.
 	//
@@ -59,7 +75,14 @@ type speechPreset struct {
 	TTSContextTurns int
 }
 
-// speechPresets returns the recommended chains, cheapest first.
+// speechPresets returns the recommended chains, cloud before local and
+// cheapest first within each.
+//
+// It said "cheapest first" and has not been strictly that since the local
+// chains arrived — they cost nothing and sit last — but the duplex entry is
+// what makes the old wording actively misleading: it is the most expensive
+// option here and sits third. Order is cloud-cheap, cloud-fast, cloud-duplex,
+// local-natural, local-private.
 //
 // Every entry is the conclusion of an ADR rather than a fresh opinion:
 // ADR-011 picked Groq turbo + gpt-4o-mini-tts as cheapest-good and Deepgram
@@ -96,6 +119,31 @@ func speechPresets() []speechPreset {
 			TTSProvider:  "deepgram",
 			TTSModel:     "aura-2-thalia-en",
 			TTSVoice:     "aura-2-thalia-en",
+			TTSFallbacks: []string{"piper-local"},
+		},
+		{
+			Name: "Talk over it",
+			// Two preconditions, and the Tag is the only place either is said
+			// before the choice is made. "needs a key" would normally be added
+			// automatically by presetMenuItems, but only when the Tag is empty —
+			// so a preset with any other precondition has to state both itself
+			// or silently lose one.
+			Tag:  "needs a key · libopus",
+			Note: "cut in mid-sentence, no silence timer · $0.05/min plus your planner",
+			// The one chain where the STT model is also the voice. It is the
+			// most expensive option on this menu by a wide margin, which is why
+			// the price is in the note rather than in a footnote: a preset is a
+			// recommendation, and recommending a per-minute bill without saying
+			// so would be the wrong kind of convenience.
+			Duplex:       true,
+			STTProvider:  "openai",
+			STTModel:     "gpt-live-1",
+			STTFallbacks: []string{"whisper-local"},
+			// Not dead configuration. Used outside a live session, and used for
+			// every turn if libopus is missing — see the Duplex field comment.
+			TTSProvider:  "openai",
+			TTSModel:     "gpt-4o-mini-tts",
+			TTSVoice:     "alloy",
 			TTSFallbacks: []string{"piper-local"},
 		},
 		{
@@ -195,6 +243,15 @@ func (p speechPreset) presetSummary() string {
 	tts := p.TTSProvider
 	if len(p.TTSFallbacks) > 0 {
 		tts += " → " + strings.Join(p.TTSFallbacks, " → ")
+	}
+	if p.Duplex {
+		// "hears you with X · answers with Y" is wrong here in a way that
+		// matters: it describes two independent halves, and the whole point of
+		// this chain is that they are one session you can interrupt. The TTS
+		// chain is named as what it actually is — the voice for everything
+		// outside that session.
+		return fmt.Sprintf("hears you and answers in one live session (%s) · falls back to %s ears and %s voice",
+			p.STTModel, strings.Join(p.STTFallbacks, " → "), tts)
 	}
 	return fmt.Sprintf("hears you with %s · answers with %s", stt, tts)
 }

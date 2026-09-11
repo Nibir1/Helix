@@ -75,8 +75,22 @@ type openaiSTT struct {
 }
 
 // NewOpenAISTT builds the cloud OpenAI Whisper adapter.
+//
+// A FULL-DUPLEX MODEL IS NOT A TRANSCRIPTION MODEL, and asking this endpoint to
+// use one fails on every turn. `gpt-live-1` is a legitimate value of
+// speech.stt.model — it is how full duplex is selected (ADR-020) — but it names
+// a WebRTC session, not /v1/audio/transcriptions. When a duplex session cannot
+// open (no libopus, no network, the service down), the turn falls back to this
+// adapter, and without the substitution below it would POST `model=gpt-live-1`
+// and take a 400 before reaching the next provider in the chain: one wasted
+// round trip per turn, on a machine that is already degraded.
+//
+// Substituting rather than erroring, because the user has ALREADY been told —
+// entering a conversation warns "full duplex unavailable, using the standard
+// chain: <why>". Having said that once, failing every subsequent turn to say it
+// again would be noise, not honesty.
 func NewOpenAISTT(model, baseURL string) STTProvider {
-	if model == "" {
+	if model == "" || IsDuplexOnlyModel(model) {
 		model = openaiDefaultSTTModel
 	}
 	if baseURL == "" {

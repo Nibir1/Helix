@@ -732,13 +732,31 @@ Three separate decisions, each argued on its own:
    for any of them.
 
 **The model id is the switch, and the switch is DATA.** There is no `enabled`
-key: `duplexSelected()` reads `speech.stt.provider` and `speech.stt.model`, and
-the way a user reaches it is the `/blackbox setup` STT table — which is built
-from `internal/speech/pricing.json` (ADR-006). So turning this on cost one
-catalogue row and no new command, and a second way to say the same thing was
-never added. `TestTheModelIsSelectableFromTheCatalog` ties the constant to the
-row, because a feature whose only door is a data file fails silently when the
-row is missing.
+key: `duplexSelected()` reads `speech.stt.provider` and `speech.stt.model`. So
+turning this on cost one `internal/speech/pricing.json` row (ADR-006) and no new
+command, and a second way to say the same thing was never added.
+`TestTheModelIsSelectableFromTheCatalog` ties the constant to the row, because a
+feature whose only door is a data file fails silently when the row is missing.
+
+**The catalogue row was not enough on its own, and that was a real gap.** It put
+`gpt-live-1` in the manual STT table — which `/blackbox setup` only reaches after
+the preset menu is DECLINED, since `offerSpeechPresets` returns early on a
+choice. Documentation saying "pick it when the wizard asks what should hear you"
+was therefore wrong for anyone who took the first thing offered. Closed by a
+fifth preset, **"Talk over it"**, third in the menu and deliberately not the
+starred recommendation: it is the most expensive chain on that menu and a
+per-minute bill is not a default to steer an undecided user into.
+
+**A duplex preset still configures an ordinary voice and ear.** `speechPreset`
+gained a `Duplex` flag that changes the SUMMARY rather than the mechanism,
+because the replacement lasts for the life of a SESSION, not the life of the
+config: `/blackbox say`, an unprompted remark before the first turn, and every
+turn on a machine without libopus all still need TTS and a transcriber. A duplex
+preset with those blank would configure a Helix that goes silent whenever it is
+not mid-conversation. The STT fallback is load-bearing for a second reason —
+`gpt-live-1` cannot transcribe a clip at all, so `NewOpenAISTT` now substitutes
+`whisper-1` when handed a duplex-only model (`speech.IsDuplexOnlyModel`) rather
+than posting it to `/v1/audio/transcriptions` and taking a 400 on every turn.
 
 **libopus is a runtime dependency, loaded with purego.** WebRTC carries Opus and
 `session.input_audio.append` is measurably NOT available once a session has
@@ -3004,9 +3022,11 @@ needs no detector, just a report.
 - **Voice log** — `internal/journal`'s opt-in record of what Helix heard and said
   (`~/.helix/voice_log/`, P2.8). Text and metadata only, never audio; absent entirely until
   enabled; voice can stop it but not start it.
-- **Chain preset** — one of the three pre-worked STT+TTS chains `/blackbox setup` offers before
-  the pricing tables (P9.7). A pre-filled answer, not a shortcut: it walks the same
-  key-verify and sidecar-probe steps as a manual pick.
+- **Chain preset** — one of the five pre-worked STT+TTS chains `/blackbox setup` offers before
+  the pricing tables (P9.7; "Talk over it" added with ADR-020). A pre-filled answer, not a
+  shortcut: it walks the same key-verify and sidecar-probe steps as a manual pick. The duplex
+  one is the only chain whose two halves are the same session, and it still fills in an ordinary
+  voice and ear for everything outside one.
 - **Collect-less rule** — the ADR-005 principle that voice may reduce what is collected but never
   increase it (eyes off and log off by voice; camera opening and log starting are explicit or
   typed).
@@ -3087,6 +3107,8 @@ needs no detector, just a report.
 | 2026-09-11 | **Echo measured, and the answer withdrew the advice I had shipped that morning.** `gpt-live-1` landed with "use headphones, effect unmeasured" in three documents — the honest position when nothing had been played through a speaker. Measured properly on the worst hardware in the room (a MacBook's own speakers into its own microphone, Helix's real `sox` capture and real beep/oto playback, no AEC anywhere) at output volumes 30/55/80: the service transcribed **none** of its own voice, at every volume, while the microphone was demonstrably hearing it — at volume 80 the model arrives at RMS 0.028 mean and 0.078 peak, *louder than an audible person* by this repo's own wake-word calibration, and a `say` sentence through those same speakers seconds earlier was transcribed word for word every time. **Then the question that actually decides it:** "does not hear itself" has two causes that look identical and mean opposite things — the echo is CANCELLED, or the input is GATED while it speaks, the second of which would quietly make full duplex not full duplex and remove the only reason to pay for the model. So the probe talked over it through the same speakers mid-sentence: *"Excuse me, stop talking, I have a different question."* came back transcribed in full while nothing of the model's concurrent speech did. Two voices in the same 20 ms frames at the same level, exactly one heard. Server-side AEC, confirmed. Resolution order (a)–(d) from the brief therefore ends at **(a)**; (b) headphones, (c) VoiceProcessingIO and (d) libspeexdsp are all unnecessary and the headphone advice is deleted rather than softened, in `docs/voice.md` §7 and §7c, `docs/blackbox.md` §3, ADR-020, §8 and §0 | Committed on `feat/blackbox` | **The first barge-in number I produced was my own bug, and it was a rule-8 failure wearing a new coat.** The probe reported the model talking for 15.3 s straight through an interruption — which I nearly wrote up as "barge-in is slow". Its session prompt said *"Never stop after one sentence"*: I had instructed the subject to ignore interruptions and then measured that it ignored interruptions. Removing the clause gave **3.9 s**, on transcript timestamps that lag the audio by 1.5–2 s, for an interrupting sentence that takes ~3 s to play — so it stopped before the interruption had finished playing. §9 rule 8 is about tests that cannot reach their target; this is the sibling nobody had written down: **a test that reaches its target and measures the harness instead.** The tell was that the number was surprisingly bad rather than surprisingly good, and a surprising result is a reason to re-read your own fixture first. |
 
 | 2026-09-11 | **`make uninstall`, `helix uninstall`, and a third door on `/purge`.** Asked for a target that removes everything Helix put on the machine, and for `/purge` to reach it. Built as ONE implementation (`internal/uninstall`) with three callers, because the obvious shape — a `scripts/uninstall.sh` mirroring `install.sh`, plus Go for `/purge` — is two copies of a destructive path, and a stale copy here does not misreport a port: it leaves a launchd job pointing at a deleted binary, retried and logged forever. The script is a wrapper that finds a binary and asks it. **The order is the safety property**: restore the login shell → remove the service → cut ONE LINE from `/etc/shells` → `~/.helix` → the binary last, because everything above may need it and it is the step that wants root (requested once, up front, by re-exec — a password prompt after four deletions is how someone cancels halfway). **If the login-shell restore FAILS the binary is kept**, enforced in `Apply` rather than documented, because those two failures compose into a machine that cannot open a terminal. `~/.helix` goes WHOLESALE unlike `/purge`, which enumerates — and the enumeration is already incomplete: `models.json`, `shell_pref` and a hand-dropped `openai.key` are all in `~/.helix` on this machine and none of them is in `purge.go`'s list. **`/purge` asks SEPARATELY** rather than folding it in, which was the owner's call and the right one: `/purge` already means "clean slate so I can carry on", and the shape copied is its own weights prompt — the more destructive option asked on its own, and only when it has something to do. Ollama, sox and ffmpeg are named in the manifest as NOT touched. README (install + contributing + tree), `docs/harness.md`, §0's make list, §7, `make info`, and the registry detail `/help /purge` renders | Committed on `feat/blackbox` | **My own test suite was one permission bit from editing `/etc/shells` on this machine.** `etcShells` was a const, so `Plan` read the real file whatever `home` it was handed — the "empty machine" case returned one item because this laptop genuinely has a Helix line in `/etc/shells`, and the wholesale-removal test went on to *rewrite* it. It was stopped by not being root. Now a var, defaulted in `TestMain` to a path that cannot exist, with an explicit opt-in for the two tests that need a real file. §9 rule 1 says no audio hardware in CI; the general form it did not say out loud is **a test that can damage the machine running it is not a test**, and a hardcoded system path is how that happens quietly. Two smaller ones: a guard that read its own explanatory prose as code (`scripts/uninstall.sh` says "No --yes" in a comment and the test matched it), and a decline path that printed NOTHING — every other decline in `/purge` says something, so silence after the last question read as the command dying halfway. All three were found by running the thing rather than reading it. |
+
+| 2026-09-11 | **"Talk over it" — the duplex chain becomes a preset, after a question exposed that it was not one.** Asked which quick setting included `gpt-live-1`; the answer was **none**. Adding it to `pricing.json` had put it in the manual STT table only, and `/blackbox setup` reaches that table *only when the preset menu is declined* — `offerSpeechPresets` returns early on a choice. So the line I had written into two documents, "pick openai / gpt-live-1 when it asks what should hear you", was wrong for anyone who took the first thing offered. A catalogue row is how a model becomes SELECTABLE; it is not how it becomes FINDABLE. Fixed with a fifth preset, third in the menu, tagged `needs a key · libopus` — both preconditions stated in the Tag because `presetMenuItems` only auto-adds "needs a key" when the Tag is empty, so a preset with any other precondition silently loses one. Deliberately **not** starred: it is the most expensive chain on that menu and a per-minute bill is not a default to steer an undecided user into, which is now a test. **The design point worth keeping:** a duplex preset still configures an ordinary TTS voice and a `whisper-local` ear. gpt-live-1 replaces the chain for the life of a SESSION, not the life of the config — `/blackbox say`, an unprompted remark before the first turn, and every turn on a machine with no libopus all still need both. A duplex preset with those blank configures a Helix that goes silent whenever it is not mid-conversation. `speechPreset.Duplex` therefore changes the SUMMARY, not the mechanism. **And one real bug fell out of thinking about the fallback:** `gpt-live-1` cannot transcribe a clip at all, so when a session fails to open the batch adapter would POST it to `/v1/audio/transcriptions` and take a 400 on every single turn before the chain moved on. `NewOpenAISTT` now substitutes `whisper-1` for any duplex-only model — substituting rather than erroring, because entering the conversation has already warned that duplex is unavailable and repeating it every turn is noise. `docs/blackbox.md`'s preset table was stale by TWO rows (it never gained the CSM chain) and still carried a paragraph saying gpt-live-1 "is not supported and cannot be" | Committed on `feat/blackbox` | **The gap was in the difference between two words I had used interchangeably.** The catalogue row made the model *selectable* and I wrote docs claiming it was *findable*, which are not the same thing when a menu short-circuits the table. Nothing in the suite could have caught it — every test I had asserted the row existed and that the model resolved, both true. What caught it was somebody asking which preset it was in. Worth remembering that "I added it to the list" is a claim about a data file, and the question to ask next is which list the user actually sees first. |
 
 *End of BlackBox_Development.md — maintain it as the single source of truth. If reality diverges
 from this document, update the document in the same commit as the code.*
