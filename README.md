@@ -61,6 +61,38 @@ git clone https://github.com/Nibir1/Helix.git && cd Helix && go install ./cmd/he
 ### Option 4: Pre-compiled Binaries (No Build Required)
 Don't want to build from source? Download the latest pre-compiled binary, checksums, and archives for your OS directly from the **[Releases Page](https://github.com/Nibir1/Helix/releases)**. All official releases are cryptographically signed and include a Software Bill of Materials (SBOM). *(See "Verifying Releases" below).*
 
+### Removing Helix
+
+```bash
+make uninstall
+```
+
+Or, from anywhere, using the installed binary — no checkout required:
+
+```bash
+helix uninstall
+```
+
+Either one prints a **manifest of exactly what it will remove** and asks before
+it touches anything: the binary and any `.prev` left behind by `/reboot`, the
+`/etc/shells` registration, the launchd or systemd background service, and
+`~/.helix` with everything in it. It asks for `sudo` once, up front, only if
+something is root-owned.
+
+**If Helix is your login shell it is set back first**, to the shell the
+installer recorded in `~/.helix/shell_pref`, and if that step fails the binary
+is deliberately *kept* — the two failures together are a machine that cannot
+open a terminal.
+
+**Ollama, `sox` and `ffmpeg` are left alone.** Helix may have suggested
+installing them; it does not own them, and you may be using them for something
+else.
+
+Inside a running session, `/purge` offers the same thing as a **separate, third**
+confirmation after it has wiped your data — so a data wipe never takes the shell
+away by surprise. Say no and you keep Helix with a clean slate; say yes and
+nothing is left.
+
 ---
 
 ### ⚡ Accelerating Threat Intel: NVD API Key
@@ -616,6 +648,7 @@ Helix/
 │   ├── sidecar/           # Local sidecar process lifecycle (detach, health, ports)
 │   ├── speech/            # STT/TTS chain — cloud providers, whisper, piper, CSM-1B
 │   ├── stealth/           # Memory-only private history execution
+│   ├── uninstall/         # Removing Helix: binary, shell registration, service, data
 │   ├── update/            # Self-update: fetch, checksum, atomic install, rollback
 │   ├── utils/             # Quote/brace validation, syntax highlighting, history, interrupts
 │   ├── ux/                # Terminal UX (typewriter, prompts, colors)
@@ -806,6 +839,12 @@ the daemon's auth token, and any voice transcripts — for handing a machine on 
 after a key leaks. It names the Hugging Face token rather than deleting it,
 since that lives in a shared cache with its own `hf auth logout`, and says
 plainly that keys set in the environment are not files and survive it.
+
+`make uninstall` is the end of that scale: the binary, the `/etc/shells` entry,
+the background service and `~/.helix` entire. It shows a manifest and asks
+first, restores your login shell before removing the binary it points at, and
+does not need a working build — which is one of the likelier reasons to be
+running it. See **Removing Helix** above.
 
 `make info` lists every target with what it does.
 

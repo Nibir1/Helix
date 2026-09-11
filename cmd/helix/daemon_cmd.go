@@ -55,6 +55,26 @@ func runDaemonCommand(args []string) (bool, int) {
 	case "remote":
 		code := runRemoteClient(args[1:])
 		return true, code
+	case "uninstall":
+		// A SUBCOMMAND rather than a slash command, because it has to work when
+		// the shell cannot start — a broken install is exactly when someone
+		// needs to remove one, and `helix` dropping to a REPL first would be the
+		// wrong shape. /purge offers the same thing from inside a session.
+		opts := uninstallOptions{}
+		for _, a := range args[1:] {
+			switch a {
+			case "-y", "--yes":
+				opts.assumeYes = true
+			case "--keep-data":
+				opts.keepData = true
+			default:
+				fmt.Fprintf(os.Stderr, "helix uninstall: unknown flag %q\n", a)
+				fmt.Fprintln(os.Stderr, "usage: helix uninstall [--yes] [--keep-data]")
+				return true, 2
+			}
+		}
+		handleUninstall(opts)
+		return true, 0
 	}
 	return false, 0
 }

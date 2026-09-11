@@ -311,6 +311,21 @@ checkout. `/reboot` is what makes the removal take
 effect — open database handles only release when the process exits, so "blank
 slate" is true one restart later.
 
+After the wipe, `/purge` asks **one more question, separately**: whether to
+remove Helix itself — the binary, the `/etc/shells` registration, and the
+launchd or systemd service. It is a third confirmation rather than part of the
+first because `/purge` already means "clean slate so I can carry on", and
+folding an uninstall into that would take the shell away from someone halfway
+through re-configuring it. Say no and you keep Helix with nothing in it; say
+yes and there is nothing left. The prompt is skipped entirely when there is
+nothing installed to remove.
+
+`make uninstall` and `helix uninstall` reach the same code from outside a
+session, and neither needs a working build. All three restore your login shell
+*before* removing the binary it points at, and if that restore fails the binary
+is deliberately kept — a missing login shell is a machine that cannot open a
+terminal.
+
 A restart also leaves a turn in the conversation saying it happened — mode,
 directory, provider — so the planner can answer "did you reboot?" instead of
 denying it. That turn records Helix's own action and never anything the

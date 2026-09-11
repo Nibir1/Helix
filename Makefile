@@ -186,6 +186,16 @@ install: current
 	@chmod +x $(SCRIPTS_DIR)/install.sh
 	@./$(SCRIPTS_DIR)/install.sh
 
+# Remove Helix from this machine: binary, shell registration, background
+# service and ~/.helix. Prints a manifest and asks before it touches anything.
+#
+# Deliberately NOT dependent on `current`. `make install` builds first because
+# it needs something to install; uninstall must work on a checkout that will not
+# compile, which is one of the likelier reasons to be running it.
+uninstall:
+	@chmod +x $(SCRIPTS_DIR)/uninstall.sh
+	@./$(SCRIPTS_DIR)/uninstall.sh
+
 # Show build info and what every target does.
 #
 # The old version listed six targets out of twenty and had not been updated
@@ -198,7 +208,7 @@ info:
 	@echo "  scripts     $(SCRIPTS_DIR)"
 	@echo "  helix home  $(HELIX_HOME)"
 	@echo ""
-	@echo "BUILD    current macos linux windows build-all install"
+	@echo "BUILD    current macos linux windows build-all install uninstall"
 	@echo "RUN      dev run start"
 	@echo "TEST     test e2e fuzz fuzz-ci live-sidecar live-csm"
 	@echo "CHECK    lint lint-workflows sec-scan work (all of them)"
@@ -207,9 +217,12 @@ info:
 	@echo "CLEAN    clean          generated state; keeps keys and models"
 	@echo "         deep-clean     + every model and runtime under ~/.helix"
 	@echo "         delete-secrets API keys, daemon token, voice transcripts"
+	@echo "         uninstall      + the binary, /etc/shells and the service"
 	@echo ""
 	@echo "  /purge inside Helix also reaches Ollama's models and the Hugging"
-	@echo "  Face cache, with sizes, and asks before each group."
+	@echo "  Face cache, with sizes, and asks before each group — and then offers"
+	@echo "  the same uninstall, separately, so a data wipe never removes the shell"
+	@echo "  by surprise."
 
 # To run the project without building first
 start:
@@ -354,5 +367,5 @@ work-install: work install
 
 
 .PHONY: all build current macos linux windows build-all clean deep-clean delete-secrets \
-	dev run info start test lint lint-workflows work work-install sec-scan install fuzz fuzz-ci \
+	dev run info start test lint lint-workflows work work-install sec-scan install uninstall fuzz fuzz-ci \
 	live-sidecar live-csm e2e release release-check
