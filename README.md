@@ -18,7 +18,7 @@ Helix is an **AI-powered command‑line assistant and adversarial cybersecurity 
 
 It combines:
 - **A voice-first companion** (`/blackbox on`) — microphone open, camera on, replies spoken, and an ambient loop that looks at the scene and speaks up on its own. Say "manual mode" to return to the keyboard
-- **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more), every default model vision-capable
+- **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more) — no model IDs compiled in; the model is discovered from the provider and ranked vision-first
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
 - **One visual language across all 57 commands** — panels, badges and aligned rows, never a flat stack of coloured lines. Colour honours `NO_COLOR` and switches itself off when the output is not a terminal, so piping Helix or running it as a service produces clean text
@@ -143,6 +143,24 @@ Using an advanced **Input Classification Engine** (`internal/shell/classify.go`)
 - `list all large files in this directory and delete the logs`
 - `compress the src folder and move it to backup`
 
+**The session persists the things a shell session should.** `cd` has always
+moved Helix itself rather than a child process; `export FOO=bar` and
+`unset FOO` now do the same, so a later command inherits them:
+
+```bash
+export PATH="$HOME/go/bin:$PATH"
+make dev            # sees it
+```
+
+Previously every command ran in a fresh child, so an `export` set a variable in
+a process that immediately exited — while `cd` persisted, which made the
+difference invisible and the failure baffling. The value is evaluated by your
+real shell, so quotes, `$VAR`, `~` and `$(...)` all behave normally. Anything
+that is not purely an assignment — a prefix like `FOO=bar make dev`, or
+`export A=1; rm -rf ~` — runs exactly as before. Spoken exports run but do not
+persist, and say so: an exported `PATH` silently redirects every command that
+follows, which ADR-005 reserves for the keyboard.
+
 ### 2. Git Workflows (Safe & Dangerous)
 - `increase the version in the README to 1.1.0, then stage, commit, and tag v1.1.0`
 - `undo the last commit but keep the changes`
@@ -249,8 +267,8 @@ Local runtimes — Ollama, llama.cpp, whisper.cpp, Piper — have their own guid
 | Command | Description |
 | :--- | :--- |
 | `/provider [status\|list\|use <name>\|<name>]` | Switch or inspect the AI provider |
-| `/provider-status` | Provider health, keys, failover state, planner transport |
-| `/model [list\|use <id>\|<id>]` | Switch or list models on the active provider |
+| `/provider-status` | Provider health, keys, failover state, planner transport — and whether the selected model is still in the provider's catalogue |
+| `/model [list\|use <id>\|<id>]` | Switch or list models — numbered, capability-tagged, ranked vision-and-fast first; answer with a number or any exact ID |
 | `/models` | List models the active provider offers |
 | `/test-basic-ai` | Smoke test the active AI model |
 
@@ -286,9 +304,27 @@ Where Helix does not know a verified package name for your platform, it says so 
 ### Live mode — `/blackbox`
 `/blackbox on` is Helix awake: microphone open, camera on, replies spoken, and a companion loop that looks at the scene on its own and speaks up when something is worth saying. Say **"manual mode"** at any time to return to the keyboard, **"turn off your eyes"** to close the camera without ending the conversation, or **"reboot"** to restart the shell — which comes back listening, in the same directory, on the same provider, with the conversation intact.
 
-**It is already listening.** `/blackbox wake on` is on by default: Helix keeps the microphone open at an idle prompt, and any sound switches it into live mode — the keyboard and the microphone at the same time, with nothing to activate. One switch covers both places it listens (an earlier split into `wake on` and `wake always on` confused people who enabled the first and reasonably asked how to wake it). Turning it **off** works by voice — "stop listening" — while turning it **on** is typed-only, because opening a microphone is an increase in what is collected. Nothing is transcribed while it waits; only the detector runs. **Upgrading?** A config written by a build before 2026-09-09 holds an `"enabled": false` that the old plain-bool save wrote on its own, and an explicit `false` is never overridden — it is the documented opt-out — so type `/blackbox wake on` once. Three honest limits: with the default engine *any* sound wakes it (loudness, not words — the sidecar engine is the phrase-accurate option), a word spoken *while you type* is not seen until you submit the line, and it is Unix-only for now. A fresh install with no microphone behaves exactly as before. See [docs/blackbox.md](docs/blackbox.md) §3.
+**Three listening states, and it starts in one of them.** Helix is always in exactly one:
 
-**Live mode never ends itself.** Being quiet is the ordinary state of someone who is not talking, so Helix waits — there is no timeout and no attempt budget. Leaving has exactly two triggers and both are yours: say "manual mode", or type `/blackbox off`. A genuine fault (no recorder, a collapsed provider chain) is reported and offers you a typed turn *without* leaving live mode, so a dead microphone cannot strand you.
+| | microphone | keyboard | leaves by |
+|---|---|---|---|
+| **STANDBY** *(startup default)* | wake detection only — nothing transcribed | live | any sound → AWAKE · "manual mode" → MANUAL |
+| **AWAKE** | transcribing every turn, **no re-waking in between** | live | a stop phrase · `/blackbox off` · 10 min silence |
+| **MANUAL** | **closed** | live | `/blackbox wake on` |
+
+A fresh install starts in STANDBY: make any sound and a conversation begins, keep typing and nothing changes — the keyboard and the microphone at the same time, with nothing to activate. Nothing is transcribed while it waits; only the detector runs.
+
+**A wake opens a conversation, not a turn.** Every turn used to need its own wake word, which made anything longer than one question exhausting. Now Helix keeps taking turns until you end it: a stop phrase, `/blackbox off`, or ten minutes with nothing said (`awake_idle_stand_down_s`, `0` disables it). The stand-down is the only exit that is not your decision, and it is the bound on an open transcribing microphone left running in an empty room.
+
+**The stop phrases differ in strength.** "manual mode", "close the mic" and "blackbox off" *spoken* close the microphone and persist it. "you can turn off now", "go to sleep" and "stop listening" only end the conversation — the wake word stays live. "that's all" and "we're done" mean the same as the second group but always confirm first, because they are also how an ordinary request ends. Voice can reduce listening but never reopen it: coming back out of MANUAL is typed-only, enforced in the state transition itself.
+
+**Type while it listens.** The keyboard is live *during* a capture, not only at an idle prompt. Start typing mid-turn and the capture is cancelled and the partial clip discarded without being transcribed — a killed recorder can return a fragment with no error, and half a sentence could come back as a stop phrase. `awake_keyboard: false` turns it off; Windows has no termios, so AWAKE is voice-only there.
+
+**Upgrading?** A config written by a build before 2026-09-09 holds an `"enabled": false` that the old plain-bool save wrote on its own, and an explicit `false` is never overridden — it is the documented opt-out — so type `/blackbox wake on` once. Under the three-state model that config now has a name: you start in MANUAL, with the microphone closed.
+
+Honest limits: with the default engine *any* sound wakes it (loudness measured against the room's own noise floor, not words — the sidecar engine is the phrase-accurate option), a word spoken *while you type* is not seen until you submit the line, and the armed prompt is Unix-only. A fresh install with no microphone behaves exactly as before. See [docs/blackbox.md](docs/blackbox.md) §3.
+
+A genuine fault (no recorder, a collapsed provider chain) is reported and offers you a typed turn *without* ending the conversation, so a dead microphone cannot strand you.
 
 Eight commands (`/voice`, `/manual`, `/voice-setup`, `/voice-status`, `/wake`, `/say`, `/tts`, `/eyes`) folded into this one; typing an old name prints where it went.
 
@@ -315,7 +351,7 @@ Subcommands:
 - **setup** — configure the STT/TTS providers with live pricing
 - **look** *[question]* — capture one frame now and answer a question about it
 - **eyes** `on|off` — camera only, without entering or leaving live mode
-- **wake** `on|off` — **on by default.** One switch for both halves of listening: at the idle keyboard prompt and between turns. Talking is enough; typing is always still there. `off` closes both. (The default detector wakes on any speech; true phrase spotting needs a sidecar. `"always_listen": false` in the config keeps between-turn listening without holding the prompt open. Upgrading from a build before 2026-09-09? Your config has an `"enabled": false` written by the old plain-bool save, and the new default does not override an explicit `false` — type `/blackbox wake on` once.)
+- **wake** `on|off` — **on by default.** `on` is STANDBY: the microphone is held open at an idle prompt, scoring chunks for a wake and transcribing nothing. Talking is enough; typing is always still there. `off` is MANUAL: the microphone is closed and stays closed until a *typed* command reopens it. (The default detector wakes on any speech measured against the room's own noise floor; true phrase spotting needs a sidecar. `"always_listen": false` un-arms the idle prompt without closing the mic. Upgrading from a build before 2026-09-09? Your config has an `"enabled": false` written by the old plain-bool save, and the new default does not override an explicit `false` — so you start in MANUAL; type `/blackbox wake on` once.)
 - **tts** `on|off` — whether ordinary replies are spoken aloud
 - **say** *text* — speak text through the TTS chain
 - **log** `on|off|status|show` — keep a local text record of what was heard and said
@@ -657,7 +693,15 @@ Helix supports a massive array of AI providers out of the box, managed via `/set
 
 API keys are securely stored in `~/.helix/secrets.json` with `0600` permissions, or passed via environment variables — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `META_API_KEY` (Meta's own `MODEL_API_KEY` is also accepted), `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `XAI_API_KEY`.
 
-**Every provider's default model can see.** Helix picks a multimodal default for each one — `gpt-5.6-luna`, `claude-opus-5`, `gemini-3.7-flash`, `muse-spark-1.2`, `deepseek-v4-flash-vision-exp`, `kimi-k3`, `qwen3.7-plus`, `glm-5.3-flash`, `grok-4.6`, and `gemma4:e2b` locally — so the Phase 5 camera path (`/blackbox eyes on`) works on a fresh key instead of refusing with "No vision-capable model is configured". Switch to a text-only model any time with `/model use <id>`.
+**No model IDs are compiled in.** Vendors retire models, and a hardcoded default is a time bomb: nothing validated the saved ID, so a retirement meant every turn failed with an unexplained 404 while `/provider-status` still reported *ok*. The model is resolved at runtime instead:
+
+1. what you last chose **for that provider** (`provider_models` in config — so switching provider and back remembers, instead of carrying the previous provider's model across);
+2. otherwise the best-ranked model the provider was last seen to serve, from a catalogue cached in `~/.helix/models.json` (24 h, refreshed only on calls that were already happening — no extra requests);
+3. otherwise nothing, and the provider says so rather than putting `"model":""` on the wire.
+
+Ranking is **vision first, then fast/flash**, then tool use, then context size; embedding, speech and image endpoints sink to the bottom instead of crowding out the models that can hold a conversation. That is what keeps the camera path (`/blackbox eyes on`) working on a fresh key without naming a model that may not exist next month.
+
+`/model list` is numbered with a capability column — answer with a row number, or type any exact model ID and it is accepted verbatim with a warning if the provider has not listed it. At startup a saved model the provider no longer serves is replaced and announced once; `/provider-status` reports "model gone" separately from reachability, because its health check has always been a `ListModels` call that says nothing about the model you selected.
 
 ---
 

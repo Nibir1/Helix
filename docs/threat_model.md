@@ -45,11 +45,15 @@ with user authority, which is precisely what this firewall does not cover: a
 TV, a podcast, or a person in the room becomes an instruction. **And since
 2026-09-09 that surface is open by default:** wake listening ships on, so a
 fresh install is holding the microphone at an idle prompt without anyone
-enabling it. Nothing is transcribed until a sound wakes it, which is what keeps
-the exposure to entering live mode rather than to acting on room noise — the
-full accounting, including how to decline it, is threat **V2b**. That surface has
-its own model and its own controls (risk capped at Medium, typed confirmations
-structurally unreachable by voice, fail-closed prompts, a wake lockout) in
+enabling it. Nothing is transcribed while it waits — but since 2026-09-11 a wake
+buys a **conversation**, not a turn: every utterance after it is transcribed and
+planned, with no further gate, until a stop phrase or ten minutes of silence. So
+the exposure is "one sound buys a conversation", and the only control that works
+with nobody present is the inactivity stand-down. The full accounting is threats
+**V2b** (the idle prompt) and **V2c** (the conversation). That surface has its
+own model and its own controls (risk capped at Medium, typed confirmations
+structurally unreachable by voice, fail-closed prompts, an inactivity
+stand-down, and a closed microphone that voice can never reopen) in
 `docs/threat_model_voice.md`. One control belongs here because it is a routing
 decision rather than a voice one: spoken input never takes the
 high-confidence-shell fast path, so a sentence whose first word happens to be a

@@ -1,3 +1,95 @@
+## Helix v1.5.1 — Listening that behaves like a conversation
+
+v1.5.0 could listen. It could not hold a conversation: every turn needed its own
+wake word, "manual mode" did not stick because the wake word put you straight
+back, and typing while it listened did nothing. This release is mostly the
+result of using it and writing down what actually happened.
+
+### Three listening states
+
+`voiceModeActive` was a bool, and a bool cannot tell "stop talking to me for a
+minute" from "close the microphone" — so both were the same phrase list calling
+the same function.
+
+| | microphone | keyboard | leaves by |
+|---|---|---|---|
+| **STANDBY** *(startup default)* | wake detection only, nothing transcribed | live | any sound → AWAKE · "manual mode" → MANUAL |
+| **AWAKE** | transcribing every turn, **no re-waking** | live | a stop phrase · `/blackbox off` · 10 min silence |
+| **MANUAL** | **closed** | live | `/blackbox wake on` |
+
+No new config key: the states map onto `user_preferences.voice_mode` and
+`speech.wake_word.enabled`, which already existed. An explicit
+`"enabled": false` finally has a name — you start in MANUAL.
+
+- **Waking is once per conversation.** The per-turn wake hold is deleted. A
+  conversation ends on a stop phrase, on `/blackbox off`, or after
+  `awake_idle_stand_down_s` of silence (default 600; `0` disables it and removes
+  the only bound that works with nobody present).
+- **Stop phrases split three ways.** "manual mode" / "close the mic" close the
+  microphone and persist it. "you can turn off now" / "go to sleep" / "stop
+  listening" pause to STANDBY. "that's all" / "we're done" mean the second but
+  always confirm first, because they are also how an ordinary request ends.
+  Longest match wins, so "stop listening completely" closes the mic.
+- **A re-arm grace window** (`rearm_delay_ms`, default 3 s) stops the tail of the
+  dismissing sentence from immediately re-waking it. Without this the state
+  machine alone would have renamed the bug rather than fixed it.
+- **Type while it listens.** The keyboard is live during a capture; a keystroke
+  cancels the turn and the partial clip is discarded **without being
+  transcribed**. The terminal is held in cbreak, not raw, so `ISIG` survives and
+  Ctrl+C still cancels a recorder. `awake_keyboard: false` opts out; Windows has
+  no termios and is voice-only in AWAKE.
+- **Voice can never reopen a closed microphone** — refused inside the state
+  transition, so it holds for every door rather than for the one command anybody
+  remembered to guard.
+
+### The wake word could not fire at all
+
+The energy detector shipped with absolute thresholds fitted to synthetic test
+tones (balanced = 0.12 normalized RMS). A MacBook Pro built-in microphone
+measures ~0.0011 for a quiet room and 0.012–0.033 for an audible voice, so the
+bar sat roughly 25× above anything the hardware could produce and the prompt
+said "listening" forever. The test suite was green because the fixtures were
+fitted to the threshold rather than to a microphone — its "must not wake" bucket
+was five times louder than real speech.
+
+Presets are now multiples of the room's **measured** noise floor (strict 4×,
+balanced 2.5×, loose 2×) with an absolute audibility gate underneath. Test
+fixtures are real recordings. Every wake error used to reach an empty callback
+in two places; failures now reach the screen, and a scan loop that dies takes
+down the HUD and says why instead of leaving a "listening" line over a dead
+microphone.
+
+### Models stop rotting
+
+No provider compiles in a model ID any more. A vendor retiring one meant every
+turn failed with an unexplained 404 while `/provider-status` reported *ok* —
+its health check has always been a `ListModels` call, which says nothing about
+the model you selected.
+
+- Resolution: your per-provider choice (`provider_models`) → the best-ranked
+  model the provider was last seen serving (`~/.helix/models.json`, 24 h) →
+  nothing, refused with a message naming the fix.
+- Ranking is **vision first, then fast/flash**, then tools, then context;
+  embedding, speech and image endpoints sink instead of crowding the list.
+- `/model list` is numbered with a capability column; answer with a number or
+  type any exact ID, accepted verbatim with a warning.
+- Startup replaces a model the provider no longer lists, and says so once. A
+  dropped connection is **not** treated as evidence of retirement.
+
+### Other
+
+- **`gpt-live-transcribe`** — OpenAI realtime STT over WebSocket, $0.017/min,
+  verified against the live service. Not a chain default: there is no
+  streaming-STT failover. `gpt-live-1`, the full-duplex model, is **not**
+  supported — its only transport is WebRTC.
+- **`export` and `unset` persist** when typed, the way `cd` already did. Spoken
+  ones run but do not persist, and say so.
+- **The per-turn `GRID STATUS :: CLEAR` line is gone** unless something is
+  actually degraded, and the LIVE panel prints in full once per session then
+  collapses to one line.
+
+---
+
 ## Helix v1.5.0 — BlackBox: The Voice-First Companion
 
 v1.0.0 taught the terminal to speak human. v1.5.0 lets you stop typing.
@@ -10,9 +102,9 @@ It remains local-first and telemetry-free. The whole voice stack runs offline if
 
 ### Voice
 
-- **Multi-provider speech** with failover chains: Groq, OpenAI and Deepgram for transcription; OpenAI, Deepgram, ElevenLabs for speech; whisper.cpp, Piper, Kokoro and **Sesame CSM-1B** as local sidecars. Pricing is *data* (`pricing.json`, user-overridable), never hardcoded routing.
+- **Multi-provider speech** with failover chains: Groq, OpenAI (batch Whisper and `gpt-live-transcribe` realtime over WebSocket) and Deepgram for transcription; OpenAI, Deepgram, ElevenLabs for speech; whisper.cpp, Piper, Kokoro and **Sesame CSM-1B** as local sidecars. Pricing is *data* (`pricing.json`, user-overridable), never hardcoded routing.
 - **Recommended chains** — one keystroke in `/blackbox setup` picks cheapest-cloud (Groq + `gpt-4o-mini-tts`), lowest-latency (Deepgram Nova-3 + Aura-2), or fully-local/private (whisper.cpp + Piper). Every cloud chain pre-fills a *local* fallback, because the failure worth surviving is the network.
-- **Hands-free wake word** — energy detector by default (pure Go, works everywhere, honest about detecting onset rather than a phrase) or an openWakeWord-class sidecar for true keyword spotting. Between turns Helix holds in wake-only listening: nothing is transcribed until a wake event fires.
+- **Hands-free wake word** — energy detector by default (pure Go, works everywhere, honest about detecting onset rather than a phrase) or an openWakeWord-class sidecar for true keyword spotting. A wake opens a **conversation**, not a turn — Helix keeps taking turns until you stop it or it stands down after ten minutes of silence. In STANDBY, nothing is transcribed until a wake event fires.
 - **Streaming both ways** — live interim transcripts (Deepgram WebSocket), and sentence-pipelined TTS that starts playing after the first sentence synthesizes instead of the whole paragraph. Time-to-first-audio dropped from a measured 2,280 ms to ~150 ms + network.
 - **Barge-in** — Ctrl+C stops a spoken reply mid-sentence (~50 ms), not at the next sentence boundary. Opt-in voice interruption stops it by speaking in the pause between sentences, with no echo cancellation required.
 - **A sci-fi HUD** — listening waveform driven by the real microphone level (log-scaled, because speech RMS on a linear meter barely leaves the floor), decode sweep, speaking wave, wake-standby pulse. Terminal-native; no GUI dependency.
@@ -87,7 +179,7 @@ The speech model behind Sesame's "crossing the uncanny valley of voice" demo, ru
 ### The agentic harness
 
 - **Bounded plan → act → observe → replan** (`/agentic on`). A failed step feeds its exit code and a sanitized tail of its output back to the planner, which self-corrects. Every iteration re-enters the *entire* safety pipeline; the harness decides only whether to plan again.
-- **Native tool calling** across eight providers — one normalized `ToolDefinition` over three different wire formats (OpenAI-shaped, Anthropic's flat `input_schema` blocks, Ollama's `/api/chat`), sharing one streamed-fragment reassembler instead of three chances to re-bug it. Capability reporting describes what the *adapter* can drive, not what the vendor sells: `custom` and llama.cpp are excluded because their tool support is genuinely undetectable, and Ollama is gated **per model** — Helix's own default local model ships no tool template, so it does not waste a round trip pretending otherwise. Where tool calling is unavailable the planner falls back to the prompt ladder silently, costing at most one request.
+- **Native tool calling** across eight providers — one normalized `ToolDefinition` over three different wire formats (OpenAI-shaped, Anthropic's flat `input_schema` blocks, Ollama's `/api/chat`), sharing one streamed-fragment reassembler instead of three chances to re-bug it. Capability reporting describes what the *adapter* can drive, not what the vendor sells: `custom` and llama.cpp are excluded because their tool support is genuinely undetectable, and Ollama is gated **per model** — the small local models Helix recommends ship no tool template, so it does not waste a round trip pretending otherwise. Where tool calling is unavailable the planner falls back to the prompt ladder silently, costing at most one request.
 - **Streaming token render** — replies appear as they generate, and the spinner stops at the first token rather than the last.
 - **Session memory** — a persisted ring of recent turns, injected as a zero-authority fenced block. "What did I ask a moment ago" works; a transcript Helix did not trust is labelled `not understood` rather than quoted back as if you had said it cleanly.
 - **Safe-subset undo** — `"undo that"` reverses a journalled action (a commit becomes a soft reset) through the normal confirmation and safety path. Overwrites and deletions are explicitly out of scope, and the docs say so.
@@ -101,7 +193,7 @@ The speech model behind Sesame's "crossing the uncanny valley of voice" demo, ru
 
 ### Providers & offline resilience
 
-- **Twelve LLM providers**: OpenAI, Anthropic, Google Gemini, Meta (Muse Spark), DeepSeek, Kimi, Qwen, GLM, xAI (Grok), Ollama, llama.cpp, and any OpenAI-compatible custom endpoint. Every one of them **defaults to a model that can see**, so the camera path works on a fresh key.
+- **Twelve LLM providers**: OpenAI, Anthropic, Google Gemini, Meta (Muse Spark), DeepSeek, Kimi, Qwen, GLM, xAI (Grok), Ollama, llama.cpp, and any OpenAI-compatible custom endpoint. **None of them compiles in a model ID** — the model is discovered from the provider at runtime and ranked vision-first, so the camera path works on a fresh key without naming a model that may not exist next month.
 - **Circuit-breaker failover** (CLOSED → OPEN → HALF-OPEN) keeps Helix *thinking* when the cloud disappears, not merely hearing and speaking. It health-checks the local brain before every switch, so a machine with no local runtime never degrades onto a dead endpoint, and an explicit `/provider use` always outranks it.
 - **Misdirected-key guard** — a pasted key whose prefix unambiguously belongs to another vendor is caught before it is stored. GroqCloud and xAI are different companies one letter apart.
 
@@ -268,7 +360,7 @@ Late additions to v1.5.0, from a live `/blackbox setup` on an Intel Mac and an A
 - **One provider, one key prompt.** A vendor on both sides of a chain — Deepgram does both — was asked for the same credential twice in a single wizard run.
 - **A sidecar's moved port survives the save.** A local provider chosen as a *fallback* and reassigned off an occupied port had its address written to a field that belongs to the primary, so the move was lost and the adapter dialled the default anyway. There is one writer for that address now.
 - **The CSM licence gate is walked, not just described.** Helix installs the Hugging Face CLI, opens the terms page in a browser and runs the login — stopping at the token, which is the only part that is actually consent.
-- **Live mode never ends itself.** Silence had a retry budget: three quiet turns and the shell reported "voice unavailable" and dropped to a typed prompt. Being quiet is the ordinary state of someone who is not talking, and leaving live mode is your decision — "manual mode" or `/blackbox off`, and nothing else.
+- **A conversation ends four ways** (see the v1.5.1 notes). Silence had a retry budget: three quiet turns and the shell reported "voice unavailable" and dropped to a typed prompt. Being quiet is the ordinary state of someone who is not talking, and leaving live mode is your decision — "manual mode" or `/blackbox off`, and nothing else.
 - **A readiness budget measures readiness.** Both sidecars that download on first run — kokoro's container image and CSM's model weights — were fetching inside the window that asks "did the server bind its port?", so Helix reported them dead while their own logs showed them working. Downloads are pulled as their own step now.
 - **The provider you chose is the provider that speaks.** A chain of `csm-local → piper-local` skipped CSM entirely: it has no streaming adapter, the streaming path passed over it to a fallback that has one, and the turn then succeeded — so the buffered path, where chain order is honoured, was never reached. CSM was built, its weights downloaded, its server started and verified, and its log recorded not one synthesis request.
 - **The CSM preset enables the conversational context it advertises.** "Most natural, local" sells conversational prosody and shipped with the conditioning off, so CSM synthesized each reply cold and sounded like the fallback it was chosen over.

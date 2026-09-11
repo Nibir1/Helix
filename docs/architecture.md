@@ -203,7 +203,9 @@ fields.
   consuming it** — so the editor is entered only when there is something to read
   and runs completely unmodified. That is what keeps Phase 4A's byte-identical
   guarantee intact, and an e2e test asserts an un-armed prompt is unchanged.
-- **Raw mode is the reason it works at all**, not an implementation detail. In
+- **Raw mode is the reason the ARMED PROMPT works at all**, not an
+  implementation detail (the in-conversation keyboard watch uses cbreak instead —
+  see 3d-ter). In
   canonical mode the line discipline buffers input until Enter, so `poll` reports
   nothing readable however much has been typed — the wait would only notice the
   keyboard once a whole line was submitted. Raw mode also disables echo, which
@@ -217,10 +219,92 @@ fields.
 - **The idle wait is unbounded, and that is not an ADR-005 §5 exception.** That
   rule caps how long an armed session may sit before falling back to *wake-only
   listening*; wake-only listening is exactly what an armed prompt is. There is no
-  open capture to time out into, and nothing is transcribed.
-- **Waking routes through `blackBoxOn`**, not `enterVoiceMode`, so the mode
-  reached by speaking is the mode reached by typing — camera, companion loop,
-  banner and persistence included. Phase 13 records what the alternative costs.
+  open capture to time out into, and nothing is transcribed. The §5 cap is now
+  genuinely implemented, but on the other state — see 3d-ter.
+- **Waking and typing reach the same conversation**, because both go through
+  `setListenMode`. That used to be achieved by routing the spoken door through
+  `blackBoxOn`; the union of entry and exit effects — camera, companion, context,
+  barge-in, persistence, banner — now lives in one transition function instead,
+  so a new door cannot acquire half of them. Phase 13 records what the
+  alternative costs.
+
+### 3d-ter. Three Listening States (`cmd/helix/listen_mode.go`, `awake_turn.go`)
+
+`voiceModeActive` was a bool, and a bool cannot express the difference between
+"stop talking to me for a minute" and "close the microphone" — so both were the
+same phrase list calling the same function, and either one left the wake word on
+to put the user straight back. STANDBY / AWAKE / MANUAL replace it.
+
+- **One door.** `setListenMode(target, cause)` owns every entry and exit effect
+  in a fixed order. The `cause` decides wording, whether the change is persisted
+  (a restored session must not rewrite the preference it just read; a quiesce
+  before `exec` must announce nothing), and whether the transition is allowed at
+  all: leaving MANUAL is refused for any non-typed cause, which is ADR-005's
+  asymmetry enforced structurally rather than per-command.
+- **No new persisted state.** The three states map onto `user_preferences.voice_mode`
+  and `speech.wake_word.enabled`, which already existed — `enabled: false` was
+  always "the microphone is closed", it just had no name. Config is read once,
+  at `initVoiceMode`; after that the enum is the session's truth.
+- **An atomic, not a bool.** The companion samples the camera from its own
+  goroutine and reads the mode while the REPL writes it — an unsynchronised read
+  that `-race` never caught because no test drives that loop across a switch.
+- **The stand-down is not a timer.** AWAKE falls back to STANDBY after
+  `awake_idle_stand_down_s` of silence, checked as a pure function of the clock
+  at the TOP of a turn, before the microphone opens. Never a context deadline
+  inside the listening path: that is the exact shape of the defect that expired
+  a wake hold into open capture, and the guard test exists so nobody
+  reintroduces the pattern even pointing the other way.
+- **A re-arm grace window** drops wake events just after entering STANDBY,
+  because with the energy engine the tail of the sentence asking for standby is
+  itself a wake event. Drop-and-continue inside the hold, so the scanner keeps
+  running and the hold stays unbounded.
+- **Cbreak, not raw, during a capture.** The keyboard is live while Helix
+  listens: one goroutine polls stdin at the armed prompt's cadence and the first
+  byte cancels the turn. `term.MakeRaw` clears `ISIG`, which would have turned
+  Ctrl+C into byte 0x03 and silently deleted "Ctrl+C cancels the recorder" — so
+  the termios work is hand-rolled to keep `ISIG`, and a PTY test asserts it. The
+  pending byte is never consumed, so `ReadLine` takes it as though typed a
+  moment later; the pre-empt guard sits BEFORE `Transcribe`, because a killed
+  recorder returns a partial clip with **no error** and half a sentence could
+  transcribe as a stop phrase.
+
+### 3d-quater. Runtime Model Resolution (`internal/providers/ranking.go`, `modelcache.go`)
+
+No provider compiles in a model ID. Vendors retire models; nothing validated the
+saved one, so a retirement meant every turn failed with an unexplained 404 while
+`/provider-status` reported *ok* — its health check has always been a
+`ListModels` call, which says nothing about the selected model.
+
+- **Resolution is purely local**: the user's per-provider choice
+  (`provider_models`), then the best-ranked model in `~/.helix/models.json`, then
+  `""`. `DefaultModel()` is consulted per turn and inside loops over every
+  provider, so a network call there would put latency in the hot path.
+- **The cache costs nothing.** Every write piggybacks on a `ListModels` that was
+  already happening. A stale list is still used; staleness only decides whether a
+  refresh is worth doing.
+- **Ranking is vision, then fast, then tools, then context tier**, with non-chat
+  entries sunk rather than dropped — nothing a provider lists becomes
+  unreachable. Telling chat models from embedding and speech endpoints matters
+  more than the fast heuristic: the picker used to show the first 24 models in
+  API order.
+- **Self-repair has three verdicts, not two.** A dropped connection is not
+  evidence of retirement, so `ModelUnverifiable` keeps the saved model; only a
+  real catalogue missing it repairs, and it says so once.
+
+### 3d-quinquies. Session Environment (`internal/commands/envpersist.go`)
+
+`export` and `unset` change the Helix process, so later commands inherit them —
+the way `cd` always did. Every command runs in a fresh child, so an `export`
+previously set a variable in a process that immediately exited, while `cd`
+persisted: the shell behaved like a session for directories and like unrelated
+subshells for the environment, with nothing on screen saying which.
+
+Only variable NAMES are parsed here; the VALUE is evaluated by a real shell and
+read back, so quoting, `$VAR`, `~` and `$(...)` behave exactly as the user's
+shell does. The recogniser is deliberately narrow — a prefix assignment stays a
+one-shot override, and anything compound falls through to ordinary execution,
+where the safety checks live. Typed-only: a spoken export runs but does not
+persist, and says so.
 
 ### 3e. Host Dependencies (`internal/deps/`)
 What Helix needs from the machine, how to detect it, and how to install it on

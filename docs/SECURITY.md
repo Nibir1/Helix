@@ -216,7 +216,9 @@ structural rather than advisory:
   the continuity record it leaves omits conversation content entirely on the
   spoken path — so the rule below survives without an exception.
 - **Confirmations fail closed.** Silence, timeout, or an unintelligible answer
-  counts as "no".
+  counts as "no". A pending confirmation also remembers *what* it asked about,
+  so a question about stopping listening cannot be answered by a later phrase
+  that means something else.
 - **The microphone is open at an idle prompt on a fresh install.** This changed
   on 2026-09-09 by owner decision and is stated here rather than left to be
   discovered: wake listening (`/blackbox wake on|off`) defaults to **on**, so a
@@ -226,13 +228,38 @@ structural rather than advisory:
   per session and shown continuously by the standby HUD, it arms only where a
   recorder, a transcriber and keystroke readiness all exist, turning it **on**
   is typed-only while turning it **off** always works by voice, and one command
-  closes both the prompt and the between-turns halves. Set
+  closes the microphone entirely. Set
   `speech.wake_word.enabled: false` in `~/.helix/config.json` to decline it —
   that value is honoured and never overridden by the default. Unix-only;
   Windows reports unavailable. The residual risk — someone who installs Helix
   and reads no banner — is recorded as threat **V2b** in
   `docs/threat_model_voice.md`.
-- **Otherwise the microphone opens only for a turn — unless you ask otherwise.** Enabling
+- **Once woken, the microphone stays open for the conversation.** This is the
+  largest exposure in this document and it changed on 2026-09-11. A wake used
+  to gate every turn; it now opens a conversation in which every utterance is
+  transcribed, sent to an STT provider and planned, with no further gate. Three
+  states, and only one of them closes the microphone:
+
+  | | microphone | ends by |
+  |---|---|---|
+  | **STANDBY** *(startup default)* | open, wake detection only, **nothing transcribed** | any sound → AWAKE |
+  | **AWAKE** | open and **transcribing every turn** | a stop phrase, `/blackbox off`, or 10 minutes of silence |
+  | **MANUAL** | **closed** | `/blackbox wake on` — typed only |
+
+  What holds AWAKE up: an inactivity stand-down
+  (`speech.wake_word.awake_idle_stand_down_s`, default 600s) which is the only
+  control that works with nobody present — setting it to `0` removes the bound
+  and should be read as doing exactly that; spoken stop phrases in two
+  strengths, one of which closes the microphone and persists it; a confirmation
+  round for phrases that could plausibly be part of an ordinary sentence; and
+  the rule below, enforced inside the state transition rather than at a command
+  handler, that voice can never reopen a closed microphone. Recorded as threats
+  **V2c**, **V2d** and **V2e** in `docs/threat_model_voice.md`.
+- **Typing during a capture discards the audio.** The keyboard is live while
+  Helix listens; a keystroke cancels the capture and the partial clip is thrown
+  away **without being transcribed**, so audio recorded up to that moment never
+  reaches a provider. There is a test behind that claim rather than a comment.
+- **Outside a conversation the microphone opens only for a turn — unless you ask otherwise.** Enabling
   sentence-boundary barge-in (`/config barge-in on`) lets Helix sample the mic in
   the pause between its own spoken sentences, so it can be interrupted by voice.
   That clip follows the same path as every capture — the recorder writes a temp
@@ -255,6 +282,18 @@ structural rather than advisory:
   transcript log must be typed. The rule has **no exceptions**: `/reboot` is the
   case that tested it, and the feature was shaped to fit — a spoken restart
   stores no conversation content — rather than the rule being amended.
+
+  Two enforcement points were added on 2026-09-11, both places where a spoken
+  word could otherwise have widened something silently:
+
+  - **Voice cannot reopen a closed microphone.** Moving out of MANUAL is
+    refused for any non-typed cause, and the refusal lives inside the state
+    transition rather than in a command handler — so it holds for every door
+    into that state, not just the one anybody remembered to guard.
+  - **Spoken `export` does not persist.** Typed at the prompt, `export FOO=bar`
+    now changes the session. Spoken, it runs in a subshell and says that it did
+    not stick — an exported `PATH` is silent and lasts the session, which makes
+    it a way to redirect every later command without appearing in any of them.
 
 Full model, including the residual risk accepted for a voice-first assistant:
 `docs/threat_model_voice.md`.

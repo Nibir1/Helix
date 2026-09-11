@@ -174,11 +174,21 @@ These hold regardless of the approval posture:
 
 ## 4. Hands-free
 
-`/blackbox wake on` holds the microphone in wake-only listening between turns — no
-transcription happens until a wake event fires, so nothing leaves the machine
-while you are not addressing it. After a completed turn Helix returns to wake-only
-listening; when the idle window lapses it says so once rather than silently
-reverting to open capture.
+Helix is in one of three listening states — STANDBY (wake detection only,
+nothing transcribed), AWAKE (a conversation in progress), or MANUAL (microphone
+closed). `/blackbox wake on` puts you in STANDBY; `/blackbox wake off` closes the
+microphone. See `docs/blackbox.md` §3 for the full table.
+
+**A wake opens a conversation, not a turn.** Once awake, Helix takes turn after
+turn with no re-waking in between. That is the change: every turn used to need
+its own wake word, which made anything longer than a single question exhausting.
+A conversation ends on a stop phrase, on `/blackbox off`, or after ten minutes
+with nothing said (`speech.wake_word.awake_idle_stand_down_s`, `0` disables it).
+
+The stand-down is the bound on an unattended open microphone, and the only exit
+that is not your decision. Entering STANDBY then drops wake events for a moment
+(`rearm_delay_ms`, default 3 s) — with the energy engine the tail of the sentence
+asking Helix to stand down is itself a wake event.
 
 **"Wake event", not "wake phrase", and the difference is the whole caveat.** The
 default `energy` engine scores loudness and cannot match words — it wakes on
@@ -188,8 +198,24 @@ detector is running and reports a configured phrase as *stored but unused* when
 the engine cannot act on it; the `WAKE` row of `/blackbox status` says the same
 in one line.
 
-Kill phrases end voice mode without touching the keyboard. "Turn off your eyes"
-disables the camera immediately while staying in voice mode.
+Stop phrases end a conversation without touching the keyboard, and there are
+three classes with three different outcomes: "manual mode" and friends close the
+microphone and persist it; "you can turn off now" / "go to sleep" / "stop
+listening" pause to STANDBY with the wake word still live; "that's all" /
+"we're done" mean the same as the second group but always confirm first, because
+they are also how an ordinary request ends. Longest match wins across all three,
+so "stop listening completely" closes the microphone rather than matching the
+"stop listening" that only pauses.
+
+"Turn off your eyes" disables the camera immediately while staying in the
+conversation.
+
+**The keyboard is live during a capture.** Type mid-turn and the capture is
+cancelled, the partial clip is discarded without being transcribed, and the line
+is read as though typed a moment later. The discard matters: a killed recorder
+can return a fragment with no error, and half a sentence could transcribe as a
+stop phrase. `speech.wake_word.awake_keyboard: false` turns it off; Windows has
+no termios, so AWAKE is voice-only there.
 
 ---
 
@@ -402,10 +428,22 @@ yet do:
   hear Helix's own voice and transcribe it as your input.
 - **"Stop talking" only lands between turns**, for the same reason.
 - **The companion waits for a closed microphone.** An unprompted remark is
-  queued, not spoken on the spot: it lands between a finished turn and the next
-  capture, or by interrupting wake listening. That is the same half-duplex rule
-  seen from the other side — Helix will not speak into an open mic, because it
-  would transcribe itself.
+  queued, not spoken on the spot: it lands at the start of the next turn, before
+  the recorder opens. That is the same half-duplex rule seen from the other
+  side — Helix will not speak into an open mic, because it would transcribe
+  itself.
+- **Typing during a capture kills the clip**, and speaking mid-typed-line is not
+  heard. Both directions of the same limit: one input channel has the terminal
+  at a time, and the handover is clean rather than concurrent.
+- **`gpt-live-1` is not supported, and cannot be with a WebSocket.** OpenAI's
+  full-duplex model is WebRTC-only — the session endpoint answers `"Only the
+  webrtc transport is supported."` and wants an SDP offer — so reaching it means
+  ICE, DTLS-SRTP and Opus rather than the WebSocket client the other streaming
+  providers use. It is selectable by typed model id, and selecting it produces a
+  session nothing here can talk to. What *is* supported is
+  `gpt-live-transcribe`, OpenAI's realtime transcription model, over
+  `wss://api.openai.com/v1/realtime?intent=transcription` at $0.017/min — one
+  direction only, which is all the STT chain needs.
 - **Latency depends entirely on the providers.** Streaming STT plus streaming TTS
   puts first-audio in the low hundreds of milliseconds on a good cloud chain, and
   seconds on a CPU-bound local chain. `/blackbox status` reports the measured
@@ -424,15 +462,17 @@ yet do:
 
 ## 7b. Waking from the keyboard
 
-`/blackbox wake on` — on by default — listens in two places at once: at an idle
-keyboard prompt, and in the gaps between spoken turns. Make any sound and Helix
-goes live; keep typing and nothing changes. `off` closes both, `status` reports
-which are armed and why not.
+`/blackbox wake on` — on by default — puts Helix in STANDBY: the microphone is
+held open at an idle keyboard prompt, scoring chunks for a wake and transcribing
+nothing. Make any sound and a conversation starts; keep typing and nothing
+changes. `off` closes the microphone (MANUAL); `status` reports which state you
+are in and why.
 
 It was two switches (`wake on`, `wake always on`) and is one, because "listen
 for me" is one intention and the split confused people who enabled half of it.
-The narrow behaviour lives on as `speech.wake_word.always_listen: false` in
-config.
+`speech.wake_word.always_listen: false` still un-arms the idle prompt, though
+the other half of its old meaning — listen between spoken turns only — has
+nothing left to refer to, because there are no gaps between turns to listen in.
 
 Both keys are tri-state: **absent means the default (on)**, and an explicit
 `false` is honoured. That distinction is the feature, not a detail — a plain
@@ -486,18 +526,25 @@ A test now fails if any adapter's own answer disagrees with the metrics reader.
 /blackbox status    chains, health, endpoints, retained context, interrupt, vocabulary
 /mictest            3-second check: is the microphone actually being heard?
 /blackbox on        go live — microphone, camera, speech, companion
-/blackbox off       back to the keyboard (also stops a reply mid-sentence)
+/blackbox off       end the conversation -> STANDBY (also stops a reply mid-sentence)
+/blackbox wake off  close the microphone -> MANUAL
 ```
 
 **Silence is not a failure.** Being quiet is the ordinary state of someone who
-is not talking, so live mode waits — indefinitely, with no attempt budget. It
-used to have one: three quiet turns and the shell reported "voice unavailable"
-and dropped to a typed prompt, which is both wrong about what silence means and
-a decision that belongs to you. Leaving live mode has exactly two triggers, and
-both are yours: say **"manual mode"**, or type `/blackbox off`. Every four quiet
-turns — roughly three minutes, since a silent capture waits for speech rather
-than returning — Helix says it is still listening and points at `/mictest`, in
-case you are speaking and are not being heard.
+is not talking, so a turn waits — indefinitely, with no attempt budget. It used
+to have one: three quiet turns and the shell reported "voice unavailable" and
+dropped to a typed prompt, which is both wrong about what silence means and a
+decision that belongs to you. Every four quiet turns — roughly three minutes,
+since a silent capture waits for speech rather than returning — Helix says it is
+still listening and points at `/mictest`, in case you are speaking and are not
+being heard.
+
+A conversation ends four ways: a stop phrase that closes the microphone ("manual
+mode"), a stop phrase that only pauses it ("you can turn off now"), a typed
+`/blackbox off`, or ten minutes with nothing said. The last is the only one that
+is not your decision, and it is the bound on an open transcribing microphone
+left running in an empty room — set `speech.wake_word.awake_idle_stand_down_s`
+to `0` to remove it, knowing that is what you are removing.
 
 A genuine fault is different and still surfaces: a missing recorder or a
 collapsed provider chain is reported, and you are offered a typed turn *without*

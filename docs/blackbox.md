@@ -29,6 +29,26 @@ provider tables are the escape hatch rather than the decision:
 | **Lowest latency** | `deepgram` nova-3 | `deepgram` aura-2 | streaming partials, ~300 ms first byte |
 | **Fully local / private** | `whisper-local` | `piper-local` | no key, no per-call cost, nothing leaves the machine, no Docker |
 
+One more transcription option is registered but deliberately not a preset:
+`gpt-live-transcribe`, OpenAI's realtime model over a WebSocket
+(`wss://api.openai.com/v1/realtime?intent=transcription`, $0.017/min). It gives
+live partials from a vendor you probably already have a key for, and it captures
+at **24 kHz** rather than the 16 kHz everything else uses — the server enforces
+that as a minimum, so the recorder is opened to match. Select it with
+`speech.stt.model = "gpt-live-transcribe"`. It is not recommended and not a
+chain head because there is no streaming-STT failover: if it fails, the whole
+voice path fails with it, and parts of its wire format were reconstructed rather
+than read from a specification. `speech.stt.realtime` in `~/.helix/config.json`
+overrides every one of those reconstructed parts, including a `session` field
+sent to the server byte for byte.
+
+`gpt-live-1` — the full-duplex model that speaks as well as listens — is **not**
+supported and cannot be, yet. Its only transport is WebRTC: the session endpoint
+answers `"Only the webrtc transport is supported."` and requires an SDP offer,
+which means ICE, DTLS-SRTP and Opus rather than a WebSocket client. It is
+selectable by typed model id like any other, but selecting it produces a session
+nothing here can talk to.
+
 Each cloud chain pre-fills a **local** fallback, because the point of a fallback
 is surviving the failure most likely to happen — the network — and a second
 cloud vendor does not. The local chain deliberately has no fallback: adding a
@@ -71,15 +91,36 @@ speech services.
 ## 2. Voice mode and the safety valve
 
 ```text
-/blackbox on   # go live: microphone, camera, speech, and initiative
-/blackbox off  # instant fallback to typing
+/blackbox on   # open a conversation: microphone, camera, speech, initiative
+/blackbox off  # end the conversation — back to STANDBY, mic still listening
 ```
 
-Say **"manual mode"** to leave without touching the keyboard — matched at the
-end of a sentence, so "okay, now switch to manual mode" works and is not
-confused with a question about the feature.
+**`/blackbox off` does not close the microphone.** It ends the conversation and
+leaves Helix in STANDBY, where a wake word can start another one. The command
+that closes the microphone is `/blackbox wake off`, or the spoken phrase
+"manual mode". See §3 for the three states.
 
-**A stop phrase heard on weak evidence asks before it acts.** Ending the
+There are three ways out of a conversation, and they mean different things:
+
+| you say | what happens |
+|---|---|
+| "manual mode", "close the mic", "keyboard mode", "blackbox off" | **MANUAL** — microphone closed and persisted. Only a typed command reopens it. |
+| "you can turn off now", "go to sleep", "stand down", "stop listening" | **STANDBY** — the conversation ends, the wake word keeps listening. |
+| "that's all", "we're done", "nothing else" | **STANDBY, after asking.** These are also how an ordinary request ends ("…and then deploy it, that's all"), so they always confirm first. |
+
+Note the asymmetry in the first row: the *spoken* phrase "blackbox off" closes
+the microphone, while the *typed* `/blackbox off` only returns to standby. The
+spoken form is how people say "stop listening to me"; the typed form is how
+people say "I'll type now", and the keyboard was never the thing at risk.
+
+Every phrase is matched at the END of a sentence, so "okay, now switch to manual
+mode" works and a question about the feature does not. Longest match wins across
+all three lists, so "stop listening completely" closes the mic rather than
+matching the "stop listening" that only pauses. Trailing politeness is trimmed:
+"turn off the microphone please" works.
+
+**A stop phrase heard on weak evidence asks before it acts,** and the
+conversational closers ask every time regardless of evidence. Ending the
 session is the one decision a mis-transcription can make that the user cannot
 undo by speaking again, and it happened: three turns of room noise, the last
 transcribed as *"Manual mode."*, and live mode ended by itself. So a stop phrase
@@ -94,7 +135,8 @@ the same way and, like the safety valve, ends the turn rather than being answere
 by it — a question such as "what happens when you reboot" is answered instead.
 The restart comes back **in live mode**, in the same directory, on the same
 provider and model, with the conversation intact and whatever you were working on
-named on the way in. Rebooting from the keyboard comes back at the keyboard.
+named on the way in. A reboot from STANDBY comes back in STANDBY with the
+microphone still listening; only MANUAL comes back with it closed.
 
 `/reboot` also **self-updates**, and does so automatically — from the microphone
 as well as the keyboard, with no confirmation. That is an owner decision, and the
@@ -143,85 +185,148 @@ separate answer*. One thought became two half-conversations.
 `HELIX_SOX_SILENCE_PCT` (default `1%`) tunes how quiet a voice can
 be before sox treats it as silence.
 
-## 3. Hands-free wake word
+## 3. Three listening states
 
-Helix listens by default — see *One switch* below for what that means and how to
-stop it. `/blackbox status` shows the WAKE row alongside hearing, sight and
-context; `/blackbox wake status` is the detailed report.
+Helix is always in exactly one of three states. The old model was a bool — live
+or not — and it could not express the difference between "stop talking to me for
+a minute" and "close the microphone", so both were the same list of phrases
+doing the same thing, and saying either one left the wake word on to put you
+straight back.
 
-The command does the config edit for you (no manual JSON): enabling applies the
-defaults (phrase `"hey helix"`, engine `"energy"`, preset `"balanced"`) and
-persists them.
+| | microphone | keyboard | leaves by |
+|---|---|---|---|
+| **STANDBY** *(the startup default)* | wake detection only — chunks are scored and discarded, nothing is transcribed | live | any sound → AWAKE · "manual mode" → MANUAL |
+| **AWAKE** | transcribing **every turn, with no re-waking in between** | live | a stop phrase · `/blackbox off` → STANDBY · 10 minutes of silence → STANDBY |
+| **MANUAL** | **closed** | live | `/blackbox wake on` → STANDBY |
 
-**Wake-only listening has no timeout.** Once a turn finishes, nothing is
-transcribed until you wake Helix again — however long that takes. Until
-2026-09-09 there was a 60-second window after which the gate removed itself and
-the microphone opened ungated, which read ADR-005 §5 backwards and, in a real
-session, produced three turns nobody took: room noise transcribed as "May he
-leave.", then `man motor`, then "Manual mode." — which matched the kill phrase
-and ended live mode on its own. Press **Ctrl+C** during the hold to take a turn
-without making a sound. A recorder that actually dies still falls through to
-open capture and says so once, because being stranded behind a broken
-microphone is worse.
+The state is persisted on config keys that already existed, so there is no new
+setting to learn and nothing to migrate:
+
+```text
+AWAKE    user_preferences.voice_mode: true
+STANDBY  speech.wake_word.enabled absent or true
+MANUAL   speech.wake_word.enabled: false
+```
+
+`/blackbox status` shows which state you are in; `/blackbox wake status` is the
+detailed report.
+
+### Waking is once per conversation, not once per turn
+
+Until this changed, every single turn had to be re-woken: you said the wake
+word, got one answer, and said it again. That made hands-free exhausting for
+anything longer than a single question.
+
+Now a wake opens a **conversation**. Helix keeps taking turns until you end it.
+What ends it:
+
+- any of the stop phrases in §2;
+- `/blackbox off`, typed;
+- **ten minutes with nothing said** — the inactivity stand-down.
+
+The stand-down is the only one that is not your decision, and it exists because
+AWAKE holds an open transcribing microphone: a conversation you walked away
+from would otherwise keep listening, and keep billing per-minute STT, until the
+shell exited. Configure it with `speech.wake_word.awake_idle_stand_down_s`
+(default `600`; `0` disables it entirely, which removes the bound).
+
+It is measured from the last sign of a person, not from the last successful
+transcript — a clip that was clearly speech but came back misheard still counts.
+Being misunderstood should not stand you down.
+
+### A short grace window after standby
+
+Entering STANDBY drops wake events for a moment
+(`speech.wake_word.rearm_delay_ms`, default `3000`; `5000` after a spoken exit).
+
+This is not a nicety. With the default energy engine a "wake event" is speech
+**onset**, not a phrase — so the tail of the very sentence asking Helix to stand
+down is itself a wake, and without the window you are handed straight back into
+the conversation you just left. Set it to `0` for the old instant re-arm.
+
+### Type while it listens
+
+The keyboard is live **during a capture**, not only at an idle prompt. Start
+typing mid-turn and the capture is cancelled, the partial clip is discarded
+without being transcribed, and your line is read as if you had typed it a moment
+later.
+
+The clip is discarded on purpose. A killed recorder can still hand back a
+fragment with no error, and transcribing half a sentence risks it coming back as
+a stop phrase and ending the conversation you were in the middle of.
+
+The cost, stated because it is real: once a keystroke wins, the microphone is
+closed for as long as you are typing that line. Speaking mid-line is not heard.
+
+Turn it off with `speech.wake_word.awake_keyboard: false` and AWAKE takes
+voice-only turns, leaving the terminal untouched. It is unavailable on Windows,
+which has no termios; there AWAKE is voice-only regardless.
 
 ### One switch, and it is already on
 
 ```text
-/blackbox wake on       # listen: at this prompt AND between spoken turns
-/blackbox wake off      # stop listening, both places
+/blackbox wake on       # STANDBY: listen for a wake at the prompt
+/blackbox wake off      # MANUAL: close the microphone
 /blackbox wake status   # state, detector, recorder, and whether the prompt is armed
 ```
 
-**This is on by default** (owner decision, 2026-09-09). A fresh install listens
-at an idle prompt: make any sound and Helix goes live, keep typing and nothing
-changes. That is the point — the keyboard and the microphone at the same time,
-with nothing to activate.
+**This is on by default** (owner decision, 2026-09-09). A fresh install starts
+in STANDBY: make any sound and Helix wakes, keep typing and nothing changes.
+That is the point — the keyboard and the microphone at the same time, with
+nothing to activate.
 
-It used to be two switches, `wake on` for the gaps between spoken turns and
-`wake always on` for the prompt, and the split confused people who had enabled
-the first and reasonably asked *"now how do I wake it up?"* — nothing was
-listening and no banner said so. "Listen for me" is one intention, so it is one
-command. If you want only the narrow behaviour, set
-`speech.wake_word.always_listen: false` in `~/.helix/config.json`; there is no
-verb for it because nobody needs one.
+`speech.wake_word.always_listen: false` un-arms the idle prompt without closing
+the microphone entirely. It used to also mean "listen between spoken turns
+only"; there are no gaps between turns to listen in any more, so that half of
+its meaning is gone.
 
 **Upgrading from a build before 2026-09-09? Type `/blackbox wake on` once.**
 Your config almost certainly holds a literal `"enabled": false` that you never
 chose: the old build stored this as a plain `bool`, and a plain bool is always
-written out, so every save recorded its zero value. The new default reaches a
-config where the key is **absent**, and it deliberately does not override an
-explicit `false` — that is the opt-out this document tells you to use, so
-resurrecting it would open a microphone on a guess. One typed command, and it
-persists for every session after.
+written out, so every save recorded its zero value. Under the three-state model
+that config now has a name — you start in **MANUAL**, with the microphone
+closed. The new default reaches a config where the key is **absent**, and it
+deliberately does not override an explicit `false`, because that is the opt-out
+this document tells you to use and resurrecting it would open a microphone on a
+guess.
 
 Both keys are tri-state (`*bool`) for that reason: absent, `true` and `false`
 are three different answers. A plain `bool` collapses the first two, and the
 first cut of this shipped that way — on by default in the code, off in every
 session that had a config file, with a passing test to match.
 
-Four things worth knowing:
+Three more things worth knowing:
 
-- **Turning it OFF works by voice; turning it ON is typed-only.** Opening a
-  microphone is an increase in what is collected, and ADR-005 reserves that for
-  the keyboard. Say "stop listening" and it stops.
-- **Nothing is transcribed while it waits.** Only the wake detector runs; chunks
-  are scored and discarded.
+- **Voice can reduce listening but never reopen it.** A spoken phrase can move
+  you to STANDBY or to MANUAL. Only a *typed* command can come back out of
+  MANUAL — enforced in the transition itself, not just in the command handler,
+  so it holds for every door. ADR-005: a transcript carries user authority with
+  no proof of who spoke.
 - **With the default engine, any sound wakes it** — a cough, a door, a sentence
-  meant for someone else. The energy detector scores loudness, not words. For a
-  prompt that answers only to "hey helix", run the sidecar engine (§5.1).
-- **Typing wins while you type.** The wake word is checked at an *idle* prompt;
-  a word spoken mid-line is not seen until you submit it. That is a consequence
-  of how it works — the keyboard read is never interrupted, only not started
-  until a key is waiting — and it is why the editor behaves identically armed or
-  not.
+  meant for someone else. The energy detector scores loudness against the room's
+  own noise floor, not words. For a prompt that answers only to "hey helix", run
+  the sidecar engine (§5.1).
+- **Typing wins at an idle prompt too.** A word spoken mid-line is not seen
+  until you submit it, so the editor behaves identically whether the prompt is
+  armed or not.
 
-Live mode never ends itself, so once woken Helix stays live until you say
-"manual mode" or type `/blackbox off`. Returning to the keyboard re-arms the
-prompt.
+### How loud is loud enough
 
-**Not available on Windows yet.** Arming needs a "is a keystroke waiting?" call,
-which is `poll(2)` on Unix and genuine console work on Windows; there it reports
-unavailable and the wake word keeps working between spoken turns only.
+The energy detector measures the room and wakes on speech that rises above it,
+rather than comparing against a fixed number. That is a correction: it shipped
+with absolute thresholds (balanced `0.12` normalized RMS) fitted to synthetic
+test tones, and on real hardware it could not fire at all. A MacBook Pro
+built-in microphone at input volume 38 measures about `0.0011` RMS for a quiet
+room and `0.012`–`0.033` for an audible voice — so the old bar sat roughly 25×
+above anything the device could produce, and the prompt said "listening"
+forever.
+
+The presets are now multiples of the measured floor: `strict` 4×, `balanced`
+2.5×, `loose` 2×, with an absolute audibility gate underneath so a muted or
+permission-denied microphone cannot wake on its own dither. `HELIX_WAKE_RATIO`
+and `HELIX_WAKE_MIN_RMS` override them for a room the heuristic reads wrongly.
+`HELIX_DEBUG=1` prints the level and the bar for every chunk, which is the fast
+way to tell "the room is too quiet" from "the microphone is not working".
 
 ## 4. The Living AI daemon
 
