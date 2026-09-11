@@ -26,10 +26,21 @@
 // session.audio.input. The framing and the commit were guessed right. The
 // corrections are recorded on sessionFrame itself.
 //
-// WHAT IS STILL INFERRED: the WebSocket URL. The transport pages are not
-// reachable, so the dial target is assembled from the documented endpoint path
-// and may be wrong; `route` and HELIX_OPENAI_REALTIME_URL exist to correct it
-// without a rebuild.
+// AND MEASURED, because the docs would not say: the route. An unauthenticated
+// dial is enough to tell a live endpoint from a wrong one, since a correct
+// route answers 401 or upgrades and then asks for a credential.
+//
+//	wss /v1/realtime?intent=transcription   session.created, then session.updated
+//	                                        accepts the frame below and audio
+//	                                        frames after it — the whole path,
+//	                                        confirmed against the live service
+//	wss /v1/realtime/transcription_sessions 403  (GET: 404 "Invalid URL")
+//	wss /v1/live/sessions                   upgrades, then closes; the REST
+//	                                        create says "Only the webrtc
+//	                                        transport is supported"
+//
+// The first version of this adapter dialled the second of those, taken from the
+// model page's "supported endpoint" column. It would have 403'd on every turn.
 //
 // A wrong guess fails SILENTLY — the socket opens, the HUD meters a live
 // microphone, and nothing is ever transcribed, which reads to the user as a
@@ -74,9 +85,20 @@ const (
 	// openaiRealtimeSTTModel is the documented transcription model.
 	openaiRealtimeSTTModel = "gpt-live-transcribe"
 
-	// openaiRealtimeRoute is the documented endpoint. INFERRED: that it is
-	// reached by dialling it as a WebSocket directly.
-	openaiRealtimeRoute = "/v1/realtime/transcription_sessions"
+	// openaiRealtimeRoute is the WebSocket route, MEASURED rather than inferred.
+	//
+	// It was /v1/realtime/transcription_sessions, taken from the model page's
+	// "supported endpoint" column, and that route does not accept a socket:
+	// an unauthenticated dial there answers 403, and a plain GET answers
+	// 404 "Invalid URL". /v1/realtime upgrades (101) and then sends
+	// {"type":"error",...,"message":"Missing bearer or basic authentication in
+	// header"} — a live endpoint asking for a credential, which is exactly what
+	// a correct route looks like without one.
+	//
+	// The session TYPE, not the path, is what makes a session transcription-only:
+	// session.update carries "type":"transcription". One endpoint, two session
+	// kinds — which is why there is no separate transcription path to dial.
+	openaiRealtimeRoute = "/v1/realtime"
 )
 
 // realtimeSTTModels are the models routed to the WebSocket path.
@@ -168,9 +190,24 @@ func (p *openaiRealtimeSTT) streamURL() string {
 	return withQuery(p.origin+route, p.realtimeQuery())
 }
 
-// realtimeQuery is the query string, with config overrides applied last.
+// realtimeQuery is `intent=transcription`, MEASURED against all three
+// candidates because reasoning picked the wrong one twice:
+//
+//	(no query)                      -> error missing_model: "You must provide a
+//	                                   model parameter"
+//	?model=gpt-live-transcribe      -> error invalid_model: "is a transcription
+//	                                   model and cannot be used as the realtime
+//	                                   session model ... Pass this transcription
+//	                                   model as audio.input.transcription.model
+//	                                   instead", then the socket is closed
+//	?intent=transcription           -> session.created, type "transcription"
+//
+// So the model belongs in the session frame AND the URL still needs to say what
+// kind of session this is — `intent` satisfies the requirement that `model`
+// otherwise would. The first version sent `model`, the second sent nothing, and
+// both were wrong in different ways.
 func (p *openaiRealtimeSTT) realtimeQuery() map[string]string {
-	q := map[string]string{"model": p.model}
+	q := map[string]string{"intent": "transcription"}
 	if p.rc != nil {
 		for k, v := range p.rc.Query {
 			q[k] = v
@@ -278,10 +315,22 @@ func (p *openaiRealtimeSTT) sessionFrame() ([]byte, error) {
 	})
 }
 
-// realtimeCaptureRate is the rate streamingVoiceTurn captures at, and so the
-// rate this session is told to expect. Named rather than repeated so the two
-// cannot drift into disagreeing about what is on the wire.
-const realtimeCaptureRate = 16000
+// realtimeCaptureRate is the sample rate this session requires, MEASURED.
+//
+// 24000 is a floor the server enforces, not a preference: a session.update
+// carrying 16000 — the rate the rest of Helix captures at — is rejected with
+//
+//	"Invalid 'session.audio.input.format.rate': integer below minimum value.
+//	 Expected a value >= 24000, but got 16000 instead."
+//
+// An earlier revision "corrected" the guide's 24000 down to 16000 on the
+// reasoning that the session should describe our capture. It was the wrong
+// direction: the session describes what the SERVER will accept, and capture has
+// to meet it. CaptureRateHz is how that reaches the recorder.
+const realtimeCaptureRate = 24000
+
+// CaptureRateHz reports the rate the caller must capture at for this provider.
+func (p *openaiRealtimeSTT) CaptureRateHz() int { return realtimeCaptureRate }
 
 // Stream consumes chunked audio and emits interim/final transcripts.
 func (p *openaiRealtimeSTT) Stream(ctx context.Context, chunks <-chan AudioFormat) (<-chan Transcript, error) {
@@ -524,6 +573,16 @@ func parseRealtimeFrame(data []byte) (string, rtFrameKind) {
 		Delta      string `json:"delta"`
 		Transcript string `json:"transcript"`
 		Text       string `json:"text"`
+		// Errors nest their message one level down. Measured against the real
+		// server, which answers an unauthenticated socket with
+		// {"type":"error","error":{"message":"Missing bearer or basic
+		// authentication in header"}} — so reading only the top level would
+		// have reported "no detail given" for the single most useful message
+		// this endpoint sends.
+		Error struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(data, &f); err != nil {
 		return "", rtOther
@@ -534,6 +593,9 @@ func parseRealtimeFrame(data []byte) (string, rtFrameKind) {
 	}
 	if text == "" {
 		text = f.Text
+	}
+	if text == "" {
+		text = f.Error.Message
 	}
 	text = strings.TrimSpace(text)
 

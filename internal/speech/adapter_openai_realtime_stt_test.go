@@ -429,3 +429,92 @@ func TestRealtimeDoesNotSendTheBetaHeader(t *testing.T) {
 		t.Errorf("an explicitly configured header was dropped: %q", got)
 	}
 }
+
+// The route is MEASURED, not read off the model page's "supported endpoint"
+// column — which is what the first version of this adapter did, and it dialled
+// a route that answers 403 to a WebSocket and 404 to a GET.
+//
+// Pinned as a test because the wrong value looked more authoritative than the
+// right one: /v1/realtime/transcription_sessions is what the documentation
+// names, and /v1/realtime is what actually accepts a socket.
+func TestRealtimeDialsTheRouteThatAcceptsASocket(t *testing.T) {
+	p := NewOpenAIRealtimeSTT("", "https://api.openai.com/v1", nil).(*openaiRealtimeSTT)
+	url := p.streamURL()
+
+	if strings.Contains(url, "transcription_sessions") {
+		t.Errorf("dialling %q — that route answers 403 to a WebSocket upgrade and "+
+			"404 to a GET. The session TYPE makes a session transcription-only, "+
+			"not the path.", url)
+	}
+	if !strings.Contains(url, "/v1/realtime?") {
+		t.Errorf("stream URL = %q, want the /v1/realtime path", url)
+	}
+}
+
+// The endpoint's most useful message nests one level down. Reading only the top
+// level reported "no detail given" for the one error a misconfigured session is
+// most likely to get.
+func TestRealtimeErrorFrameReadsTheNestedMessage(t *testing.T) {
+	// Captured verbatim from an unauthenticated dial to wss://api.openai.com/v1/realtime.
+	frame := `{"type":"error","event_id":"event_x","error":{"type":"invalid_request_error","code":null,"message":"Missing bearer or basic authentication in header","param":null}}`
+	text, kind := parseRealtimeFrame([]byte(frame))
+	if kind != rtError {
+		t.Fatalf("kind = %v, want rtError", kind)
+	}
+	if text != "Missing bearer or basic authentication in header" {
+		t.Errorf("text = %q, want the nested error.message", text)
+	}
+}
+
+// The query is `intent=transcription`, MEASURED. Reasoning picked the wrong
+// value twice — first `model=gpt-live-transcribe` (rejected: "is a
+// transcription model and cannot be used as the realtime session model"), then
+// no query at all (rejected: "You must provide a model parameter"). Only
+// `intent` produces session.created.
+func TestRealtimeUsesTheTranscriptionIntent(t *testing.T) {
+	p := NewOpenAIRealtimeSTT("", "https://api.openai.com/v1", nil).(*openaiRealtimeSTT)
+	url := p.streamURL()
+	if !strings.Contains(url, "intent=transcription") {
+		t.Errorf("stream URL = %q, want intent=transcription", url)
+	}
+	if strings.Contains(url, "model=") {
+		t.Errorf("stream URL %q carries a model parameter — the server rejects a "+
+			"transcription model there and says to pass it in the session instead", url)
+	}
+}
+
+// 24000 is a server-enforced FLOOR, not a preference: 16000 comes back as
+// "integer below minimum value. Expected a value >= 24000". The provider
+// declares it so the recorder can be opened to match.
+func TestRealtimeRequiresTwentyFourKilohertz(t *testing.T) {
+	p := NewOpenAIRealtimeSTT("", "https://example.invalid/v1", nil).(*openaiRealtimeSTT)
+
+	var reporter CaptureRateReporter = p
+	if got := reporter.CaptureRateHz(); got < 24000 {
+		t.Errorf("CaptureRateHz = %d, want at least 24000 — the server rejects less", got)
+	}
+
+	raw, err := p.sessionFrame()
+	if err != nil {
+		t.Fatalf("session frame: %v", err)
+	}
+	var f struct {
+		Session struct {
+			Audio struct {
+				Input struct {
+					Format struct {
+						Rate int `json:"rate"`
+					} `json:"format"`
+				} `json:"input"`
+			} `json:"audio"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if f.Session.Audio.Input.Format.Rate != reporter.CaptureRateHz() {
+		t.Errorf("session says rate %d but the provider captures at %d — the two must "+
+			"agree or the server is told about audio it does not receive",
+			f.Session.Audio.Input.Format.Rate, reporter.CaptureRateHz())
+	}
+}

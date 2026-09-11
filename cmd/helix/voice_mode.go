@@ -510,7 +510,16 @@ func streamingVoiceTurn(parent context.Context, s speech.StreamingSTTProvider) (
 	viz.Start(ux.VizListening)
 	defer viz.Stop()
 
-	scanner := speech.NewChunkScanner(time.Duration(chunkMs)*time.Millisecond, 16000)
+	// The capture rate is the PROVIDER's to decide when it has a floor. 16 kHz
+	// is right for every other adapter and is rejected outright by OpenAI's
+	// realtime transcription session, whose format rate has a server-enforced
+	// minimum of 24000 — so the recorder is opened at whatever the provider
+	// says it needs rather than at a constant that happens to suit most of them.
+	rate := 16000
+	if r, ok := s.(speech.CaptureRateReporter); ok && r.CaptureRateHz() > 0 {
+		rate = r.CaptureRateHz()
+	}
+	scanner := speech.NewChunkScanner(time.Duration(chunkMs)*time.Millisecond, rate)
 	chunks := make(chan speech.AudioFormat)
 	go func() {
 		defer close(chunks)

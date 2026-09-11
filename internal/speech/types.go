@@ -109,6 +109,19 @@ type StreamingTTSProvider interface {
 	SynthesizeStream(ctx context.Context, text string, opts SynthesisOptions) (StreamedAudio, error)
 }
 
+// CaptureRateReporter is optionally implemented by streaming providers that
+// require a particular capture sample rate.
+//
+// Helix captures at 16 kHz everywhere else, which is ideal for batch STT and is
+// what every other adapter expects. OpenAI's realtime transcription session
+// rejects it: the format rate has a server-enforced minimum of 24000. The
+// provider is the only thing that knows its own floor, so it says so and the
+// caller opens the recorder to match — rather than the recorder guessing, or
+// the adapter resampling audio it did not capture.
+type CaptureRateReporter interface {
+	CaptureRateHz() int
+}
+
 // StreamFaultReporter is optionally implemented by streaming providers that
 // can say why a session produced nothing.
 //
