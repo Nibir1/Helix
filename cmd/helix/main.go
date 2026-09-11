@@ -125,6 +125,10 @@ func main() {
 	defer func() { _ = db.Close() }()
 	// Installed BEFORE the providers, because InitProviders and UseProvider
 	// both resolve a model through ai.PreferredModel and it consults these.
+	// `export FOO=bar` typed at the prompt changes THIS process, so later
+	// commands inherit it — the way `cd` already persists. A SPOKEN one does
+	// not: see internal/commands/envpersist.go for why provenance decides.
+	commands.SetSpokenTurnFunc(turnIsSpoken)
 	ai.SetUserModelChoices(cfg.ProviderModels)
 	_ = ai.InitProviders(ai.ProviderSettings{
 		Provider:        normalizeProviderName(cfg.Provider),

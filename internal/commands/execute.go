@@ -107,6 +107,15 @@ func ExecuteCommand(command string, config ExecuteConfig, env shell.Env) error {
 		}
 	}
 
+	// `export` and `unset` change THIS process, not a child that is about to
+	// exit. Placed after the safety checks above so it gains no exemption from
+	// them, and before the spawn below because the spawn is the whole problem:
+	// a child's environment dies with the child, which is why `export PATH=...`
+	// followed by `make dev` never worked here. See envpersist.go.
+	if assigns, ok := parseEnvCommand(command); ok && posixShell(env) {
+		return applyEnvCommandForTurn(command, assigns, config, env)
+	}
+
 	var cmd *exec.Cmd
 
 	switch env.Shell {
