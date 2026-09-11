@@ -27,6 +27,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"helix/internal/providers"
 	"strings"
 	"sync"
 )
@@ -104,6 +105,16 @@ func shortCause(detail string) string {
 		{"http 401", "HTTP 401 unauthorized"},
 		{"unauthorized", "HTTP 401 unauthorized"},
 		{"http 403", "HTTP 403 forbidden"},
+		// BEFORE the bare 404, because this list is first-match-wins and the
+		// two are not the same problem. "HTTP 404 not found" sends the reader
+		// to check their URL; the actual fault is that the vendor retired the
+		// model they have saved, and the fix is /model list.
+		{"model_not_found", "model no longer exists"},
+		{"model not found", "model no longer exists"},
+		{"model not exist", "model no longer exists"},
+		{"does not exist", "model no longer exists"},
+		{"unknown model", "model no longer exists"},
+		{"invalid model", "model no longer exists"},
 		{"http 404", "HTTP 404 not found"},
 		{"http 429", "rate limited"},
 		{"missing api key", "no API key configured"},
@@ -202,6 +213,14 @@ func noteBrainCall(err error, probing bool) {
 		NoteProviderReachable(ActiveProviderName())
 		return
 	}
+	// The wire has just told us the saved model is gone — stronger evidence
+	// than absence from a listing, and it arrives mid-turn, where repairing
+	// would swap the brain under an answer in progress. So it only invalidates
+	// the cached list that offered the model; the next reconcile refetches and
+	// repairs, instead of re-failing on the same stale answer forever.
+	if providers.IsModelNotFound(err) {
+		NoteModelNotFound(ActiveProviderName(), ActiveModel())
+	}
 	NoteProviderUnreachable(ActiveProviderName(), err.Error())
 }
 
@@ -235,5 +254,33 @@ func CheckActiveProvider(ctx context.Context) error {
 		return err
 	}
 	NoteProviderReachable(name)
+
+	// Every provider's HealthCheck IS a ListModels call, which is a statement
+	// about the PROVIDER and says nothing about the selected model — which is
+	// why /provider-status reported ok on a shell whose every turn was
+	// 404ing. The list is already fetched here, so recording it costs nothing
+	// and lets ActiveModelIsListed answer the second question.
+	if models, lerr := p.ListModels(ctx); lerr == nil {
+		_ = providers.Models().Put(name, models)
+	}
 	return nil
+}
+
+// ActiveModelIsListed reports whether the active provider is known to serve
+// the active model, and whether that is knowable at all.
+//
+// Three states, not two, for the reason ReconcileActiveModel has three: with
+// no catalogue, absence is ignorance. A status line that said "model gone"
+// because it could not reach the provider would send the user to fix the wrong
+// thing.
+func ActiveModelIsListed() (listed bool, knowable bool) {
+	name, model := ActiveProviderName(), ActiveModel()
+	if name == "" || model == "" {
+		return false, false
+	}
+	cache := providers.Models()
+	if !cache.Lists(name) {
+		return false, false
+	}
+	return cache.Knows(name, model), true
 }

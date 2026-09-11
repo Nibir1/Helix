@@ -43,10 +43,17 @@ const ContinuityVersion = 1
 // hand days ago. Stale is silently discarded, not honoured.
 const ContinuityMaxAge = 12 * time.Hour
 
-// ModeVoice and ModeManual are the two shells Helix can come back as.
+// ModeVoice, ModeStandby and ModeManual are the shells Helix can come back as.
+//
+// ModeStandby arrived with the three-state listening model: "not in a
+// conversation" stopped being one thing, and a reboot from standby that came
+// back as ModeManual would have closed a microphone the user had left open.
+// An absent or unrecognised value falls back to resolving the mode from
+// config, never to a guess.
 const (
-	ModeVoice  = "voice"
-	ModeManual = "manual"
+	ModeVoice   = "voice"
+	ModeStandby = "standby"
+	ModeManual  = "manual"
 )
 
 // Continuity is the state a restart carries across.
@@ -69,7 +76,7 @@ type Continuity struct {
 	// is the difference between reporting and inventing.
 	Update string `json:"update,omitempty"`
 
-	// Mode is the shell to come back as: ModeVoice or ModeManual.
+	// Mode is the shell to come back as: ModeVoice, ModeStandby or ModeManual.
 	//
 	// Carried explicitly rather than left to cfg.UserPrefs.VoiceMode, even
 	// though that field also persists it. The preference records what you last

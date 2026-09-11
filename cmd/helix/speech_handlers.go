@@ -401,6 +401,13 @@ func commitSpeechSelection(sttCfg config.SpeechSTTConfig, ttsCfg config.SpeechTT
 	if sttCfg.Provider != "" {
 		sttCfg.StreamChunkMs = cfg.Speech.STT.StreamChunkMs
 		sttCfg.Endpoints = cfg.Speech.STT.Endpoints
+		// Realtime joins the carry-over list for exactly the reason the two
+		// lines above are here. It holds a hand-corrected wire format for an
+		// endpoint whose specification is not public — the single most
+		// expensive thing in this config to lose — and a wizard re-run would
+		// have erased it and sent the user back to a silently non-transcribing
+		// session.
+		sttCfg.Realtime = cfg.Speech.STT.Realtime
 		cfg.Speech.STT = sttCfg
 	}
 	if ttsCfg.Provider != "" {

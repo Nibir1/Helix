@@ -123,6 +123,9 @@ func main() {
 		return
 	}
 	defer func() { _ = db.Close() }()
+	// Installed BEFORE the providers, because InitProviders and UseProvider
+	// both resolve a model through ai.PreferredModel and it consults these.
+	ai.SetUserModelChoices(cfg.ProviderModels)
 	_ = ai.InitProviders(ai.ProviderSettings{
 		Provider:        normalizeProviderName(cfg.Provider),
 		Model:           cfg.ProviderModel,
@@ -145,10 +148,20 @@ func main() {
 			defer diagnostics.Guard("local-model-resolve")()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			if resolved, changed := ai.ResolveActiveLocalModel(ctx); changed {
-				cfg.ProviderModel = resolved
-				_ = cfg.SavePreferences()
+			resolved, changed, verdict := ai.ReconcileActiveModel(ctx)
+			if !changed {
+				return
 			}
+			// Said out loud, because a model changing under the user is a fact
+			// they need. The alternative to saying it is not silence — it is a
+			// shell whose answers come from a different model than the one
+			// /status reported a moment ago.
+			if verdict == ai.ModelGone {
+				uiWarn(ai.ActiveProviderName()+" no longer serves "+cfg.ProviderModel,
+					"switched to "+resolved+"  ·  /model list to choose another")
+			}
+			rememberProviderModel(ai.ActiveProviderName(), resolved)
+			_ = cfg.SavePreferences()
 		}()
 	} else {
 		// A failed setup must not cost the user their shell.
@@ -414,54 +427,88 @@ func main() {
 	// ends its turn with errVoiceHandled and `continue`s straight back to the
 	// top — where, without this condition, voiceTurnWithRetry would open the
 	// microphone again and the restart would wait for the user to speak.
+	// Labelled, because the body is now a switch on the listening mode and a
+	// bare `break` inside a switch exits the SWITCH, not the loop. Ctrl+D has
+	// to end the shell, so every exit path says which construct it means.
+repl:
 	for !rebootRequested {
 		// TTY heartbeat: the daemon's voice loop yields the microphone to
 		// the foreground session while this lock stays fresh.
 		daemon.Heartbeat()
 
+		// THREE states, three ways to take a turn. This was a two-branch
+		// `if voiceModeActive` for as long as the mode was a bool; splitting it
+		// is what lets "not in a conversation" mean two different things — the
+		// microphone listening for a wake word, and the microphone closed.
 		var ev input.InputEvent
-		if voiceModeActive {
+		switch currentMode() {
+		case modeAwake:
+			// Checked before the microphone opens, and deliberately not as a
+			// deadline inside the capture — see shouldStandDown. A conversation
+			// nobody has spoken in falls back to wake-only listening rather
+			// than holding an open transcribing microphone indefinitely.
+			if shouldStandDown(time.Now()) {
+				setListenMode(modeStandby, causeStandDown)
+				continue
+			}
 			var verr error
-			ev, verr = voiceTurnWithRetry()
+			ev, verr = awakeTurn()
 			if verr != nil {
-				if verr == errVoiceStopped {
-					continue // kill phrase: mode line already announced it
+				// errors.Is for all three: the turn is over and nothing more
+				// should be done with it. The switch above re-dispatches on
+				// whatever state we are in next time round.
+				if errors.Is(verr, errVoiceHandled) || errors.Is(verr, errModeChanged) {
+					continue
 				}
-				if errors.Is(verr, errVoiceHandled) {
-					continue // spoken command already ran and answered
+				if errors.Is(verr, errKeyboardPreempted) {
+					// A key was pressed mid-capture. The byte was never
+					// consumed, so ReadLine takes it as if it had just been
+					// typed — and the conversation is still running underneath.
+					tev, rerr := typedTurn(history)
+					if rerr != nil {
+						if rerr.Error() == "EOF" {
+							break repl
+						}
+						continue
+					}
+					// The typed line stands in for this turn; fall through to
+					// the common dispatch below.
+					ev = tev
+					break
 				}
 				// Graceful degradation: mic/STT trouble must never brick the
-				// shell — offer one typed turn while staying in voice mode.
-				// The error is often multi-line (a provider chain failure
-				// carries the address it dialled and the command that starts
-				// it). Appending an instruction to the end of that glued
-				// "— type /blackbox off" onto the tail of a shell command.
+				// shell — offer one typed turn while staying in the
+				// conversation. The error is often multi-line (a provider chain
+				// failure carries the address it dialled and the command that
+				// starts it), so it is printed line by line rather than glued
+				// onto an instruction.
 				fmt.Println(shell.PanelLine(shell.Badge(shell.StateBad, "voice unavailable")))
 				for _, line := range strings.Split(strings.TrimSpace(verr.Error()), "\n") {
 					fmt.Println(shell.PanelLine(shell.Muted(strings.TrimRight(line, " "))))
 				}
 				fmt.Println(shell.Hint("/blackbox off returns to the keyboard  ·  /blackbox status diagnoses"))
-				line, rerr := shell.ReadLine(shell.GetContext(), highlighter, history)
+				tev, rerr := typedTurn(history)
 				if rerr != nil {
 					if rerr.Error() == "EOF" {
-						break
+						break repl
 					}
 					continue
 				}
-				ev = input.InputEvent{Text: strings.TrimSpace(line), Channel: input.ChannelText}
+				ev = tev
 			}
-		} else {
+
+		case modeStandby:
 			// Always-listen wake: hold the prompt open to the microphone as
 			// well as the keyboard. Only when armed — otherwise this is the
 			// blocking read it has always been, byte for byte, which is what
 			// the PTY suite proves and what keeps this feature from being a
 			// change to everyone's shell.
 			if alwaysListenArmed() {
-				ev, outcome := armedIdleWait()
+				wakeEv, outcome := armedIdleWait()
 				switch outcome {
 				case armedWake:
-					lastWakeAt = ev.DetectedAt
-					enterVoiceModeFromWake(ev)
+					lastWakeAt = wakeEv.DetectedAt
+					enterVoiceModeFromWake(wakeEv)
 					continue // the next iteration takes the turn by voice
 				case armedUnavailable:
 					// Arming failed (no scanner, a dead device). Say so once
@@ -470,18 +517,29 @@ func main() {
 					noteArmingLapse()
 				}
 			}
-			line, err := shell.ReadLine(shell.GetContext(), highlighter, history)
+			tev, err := typedTurn(history)
 			if err != nil {
 				if err.Error() == "EOF" {
-					break // Ctrl+D on empty line / closed stdin still exits.
+					break repl // Ctrl+D on empty line / closed stdin still exits.
 				}
 				// FIX (interrupt hardening): Ctrl+C at the prompt behaves like a
 				// real shell: clear the line and redraw a fresh prompt. It must
 				// NEVER exit Helix.
 				continue
 			}
-			ev = input.InputEvent{Text: strings.TrimSpace(line), Channel: input.ChannelText}
+			ev = tev
+
+		default: // modeManual — the microphone is closed; typing only.
+			tev, err := typedTurn(history)
+			if err != nil {
+				if err.Error() == "EOF" {
+					break repl
+				}
+				continue
+			}
+			ev = tev
 		}
+
 		if ev.Text == "" {
 			continue
 		}
@@ -520,6 +578,22 @@ func main() {
 			logVoiceLatency("wake_to_exec", time.Since(lastWakeAt), ev.Meta)
 			lastWakeAt = time.Time{}
 		}
+		// Provenance and prompter, both PER TURN.
+		//
+		// Handlers that must treat a spoken line differently used to ask the
+		// mode, which was a proxy — and the prompter was swapped per mode, so
+		// with the keyboard live during a conversation a line the user TYPED
+		// would have its confirmation asked out loud and answered by the
+		// microphone. That is the hole ADR-005 §2 exists to close, and only
+		// provenance closes it.
+		setTurnChannel(ev.Channel)
+		commands.SetPrompter(prompterForChannel(ev.Channel))
+
+		// Any turn that gets this far is a person being present, typed or
+		// spoken, so the stand-down clock resets. Someone who is typing
+		// through a conversation has not gone away.
+		noteVoiceActivity(time.Now())
+
 		agentCore.HandleInputEvent(ev)
 		if rebootRequested {
 			// /reboot is a slash command, so the flag is set INSIDE the turn
@@ -546,40 +620,16 @@ func main() {
 		}
 		fmt.Print("\x1b]133;D;0\x07")
 
-		// BlackBox Phase 3 hands-free: after a completed turn, hold in
-		// wake-only listening (no transcription) until a wake event fires or
-		// the idle window expires; then the next loop iteration runs another
-		// voice turn. Disabled wake config = classic push-to-talk per turn.
-		if voiceModeActive {
-			// The microphone is provably closed here — the turn finished and the
-			// next capture has not started — so this is one of the two points
-			// where Helix may say something it was not asked for.
-			drainCompanion()
-
-			for {
-				wakeEv, outcome := wakeListenUntilArmed()
-				if outcome == wakeCompanionSpoke {
-					// The scanner stopped on the way out of the listen, so the
-					// remark is spoken into a closed microphone; then listening
-					// resumes rather than falling through to open capture.
-					drainCompanion()
-					continue
-				}
-				if outcome == wakeFired {
-					lastWakeAt = wakeEv.DetectedAt
-				} else {
-					// Only a DEAD SCANNER reaches here now. The idle window
-					// that used to expire into open capture is gone — it
-					// inverted ADR-005 §5 and, in a real session, handed three
-					// hallucinated turns to a shell nobody was talking to, the
-					// last of which was heard as "manual mode" and ended live
-					// mode. A broken microphone still falls through, because
-					// stranding a user is worse, and it still says so once.
-					noteWakeLapse(outcome)
-				}
-				break
-			}
-		}
+		// A completed turn used to be followed by a wake-only hold, so every
+		// single turn in a conversation had to be re-woken. That is what made
+		// hands-free exhausting to use: you said the word, got one answer, and
+		// said it again. AWAKE now takes the next turn directly, and the state
+		// ends when the user says so or when it has heard nothing for the
+		// stand-down window.
+		//
+		// drainCompanion moved to the top of voiceTurn, which is the other
+		// point where the microphone is provably closed — the turn has ended
+		// and the next capture has not started.
 	}
 }
 

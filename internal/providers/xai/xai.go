@@ -32,7 +32,7 @@ const (
 
 	// DefaultModel is used until the user picks one; the wizard lists the live
 	// catalogue from /models.
-	DefaultModel = "grok-4.6"
+	DefaultModel = ""
 )
 
 // New creates the xAI provider.

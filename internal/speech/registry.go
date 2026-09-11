@@ -7,6 +7,7 @@ package speech
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -17,6 +18,59 @@ import (
 )
 
 // STTConfig selects the active speech-to-text provider and its fallback chain.
+// RealtimeConfig tunes a WebSocket realtime-transcription session.
+//
+// EVERY FIELD HERE EXISTS BECAUSE PART OF THE PROTOCOL IS INFERRED. The model
+// (`gpt-live-transcribe`), the endpoint (`v1/realtime/transcription_sessions`),
+// the modalities and the price ($0.017/min) are documented. The wire detail —
+// how the session is opened, how audio is framed, what the server events are
+// called — is not public at the time of writing, and it was reconstructed from
+// the Deepgram streaming adapter and OpenAI's conventions.
+//
+// The failure mode of a wrong guess is SILENT: the socket opens, the HUD
+// meters a live microphone, and nothing is ever transcribed — which reads as a
+// broken microphone rather than a broken adapter. So the guesses are
+// configuration, not constants. ADR-006 made speech PRICES user-fixable
+// without a rebuild for the same reason; this applies it to a wire format.
+//
+// Session is the sharpest tool here: it is sent verbatim, so whatever the real
+// specification turns out to be can be pasted into ~/.helix/config.json.
+type RealtimeConfig struct {
+	// Route overrides the WebSocket path.
+	Route string `json:"route,omitempty"`
+
+	// SessionMode is "direct" (dial and configure over the socket) or
+	// "create_then_dial" (POST for an ephemeral secret, then dial with it).
+	// Both are implemented because OpenAI's realtime family has used both
+	// shapes and the docs do not say which applies here.
+	SessionMode string `json:"session_mode,omitempty"`
+
+	// AudioFraming is "json_base64" (an input_audio_buffer.append event) or
+	// "binary" (raw linear16 frames, as Deepgram takes them).
+	AudioFraming string `json:"audio_framing,omitempty"`
+
+	// Query adds or replaces URL query parameters.
+	Query map[string]string `json:"query,omitempty"`
+
+	// Headers adds or replaces request headers on the dial.
+	Headers map[string]string `json:"headers,omitempty"`
+
+	// Session replaces the default session-configuration JSON entirely and is
+	// sent BYTE FOR BYTE. The escape hatch: no code change is needed to match
+	// a specification this file guessed wrong.
+	Session json.RawMessage `json:"session,omitempty"`
+
+	// CommitOnClose sends an input_audio_buffer.commit before closing, so a
+	// server that waits for an explicit end-of-utterance still finalises.
+	// nil → true.
+	CommitOnClose *bool `json:"commit_on_close,omitempty"`
+}
+
+// CommitsOnClose reports whether to send a commit frame. nil → true.
+func (r *RealtimeConfig) CommitsOnClose() bool {
+	return r == nil || r.CommitOnClose == nil || *r.CommitOnClose
+}
+
 type STTConfig struct {
 	Provider  string   `json:"provider"`
 	Model     string   `json:"model"`
@@ -28,6 +82,11 @@ type STTConfig struct {
 	Endpoints map[string]string `json:"endpoints,omitempty"`
 	// StreamChunkMs is the streaming capture chunk length (0 → 300ms).
 	StreamChunkMs int `json:"stream_chunk_ms"`
+
+	// Realtime tunes a WebSocket transcription session for providers that
+	// support one. See RealtimeConfig — it exists so an inferred wire format
+	// is fixable from config rather than only by a rebuild.
+	Realtime *RealtimeConfig `json:"realtime,omitempty"`
 }
 
 // TTSConfig selects the active text-to-speech provider and its fallback chain.

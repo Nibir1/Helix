@@ -74,31 +74,31 @@ func TestKillPhraseNeedsEvidence(t *testing.T) {
 		Bytes: wavAtAmplitude(4000, 0.001), // below the floor, let alone 2x it
 	}
 
-	t.Cleanup(func() { killPhrasePending = false })
+	t.Cleanup(func() { modePhrasePending.active = false })
 
-	killPhrasePending = false
-	if !killPhraseTrusted(speech.Transcript{Provider: "whisper-local"}, loud) {
+	modePhrasePending.active = false
+	if !modePhraseTrusted(speech.Transcript{Provider: "whisper-local"}, loud) {
 		t.Error("a clearly-spoken phrase was not trusted — the safety valve must work")
 	}
 
-	killPhrasePending = false
-	if killPhraseTrusted(speech.Transcript{Provider: "whisper-local"}, whisper) {
+	modePhrasePending.active = false
+	if modePhraseTrusted(speech.Transcript{Provider: "whisper-local"}, whisper) {
 		t.Error("a phrase from a near-silent clip was trusted — that is the hallucinated " +
 			"\"Manual mode.\" that ended a session nobody was talking to")
 	}
 
 	// A provider that REPORTS low confidence is refused even on a loud clip:
 	// it is telling us it guessed.
-	killPhrasePending = false
-	if killPhraseTrusted(speech.Transcript{Provider: "deepgram", Confidence: 0.2}, loud) {
+	modePhrasePending.active = false
+	if modePhraseTrusted(speech.Transcript{Provider: "deepgram", Confidence: 0.2}, loud) {
 		t.Error("a phrase the provider itself doubted was acted on")
 	}
 
 	// The confirmation round is the safety net in both directions: once Helix
 	// has asked, the next hit counts however weak, so a quiet user is not
 	// trapped in live mode with no keyboard.
-	killPhrasePending = true
-	if !killPhraseTrusted(speech.Transcript{Provider: "whisper-local"}, whisper) {
+	modePhrasePending.active = true
+	if !modePhraseTrusted(speech.Transcript{Provider: "whisper-local"}, whisper) {
 		t.Error("the confirmation was not honoured — a user whose mic is quiet would have " +
 			"no way out but Ctrl+C")
 	}
@@ -107,9 +107,9 @@ func TestKillPhraseNeedsEvidence(t *testing.T) {
 // Nothing to measure must not disable the valve. A streaming turn holds no
 // contiguous clip, and refusing on a missing measurement would trap someone.
 func TestKillPhraseTrustsWhatItCannotMeasure(t *testing.T) {
-	t.Cleanup(func() { killPhrasePending = false })
-	killPhrasePending = false
-	if !killPhraseTrusted(speech.Transcript{Provider: "deepgram"}, speech.AudioFormat{}) {
+	t.Cleanup(func() { modePhrasePending.active = false })
+	modePhrasePending.active = false
+	if !modePhraseTrusted(speech.Transcript{Provider: "deepgram"}, speech.AudioFormat{}) {
 		t.Error("a turn with no clip was refused — the streaming path never holds one, so " +
 			"this would break the valve for every streaming session")
 	}
@@ -168,21 +168,21 @@ func TestKillPhraseGateIsWiredIntoTheTurn(t *testing.T) {
 		t.Fatal("could not find finishVoiceTranscript — the test cannot reach what it checks")
 	}
 
-	match := strings.Index(body, "isVoiceKillPhrase(")
-	gate := strings.Index(body, "killPhraseTrusted(")
-	act := strings.Index(body, "blackBoxOff()")
+	match := strings.Index(body, "matchModePhrase(")
+	gate := strings.Index(body, "modePhraseTrusted(")
+	act := strings.Index(body, "setListenMode(")
 	switch {
 	case match < 0:
 		t.Fatal("the kill phrase is no longer matched here")
 	case gate < 0:
-		t.Fatal("finishVoiceTranscript does not consult killPhraseTrusted — a hallucinated " +
+		t.Fatal("finishVoiceTranscript does not consult modePhraseTrusted — a hallucinated " +
 			"\"manual mode\" from room noise ends the session again, which is the exact " +
 			"failure a live session reported")
 	case act < 0:
 		t.Fatal("nothing acts on the phrase any more")
 	case gate < match, act < gate:
 		t.Errorf("order is wrong (match=%d gate=%d act=%d): the evidence check has to sit "+
-			"between recognising the phrase and leaving live mode", match, gate, act)
+			"between recognising the phrase and changing the mode", match, gate, act)
 	}
 }
 

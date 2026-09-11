@@ -109,6 +109,19 @@ type StreamingTTSProvider interface {
 	SynthesizeStream(ctx context.Context, text string, opts SynthesisOptions) (StreamedAudio, error)
 }
 
+// StreamFaultReporter is optionally implemented by streaming providers that
+// can say why a session produced nothing.
+//
+// Stream returns a channel, so by the time a server rejects the audio the call
+// has already succeeded — and a session that opens, meters a live microphone
+// and transcribes nothing is indistinguishable from a quiet room. For an
+// adapter whose wire format is partly inferred that distinction is the
+// difference between "fall back to batch" and "tell the user their microphone
+// is broken", so the caller asks afterwards.
+type StreamFaultReporter interface {
+	StreamFault() error
+}
+
 // StreamingSTTProvider is implemented by adapters that support real-time
 // streaming transcription (Deepgram WebSocket, OpenAI Realtime). The batch
 // Transcribe path is sufficient for Phase 1-2; streaming lands with the

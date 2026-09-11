@@ -22,7 +22,10 @@ func TestE2E_ManualModeSafetyValve(t *testing.T) {
 
 	// /blackbox off in keyboard mode is an informative no-op...
 	h.WriteLine("/blackbox off")
-	if err := h.Expect("Already in keyboard mode", 10*time.Second); err != nil {
+	// "standby", not "keyboard": there are two keyboard states now, and
+	// /blackbox off names the one it left you in. The test's real point is
+	// unchanged — the REPL survives mode churn and still takes a turn.
+	if err := h.Expect("Already in standby mode", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -34,7 +37,7 @@ func TestE2E_ManualModeSafetyValve(t *testing.T) {
 	// running — the harness documents that exact trap. The test then raced
 	// ahead to the `ls` below and intermittently lost it. Flaked twice before
 	// anyone read the failure instead of re-running it.
-	if err := h.SendExpect("/blackbox off", "Already in keyboard mode", 10*time.Second); err != nil {
+	if err := h.SendExpect("/blackbox off", "Already in standby mode", 10*time.Second); err != nil {
 		t.Fatal(err)
 	}
 

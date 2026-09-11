@@ -78,8 +78,16 @@ func (p *Provider) DefaultModel() string {
 	return p.cfg.DefaultModel
 }
 
+// Capabilities answers at the PROVIDER level when no model is compiled in,
+// which is now every provider but llama.cpp. Inspecting an empty model ID
+// would have reported that every vendor is blind and cannot use tools until
+// the user picked something.
 func (p *Provider) Capabilities() providers.Capabilities {
-	return providers.CapabilitiesFor(p.cfg.Name, p.cfg.DefaultModel)
+	if p.cfg.DefaultModel != "" {
+		return providers.CapabilitiesFor(p.cfg.Name, p.cfg.DefaultModel)
+	}
+	return providers.CapabilitiesForProvider(p.cfg.Name,
+		providers.Models().AnyVisionModel(p.cfg.Name))
 }
 
 // Chat sends an OpenAI-compatible streaming chat request.
@@ -103,6 +111,12 @@ func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan 
 	model := req.Model
 	if model == "" {
 		model = p.DefaultModel()
+	}
+	if model == "" {
+		// Refuse rather than put "model":"" on the wire and get back an opaque
+		// 400 from the vendor. This error names the fix; theirs cannot.
+		return nil, fmt.Errorf("%s: no model selected — /model list shows what is "+
+			"available, /model use <id> picks one", p.Name())
 	}
 
 	headers := map[string]string{}

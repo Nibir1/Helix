@@ -7,6 +7,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"helix/internal/ollama"
@@ -129,9 +130,12 @@ func UseProvider(name string) error {
 		return err
 	}
 	activeProvider = p
-	if activeModel == "" {
-		activeModel = p.DefaultModel()
-	}
+	// Resolved PER PROVIDER, not "keep whatever was set". The old condition
+	// only filled the model when it was empty, so switching provider carried
+	// the previous provider's model across — masked interactively because the
+	// wizard always picks a model afterwards, but not in the daemon, which
+	// calls UseProvider and then runs turns.
+	activeModel = PreferredModel(name)
 	// A deliberate choice outranks the P11.2 breaker: without this, a later
 	// automatic restore would silently revert what the user just selected.
 	clearDegradedForUserOverride()
@@ -175,6 +179,10 @@ func ListProviders() []string {
 }
 
 // ListProviderModels lists models from the active provider.
+//
+// Every successful listing is remembered, which is what makes the model cache
+// free: nothing here initiates a request that was not already happening, and
+// the cache is what lets DefaultModel() answer without the network.
 func ListProviderModels(ctx context.Context) ([]providers.ModelInfo, error) {
 	if activeProvider == nil {
 		return nil, fmt.Errorf("no active provider")
@@ -184,19 +192,67 @@ func ListProviderModels(ctx context.Context) ([]providers.ModelInfo, error) {
 		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 	}
-	return activeProvider.ListModels(ctx)
+	models, err := activeProvider.ListModels(ctx)
+	if err == nil {
+		_ = providers.Models().Put(activeProvider.Name(), models)
+	}
+	return models, err
 }
 
-// DefaultModelForProvider returns the default model for a provider.
+// userModelChoices is the per-provider model the user last chose, injected by
+// main so this package does not import config.
+//
+// A map rather than one string, because "which model for THIS provider" is the
+// question UseProvider has to answer, and a single value cannot.
+var userModelChoices = map[string]string{}
+
+// SetUserModelChoices installs the persisted per-provider selections.
+func SetUserModelChoices(m map[string]string) {
+	userModelChoices = map[string]string{}
+	for k, v := range m {
+		if k = strings.ToLower(strings.TrimSpace(k)); k != "" && strings.TrimSpace(v) != "" {
+			userModelChoices[k] = v
+		}
+	}
+}
+
+// PreferredModel resolves which model a provider should use right now, with no
+// network access.
+//
+// Order: what the user chose for this provider, then the best-ranked model the
+// provider was last seen to serve, then nothing. "Nothing" is a real answer and
+// callers must handle it — it replaces a compiled-in constant that went stale
+// the moment a vendor retired a model, and answering with a stale constant is
+// what made every turn fail with an unexplained 404.
+//
+// Purely local BY DESIGN. This is consulted per turn and inside loops over
+// every registered provider (VisionCapableProviders), so a request here would
+// put network latency in the hot path.
+func PreferredModel(provider string) string {
+	name := strings.ToLower(strings.TrimSpace(provider))
+	if name == "" {
+		return ""
+	}
+	if chosen := strings.TrimSpace(userModelChoices[name]); chosen != "" {
+		return chosen
+	}
+	if cached := providers.Models().Preferred(name); cached != "" {
+		return cached
+	}
+	// Last resort: whatever the adapter itself claims. Almost every provider
+	// now returns "" here; llama.cpp is the exception, where "local-gguf" is a
+	// UI label for "whatever GGUF was loaded by hand" rather than a routing key.
+	if registry != nil {
+		if p, err := registry.Get(name); err == nil {
+			return p.DefaultModel()
+		}
+	}
+	return ""
+}
+
+// DefaultModelForProvider returns the model a provider would use if asked now.
 func DefaultModelForProvider(name string) string {
-	if registry == nil {
-		return ""
-	}
-	p, err := registry.Get(name)
-	if err != nil {
-		return ""
-	}
-	return p.DefaultModel()
+	return PreferredModel(name)
 }
 
 // SaveProviderKey stores a provider API key.

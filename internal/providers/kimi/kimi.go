@@ -16,6 +16,6 @@ func New(apiKey string, client *providers.HTTPClient) *openaicompatible.Provider
 		APIKey:      apiKey,
 		// kimi-k3 is natively multimodal — text, image and video through the
 		// same model — so the default already sees.
-		DefaultModel: "kimi-k3",
+		DefaultModel: "",
 	}, client)
 }

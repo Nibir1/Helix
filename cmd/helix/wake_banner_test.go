@@ -46,13 +46,22 @@ func TestWakeBannerSidecarEngineKeepsThePhrasePromise(t *testing.T) {
 	}
 }
 
-// Both banners must say that wake gating applies BETWEEN turns — the other half
-// of the QA confusion, since the first turn after /voice on needs no wake.
-func TestWakeBannerExplainsBetweenTurnGating(t *testing.T) {
+// Both banners must say that waking is ONCE, not per turn, and must name a way
+// out.
+//
+// This replaces an assertion that the banner explained between-turn gating.
+// That sentence was true of the old per-turn hold and is now the opposite of
+// the truth — a banner is the most authoritative place in the shell to be
+// wrong, so the assertion had to move with the behaviour rather than be
+// deleted.
+func TestWakeBannerSaysWakingIsOncePerConversation(t *testing.T) {
 	for _, engine := range []string{"energy", "sidecar"} {
 		banner := strings.Join(wakeBannerLines(engine, "hey helix"), "\n")
-		if !strings.Contains(banner, "AFTER this one") {
-			t.Errorf("engine %q banner must explain when the wake word applies:\n%s", engine, banner)
+		if !strings.Contains(banner, "no waking in between") {
+			t.Errorf("engine %q banner must say waking is once, not per turn:\n%s", engine, banner)
+		}
+		if !strings.Contains(banner, "manual mode") {
+			t.Errorf("engine %q banner must name a way out:\n%s", engine, banner)
 		}
 	}
 }
@@ -70,14 +79,24 @@ func TestVoiceModeWakeNotes(t *testing.T) {
 	}
 
 	on := strings.Join(voiceModeWakeNotes(true, "energy", true), "\n")
-	if !strings.Contains(on, "BETWEEN turns") {
-		t.Errorf("/voice on must say wake gating sits between turns:\n%s", on)
+	if !strings.Contains(on, "no waking in between") {
+		t.Errorf("the panel must say every turn runs without re-waking:\n%s", on)
 	}
-	if !strings.Contains(on, "no wake needed") {
-		t.Errorf("/voice on must say the first turn needs no wake word:\n%s", on)
+	if !strings.Contains(on, "manual mode") {
+		t.Errorf("the panel must name the exit that closes the microphone:\n%s", on)
+	}
+	if !strings.Contains(on, "stand down") {
+		t.Errorf("an open transcribing mic that ends itself must say so:\n%s", on)
 	}
 	if !strings.Contains(on, "any speech") {
 		t.Errorf("the energy engine's behavior belongs here too:\n%s", on)
+	}
+
+	// The collapsed form still has to carry the way out, or a re-entry leaves
+	// the user in a conversation with no stated exit.
+	brief := strings.Join(voiceModeWakeNotes(true, "energy", false), "\n")
+	if !strings.Contains(brief, "manual mode") {
+		t.Errorf("the collapsed note must still name the exit:\n%s", brief)
 	}
 
 	sidecar := strings.Join(voiceModeWakeNotes(true, "sidecar", true), "\n")
@@ -86,65 +105,36 @@ func TestVoiceModeWakeNotes(t *testing.T) {
 	}
 }
 
-// Wake gating lapsing back to open capture must be announced — and only for the
-// causes where something actually changed.
+// The once-per-session discipline for lapse notices.
 //
-// The list is SHORTER than it was, which is the point: wakeWindowExpired used
-// to be here, and a notice was the whole mitigation for a gate that removed
-// itself after sixty seconds. The gate no longer does that (see
-// wakeListenUntilArmed), so the only cause left is a scanner that died — the
-// one case where falling through beats stranding the user. An interrupt is an
-// explicit act and needs no notice.
-func TestWakeLapseNotice(t *testing.T) {
-	cases := []struct {
-		outcome  wakeOutcome
-		announce bool
-		mentions string
-	}{
-		// The notice says listening stopped; it deliberately does NOT name a
-		// cause any more (it used to guess "recorder unavailable"). The real
-		// error reaches the screen from the scan loop's OnError hook.
-		{wakeScannerFailed, true, "wake listening stopped"},
-		// Wake was never configured, so nothing lapsed and nothing is said.
-		{wakeNotEngaged, false, ""},
-		{wakeFired, false, ""},
-		// Ctrl+C during the hold: the user asked for the turn, so there is
-		// nothing to explain.
-		{wakeInterrupted, false, ""},
+// It used to be a map keyed by a wakeOutcome, because the per-turn wake hold
+// was re-entered after every turn and an un-suppressed notice would have
+// buried the shell. That hold is gone; the two surviving lapses each carry
+// their own flag, and this asserts the one a user can actually hit twice.
+func TestArmingLapseIsAnnouncedOncePerSession(t *testing.T) {
+	t.Cleanup(func() { armingLapseAnnounced = false })
+
+	armingLapseAnnounced = false
+	noteArmingLapse()
+	if !armingLapseAnnounced {
+		t.Fatal("the first lapse must be announced")
 	}
-	for _, tc := range cases {
-		got := wakeLapseNotice(tc.outcome)
-		if tc.announce {
-			if got == "" {
-				t.Errorf("outcome %v must produce a notice", tc.outcome)
-				continue
-			}
-			if !strings.Contains(got, tc.mentions) {
-				t.Errorf("notice %q should mention %q", got, tc.mentions)
-			}
-			if !strings.Contains(got, "/blackbox status") {
-				t.Errorf("notice %q should point at /blackbox status", got)
-			}
-		} else if got != "" {
-			t.Errorf("outcome %v must stay silent, got %q", tc.outcome, got)
-		}
+	// A second call is a no-op: the flag is what proves it, since the notice
+	// itself goes to the screen.
+	noteArmingLapse()
+	if !armingLapseAnnounced {
+		t.Error("the flag was cleared by a repeat call")
 	}
 }
 
-// The notice explains a state change, and the hold is re-entered after every
-// turn, so repeating it would bury the shell.
-func TestNoteWakeLapseIsOncePerCause(t *testing.T) {
-	t.Cleanup(func() { wakeLapseAnnounced = map[wakeOutcome]bool{} })
-	wakeLapseAnnounced = map[wakeOutcome]bool{}
+// A scanner that dies mid-wait re-arms the announcement, because the "◉
+// listening" line was printed once and has to be retracted and re-earned.
+func TestScannerDeathReEarnsTheListeningLine(t *testing.T) {
+	t.Cleanup(func() { armedPromptAnnounced = false })
 
-	noteWakeLapse(wakeScannerFailed)
-	if !wakeLapseAnnounced[wakeScannerFailed] {
-		t.Fatal("the first lapse must be announced")
-	}
-	// A second call is a no-op.
-	noteWakeLapse(wakeScannerFailed)
-	noteWakeLapse(wakeNotEngaged)
-	if wakeLapseAnnounced[wakeNotEngaged] {
-		t.Error("a cause with no notice must not be marked announced")
+	armedPromptAnnounced = true
+	noteArmingDied(nil)
+	if armedPromptAnnounced {
+		t.Error("a dead scanner left the listening line claiming an open microphone")
 	}
 }

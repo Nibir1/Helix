@@ -16,6 +16,6 @@ func New(apiKey string, client *providers.HTTPClient) *openaicompatible.Provider
 		APIKey:      apiKey,
 		// qwen3.7-plus takes image and video input alongside text; the
 		// text-only qwen3.7-max is deliberately NOT the default.
-		DefaultModel: "qwen3.7-plus",
+		DefaultModel: "",
 	}, client)
 }

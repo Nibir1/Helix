@@ -76,16 +76,20 @@ func TestSpokenRebootRefusesEverythingElse(t *testing.T) {
 // left voice mode without persisting would otherwise come back as the opposite
 // of what it was.
 func TestCaptureContinuityRecordsTheLiveMode(t *testing.T) {
-	restore := voiceModeActive
-	t.Cleanup(func() { voiceModeActive = restore })
-
-	voiceModeActive = true
+	withListenMode(t, modeAwake)
 	if got := captureContinuity("spoken", true).Mode; got != session.ModeVoice {
-		t.Errorf("live mode = %q, want %q", got, session.ModeVoice)
+		t.Errorf("awake = %q, want %q", got, session.ModeVoice)
 	}
-	voiceModeActive = false
+
+	// Three states now, and standby has to round-trip: a reboot from standby
+	// that came back as manual would close a microphone the user left open.
+	modeCur.Store(int32(modeStandby))
+	if got := captureContinuity("typed", false).Mode; got != session.ModeStandby {
+		t.Errorf("standby = %q, want %q", got, session.ModeStandby)
+	}
+	modeCur.Store(int32(modeManual))
 	if got := captureContinuity("typed", false).Mode; got != session.ModeManual {
-		t.Errorf("keyboard mode = %q, want %q", got, session.ModeManual)
+		t.Errorf("manual = %q, want %q", got, session.ModeManual)
 	}
 }
 
@@ -94,9 +98,7 @@ func TestCaptureContinuityRecordsTheLiveMode(t *testing.T) {
 // to disk would break it — so it writes no conversation content at all, and the
 // resume is slightly less specific instead of the principle being amended.
 func TestSpokenRebootWritesNoConversationContent(t *testing.T) {
-	restore := voiceModeActive
-	t.Cleanup(func() { voiceModeActive = restore })
-	voiceModeActive = true
+	withListenMode(t, modeAwake)
 
 	if got := captureContinuity("you asked out loud", true).LastExchange; got != "" {
 		t.Errorf("a spoken reboot must store no conversation content, got %q", got)

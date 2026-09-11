@@ -32,9 +32,8 @@ import (
 )
 
 var (
-	voiceModeActive bool
-	voicePrompter   *VoicePrompter
-	ttyPrompter     commands.Prompter
+	voicePrompter *VoicePrompter
+	ttyPrompter   commands.Prompter
 )
 
 // initVoiceMode wires prompters and restores the persisted mode. Called once
@@ -43,41 +42,28 @@ func initVoiceMode() {
 	ttyPrompter = commands.ActivePrompter()
 	voicePrompter = NewVoicePrompter()
 
-	if cfg.UserPrefs.VoiceMode {
-		// Refuse to strand the user in voice mode without a recorder.
-		if _, err := speech.DetectRecorder(); err == nil {
-			enterVoiceMode(false)
-			// A restored session is live mode too. Without this, restarting
-			// with voice persisted gave you the microphone but no companion —
-			// the same mode reached by a different door, behaving differently.
-			startCompanion()
-		} else {
+	// The one read of config that decides the mode. Everything after this is
+	// the enum; nothing re-derives the state from disk mid-session.
+	initial := resolveInitialMode()
+	if cfg.UserPrefs.VoiceMode && initial != modeAwake {
+		// Persisted live mode that the host cannot deliver. Do not strand the
+		// user in a mode with no microphone, and do not leave the preference
+		// claiming otherwise. Falls back to STANDBY rather than MANUAL: the
+		// wake word was not what failed.
+		if _, err := speech.DetectRecorder(); err != nil {
 			uiWarn("voice mode skipped at startup", err.Error())
-			cfg.UserPrefs.VoiceMode = false
-			_ = cfg.SavePreferences()
 		}
-	}
-}
-
-func enterVoiceMode(persist bool) {
-	voiceModeActive = true
-	commands.SetPrompter(voicePrompter)
-
-	// Conversational context is scoped to the mode: it only makes sense while a
-	// conversation is happening, and scoping it here is what makes "leaving live
-	// mode drops the retained audio" true rather than aspirational.
-	speech.EnableConversationContext(cfg.Speech.TTS.ContextTurns, cfg.Speech.TTS.ContextMaxBytes)
-
-	// Scoped to the mode like context is: the probe only makes sense while a
-	// conversation is happening, and it must not keep sampling the microphone
-	// after /blackbox off.
-	speech.EnableBargeIn(cfg.Speech.TTS.BargeIn)
-	if persist {
-		cfg.UserPrefs.VoiceMode = true
+		cfg.UserPrefs.VoiceMode = false
 		_ = cfg.SavePreferences()
 	}
-	audio.PlayAlert()
-	printLiveBanner()
+	if initial == modeAwake {
+		// A restored session is a conversation, camera and companion included.
+		// Restoring it any other way is the "same mode by a different door"
+		// defect Phase 13 records.
+		setListenMode(modeAwake, causeRestore)
+		return
+	}
+	modeCur.Store(int32(initial))
 }
 
 // printLiveBanner is the moment Helix wakes up, and it should look like it.
@@ -205,18 +191,27 @@ func voiceModeWakeNotes(wakeEnabled bool, engine string, full bool) []string {
 		return nil
 	}
 	if !full {
-		// One line, and it still has to carry the fact that surprises people:
-		// this turn is open capture, the NEXT one needs waking. Dropping to
-		// "wake word is on" would save the same space and lose the only part
-		// that was ever load-bearing.
+		// One line, carrying the two facts that matter: it keeps going, and
+		// here is how to stop it.
 		return []string{
-			"This turn starts now; wake me again for the next one  ·  /blackbox status",
+			fmt.Sprintf("Listening until you say so  ·  \"you can turn off now\" pauses  ·  "+
+				"\"manual mode\" closes the mic  ·  stands down after %s quiet",
+				roundedDuration(cfg.Speech.WakeWord.AwakeIdleStandDown())),
 		}
 	}
+	// REWRITTEN, because every sentence it used to carry became false.
+	//
+	// It said wake gating sat BETWEEN turns and that only the first turn needed
+	// no wake word. Both were true of the old per-turn hold and are now the
+	// opposite of the truth: every turn runs without re-waking, which is the
+	// whole point of the change. Leaving the old text would make the banner the
+	// most authoritative wrong answer in the shell.
 	lines := []string{
-		"Wake word is on, but it gates the gaps BETWEEN turns — this first turn starts now,",
-		"with no wake needed. After it, nothing is transcribed until you wake me again —",
-		"there is no timeout, so a quiet room stays a quiet room. Ctrl+C takes a turn now.",
+		"I stay awake once you wake me — every turn, no waking in between.",
+		fmt.Sprintf("Say \"you can turn off now\" to pause, or \"manual mode\" to close the "+
+			"microphone. I also stand down on my own after %s with nothing said.",
+			roundedDuration(cfg.Speech.WakeWord.AwakeIdleStandDown())),
+		"Ctrl+C takes a turn now. Type at any time — the keyboard stays live.",
 	}
 	if engine != "sidecar" {
 		lines = append(lines,
@@ -224,30 +219,6 @@ func voiceModeWakeNotes(wakeEnabled bool, engine string, full bool) []string {
 				engineOrDefault(engine)))
 	}
 	return lines
-}
-
-func exitVoiceMode(persist bool) {
-	// Leaving voice mode while Helix is mid-sentence should stop the sentence.
-	// Without this, leaving live mode returned the prompt to the keyboard while the
-	// previous reply kept talking over it.
-	speech.StopSpeaking()
-
-	// Drop retained conversation audio with the mode. Nothing here was ever
-	// written to disk, so this is the only place it needs to be released.
-	speech.EnableConversationContext(0, 0)
-	speech.EnableBargeIn(false)
-
-	voiceModeActive = false
-	if ttyPrompter != nil {
-		commands.SetPrompter(ttyPrompter)
-	}
-	if persist {
-		cfg.UserPrefs.VoiceMode = false
-		_ = cfg.SavePreferences()
-	}
-	fmt.Println("  " + shell.Fg(shell.HexMuted, "○ ") +
-		shell.Fg(shell.HexText, "keyboard") +
-		shell.Muted("  ·  /blackbox on goes live again"))
 }
 
 // handleVoiceCommand: /voice [on|off|status]
@@ -306,7 +277,14 @@ func speakDirect(text string) {
 // When the active STT provider supports streaming, voiceTurn shows interim
 // partials live and finalizes on the utterance-final result; a failed stream
 // dial degrades to the proven batch path.
-func voiceTurn() (input.InputEvent, error) {
+func voiceTurn(ctx context.Context) (input.InputEvent, error) {
+	// Anything the companion has been holding is said HERE, which is one of the
+	// two points where the microphone is provably closed: the previous turn has
+	// ended and this one has not opened the recorder yet. It used to be drained
+	// by the main loop between the turn and the wake hold; that hold is gone,
+	// so the drain moved to the surviving boundary rather than to a new one.
+	drainCompanion()
+
 	// A new turn supersedes the previous reply. Capture is half-duplex (the
 	// recorder cannot run while the speaker does), so anything still playing
 	// here is a reply the user has stopped waiting for — most often an ambient
@@ -322,7 +300,7 @@ func voiceTurn() (input.InputEvent, error) {
 	time.Sleep(micSettleDelay)
 
 	if s, ok := speech.StreamingSTT(); ok {
-		ev, err := streamingVoiceTurn(s)
+		ev, err := streamingVoiceTurn(ctx, s)
 		if err == nil {
 			return ev, nil
 		}
@@ -333,7 +311,7 @@ func voiceTurn() (input.InputEvent, error) {
 		}
 		uiIdle("batch capture", "streaming is unavailable: "+err.Error())
 	}
-	return batchVoiceTurn()
+	return batchVoiceTurn(ctx)
 }
 
 // quietTurnsBetweenReassurance is how many silent turns pass before Helix says
@@ -378,14 +356,14 @@ func silenceIsNotAFailure(err error) bool {
 // return. Those are not silence, they are a broken microphone, and the caller
 // offers one typed turn WITHOUT leaving voice mode so a dead mic cannot strand
 // anyone.
-func voiceTurnWithRetry() (input.InputEvent, error) {
+func voiceTurnWithRetry(ctx context.Context) (input.InputEvent, error) {
 	quiet := 0
 	for {
-		ev, err := voiceTurn()
+		ev, err := voiceTurn(ctx)
 		if err == nil {
 			return ev, nil
 		}
-		if errors.Is(err, errVoiceHandled) || errors.Is(err, errVoiceStopped) {
+		if errors.Is(err, errVoiceHandled) || errors.Is(err, errModeChanged) {
 			// The utterance was served (a command ran, or a kill phrase fired).
 			// Re-recording here would ask the user to repeat something that
 			// already worked.
@@ -414,11 +392,15 @@ func voiceTurnWithRetry() (input.InputEvent, error) {
 // transcribed, answered, and its remainder arrived as a separate turn with a
 // separate answer — one thought, two half-conversations. The cap is now a
 // backstop against a stuck microphone and sits far outside any real utterance.
-func batchVoiceTurn() (input.InputEvent, error) {
+func batchVoiceTurn(parent context.Context) (input.InputEvent, error) {
 	// The context must outlast the capture backstop, or IT becomes the cutter
 	// and we are back to a stopwatch ending turns. Capture stops on silence
 	// long before either fires in any normal turn.
-	ctx, cancel := context.WithTimeout(context.Background(),
+	//
+	// A CHILD of the caller's context, not a fresh Background: the caller may
+	// cancel this turn because a key was pressed, and a backstop rooted in
+	// Background would keep the recorder running until it expired.
+	ctx, cancel := context.WithTimeout(parent,
 		speech.ConversationalMaxDuration+15*time.Second)
 	unreg := utils.RegisterOperation(cancel)
 	defer unreg()
@@ -446,6 +428,23 @@ func batchVoiceTurn() (input.InputEvent, error) {
 		viz.Stop()
 		return input.InputEvent{}, speech.ErrNoSpeech
 	}
+
+	// A cancelled capture must not be transcribed, and this is the one place
+	// that can tell. RecordClip returns a partial clip with NO ERROR when a
+	// killed recorder had already flushed a header (see capture.go), so the
+	// error is not the signal — the context is. Without this, every keystroke
+	// during a conversation would burn a cloud STT call on half a sentence,
+	// and that half sentence could come back as a stop phrase.
+	if ctx.Err() != nil {
+		viz.Stop()
+		return input.InputEvent{}, ctx.Err()
+	}
+
+	// Presence, recorded HERE rather than on a successful transcript. A clip
+	// that cleared the gate is a person in the room, whatever the provider
+	// then makes of it — so being MISHEARD cannot stand you down, which it
+	// would if the clock only reset on text that parsed.
+	noteVoiceActivity(time.Now())
 	viz.SetState(ux.VizTranscribing)
 
 	// Transcription gets its own budget — a capture that used most of the
@@ -486,13 +485,14 @@ var errStreamDial = errors.New("stream dial failed")
 // The chunk scanner arms as soon as this is entered, so the ready chime must
 // already be finished and settled: voiceTurn owns that ordering
 // (PlayAlertSync + micSettleDelay) for this path and the batch one alike.
-func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error) {
+func streamingVoiceTurn(parent context.Context, s speech.StreamingSTTProvider) (input.InputEvent, error) {
 	// Same rule as the batch path: the deadline is a backstop, never the thing
 	// that ends a turn. At 15s a speaker who ran long had the stream closed
 	// under them mid-sentence, and the remainder became a separate turn with a
 	// separate answer. The provider's utterance-final and the silence gap below
 	// do the endpointing.
-	ctx, cancel := context.WithTimeout(context.Background(),
+	// A child of the caller's context — see batchVoiceTurn for why.
+	ctx, cancel := context.WithTimeout(parent,
 		speech.ConversationalMaxDuration+15*time.Second)
 	unreg := utils.RegisterOperation(cancel)
 	defer unreg()
@@ -556,6 +556,18 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 
 	finalize := func() (input.InputEvent, error) {
 		if !heard {
+			// Nothing was transcribed. Before blaming the microphone, ask the
+			// provider whether IT failed: a streaming adapter whose wire
+			// format is partly inferred (the OpenAI realtime one) opens a
+			// socket, meters a live mic and transcribes nothing when a guess
+			// is wrong — indistinguishable from a quiet room from here. Wrap
+			// it as a dial failure so the turn falls back to batch, which is
+			// the path that actually works.
+			if r, ok := s.(speech.StreamFaultReporter); ok {
+				if fault := r.StreamFault(); fault != nil {
+					return input.InputEvent{}, fmt.Errorf("%w: %v", errStreamDial, fault)
+				}
+			}
 			return input.InputEvent{}, speech.ErrNoSpeech
 		}
 		if last == "" {
@@ -579,6 +591,9 @@ func streamingVoiceTurn(s speech.StreamingSTTProvider) (input.InputEvent, error)
 				// silent mic must report ErrNoSpeech (retry prompt says
 				// "speak again"), not ErrEmptyTranscript.
 				heard = true
+				// Streaming turns hold no clip to measure, so the words
+				// themselves are the evidence of presence.
+				noteVoiceActivity(time.Now())
 			}
 			if !t.IsFinal {
 				if text != "" && text != last {
@@ -666,31 +681,46 @@ func finishVoiceTranscript(text string, transcript speech.Transcript, audio spee
 	}
 	fmt.Println(line)
 
-	// Hands-free kill switches (ADR-005 wake controls): recognized before
-	// dispatch.
-	if isVoiceKillPhrase(text) {
-		if !killPhraseTrusted(transcript, audio) {
-			// Weak evidence for a decision that ENDS the session: ask once
-			// instead of acting or ignoring. See killPhraseTrusted.
+	// Mode phrases (ADR-005 wake controls): recognized before dispatch, because
+	// they END the turn rather than being served by it. A "manual mode" that
+	// fell through to the planner would be answered with a sentence about
+	// manual mode.
+	if target, mustConfirm, ok := matchModePhrase(text); ok {
+		// A pending question is only answered by the mode it asked about.
+		if modePhrasePending.active && modePhrasePending.target != target {
+			modePhrasePending.active = false
+		}
+		if mustConfirm && !modePhrasePending.active {
+			// A conversational closer. Real wording, but it also lands as the
+			// tail of an ordinary request, so it is always worth one question.
 			logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeKillPhrase)
-			killPhrasePending = true
-			speakDirect("Did you say manual mode? Say it again and I will go.")
+			modePhrasePending.active, modePhrasePending.target = true, target
+			speakDirect(modePhraseQuestion(target) + " Say it again and I will.")
+			fmt.Println(shell.Step(shell.StateWarn, "just checking",
+				"that sounded like you were finished — say it again to confirm"))
+			return input.InputEvent{}, errVoiceHandled
+		}
+		if !modePhraseTrusted(transcript, audio) {
+			// Weak evidence for a decision that ends the conversation: ask once
+			// instead of acting or ignoring. See modePhraseTrusted.
+			logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeKillPhrase)
+			modePhrasePending.active, modePhrasePending.target = true, target
+			speakDirect(modePhraseQuestion(target) + " Say it again and I will.")
 			fmt.Println(shell.Step(shell.StateWarn, "not sure",
 				"heard a stop phrase in a clip too weak to trust — say it again to confirm"))
-			return input.InputEvent{}, speech.ErrNoSpeech
+			return input.InputEvent{}, errVoiceHandled
 		}
-		killPhrasePending = false
+		modePhrasePending.active = false
 		logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeKillPhrase)
-		// blackBoxOff, not exitVoiceMode: live mode opened the camera and the
-		// companion loop too, and a safety valve that leaves either running has
-		// not actually let go.
-		blackBoxOff()
-		return input.InputEvent{}, errVoiceStopped
+		// One door. It closes the camera and the companion as well, which is
+		// what a safety valve that leaves either running has not actually done.
+		setListenMode(target, causeSpoken)
+		return input.InputEvent{}, errModeChanged
 	}
 	// Anything else clears a pending confirmation: the user moved on, so a
 	// stop phrase heard two turns ago is not an answer to a question nobody
 	// remembers being asked.
-	killPhrasePending = false
+	modePhrasePending.active = false
 
 	// Restart, recognized in the same place and for the same reason as the
 	// kill phrases: it ENDS the turn rather than being served by it, so the
@@ -716,7 +746,11 @@ func finishVoiceTranscript(text string, transcript speech.Transcript, audio spee
 	if isEyesOffPhrase(text) {
 		logHeard(text, transcript.Provider, transcript.Confidence, journal.OutcomeEyesOff)
 		setVisionEnabled(false)
-		return input.InputEvent{}, errVoiceStopped
+		// errVoiceHandled, which is what this always MEANT: the camera closed,
+		// the conversation continues. It used to return the same sentinel as a
+		// kill phrase, so "the mode ended" and "the mode did not end" were one
+		// value.
+		return input.InputEvent{}, errVoiceHandled
 	}
 
 	// Spoken command routing (voice_commands.go). A transcript never contains a
@@ -748,32 +782,101 @@ func finishVoiceTranscript(text string, transcript speech.Transcript, audio spee
 	}, nil
 }
 
-// errVoiceHandled signals the utterance was served as a spoken COMMAND, so the
-// turn is complete and the planner must not also see it. Distinct from
-// errVoiceStopped: voice mode is still active and the loop simply takes the next
-// turn.
+// errVoiceHandled signals the utterance was served without reaching the
+// planner, and the mode is UNCHANGED. The loop simply takes the next turn.
+//
+// It now covers three things that are the same thing from the loop's point of
+// view: a spoken command, the eyes-off switch, and the "say it again" round
+// after a stop phrase arrived on weak evidence. The last of those used to
+// return speech.ErrNoSpeech, which was a lie — it made the silence-reassurance
+// counter tick on a turn where someone had plainly spoken.
 var errVoiceHandled = errors.New("voice command handled")
 
-// errVoiceStopped signals a kill phrase ended voice mode (the mode line
-// already announced it; the main loop treats this as a quiet continue).
-var errVoiceStopped = fmt.Errorf("voice stopped by kill phrase")
+// errModeChanged signals that the listening mode changed under the caller, so
+// it should re-dispatch on whatever is current now.
+//
+// This replaces errVoiceStopped, which meant TWO different things — "a kill
+// phrase ended live mode" and "eyes were turned off, the mode continues" — and
+// was compared with == at one call site and errors.Is one line below. No branch
+// needs to know WHICH mode was entered: the REPL switches on currentMode() at
+// the top of the next iteration.
+var errModeChanged = errors.New("listening mode changed")
 
-// killPhrases end live mode. Matched as a SUFFIX of the utterance, not as the
-// whole of it — see isVoiceKillPhrase.
-var killPhrases = []string{
-	"switch to manual mode", "switch to manual", "go to manual mode",
-	"manual mode", "stop listening", "go to sleep", "stop voice",
-	"i want to type", "blackbox off", "black box off",
-}
+// errKeyboardPreempted signals that a key was pressed during a capture, so the
+// turn belongs to the keyboard.
+//
+// Distinct from silence, and that distinction is load-bearing:
+// voiceTurnWithRetry treats silence as "keep listening" and would re-open the
+// recorder on top of the line the user is now typing.
+var errKeyboardPreempted = errors.New("keyboard pre-empted the voice turn")
 
-// killPhrasePending is true when a stop phrase arrived on evidence too weak to
-// act on, and Helix asked for it again.
+// Mode phrases. Three lists, because "close the microphone" and "stop talking
+// to me for now" are different requests and used to be the same one.
+//
+// All matched as a SUFFIX of the utterance, not as the whole of it — see
+// matchModePhrase.
+var (
+	// manualPhrases close the microphone and persist it. The deep exit.
+	manualPhrases = []string{
+		"switch to manual mode", "switch to manual", "go to manual mode",
+		"go manual", "manual mode", "keyboard mode", "keyboard only",
+		"i want to type", "i'll type", "let me type",
+		"close the microphone", "close the mic",
+		"turn off the microphone", "turn off the mic",
+		"mute the microphone", "mute the mic", "mic off", "microphone off",
+		"stop listening completely", "stop listening entirely",
+		"blackbox off", "black box off",
+	}
+
+	// standbyPhrases end the conversation but keep listening for a wake.
+	//
+	// "stop listening" and "go to sleep" USED to live in the same list as
+	// "manual mode" and did the same thing. They are the lighter request and
+	// now say so: Helix stops taking turns, and a sound brings it back.
+	standbyPhrases = []string{
+		"you can turn off now", "you can turn off", "you can stop now",
+		"you can stop listening", "you can rest", "you can relax",
+		"go to sleep", "go back to sleep", "sleep now", "go to standby",
+		"stand down", "stop listening", "stop listening for now",
+		"pause listening", "stop voice", "take a break",
+		"i'm done for now", "im done for now", "i'm done talking",
+		"im done talking",
+	}
+
+	// softStandbyPhrases also mean standby, but ALWAYS ask first.
+	//
+	// These are how people actually close a conversation, so they have to
+	// work — and they are also how people end an ordinary request ("...and
+	// then deploy it, that's all"). Suffix matching cannot tell those apart,
+	// and the cost of guessing wrong is a conversation that ends itself. So
+	// they route through the confirmation round unconditionally, whatever the
+	// clip's energy says. That is the difference between hearing you and
+	// obeying a noise.
+	softStandbyPhrases = []string{
+		"that's all", "thats all", "that's all for now", "thats all for now",
+		"that will be all", "that'll be all",
+		"we're done", "we are done", "were done",
+		"i'm done", "im done", "nothing else", "that's everything",
+		"thats everything",
+	}
+)
+
+// modePhrasePending remembers WHICH mode was asked for when a stop phrase
+// arrived on evidence too weak to act on, and Helix asked again.
 //
 // Session state rather than a parameter because the two halves are different
 // turns: the question is asked at the end of one and answered at the start of
 // the next. Cleared by any other utterance, so it cannot be satisfied by a
 // phrase heard minutes earlier.
-var killPhrasePending bool
+//
+// It carries the TARGET, not just a flag. As a bare bool, a "go to sleep" that
+// needed confirming could be satisfied by a later "manual mode" and vice
+// versa — Helix would have asked one question and acted on the answer to
+// another.
+var modePhrasePending struct {
+	active bool
+	target listenMode
+}
 
 // killPhraseMinRMSMultiple is how much louder than "audible" a session-ending
 // phrase must be.
@@ -786,7 +889,7 @@ var killPhrasePending bool
 // hallucination out of room noise.
 const killPhraseMinRMSMultiple = 2.0
 
-// killPhraseTrusted reports whether a stop phrase came with enough evidence to
+// modePhraseTrusted reports whether a stop phrase came with enough evidence to
 // end the session on the spot.
 //
 // WHY THIS EXISTS. The kill phrase used to be acted on unconditionally, with
@@ -815,8 +918,8 @@ const killPhraseMinRMSMultiple = 2.0
 // only other exit is Ctrl+C. So an unmeasurable clip is TRUSTED, and the
 // confirmation round is what stands between noise and an unwanted exit
 // everywhere else.
-func killPhraseTrusted(transcript speech.Transcript, audio speech.AudioFormat) bool {
-	if killPhrasePending {
+func modePhraseTrusted(transcript speech.Transcript, audio speech.AudioFormat) bool {
+	if modePhrasePending.active {
 		return true // this is the confirmation; the first one already asked
 	}
 	if transcript.Confidence > 0 &&
@@ -829,7 +932,7 @@ func killPhraseTrusted(transcript speech.Transcript, audio speech.AudioFormat) b
 	return speech.HasSpeech(audio, speech.SpeechRMSFloor*killPhraseMinRMSMultiple)
 }
 
-// isVoiceKillPhrase reports whether the user asked to go back to the keyboard.// isVoiceKillPhrase reports whether the user asked to go back to the keyboard.
+// matchModePhrase reports which listening mode an utterance asked for.
 //
 // Suffix matching, because people do not speak in bare commands. QA said
 // "Excellent. Now switch to manual mode." and Helix — which required the whole
@@ -843,78 +946,123 @@ func killPhraseTrusted(transcript speech.Transcript, audio speech.AudioFormat) b
 // phrase lands mid-sentence there. Ending on it is what makes it an
 // instruction.
 //
+// The longest match across all three lists wins, so "stop listening
+// completely" closes the microphone rather than matching the "stop listening"
+// that means standby.
+//
 // Args: text: the raw transcript.
-// Returns: whether live mode should end.
-// Complexity: O(len(text) × len(killPhrases)).
-func isVoiceKillPhrase(text string) bool {
-	t := strings.ToLower(strings.TrimSpace(text))
-	t = strings.TrimRight(t, " .!?,")
-	for _, p := range killPhrases {
-		if t == p || strings.HasSuffix(t, " "+p) {
-			return true
+// Returns: the mode asked for, whether it must be confirmed regardless of
+// evidence, and whether anything matched at all.
+// Complexity: O(len(text) × number of phrases).
+func matchModePhrase(text string) (target listenMode, mustConfirm bool, ok bool) {
+	bare := strings.TrimRight(strings.ToLower(strings.TrimSpace(text)), " .!?,")
+
+	// TWO candidates, not one. Courtesy trimming has to happen for "turn off
+	// the microphone please" to work, but some phrases END in a word the
+	// trimmer removes — "you can stop now" would become "you can stop" and
+	// stop matching. Trying both forms means no entry in the lists above can
+	// be broken by the trimmer, which is the kind of coupling that would
+	// otherwise be discovered by a user rather than a test.
+	candidates := []string{bare}
+	if trimmed := trimTrailingCourtesy(bare); trimmed != bare && trimmed != "" {
+		candidates = append(candidates, trimmed)
+	}
+
+	best := -1
+	for _, c := range []struct {
+		phrases []string
+		target  listenMode
+		confirm bool
+	}{
+		{manualPhrases, modeManual, false},
+		{standbyPhrases, modeStandby, false},
+		{softStandbyPhrases, modeStandby, true},
+	} {
+		for _, p := range c.phrases {
+			for _, t := range candidates {
+				if t != p && !strings.HasSuffix(t, " "+p) {
+					continue
+				}
+				if len(p) > best {
+					best, target, mustConfirm, ok = len(p), c.target, c.confirm, true
+				}
+				break
+			}
 		}
 	}
-	return false
+	return target, mustConfirm, ok
 }
 
-// The 60-second idle window is GONE, and its removal is a correction rather
-// than a simplification.
+// modeCourtesy are trailing words that carry no instruction.
 //
-// It read ADR-005 §5 — "wake-word-triggered sessions have a hard 60s inactivity
-// lockout back to wake-only listening" — as a deadline on wake-only listening,
-// after which the shell fell through to OPEN capture. That is the rule
-// inverted. §5 exists so that an idle session needs the wake word again; the
-// implementation made an idle session stop needing it.
+// Suffix matching needs the phrase at the END of the utterance, and people do
+// not stop talking there: "turn off the microphone please" and "manual mode
+// thanks" are the same request as the bare phrase, and a valve that only opens
+// for someone who omits the politeness is the same defect suffix matching was
+// introduced to fix. Trailing only — "please stop listening" keeps its lead-in,
+// because the phrase is still the tail.
+var modeCourtesy = []string{"please", "thanks", "thank you", "now", "ok", "okay", "alright"}
+
+// trimTrailingCourtesy strips trailing punctuation and politeness, repeatedly,
+// so "manual mode, please. thanks!" reduces to "manual mode".
+func trimTrailingCourtesy(t string) string {
+	for {
+		t = strings.TrimRight(strings.TrimSpace(t), " .!?,")
+		cut := false
+		for _, w := range modeCourtesy {
+			if t == w {
+				return "" // nothing but courtesy is not an instruction
+			}
+			if strings.HasSuffix(t, " "+w) {
+				t, cut = t[:len(t)-len(w)-1], true
+				break
+			}
+		}
+		if !cut {
+			return t
+		}
+	}
+}
+
+// modePhraseQuestion asks for the confirmation, naming what would happen.
+func modePhraseQuestion(target listenMode) string {
+	if target == modeManual {
+		return "Should I close the microphone?"
+	}
+	return "Should I stop listening for now?"
+}
+
+// WAKE-ONLY LISTENING HAS NO DEADLINE, and that rule outlived the code that
+// used to hold it here.
+//
+// The original defect: a 60-second window read ADR-005 §5 — "wake-word-
+// triggered sessions have a hard 60s inactivity lockout back to wake-only
+// listening" — as a deadline ON wake-only listening, after which the shell fell
+// through to OPEN capture. That is the rule inverted. §5 exists so that an idle
+// session needs the wake word again; the implementation made an idle session
+// stop needing it.
 //
 // What it cost, from a real session on 2026-09-09: sixty quiet seconds after
 // going live, the gate removed itself and the microphone opened unbidden. Fan
 // noise became a 0.5s clip, whisper turned that into "May he leave.", and the
 // shell answered a turn nobody took. The next one ran `man motor`. The one
-// after that transcribed as "Manual mode." — the kill phrase — and Helix left
+// after that transcribed as "Manual mode." — the stop phrase — and Helix left
 // live mode on its own, which is precisely the thing the owner had just asked
 // it never to do.
 //
-// So wake-only listening now has no deadline. Nothing is transcribed until a
-// wake event fires, for as long as that takes. The escape hatches are
-// deliberate acts: Ctrl+C takes a turn immediately (wakeInterrupted), and a
-// scanner that dies still falls through, because a broken microphone must not
-// strand anyone.
-
-// wakeOutcome says how a stretch of wake listening ended.
+// WHERE THE RULE LIVES NOW. The between-turns hold this paragraph used to
+// describe is gone for a different reason: a conversation no longer re-waits
+// for a wake word between every turn, because having to re-wake for each
+// answer is what made hands-free unusable. The only wake-only hold left is
+// armedIdleWait (wake_always.go), and it is unbounded — which is what
+// TestWakeHoldHasNoDeadline now asserts against.
 //
-// The distinction exists because wake gating used to lapse SILENTLY: the 60s
-// window expiring and wake never being configured both returned a bare false,
-// and the main loop reacted identically — back to open capture. From the user's
-// seat that is the shell quietly abandoning a privacy control it announced, so
-// the two cases now have to be told apart at the call site.
-type wakeOutcome int
-
-const (
-	// wakeNotEngaged: wake listening never started (disabled, no recorder, no
-	// speech engine). Nothing changed, so nothing is announced.
-	wakeNotEngaged wakeOutcome = iota
-
-	// wakeFired: a wake event arrived; the caller runs another voice turn.
-	wakeFired
-
-	// wakeInterrupted: the user pressed Ctrl+C during the hold. An explicit
-	// "I want to talk now" gesture, so the caller takes a turn rather than
-	// treating it as a failure — and unlike the window that used to live here,
-	// it cannot happen without someone asking for it.
-	wakeInterrupted
-
-	// wakeScannerFailed: wake listening was configured and engaged but the
-	// capture stream died (device yanked, recorder killed, service refused to
-	// start). Gating is gone for the same reason expiry loses it, so it is
-	// announced too — with its own cause.
-	wakeScannerFailed
-
-	// wakeCompanionSpoke ends the listen because Helix has something to say.
-	// It is not a failure and must never be announced as a lapse: the scanner
-	// is stopped deliberately so the remark is spoken with the microphone
-	// closed (half-duplex), and the caller re-enters listening straight after.
-	wakeCompanionSpoke
-)
+// The AWAKE stand-down is NOT a counterexample and must not be mistaken for
+// one. It expires into LESS listening, never into transcription: a
+// conversation nobody is speaking in falls back to wake-only. The defect above
+// ran the other way. That is also why it is checked at the top of a turn as a
+// pure function of the clock rather than as a context deadline inside the
+// listening path — see shouldStandDown.
 
 // newWakeService builds the wake detector, scanner and service from config.
 //
@@ -958,98 +1106,6 @@ func newWakeService() (wakeword.Service, error) {
 			OnError:  hooks.OnError,
 			OnScan:   hooks.OnScan,
 		})
-}
-
-// wakeListenUntilArmed blocks in chunk-scanning wake detection. Returns the wake
-// event and how the listen ended; only wakeFired carries a usable event. The
-// DetectedAt timestamp feeds the §10 wake→execution latency metric.
-func wakeListenUntilArmed() (wakeword.WakeEvent, wakeOutcome) {
-	if speech.Default() == nil || !cfg.Speech.WakeWord.Listening() {
-		return wakeword.WakeEvent{}, wakeNotEngaged
-	}
-	if _, err := speech.DetectRecorder(); err != nil {
-		return wakeword.WakeEvent{}, wakeNotEngaged
-	}
-
-	svc, err := newWakeService()
-	if err != nil {
-		return wakeword.WakeEvent{}, wakeScannerFailed
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	unreg := utils.RegisterOperation(cancel)
-	defer unreg()
-	defer cancel()
-
-	events, err := svc.Start(ctx)
-	if err != nil {
-		return wakeword.WakeEvent{}, wakeScannerFailed
-	}
-	defer func() { _ = svc.Stop() }()
-
-	viz := ux.NewVoiceViz()
-	viz.SetStandbyHint(standbyHint())
-	viz.Start(ux.VizStandby)
-	defer viz.Stop()
-	select {
-	case ev, ok := <-events:
-		if !ok {
-			// Scanner failure closed the channel — a zero-value event here is
-			// NOT a wake. Fall back to push-to-talk instead of phantom-arming
-			// the mic (the exact moment the mic is most likely broken).
-			return wakeword.WakeEvent{}, wakeScannerFailed
-		}
-		logWakeEvent(ev)
-		viz.Stop()
-		// No chime here: the caller runs a voice turn next and voiceTurn plays
-		// the ready cue itself. Two pings back to back read as a stutter, and
-		// the second one is the only one whose timing is actually coupled to the
-		// recorder arming (PlayAlertSync + micSettleDelay).
-		return ev, wakeFired
-	case <-companionInterrupt:
-		// The deferred svc.Stop() and viz.Stop() run before the caller speaks,
-		// which is exactly the point: the recorder must be closed before the
-		// speaker opens or Helix transcribes its own remark.
-		return wakeword.WakeEvent{}, wakeCompanionSpoke
-	case <-ctx.Done():
-		// Only reachable through the interrupt manager now that there is no
-		// timeout: someone pressed Ctrl+C.
-		return wakeword.WakeEvent{}, wakeInterrupted
-	}
-}
-
-// wakeLapseNotice returns the one-line explanation for an outcome that silently
-// dropped wake gating, or "" when there is nothing to announce.
-func wakeLapseNotice(o wakeOutcome) string {
-	switch o {
-	case wakeScannerFailed:
-		// No cause named here on purpose. This used to assert "recorder
-		// unavailable", which was a guess: the scan loop's real error now
-		// reaches the screen through the OnError hook (wake_scan.go), and
-		// two explanations for one event, one of them invented, is worse
-		// than one.
-		return "wake listening stopped — listening without the wake word; " +
-			"/mictest checks the microphone, /blackbox status for info"
-	default:
-		return ""
-	}
-}
-
-// wakeLapseAnnounced tracks which lapse notices this session has already shown.
-//
-// Once each, per cause: the message explains a STATE CHANGE, and the idle window
-// expires every 60s of quiet, so repeating it would bury the shell in a notice
-// about not listening.
-var wakeLapseAnnounced = map[wakeOutcome]bool{}
-
-// noteWakeLapse prints the notice for an outcome at most once per session.
-func noteWakeLapse(o wakeOutcome) {
-	notice := wakeLapseNotice(o)
-	if notice == "" || wakeLapseAnnounced[o] {
-		return
-	}
-	wakeLapseAnnounced[o] = true
-	uiWarn("wake", notice)
 }
 
 // interactiveAmbientMonitor builds the monitor for the interactive wake loop.

@@ -18,9 +18,12 @@ import (
 const (
 	baseURL    = "https://api.anthropic.com"
 	apiVersion = "2023-06-01"
-	// defaultModel is the current GA flagship: 1M context, and image input, so
-	// the camera path is live without picking a different model first.
-	defaultModel = "claude-opus-5"
+	// NO compiled-in model ID. It used to name the current GA flagship, which
+	// is a time bomb: vendors retire models, nothing validated the saved ID,
+	// and a retired default made every turn fail with an unexplained 404 while
+	// /provider-status still reported ok. The model is resolved at runtime from
+	// the user's choice or the provider's live catalogue (ai.PreferredModel).
+	defaultModel = ""
 )
 
 // Provider implements Anthropic.
@@ -62,8 +65,13 @@ func (p *Provider) RequiresAPIKey() bool { return true }
 func (p *Provider) IsLocal() bool        { return false }
 func (p *Provider) DefaultModel() string { return defaultModel }
 
+// Capabilities answers at the PROVIDER level, because with no compiled-in
+// model there is no model to inspect. Vision is the flag that used to need
+// one; the vendor floor keeps /blackbox eyes from refusing on a fresh key
+// before anything has been picked.
 func (p *Provider) Capabilities() providers.Capabilities {
-	return providers.CapabilitiesFor("anthropic", defaultModel)
+	return providers.CapabilitiesForProvider("anthropic",
+		providers.Models().AnyVisionModel("anthropic"))
 }
 
 // Chat sends a streaming Anthropic Messages request.
@@ -78,7 +86,10 @@ func (p *Provider) Chat(ctx context.Context, req providers.ChatRequest) (<-chan 
 
 	model := req.Model
 	if model == "" {
-		model = defaultModel
+		// Refuse rather than put "model":"" on the wire and get back an opaque
+		// 400. The caller can fix this; the vendor's error message cannot.
+		return nil, fmt.Errorf("anthropic: no model selected — /model list shows what is " +
+			"available, /model use <id> picks one")
 	}
 
 	maxTokens := req.MaxTokens

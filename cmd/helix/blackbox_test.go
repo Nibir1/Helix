@@ -325,31 +325,104 @@ func TestCompanionPacingBacksOffOnSlowLooks(t *testing.T) {
 // QA said "Excellent. Now switch to manual mode." and Helix — which required an
 // exact whole-transcript match — sent it to the planner, which replied by asking
 // what to switch to manual mode FOR.
-func TestKillPhraseMatchesNaturalSpeech(t *testing.T) {
+func TestManualPhrasesCloseTheMicrophone(t *testing.T) {
 	for _, said := range []string{
 		"manual mode",
 		"Manual mode.",
 		"Excellent. Now switch to manual mode.",
 		"okay let's switch to manual",
-		"that's enough, stop listening",
 		"blackbox off",
+		"close the mic",
+		"turn off the microphone please",
+		// Longest-match: this must NOT be read as the "stop listening" that
+		// only means standby.
+		"stop listening completely",
 	} {
-		if !isVoiceKillPhrase(said) {
-			t.Errorf("%q should end live mode", said)
+		target, _, ok := matchModePhrase(said)
+		if !ok || target != modeManual {
+			t.Errorf("%q should close the microphone, got target=%v ok=%v", said, target, ok)
 		}
 	}
+}
 
-	// A question ABOUT the feature is not a request to use it: the phrase lands
-	// mid-sentence there, which is why this is suffix- not substring-matched.
+// The phrases that used to share a list with "manual mode" and do the same
+// thing. They are the lighter request: stop taking turns, keep listening.
+func TestStandbyPhrasesPauseListening(t *testing.T) {
+	for _, said := range []string{
+		"you can turn off now",
+		"You can stop now.",
+		"that's enough, stop listening",
+		"go to sleep",
+		"okay, stand down",
+		"take a break",
+	} {
+		target, mustConfirm, ok := matchModePhrase(said)
+		if !ok || target != modeStandby {
+			t.Errorf("%q should pause listening, got target=%v ok=%v", said, target, ok)
+		}
+		if mustConfirm {
+			t.Errorf("%q is explicit enough to act on without asking", said)
+		}
+	}
+}
+
+// Conversational closers mean standby, but they are also how an ordinary
+// request ends ("...and then deploy it, that's all"). Suffix matching cannot
+// tell those apart, so these always ask first.
+func TestSoftClosersAlwaysAskFirst(t *testing.T) {
+	for _, said := range []string{
+		"that's all",
+		"That will be all.",
+		"we're done",
+		"nothing else",
+	} {
+		target, mustConfirm, ok := matchModePhrase(said)
+		if !ok || target != modeStandby {
+			t.Errorf("%q should mean standby, got target=%v ok=%v", said, target, ok)
+		}
+		if !mustConfirm {
+			t.Errorf("%q must be confirmed before it ends a conversation", said)
+		}
+	}
+}
+
+// A question ABOUT the feature is not a request to use it: the phrase lands
+// mid-sentence there, which is why this is suffix- not substring-matched.
+// Asserted against ALL THREE lists, because the failure mode of splitting a
+// list is a phrase escaping into one of them.
+func TestModePhrasesIgnoreOrdinarySpeech(t *testing.T) {
 	for _, said := range []string{
 		"how do I switch to manual mode again",
 		"what does manual mode do",
 		"remind me about manual mode later please",
+		"tell me when you are done processing",
 		"run the tests",
 		"",
 	} {
-		if isVoiceKillPhrase(said) {
-			t.Errorf("%q must NOT end live mode", said)
+		if target, _, ok := matchModePhrase(said); ok {
+			t.Errorf("%q must not change the mode, got %v", said, target)
+		}
+	}
+}
+
+// The failure mode of three lists is a phrase in two of them, where the
+// longest-match rule would decide silently. Free to rule out.
+func TestNoPhraseAppearsInTwoLists(t *testing.T) {
+	seen := map[string]string{}
+	for _, set := range []struct {
+		name    string
+		phrases []string
+	}{
+		{"manual", manualPhrases},
+		{"standby", standbyPhrases},
+		{"soft", softStandbyPhrases},
+	} {
+		for _, p := range set.phrases {
+			if prev, dup := seen[p]; dup {
+				t.Errorf("%q is in both the %s and %s lists", p, prev, set.name)
+				continue
+			}
+			seen[p] = set.name
 		}
 	}
 }

@@ -15,7 +15,7 @@ import (
 // `-exp` suffix is DeepSeek's, not a Helix opinion: it is the name they ship the
 // multimodal API under, and `/model use deepseek-v4-flash` remains one command
 // away for anyone who wants the text-only build.
-const DefaultModel = "deepseek-v4-flash-vision-exp"
+const DefaultModel = ""
 
 // New creates a DeepSeek provider.
 func New(apiKey string, client *providers.HTTPClient) *openaicompatible.Provider {

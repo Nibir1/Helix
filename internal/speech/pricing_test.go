@@ -54,17 +54,31 @@ func TestMergedCatalogUserOverride(t *testing.T) {
 		t.Fatalf("merge: %v", err)
 	}
 
-	foundOverride, foundNew := false, false
+	// Matched on provider+kind+MODEL, which is the key the merge actually uses.
+	// This used to match on provider+kind alone and passed only because openai
+	// had exactly one STT row; a second one (gpt-live-transcribe) made it
+	// assert the override against a row the override never named.
+	foundOverride, foundNew, untouched := false, false, false
 	for _, e := range merged {
 		switch {
-		case e.Provider == "openai" && e.Kind == "stt":
+		case e.Provider == "openai" && e.Kind == "stt" && e.Model == "whisper-1":
 			if e.PricePerUnit != 0.002 {
 				t.Fatalf("override not applied: %+v", e)
 			}
 			foundOverride = true
+		case e.Provider == "openai" && e.Kind == "stt" && e.Model == "gpt-live-transcribe":
+			// A sibling row of the same provider and kind must survive
+			// untouched, or one override would silently reprice the family.
+			if e.PricePerUnit != 0.017 {
+				t.Errorf("an unrelated row was repriced: %+v", e)
+			}
+			untouched = true
 		case e.Provider == "vulcan-telepathy":
 			foundNew = true
 		}
+	}
+	if !untouched {
+		t.Error("the embedded gpt-live-transcribe row disappeared from the merge")
 	}
 	if !foundOverride || !foundNew {
 		t.Fatalf("merge incomplete: override=%v new=%v", foundOverride, foundNew)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"helix/internal/ai"
@@ -15,13 +16,27 @@ import (
 
 // Config holds runtime configuration and paths for Helix.
 type Config struct {
-	ModelDir              string                 `json:"model_dir"`
-	ModelFile             string                 `json:"model_file"`
-	HistoryPath           string                 `json:"history_path"`
-	ConfigPath            string                 `json:"config_path"`
-	OpenAIKeyPath         string                 `json:"openai_key_path"`
-	Provider              string                 `json:"provider"`
-	ProviderModel         string                 `json:"provider_model"`
+	ModelDir      string `json:"model_dir"`
+	ModelFile     string `json:"model_file"`
+	HistoryPath   string `json:"history_path"`
+	ConfigPath    string `json:"config_path"`
+	OpenAIKeyPath string `json:"openai_key_path"`
+	Provider      string `json:"provider"`
+	ProviderModel string `json:"provider_model"`
+
+	// ProviderModels is the model chosen PER PROVIDER.
+	//
+	// ProviderModel alone could not express it, and the gap was a real bug:
+	// ai.UseProvider only filled the model when it was empty, so switching
+	// provider carried the previous provider's model across. The interactive
+	// path masked it (the wizard always picks a model next); the daemon, which
+	// calls UseProvider and then runs turns, did not.
+	//
+	// It also means switching away and back does not lose the choice, which
+	// matters more now that there is no compiled-in default to fall back to.
+	// ProviderModel stays as the active-provider mirror so nothing that reads
+	// it has to change.
+	ProviderModels        map[string]string      `json:"provider_models,omitempty"`
 	CustomProviderBaseURL string                 `json:"custom_provider_base_url"`
 	UserPrefs             UserPrefs              `json:"user_preferences"`
 	Speech                SpeechConfig           `json:"speech"`
@@ -75,6 +90,13 @@ type SpeechSTTConfig struct {
 	Endpoints map[string]string `json:"endpoints,omitempty"`
 	// StreamChunkMs is the streaming-STT capture chunk length (0 → 300ms).
 	StreamChunkMs int `json:"stream_chunk_ms"`
+
+	// Realtime tunes a WebSocket transcription session. Its fields exist
+	// because part of the OpenAI realtime wire format is not publicly
+	// documented and had to be inferred — `session` is sent verbatim, so the
+	// real specification can be pasted in here instead of requiring a new
+	// build. See speech.RealtimeConfig.
+	Realtime *speech.RealtimeConfig `json:"realtime,omitempty"`
 }
 
 // SpeechTTSConfig selects the text-to-speech provider chain.
@@ -163,6 +185,41 @@ type SpeechWakeConfig struct {
 	// not turn the wake word on. Unsupported on Windows — see
 	// shell.KeyWaitSupported.
 	AlwaysListen *bool `json:"always_listen,omitempty"`
+
+	// AwakeIdleStandDownS bounds how long a conversation may sit with nobody
+	// speaking before it falls back to wake-only listening.
+	//
+	// AWAKE transcribes every turn with no re-waking, which is a strictly
+	// larger exposure than an armed prompt (threat V2b): an open microphone
+	// sending audio to a provider, billed per minute, for as long as the
+	// session lasts. The stand-down is the control on that, and it is the only
+	// thing in AWAKE that ends the state without being asked.
+	//
+	// nil → 600s. An explicit 0 means "never stand down" — a real wish, which
+	// is why this is a pointer and not an int whose zero value would silently
+	// mean the same thing as an absent key.
+	AwakeIdleStandDownS *int `json:"awake_idle_stand_down_s,omitempty"`
+
+	// RearmDelayMs suppresses wake events for a moment after entering standby.
+	//
+	// Load-bearing on the energy engine, which wakes on speech ONSET and not on
+	// a phrase: without it the tail of the sentence that asked for standby is
+	// itself a wake event, and the user is handed straight back into a
+	// conversation they just left. That was the reported bug, and the state
+	// machine alone does not fix it.
+	//
+	// nil → 3000ms. An explicit 0 restores the old instant re-arm.
+	RearmDelayMs *int `json:"rearm_delay_ms,omitempty"`
+
+	// AwakeKeyboard keeps the keyboard live during a voice capture, so a line
+	// can be typed mid-conversation and pre-empts the turn.
+	//
+	// nil → true. false → AWAKE takes voice-only turns: no cbreak, no key
+	// watcher, the terminal untouched. That is the escape hatch if the terminal
+	// handling misbehaves on a host, and it is why this exists as a switch
+	// rather than as a build tag. Unsupported on Windows regardless — see
+	// shell.KeyWaitSupported.
+	AwakeKeyboard *bool `json:"awake_keyboard,omitempty"`
 }
 
 // Listening reports whether wake listening is on. nil → the default, true.
@@ -176,6 +233,46 @@ func (w SpeechWakeConfig) Listening() bool { return w.Enabled == nil || *w.Enabl
 func (w SpeechWakeConfig) PromptArmed() bool {
 	return w.Listening() && (w.AlwaysListen == nil || *w.AlwaysListen)
 }
+
+// Defaults for the three tunables above, named so /config and /doctor can
+// render them rather than re-deriving the numbers.
+const (
+	// DefaultAwakeIdleStandDown: long enough that a pause in a working
+	// conversation never trips it, short enough that a forgotten session does
+	// not hold the microphone open for an afternoon.
+	DefaultAwakeIdleStandDown = 10 * time.Minute
+
+	// DefaultRearmDelay: measured against the thing it has to outlast — the
+	// tail of a spoken stop phrase plus its reverberation.
+	DefaultRearmDelay = 3 * time.Second
+)
+
+// AwakeIdleStandDown reports the inactivity window. nil → the default; an
+// explicit 0 → never.
+func (w SpeechWakeConfig) AwakeIdleStandDown() time.Duration {
+	if w.AwakeIdleStandDownS == nil {
+		return DefaultAwakeIdleStandDown
+	}
+	return time.Duration(*w.AwakeIdleStandDownS) * time.Second
+}
+
+// RearmDelay reports the post-standby grace window. nil → the default; an
+// explicit 0 → none.
+func (w SpeechWakeConfig) RearmDelay() time.Duration {
+	if w.RearmDelayMs == nil {
+		return DefaultRearmDelay
+	}
+	return time.Duration(*w.RearmDelayMs) * time.Millisecond
+}
+
+// AwakeKeyboardLive reports whether the keyboard stays live during a capture.
+// nil → the default, true.
+func (w SpeechWakeConfig) AwakeKeyboardLive() bool {
+	return w.AwakeKeyboard == nil || *w.AwakeKeyboard
+}
+
+// IntPtr returns a pointer to v, for writing these settings.
+func IntPtr(v int) *int { return &v }
 
 // BoolPtr returns a pointer to v, for writing these settings.
 func BoolPtr(v bool) *bool { return &v }
@@ -206,6 +303,7 @@ func (sc SpeechConfig) Runtime() speech.Config {
 			Endpoints:     sc.STT.Endpoints,
 			Fallbacks:     sc.STT.Fallbacks,
 			StreamChunkMs: sc.STT.StreamChunkMs,
+			Realtime:      sc.STT.Realtime,
 		},
 		TTS: speech.TTSConfig{
 			Provider:    sc.TTS.Provider,
@@ -507,6 +605,31 @@ func (cfg *Config) LoadPreferences() error {
 	}
 	if prefs.ProviderModel != "" {
 		cfg.ProviderModel = prefs.ProviderModel
+	}
+	// Merged key by key, not assigned wholesale: this is the shape the
+	// wake-word and Companion sections already use, because a partial section
+	// in the file must not erase the rest of the map.
+	if len(prefs.ProviderModels) > 0 {
+		if cfg.ProviderModels == nil {
+			cfg.ProviderModels = map[string]string{}
+		}
+		for provider, model := range prefs.ProviderModels {
+			if strings.TrimSpace(model) != "" {
+				cfg.ProviderModels[strings.ToLower(strings.TrimSpace(provider))] = model
+			}
+		}
+	}
+	// Seeded from the legacy pair when the map has nothing for it, so an
+	// existing config keeps the model it was using instead of resolving one
+	// from scratch on the first run after an upgrade.
+	if cfg.Provider != "" && cfg.ProviderModel != "" {
+		if cfg.ProviderModels == nil {
+			cfg.ProviderModels = map[string]string{}
+		}
+		key := strings.ToLower(strings.TrimSpace(cfg.Provider))
+		if _, ok := cfg.ProviderModels[key]; !ok {
+			cfg.ProviderModels[key] = cfg.ProviderModel
+		}
 	}
 	if prefs.CustomProviderBaseURL != "" {
 		cfg.CustomProviderBaseURL = prefs.CustomProviderBaseURL

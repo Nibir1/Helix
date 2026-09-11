@@ -98,38 +98,15 @@ func handleBlackBoxCommand(c cmdArgs) {
 // been switched on. The camera is best-effort and reports its own reason for
 // staying dark — a live mode that silently has no eyes is worse than one that
 // says why.
+// The camera, the companion, the preflight and the banner all moved into
+// setListenMode, so that the conversation reached by typing and the one reached
+// by speaking are the same conversation. What is left here is the typed door.
 func blackBoxOn() {
-	if voiceModeActive {
+	if isAwake() {
 		fmt.Println("Already live. /blackbox status shows what is on.")
 		return
 	}
-	if err := voiceEntryPreflight(); err != nil {
-		uiFail("cannot go live", err.Error())
-		return
-	}
-
-	// Eyes follow the mode. This inverts the old opt-in on purpose — live mode
-	// is a camera consent moment by definition — and the frame invariants are
-	// unchanged: one frame at a time, held in memory, never written to disk.
-	//
-	// Decided BEFORE the banner, because the banner reports it. Enabling the
-	// camera afterwards printed "SIGHT • off" and then "Eyes ENABLED" two lines
-	// later, which is the banner lying about the state it exists to show.
-	eyesWhy := ""
-	if ready, why := visionReady(); ready {
-		cfg.Vision.Enabled = true
-		_ = cfg.SavePreferences()
-		journalVisionEvent("enabled", "", 0)
-	} else {
-		eyesWhy = why
-	}
-
-	enterVoiceMode(true)
-	if eyesWhy != "" {
-		fmt.Println(shell.Hint("camera stays off: " + eyesWhy))
-	}
-
-	startCompanion()
+	setListenMode(modeAwake, causeTyped)
 }
 
 // blackBoxOff returns to the keyboard and closes both sensors.
@@ -137,18 +114,20 @@ func blackBoxOn() {
 // Leaving the camera on after leaving the mode would be exactly the kind of
 // privacy surprise the opt-in exists to prevent, so one command closes what one
 // command opened.
+// blackBoxOff ends the conversation and closes the camera, leaving wake-only
+// listening. It is the lighter of the two exits: the microphone stays open for
+// a wake word. `/blackbox wake off` is the one that shuts it.
 func blackBoxOff() {
-	if !voiceModeActive && !cfg.Vision.Enabled {
-		fmt.Println("Already in keyboard mode.")
+	if !isAwake() && !cfg.Vision.Enabled {
+		fmt.Printf("Already in %s mode. /blackbox status shows what is on.\n", currentMode())
 		return
 	}
-	stopCompanion()
-	if cfg.Vision.Enabled {
+	if !isAwake() && cfg.Vision.Enabled {
+		// Camera on without a conversation: close it and say nothing else.
 		setVisionEnabled(false)
+		return
 	}
-	if voiceModeActive {
-		exitVoiceMode(true)
-	}
+	setListenMode(modeStandby, causeTyped)
 }
 
 // blackBoxEyes toggles the camera WITHOUT touching the conversation mode, so
@@ -177,9 +156,20 @@ func blackBoxEyes(c cmdArgs) {
 // blackBoxStatus prints the merged report: one place that answers "what can
 // Helix do right now", followed by the full speech-chain detail.
 func blackBoxStatus() {
-	mode := shell.Badge(shell.StateIdle, "standby") + shell.Muted("  keyboard input")
-	if voiceModeActive {
-		mode = shell.Badge(shell.StateGood, "LIVE") + shell.Muted("  listening")
+	// Three states, three badges. This line used to print "standby" to mean
+	// "keyboard mode", which is now the name of a DIFFERENT state — one whose
+	// microphone is open. Naming them apart is the whole point of the panel.
+	var mode string
+	switch currentMode() {
+	case modeAwake:
+		mode = shell.Badge(shell.StateGood, "AWAKE") +
+			shell.Muted("  conversation  ·  type or talk")
+	case modeStandby:
+		mode = shell.Badge(shell.StateIdle, "standby") +
+			shell.Muted("  listening for you  ·  type or talk")
+	default:
+		mode = shell.Badge(shell.StateWarn, "manual") +
+			shell.Muted("  microphone closed  ·  /blackbox wake on")
 	}
 
 	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "WAKE", "INITIATIVE", "CONTEXT",

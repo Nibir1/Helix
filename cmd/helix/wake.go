@@ -151,7 +151,8 @@ func wakeBannerLines(engine, phrase string) []string {
 			"Once live, it never ends itself: say \"manual mode\" or type /blackbox off to come back.")
 	}
 	return append(lines,
-		"The wake word gates turns AFTER this one — a voice turn already in progress needs no wake.",
+		"Say it once and I stay awake — every turn, no waking in between. "+
+			"\"you can turn off now\" pauses me; \"manual mode\" closes the microphone.",
 		// "run: helix daemon" without saying WHERE sent a user to type it at
 		// this prompt, where it is not a slash command: it reached the planner,
 		// which investigated with `ps aux | grep helix` instead of starting

@@ -27,7 +27,6 @@ import (
 	"helix/internal/ai"
 	"helix/internal/session"
 	"helix/internal/shell"
-	"helix/internal/speech"
 )
 
 // rebootRequested is read by the REPL loop, which breaks out of it the same way
@@ -105,7 +104,7 @@ func handleRebootRequest(c cmdArgs, spoken bool) {
 	printRebootNotice(rec)
 
 	// Say it before the microphone goes away with the process.
-	if voiceModeActive {
+	if isAwake() {
 		// speakDirect rather than the /tts-gated path: this is voice-channel
 		// bookkeeping, not a reply, and someone who just spoke to a terminal
 		// they may not be looking at should hear that it is going away.
@@ -133,8 +132,13 @@ func captureContinuity(reason string, spoken bool) session.Continuity {
 		Provider: ai.ActiveProviderName(),
 		Model:    ai.ActiveModel(),
 	}
-	if voiceModeActive {
+	// Three states now, and the third has to survive a restart or a reboot
+	// from standby would come back either deaf or in a conversation.
+	switch currentMode() {
+	case modeAwake:
 		rec.Mode = session.ModeVoice
+	case modeStandby:
+		rec.Mode = session.ModeStandby
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		rec.Cwd = cwd
@@ -365,24 +369,18 @@ func restartTurnChannel(rec session.Continuity) string {
 func applyContinuityMode(mode string) {
 	switch mode {
 	case session.ModeVoice:
-		if voiceModeActive {
-			return
+		// The preflight lives inside setListenMode now, so the rule that
+		// refuses to strand someone without a microphone has no exception for
+		// a mode that arrived from a file.
+		if !setListenMode(modeAwake, causeRestore) {
+			fmt.Println(shell.Step(shell.StateWarn, "standby",
+				"you rebooted from a conversation, but the microphone is not available"))
+			setListenMode(modeStandby, causeRestore)
 		}
-		// Same preflight as /blackbox on: refusing to strand someone in voice
-		// mode without a microphone is a rule that must not have an exception
-		// just because the mode arrived from a file.
-		if _, err := speech.DetectRecorder(); err != nil {
-			fmt.Println(shell.Step(shell.StateWarn, "manual mode",
-				"you rebooted from voice mode, but no recorder is available: "+err.Error()))
-			return
-		}
-		enterVoiceMode(true)
-		startCompanion()
+	case session.ModeStandby:
+		setListenMode(modeStandby, causeRestore)
 	case session.ModeManual:
-		if !voiceModeActive {
-			return
-		}
-		exitVoiceMode(true)
+		setListenMode(modeManual, causeRestore)
 	}
 }
 
@@ -505,11 +503,11 @@ func maybeReboot() {
 // true when someone asked to leave live mode and a lie here — the shell is
 // restarting INTO live mode, and the panel above already said so.
 func quiesceForRestart() {
-	stopCompanion()
-	speech.StopSpeaking()
-	speech.EnableConversationContext(0, 0)
-	speech.EnableBargeIn(false)
-	voiceModeActive = false
+	// causeQuiesce runs every teardown effect and announces nothing — the
+	// "keyboard · /blackbox on goes live again" line is a lie when the process
+	// is about to be replaced, and it does not persist, because the mode being
+	// restarted INTO is already recorded in the continuity file.
+	setListenMode(modeManual, causeQuiesce)
 }
 
 // asExitError is errors.As, spelled out so reboot_exec.go reads without an

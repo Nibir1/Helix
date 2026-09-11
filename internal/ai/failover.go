@@ -384,12 +384,37 @@ func degradeLocked(notice string) {
 		return
 	}
 
+	// The local brain needs a MODEL, and this is where emptying the hardcoded
+	// defaults bites hardest: LLMDefaults() leaves Fallback.Model blank, so
+	// this path used to be carried entirely by ollama's compiled-in
+	// "gemma4:e2b". With no constant to fall back on, a cloud blip would fail
+	// over to a local provider with no model and stack a second, stranger
+	// failure on top of the first.
+	//
+	// So resolve it the same way everything else does, and if that yields
+	// nothing, DO NOT DEGRADE. Refusing is the established behaviour of this
+	// function when the switch cannot actually be made — the health check
+	// above already returns rather than announce a move that did not happen —
+	// and a local brain with no model is exactly that case.
+	target := fallbackCfg.Model
+	if target == "" {
+		target = PreferredModel(localProvider.Name())
+	}
+	if target == "" {
+		// Ask the provider we are about to switch TO, rather than the registry.
+		// It is the authority on its own default, it is already in hand, and
+		// for llama.cpp it is the only answer there is — "local-gguf" is a
+		// label for whatever GGUF was loaded by hand, not a routing key.
+		target = localProvider.DefaultModel()
+	}
+	if target == "" {
+		consecutiveFailures = 0
+		return
+	}
+
 	savedProvider, savedModel = activeProvider, activeModel
 	activeProvider = localProvider
-	activeModel = fallbackCfg.Model
-	if activeModel == "" {
-		activeModel = localProvider.DefaultModel()
-	}
+	activeModel = target
 	degraded = true
 	consecutiveFailures = 0
 	nextProbe = now().Add(retryAfterLocked())

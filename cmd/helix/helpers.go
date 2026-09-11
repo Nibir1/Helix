@@ -367,57 +367,143 @@ func selectRemoteModel(provider string) error {
 		defaultModel = models[0].ID
 	}
 
-	printModelChoices(models, defaultModel)
-	choice := strings.TrimSpace(commands.AskLine(shell.Prompt("model id", defaultModel)))
+	shown := printModelChoices(provider, models, defaultModel)
+	typed := commands.AskLine(shell.Prompt("number or model id", defaultModel))
+	choice, verbatim := resolveModelChoice(typed, shown, models, defaultModel)
 	if choice == "" {
-		choice = defaultModel
+		return fmt.Errorf("no model selected")
+	}
+	if verbatim {
+		noteVerbatimModel(provider, choice)
 	}
 
 	ai.UseModel(choice)
 	return nil
 }
 
-// printModelChoices renders the provider's catalogue.
+// printModelChoices renders the provider's catalogue, best first.
 //
-// The old version printed 25 bare IDs and "... and 101 more", which is the
-// worst of both: too long to scan and too short to be complete. Models are
-// grouped by family and capability-tagged instead, so the list answers the
-// question actually being asked — which of these can see, which is the default,
-// and is the one I want even here.
-func printModelChoices(models []providers.ModelInfo, defaultModel string) {
-	const shown = 24
+// TWO corrections over what this used to do. It printed the first 24 models in
+// whatever order the API returned them — which, on OpenAI, means embedding and
+// speech endpoints crowding out the models that can hold a conversation — and
+// it offered no way to answer except by typing a full model ID. It is now
+// ranked (vision and fast first, non-chat entries last) and numbered, so the
+// answer can be "1".
+//
+// shell.Table rather than shell.Menu, for a layout reason that matters on a
+// narrow terminal: Table derives its widths from the content and shaves the
+// WIDEST column first, and the model ID is always widest — so the capability
+// column survives. Menu never pads its Note field, so a tag after it can never
+// form a column at all.
+func printModelChoices(provider string, models []providers.ModelInfo, preferred string) []providers.ModelInfo {
+	const shown = 30
+	ranked := providers.RankModels(provider, models)
+
 	fmt.Println(shell.PanelTitle("models"))
 
 	rows := make([][]string, 0, shown)
-	for i, m := range models {
-		if i >= shown {
-			break
-		}
+	visible := ranked
+	if len(visible) > shown {
+		visible = visible[:shown]
+	}
+	nonChat := 0
+	for i, m := range visible {
 		mark := ""
-		if m.ID == defaultModel {
-			mark = shell.Badge(shell.StateGood, "default")
+		if m.ID == preferred {
+			mark = shell.Badge(shell.StateGood, "current")
 		}
-		caps := []string{}
-		if providers.SupportsVision("", m.ID) {
-			caps = append(caps, "sees")
-		}
-		if providers.SupportsToolUse("", m.ID) {
-			caps = append(caps, "tools")
+		if !providers.IsChatModel(m.ID) {
+			nonChat++
 		}
 		rows = append(rows, []string{
-			shell.Value(m.ID), shell.Muted(strings.Join(caps, " · ")), mark,
+			shell.Muted(fmt.Sprintf("%d", i+1)),
+			shell.Value(m.ID),
+			shell.Muted(strings.Join(providers.ModelCapabilityTags(provider, m.ID), " · ")),
+			mark,
 		})
 	}
-	for _, l := range shell.Table([]string{"model", "can", ""}, rows) {
+	for _, l := range shell.Table([]string{"#", "model", "can", ""}, rows) {
 		fmt.Println(l)
 	}
-	if len(models) > shown {
-		fmt.Println(shell.PanelGap())
-		fmt.Println(shell.PanelLine(shell.Muted(fmt.Sprintf(
-			"%d more not shown — any id the provider accepts works here",
-			len(models)-shown))))
+
+	fmt.Println(shell.PanelGap())
+	hint := "type a number, or any exact id the provider accepts"
+	if len(ranked) > shown {
+		hint = fmt.Sprintf("%d more not shown  ·  %s", len(ranked)-shown, hint)
 	}
+	fmt.Println(shell.PanelLine(shell.Muted(hint)))
 	fmt.Println(shell.PanelEnd())
+	return visible
+}
+
+// resolveModelChoice turns what the user typed into a model ID.
+//
+// Numbers and free text coexist, and the guard that lets them is rule 2's
+// "...and no model is literally named that": a provider is free to ship a
+// model called "3", and reading that as row three would pick the wrong one
+// silently.
+//
+// Anything unrecognised is ACCEPTED VERBATIM rather than refused. That is a
+// deliberate choice by the owner — "let them use it" — and it is also the only
+// way a model absent from the list is reachable at all: gpt-live-1 is billed
+// per minute on an endpoint whose /models listing may not include it, and a
+// picker that only accepted what it could see would make it unreachable
+// without a code change.
+//
+// Args:
+//   - in: what the user typed.
+//   - shown: the rows that were numbered on screen.
+//   - all: every model the provider listed, including rows below the cap.
+//   - preferred: the current choice, used for an empty answer.
+//
+// Returns: the chosen ID, and whether it was accepted without being recognised.
+func resolveModelChoice(in string, shown, all []providers.ModelInfo, preferred string) (string, bool) {
+	choice := strings.TrimSpace(in)
+	if choice == "" {
+		if preferred != "" {
+			return preferred, false
+		}
+		if len(shown) > 0 {
+			return shown[0].ID, false
+		}
+		return "", false
+	}
+
+	named := func(id string) (string, bool) {
+		for _, m := range all {
+			if m.ID == id {
+				return m.ID, true
+			}
+		}
+		for _, m := range all {
+			if strings.EqualFold(m.ID, id) {
+				return m.ID, true // the provider's own casing wins
+			}
+		}
+		return "", false
+	}
+
+	// A row number, unless a model is actually called that.
+	if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= len(shown) {
+		if _, isModelName := named(choice); !isModelName {
+			return shown[n-1].ID, false
+		}
+	}
+	if id, ok := named(choice); ok {
+		return id, false
+	}
+	return choice, true
+}
+
+// noteVerbatimModel says that an unrecognised ID was taken at face value.
+//
+// Said once, plainly, because the failure it precedes is otherwise mystifying:
+// the shell accepts the model, saves it, and then every turn returns a 404
+// from the provider.
+func noteVerbatimModel(provider, id string) {
+	uiWarn("not in "+provider+"'s list", id)
+	uiDetail("accepted as typed — it will fail on the first turn if the provider " +
+		"does not know it")
 }
 
 // selectOllamaModel lets the user choose any installed or pullable Ollama model.
@@ -454,15 +540,13 @@ func selectOllamaModel() error {
 			if model.ID == defaultTag {
 				mark = shell.Badge(shell.StateGood, "recommended here")
 			}
-			caps := []string{}
-			if providers.SupportsVision("ollama", model.ID) {
-				caps = append(caps, "sees")
-			}
-			if providers.SupportsToolUse("ollama", model.ID) {
-				caps = append(caps, "tools")
-			}
+			// One source for the tags. This had its own two-capability copy,
+			// which is how a `fast` tier could appear in the remote picker and
+			// not here for the same model.
 			rows = append(rows, []string{
-				shell.Value(model.ID), shell.Muted(strings.Join(caps, " · ")), mark,
+				shell.Value(model.ID),
+				shell.Muted(strings.Join(providers.ModelCapabilityTags("ollama", model.ID), " · ")),
+				mark,
 			})
 		}
 		for _, l := range shell.Table([]string{"installed", "can", ""}, rows) {
@@ -1228,4 +1312,26 @@ func warnIfOllamaCannotSeeItsModels(onDisk []ollama.LocalModel) {
 	fmt.Println(shell.StepCommand("lsof -nP -iTCP:11434 -sTCP:LISTEN"))
 	fmt.Println(shell.StepCommand("ps eww -p <pid> | tr ' ' '\\n' | grep -E 'HOME=|OLLAMA_MODELS='"))
 	uiDetail("Restart it from your own shell to serve ~/.ollama again.")
+}
+
+// rememberProviderModel records a model choice for a provider and keeps the
+// legacy single-value mirror in step.
+//
+// Two places to write because there are two readers: cfg.ProviderModel is what
+// startup and the daemon still consult for the ACTIVE provider, and
+// cfg.ProviderModels is what makes switching provider and back remember the
+// choice instead of resolving a new one. Writing only the first is what let a
+// provider switch carry the previous provider's model.
+func rememberProviderModel(provider, model string) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	model = strings.TrimSpace(model)
+	cfg.ProviderModel = model
+	if provider == "" || model == "" {
+		return
+	}
+	if cfg.ProviderModels == nil {
+		cfg.ProviderModels = map[string]string{}
+	}
+	cfg.ProviderModels[provider] = model
+	ai.SetUserModelChoices(cfg.ProviderModels)
 }

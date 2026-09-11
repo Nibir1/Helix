@@ -25,7 +25,7 @@ const (
 	// before they have decided anything, and all three share the 1.05M context
 	// window and the vision the default exists to guarantee. Anyone who wants
 	// the frontier tier is one `/model use gpt-5.6-sol` away.
-	defaultModel = "gpt-5.6-luna"
+	defaultModel = ""
 )
 
 // Provider implements OpenAI.

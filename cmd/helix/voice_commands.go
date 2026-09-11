@@ -749,7 +749,7 @@ func speakNotice(text string) {
 	if text == "" {
 		return
 	}
-	if !voiceModeActive {
+	if !isAwake() {
 		return
 	}
 	speakDirect(text)

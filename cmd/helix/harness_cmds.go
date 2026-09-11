@@ -168,7 +168,12 @@ func handlePermissionsCommand(c cmdArgs) {
 	// a transcript arrives with user authority and no proof of who spoke, and the
 	// posture decides how much runs WITHOUT being asked. A misheard phrase must
 	// not be able to widen that.
-	if voiceModeActive {
+	// turnIsSpoken(), not the mode. The mode was a PROXY for "this line arrived
+	// by voice" and it was already the wrong one: the typed line Helix offers
+	// after a microphone failure was refused too. With the keyboard live during
+	// a conversation it would be wrong on every typed line. InputEvent.Channel
+	// has carried the truth all along.
+	if turnIsSpoken() {
 		uiWarn("typed only", "changing the approval posture by voice is refused")
 		fmt.Println(shell.KV("MODE", shell.Value(string(current))+
 			shell.Muted("  "+current.Describe()), shell.KVWidth("MODE")))
@@ -862,7 +867,7 @@ func configKeys() []configKey {
 				// Takes effect now AND persists: a setting that needed a
 				// restart to matter would be a worse answer than the config
 				// file it replaces.
-				speech.EnableBargeIn(on && voiceModeActive)
+				speech.EnableBargeIn(on && isAwake())
 				return cfg.SavePreferences()
 			},
 		},
@@ -899,7 +904,7 @@ func configKeys() []configKey {
 					return fmt.Errorf("want a whole number between 0 and 12")
 				}
 				cfg.Speech.TTS.ContextTurns = n
-				if voiceModeActive {
+				if isAwake() {
 					speech.EnableConversationContext(n, cfg.Speech.TTS.ContextMaxBytes)
 				}
 				return cfg.SavePreferences()

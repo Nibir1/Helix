@@ -109,6 +109,19 @@ func ttsEndpointFor(cfg Config, provider string) string {
 // registerBuiltins instantiates every builtin adapter. Model/voice overrides
 // belong to the ACTIVE provider; endpoints are resolved per provider so a local
 // sidecar keeps its port in either role.
+// sttRealtime returns the realtime tuning for a provider, but only when it is
+// the ACTIVE one.
+//
+// The same discipline sttModel/ttsVoice already apply: an override belongs to
+// the provider the user selected, not to whichever copy of that adapter
+// happens to be registered as a fallback.
+func sttRealtime(cfg Config, provider string) *RealtimeConfig {
+	if cfg.STT.Provider == provider {
+		return cfg.STT.Realtime
+	}
+	return nil
+}
+
 func registerBuiltins(reg *Registry, cfg Config) {
 	// --- STT ---
 	sttModel := func(provider string) string {
@@ -117,7 +130,17 @@ func registerBuiltins(reg *Registry, cfg Config) {
 		}
 		return ""
 	}
-	reg.RegisterSTT(NewOpenAISTT(sttModel("openai"), sttEndpointFor(cfg, "openai")))
+	// The OpenAI STT slot is one provider with two transports, chosen by the
+	// model. Registering the realtime wrapper unconditionally would make every
+	// whisper-1 turn attempt a WebSocket dial and fall back — a wasted round
+	// trip per turn — and would make the StreamingSTTProvider type assertion
+	// in Registry.StreamingSTT() a lie for a provider that cannot stream.
+	if model := sttModel("openai"); IsRealtimeSTTModel(model) {
+		reg.RegisterSTT(NewOpenAIRealtimeSTT(model, sttEndpointFor(cfg, "openai"),
+			sttRealtime(cfg, "openai")))
+	} else {
+		reg.RegisterSTT(NewOpenAISTT(model, sttEndpointFor(cfg, "openai")))
+	}
 	reg.RegisterSTT(NewGroqSTT(sttModel("groq"), sttEndpointFor(cfg, "groq")))
 	reg.RegisterSTT(NewDeepgramStreamingSTT(sttModel("deepgram"), sttEndpointFor(cfg, "deepgram")))
 	reg.RegisterSTT(NewWhisperLocalSTT(sttModel("whisper-local"), sttEndpointFor(cfg, "whisper-local")))

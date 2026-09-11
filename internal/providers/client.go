@@ -52,6 +52,47 @@ func IsNotFound(err error) bool {
 	return ok && code == http.StatusNotFound
 }
 
+// modelNotFoundMarkers are the ways vendors say "that model does not exist".
+//
+// Collected rather than guessed at, because there is no standard: OpenAI
+// returns 404 with an error code of model_not_found, DeepSeek and the
+// Gemini-compatible endpoints return 400 with "Model Not Exist", and Anthropic
+// returns 404 with not_found_error. A single status check would miss two of
+// the three.
+var modelNotFoundMarkers = []string{
+	"model_not_found", "model not found", "model not exist",
+	"does not exist", "unknown model", "invalid model",
+	"no such model", "model_not_exist",
+}
+
+// IsModelNotFound reports whether err says the SELECTED MODEL is gone, as
+// opposed to the endpoint or the key being wrong.
+//
+// This distinction is the whole point. A vendor retiring a model produced an
+// error indistinguishable from a bad URL: `HTTP 404: ...`. The failover
+// breaker deliberately ignores 404 (a misconfiguration must be seen, not
+// hidden behind a local model), every HealthCheck is a ListModels call that
+// says nothing about the selected model, and nothing rewrote the saved ID — so
+// a retired model meant every turn failed forever while /provider-status
+// reported ok.
+//
+// A 404 alone is accepted as model-not-found only when the snippet does not
+// read like a routing problem, because on these APIs the model is the only
+// path component that varies.
+func IsModelNotFound(err error) bool {
+	var se *StatusError
+	if !errors.As(err, &se) {
+		return false
+	}
+	snippet := strings.ToLower(se.Snippet)
+	for _, m := range modelNotFoundMarkers {
+		if strings.Contains(snippet, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // HTTPClient is a shared client for provider HTTP calls.
 type HTTPClient struct {
 	client       *http.Client

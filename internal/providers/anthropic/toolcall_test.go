@@ -56,6 +56,9 @@ func TestAnthropicToolWireShape(t *testing.T) {
 	defer cancel()
 
 	_, _ = providers.CollectChatResult(ctx, p, providers.ChatRequest{
+		// Named explicitly: there is no compiled-in default any more,
+		// and Chat now refuses rather than sending "model":"".
+		Model:      "claude-opus-5",
 		Messages:   []providers.ChatMessage{{Role: "user", Content: "plan this"}},
 		Tools:      []providers.ToolDefinition{planTool()},
 		ToolChoice: providers.ToolChoiceRequired,
@@ -95,6 +98,9 @@ func TestAnthropicToolsAbsentFromOrdinaryChat(t *testing.T) {
 	defer cancel()
 
 	out, err := providers.CollectChat(ctx, p, providers.ChatRequest{
+		// Named explicitly: there is no compiled-in default any more,
+		// and Chat now refuses rather than sending "model":"".
+		Model:    "claude-opus-5",
 		Messages: []providers.ChatMessage{{Role: "user", Content: "hello"}},
 	})
 	if err != nil {
@@ -126,6 +132,9 @@ func TestAnthropicStreamedToolUseReassembles(t *testing.T) {
 	defer cancel()
 
 	res, err := providers.CollectChatResult(ctx, p, providers.ChatRequest{
+		// Named explicitly: there is no compiled-in default any more,
+		// and Chat now refuses rather than sending "model":"".
+		Model:    "claude-opus-5",
 		Messages: []providers.ChatMessage{{Role: "user", Content: "plan"}},
 		Tools:    []providers.ToolDefinition{planTool()},
 	})
@@ -163,6 +172,9 @@ func TestAnthropicMixedTextAndToolUse(t *testing.T) {
 	defer cancel()
 
 	res, err := providers.CollectChatResult(ctx, p, providers.ChatRequest{
+		// Named explicitly: there is no compiled-in default any more,
+		// and Chat now refuses rather than sending "model":"".
+		Model:    "claude-opus-5",
 		Messages: []providers.ChatMessage{{Role: "user", Content: "plan"}},
 		Tools:    []providers.ToolDefinition{planTool()},
 	})
@@ -191,6 +203,9 @@ func TestAnthropicTruncatedStreamStillDelivers(t *testing.T) {
 	defer cancel()
 
 	res, err := providers.CollectChatResult(ctx, p, providers.ChatRequest{
+		// Named explicitly: there is no compiled-in default any more,
+		// and Chat now refuses rather than sending "model":"".
+		Model:    "claude-opus-5",
 		Messages: []providers.ChatMessage{{Role: "user", Content: "plan"}},
 		Tools:    []providers.ToolDefinition{planTool()},
 	})

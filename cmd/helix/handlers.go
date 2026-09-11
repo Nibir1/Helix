@@ -1052,14 +1052,10 @@ func listAvailableModels() {
 		uiFail("models", err.Error())
 		return
 	}
-	fmt.Println(shell.PanelTitle("models"))
-	for i, model := range models {
-		if i >= 50 {
-			fmt.Println(shell.PanelLine(shell.Muted(fmt.Sprintf("… and %d more", len(models)-50))))
-			break
-		}
-		fmt.Println(shell.PanelLine(shell.Value(model.ID)))
-	}
+	// The same ranked, capability-tagged table the picker uses. This printed
+	// 50 bare IDs in API order and no capabilities at all, so the one command
+	// named after answering "what can I use" answered it worst.
+	printModelChoices(ai.ActiveProviderName(), models, ai.ActiveModel())
 }
 
 func cleanDebrief(text string) string {
@@ -1871,6 +1867,20 @@ func activeProviderHealthLine() string {
 		}
 		return shell.Badge(shell.StateBad, "unreachable") + shell.Muted("  "+detail)
 	}
+
+	// TWO facts, because the health check only establishes one of them.
+	//
+	// Every provider's HealthCheck is a ListModels call — a statement about the
+	// provider, not about the model that is selected. So this line said "ok" on
+	// a shell where every single turn returned 404 because the vendor had
+	// retired the saved model. The list CheckActiveProvider already fetched
+	// answers the second question at no extra cost.
+	if listed, knowable := ai.ActiveModelIsListed(); knowable && !listed {
+		return shell.Badge(shell.StateWarn, "model gone") +
+			shell.Muted("  "+ai.ActiveProviderName()+" no longer lists ") +
+			shell.Value(ai.ActiveModel()) +
+			shell.Muted("  ·  /model list picks another")
+	}
 	return shell.Badge(shell.StateGood, "ok")
 }
 
@@ -1928,7 +1938,7 @@ func switchProvider(name string) {
 		return
 	}
 	cfg.Provider = name
-	cfg.ProviderModel = ai.ActiveModel()
+	rememberProviderModel(name, ai.ActiveModel())
 	_ = cfg.SavePreferences()
 	uiOK(name, "is answering  ·  "+ai.ActiveModel())
 }
@@ -1968,7 +1978,7 @@ func switchModel(model string) {
 		uiFail("model", err.Error())
 		return
 	}
-	cfg.ProviderModel = ai.ActiveModel()
+	rememberProviderModel(ai.ActiveProviderName(), ai.ActiveModel())
 	_ = cfg.SavePreferences()
 	uiOK(ai.ActiveModel(), "is the active model")
 }

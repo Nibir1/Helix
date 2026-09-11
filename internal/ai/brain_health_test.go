@@ -76,9 +76,16 @@ func TestNoteProviderUnreachableIsRemembered(t *testing.T) {
 func TestShortCauseClassification(t *testing.T) {
 	cases := map[string]string{
 		`Get "http://127.0.0.1:8080/v1/models": dial tcp: connect: connection refused`: "connection refused",
-		"context deadline exceeded":            "timed out",
-		"HTTP 401: invalid api key":            "HTTP 401 unauthorized",
-		"HTTP 404: model not found":            "HTTP 404 not found",
+		"context deadline exceeded": "timed out",
+		"HTTP 401: invalid api key": "HTTP 401 unauthorized",
+		// This case's own input is a RETIRED MODEL, and it used to assert the
+		// imprecise answer. "HTTP 404 not found" sends the reader to check
+		// their base URL when the fault is that the vendor deleted the model
+		// they have saved — so the expectation moved with the classifier.
+		"HTTP 404: model not found": "model no longer exists",
+		// A routing 404 still reads as a routing 404, which is the pair that
+		// makes the distinction worth having.
+		"HTTP 404: 404 page not found":         "HTTP 404 not found",
 		"HTTP 429: slow down":                  "rate limited",
 		"HTTP 503: upstream unavailable":       "provider server error",
 		"lookup api.example.com: no such host": "host not found",

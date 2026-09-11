@@ -205,7 +205,11 @@ func (c *companionState) look(stop <-chan struct{}) {
 	// Never sample while Helix is mid-sentence or the user is mid-turn: the
 	// vision model and the answering model are usually the same process, and
 	// stealing it here shows up as latency in the conversation.
-	if !voiceModeActive || !cfg.Vision.Enabled || speech.Speaking() || agentCore == nil {
+	// isAwake() rather than a plain bool read: this runs on the companion's own
+	// goroutine while the REPL writes the mode, which was an unsynchronised
+	// read that -race never caught because nothing drives this loop across a
+	// mode switch.
+	if !isAwake() || !cfg.Vision.Enabled || speech.Speaking() || agentCore == nil {
 		return
 	}
 	if !agentCore.VisionAvailable() || !captureAvailable() {

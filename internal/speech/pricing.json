@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Approximate list prices, refreshed by editing this embedded catalog via ~/.helix/pricing.json (overrides match on provider+kind+model, or add new entries). Prices are display-only estimates — never billing data.",
+  "note": "Approximate list prices, refreshed by editing this embedded catalog via ~/.helix/pricing.json (overrides match on provider+kind+model, or add new entries). Prices are display-only estimates \u2014 never billing data.",
   "entries": [
     {
       "provider": "groq",
@@ -14,7 +14,7 @@
       "requires_key": true,
       "local": false,
       "recommended": true,
-      "notes": "Groq Whisper large-v3-turbo (~$0.04/hr, ~200x realtime). Cheapest large-model STT — best value for always-on voice. Recommended."
+      "notes": "Groq Whisper large-v3-turbo (~$0.04/hr, ~200x realtime). Cheapest large-model STT \u2014 best value for always-on voice. Recommended."
     },
     {
       "provider": "openai",
@@ -29,6 +29,20 @@
       "local": false,
       "recommended": false,
       "notes": "OpenAI Whisper API (large-v3). Robust across accents and noise."
+    },
+    {
+      "provider": "openai",
+      "kind": "stt",
+      "model": "gpt-live-transcribe",
+      "price_per_unit": 0.017,
+      "unit": "minute",
+      "latency": "very_low",
+      "quality_tier": "premium",
+      "languages": "multi",
+      "requires_key": true,
+      "local": false,
+      "recommended": false,
+      "notes": "OpenAI realtime transcription over WebSocket \u2014 live partials without adding a second vendor. ~3.5x whisper-1 per minute and ~25x groq turbo, so pick it when streaming matters and you already have an OpenAI key. Wire format is partly inferred; speech.stt.realtime in config corrects it."
     },
     {
       "provider": "deepgram",

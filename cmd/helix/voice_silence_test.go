@@ -48,7 +48,7 @@ func TestRealFailuresStillSurface(t *testing.T) {
 		errors.New("capture: exec: \"sox\": executable file not found in $PATH"),
 		errors.New("all STT providers failed"),
 		errVoiceHandled,
-		errVoiceStopped,
+		errModeChanged,
 	} {
 		if silenceIsNotAFailure(err) {
 			t.Errorf("%v is treated as silence; a real fault would never be reported", err)

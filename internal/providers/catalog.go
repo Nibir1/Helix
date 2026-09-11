@@ -304,11 +304,69 @@ func SupportsVision(provider, model string) bool {
 	return false
 }
 
+// visionCapableVendors are vendors whose current line-up includes a
+// multimodal model.
+//
+// The provider-level floor for when no model is selected yet. It exists
+// because Capabilities() used to answer by inspecting a compiled-in default
+// model ID — so removing those IDs would have made every provider report that
+// it cannot see until the user picked something, and /blackbox eyes would
+// refuse on a fresh key with no explanation.
+//
+// "Anthropic ships multimodal models" ages far better than "claude-opus-5
+// exists", which is the whole reason this is a vendor list and not a model
+// list. Consulted only when the model cache knows nothing.
+var visionCapableVendors = map[string]bool{
+	"openai": true, "anthropic": true, "gemini": true, "deepseek": true,
+	"glm": true, "kimi": true, "meta": true, "qwen": true, "xai": true,
+	"ollama": true,
+}
+
+// isLocalProvider reports whether a provider runs on this machine. Extracted
+// from an inline expression that two capability functions now need, so the two
+// cannot come to disagree about what "local" means.
+func isLocalProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "ollama", "llamacpp":
+		return true
+	default:
+		return false
+	}
+}
+
+// VendorLikelySees reports whether a vendor is known to serve a model that can
+// process images, without naming one.
+func VendorLikelySees(provider string) bool {
+	return visionCapableVendors[strings.ToLower(strings.TrimSpace(provider))]
+}
+
+// CapabilitiesForProvider answers what a provider can do when no model has
+// been selected.
+//
+// Everything except Vision is already a provider-level fact in this file;
+// Vision is the one that used to need a model name, and the caller supplies
+// what it knows about the provider's live catalogue (see
+// ModelCache.AnyVisionModel) so a real answer beats the vendor list whenever
+// one is available.
+func CapabilitiesForProvider(provider string, knownVisionModel bool) Capabilities {
+	name := strings.ToLower(strings.TrimSpace(provider))
+	return Capabilities{
+		Chat:       true,
+		Streaming:  true,
+		Planner:    true,
+		Embeddings: name == "openai" || name == "ollama",
+		Vision:     knownVisionModel || VendorLikelySees(name),
+		Local:      isLocalProvider(name),
+		Remote:     !isLocalProvider(name),
+		ToolUse:    toolUseProviders[name],
+	}
+}
+
 // CapabilitiesFor returns capability flags for a provider/model pair.
 func CapabilitiesFor(provider, model string) Capabilities {
 	model = strings.ToLower(model)
 
-	local := provider == "ollama" || provider == "llamacpp"
+	local := isLocalProvider(provider)
 
 	return Capabilities{
 		Chat:       true,

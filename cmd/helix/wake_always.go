@@ -39,6 +39,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"helix/internal/shell"
 	"helix/internal/utils"
@@ -129,14 +130,31 @@ func armedIdleWait() (wakeword.WakeEvent, armedOutcome) {
 		}
 	}
 	go func() {
-		ev, ok := <-events
-		if !ok {
-			scannerDied = true
+		for {
+			ev, ok := <-events
+			if !ok {
+				scannerDied = true
+				signal()
+				return
+			}
+			// The grace window after entering standby. On the energy engine a
+			// wake event is speech ONSET, not a phrase — so the tail of the
+			// sentence that just asked for standby is itself a wake event, and
+			// without this the user is handed straight back into the
+			// conversation they just left. That loop was the reported bug, and
+			// the three-state model alone does not fix it.
+			//
+			// Dropped, not stopped: the scanner keeps running, so nothing about
+			// the hold's unbounded-ness changes and a real wake a moment later
+			// still lands.
+			if inRearmGrace(time.Now()) {
+				continue
+			}
+			got = ev
+			logWakeEvent(ev)
 			signal()
 			return
 		}
-		got = ev
-		signal()
 	}()
 
 	printArmedPrompt()
@@ -173,11 +191,30 @@ func armedIdleWait() (wakeword.WakeEvent, armedOutcome) {
 // claiming the microphone is open.
 func noteArmingDied(cause error) {
 	armedPromptAnnounced = false
-	detail := "the wake scanner stopped — /mictest checks the microphone"
+	fmt.Println(shell.Step(shell.StateWarn, "stopped listening at the prompt",
+		armingDiedNotice(cause)))
+}
+
+// armingDiedNotice is the wording, separated from the printing so the rule it
+// carries stays testable.
+//
+// The rule: a lapse in listening must be announced WITH ITS CAUSE. It used to
+// be enforced on a wakeOutcome enum and a lapse-notice table, which the
+// per-turn wake hold owned; that hold is gone, and the two surviving lapses —
+// arming that never started, and a scanner that died mid-wait — carry it now.
+// A cause the scanner actually reported always beats a generic sentence,
+// because "the wake scanner stopped" sends the reader nowhere.
+func armingDiedNotice(cause error) string {
 	if cause != nil {
-		detail = cause.Error() + " — /mictest checks the microphone"
+		return cause.Error() + " — /mictest checks the microphone"
 	}
-	fmt.Println(shell.Step(shell.StateWarn, "stopped listening at the prompt", detail))
+	return "the wake scanner stopped — /mictest checks the microphone"
+}
+
+// armingLapseNotice is the wording for arming that could not start at all.
+func armingLapseNotice() string {
+	return "the wake scanner could not start — /blackbox status diagnoses, " +
+		"/mictest checks the microphone"
 }
 
 // printArmedPrompt says the microphone is open, because an open microphone the
@@ -240,9 +277,9 @@ func enterVoiceModeFromWake(ev wakeword.WakeEvent) {
 	// Spoken only once live mode is actually up. blackBoxOn can refuse — a
 	// failed preflight, or a mode that was already on — and saying "I'm
 	// listening" into either of those would be the readiness lie this file
-	// spends its length avoiding. voiceModeActive is the fact, so it is what
-	// gets asked.
-	if voiceModeActive {
+	// spends its length avoiding. The mode is the fact, so it is what gets
+	// asked.
+	if isAwake() {
 		speakWakeAcknowledgement()
 	}
 }
@@ -335,6 +372,5 @@ func noteArmingLapse() {
 	}
 	armingLapseAnnounced = true
 	fmt.Println(shell.Step(shell.StateWarn, "not listening at the prompt",
-		"the wake scanner could not start — /blackbox status diagnoses, "+
-			"/mictest checks the microphone"))
+		armingLapseNotice()))
 }

@@ -13,7 +13,7 @@ import (
 // cannot process images, screenshots or any visual content. glm-5.3-flash keeps
 // the 1M-token context and tool calling, and adds image and video input, so it
 // is the vision-capable default rather than a trade.
-const DefaultModel = "glm-5.3-flash"
+const DefaultModel = ""
 
 // New creates a GLM provider.
 func New(apiKey string, client *providers.HTTPClient) *openaicompatible.Provider {

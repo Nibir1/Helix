@@ -9,6 +9,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -253,16 +254,24 @@ func wakeEventForTest(phrase string, score float64) wakeword.WakeEvent {
 // property is the ABSENCE of a timeout and a test that waited for one to not
 // fire would have to run longer than the timeout it is checking for. §9 rule 8
 // applies: the assertions below would both have failed against the old code.
+// RETARGETED, not relaxed. The hold this used to read — the between-turns
+// wake hold inside live mode — is gone, because a conversation no longer
+// re-waits for a wake word before every answer. The RULE is unchanged and now
+// belongs to armedIdleWait, the only wake-only hold left.
+//
+// The AWAKE stand-down is not a counterexample: it expires into LESS listening
+// (wake-only), never into transcription. TestStandDownIsNotACaptureDeadline
+// pins that it never becomes a deadline inside a capture.
 func TestWakeHoldHasNoDeadline(t *testing.T) {
-	src, err := os.ReadFile("voice_mode.go")
+	src, err := os.ReadFile("wake_always.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := string(src)
 
-	fn := functionBody(body, "func wakeListenUntilArmed()")
+	fn := functionBody(body, "func armedIdleWait()")
 	if fn == "" {
-		t.Fatal("could not find wakeListenUntilArmed — the test cannot reach what it checks")
+		t.Fatal("could not find armedIdleWait — the test cannot reach what it checks")
 	}
 	if strings.Contains(fn, "context.WithTimeout") {
 		t.Error("the wake hold has a timeout again. When it expires the caller falls " +
@@ -273,21 +282,68 @@ func TestWakeHoldHasNoDeadline(t *testing.T) {
 		t.Error("the hold must still be cancellable — Ctrl+C is the only way to take a " +
 			"turn without making a sound")
 	}
-	if strings.Contains(body, "wakeIdleWindow") {
-		t.Error("wakeIdleWindow is back; the window is the bug, not the duration")
+	for _, f := range []string{"wake_always.go", "voice_mode.go", "awake_turn.go"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			continue // awake_turn.go may not exist yet
+		}
+		if strings.Contains(string(src), "wakeIdleWindow") {
+			t.Errorf("wakeIdleWindow is back in %s; the window is the bug, not the duration", f)
+		}
 	}
 }
 
-// The complement: a dead scanner must STILL fall through, or a broken
-// microphone would trap the user in a hold that can never fire.
-func TestDeadScannerStillFallsThrough(t *testing.T) {
-	if notice := wakeLapseNotice(wakeScannerFailed); notice == "" {
-		t.Error("a scanner that died must announce itself — it is the one case where wake " +
-			"gating is genuinely lost, and silence there is how a user ends up talking to " +
-			"a shell that cannot hear")
+// The stand-down must never become a capture deadline.
+//
+// It is the same defect in a new coat: a duration that ends listening, sitting
+// inside the function that does the listening. Checked at the top of a turn as
+// a pure function of the clock instead — see shouldStandDown — so no capture
+// context ever carries it and there is no race against an in-flight recorder.
+func TestStandDownIsNotACaptureDeadline(t *testing.T) {
+	src, err := os.ReadFile("voice_mode.go")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if notice := wakeLapseNotice(wakeInterrupted); notice != "" {
-		t.Errorf("Ctrl+C is an explicit act and needs no explanation, got %q", notice)
+	body := string(src)
+	for _, fn := range []string{
+		"func voiceTurn(", "func batchVoiceTurn(", "func streamingVoiceTurn(",
+	} {
+		b := functionBody(body, fn)
+		if b == "" {
+			t.Fatalf("could not find %s", fn)
+		}
+		for _, banned := range []string{"AwakeIdleStandDown", "shouldStandDown", "awakeIdleFor"} {
+			if strings.Contains(b, banned) {
+				t.Errorf("%s consults %s — the stand-down has become a capture deadline, "+
+					"which is the shape of the defect TestWakeHoldHasNoDeadline exists for",
+					fn, banned)
+			}
+		}
+	}
+}
+
+// A lapse in listening must be announced WITH ITS CAUSE, and a deliberate act
+// must not be announced at all.
+//
+// This used to be asserted against a wakeOutcome table owned by the per-turn
+// wake hold. That hold is gone — a conversation no longer re-waits for a wake
+// word between turns — so the rule moved to the two lapses that survive.
+func TestArmingLapsesNameTheirCause(t *testing.T) {
+	if got := armingLapseNotice(); !strings.Contains(got, "/mictest") {
+		t.Errorf("a scanner that could not start must point somewhere: %q", got)
+	}
+
+	// A reported cause always beats the generic sentence: "the wake scanner
+	// stopped" sends the reader nowhere.
+	withCause := armingDiedNotice(errors.New("wake capture failed 5 times in a row"))
+	if !strings.Contains(withCause, "failed 5 times") {
+		t.Errorf("the scanner's own reason was dropped: %q", withCause)
+	}
+	if generic := armingDiedNotice(nil); generic == withCause {
+		t.Error("a missing cause and a reported one produced the same notice")
+	}
+	if !strings.Contains(armingDiedNotice(nil), "/mictest") {
+		t.Error("the fallback notice points nowhere")
 	}
 }
 

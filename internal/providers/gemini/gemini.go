@@ -33,7 +33,7 @@ const (
 	// text+image+audio+video input, function calling. Vision is not incidental
 	// here — a default that cannot see makes /eyes unreachable on a fresh
 	// install, which is the whole point of choosing it.
-	DefaultModel = "gemini-3.7-flash"
+	DefaultModel = ""
 )
 
 // New creates the Gemini provider.

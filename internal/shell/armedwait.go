@@ -49,6 +49,15 @@ const (
 // indistinguishable from instant to the person typing.
 const DefaultArmedPoll = 60 * time.Millisecond
 
+// StdinIsTerminal reports whether stdin is a terminal.
+//
+// Exported because two features now need the same precondition — the armed
+// prompt and the keyboard watch inside a conversation — and asking it twice in
+// two packages is how the two would come to disagree. Everything in this file
+// and cbreak_unix.go is unavailable without it: termios ioctls fail on a pipe,
+// and poll(2) on a non-tty answers a different question.
+func StdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
 // ArmedWait blocks until stdin has input or `other` receives.
 //
 // Args:

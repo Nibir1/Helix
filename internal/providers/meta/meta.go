@@ -31,7 +31,7 @@ const (
 	// DefaultModel is the current Standard-tier checkpoint: 1,048,576-token
 	// context, tool calling, and multimodal input (text, image, video, audio,
 	// PDF) — chosen for the vision, so the camera path works on a fresh key.
-	DefaultModel = "muse-spark-1.2"
+	DefaultModel = ""
 )
 
 // New creates the Meta provider.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 )
 
 // Prompter is implemented by UX layers capable of asking the user questions.
@@ -62,32 +63,54 @@ func (c cliPrompter) AskTypedConfirmation(label, requiredPhrase string) bool {
 
 // activePrompter defaults to CLI prompts.
 // main.go replaces this with the TUI-aware UX implementation.
-var activePrompter Prompter = cliPrompter{}
+//
+// Guarded, because it is now written ONCE PER TURN rather than once per mode.
+// The prompter used to follow the conversation mode, which was the same thing
+// as the mode; it now follows the provenance of the line being handled, so a
+// typed line asks for confirmation at the keyboard even mid-conversation. That
+// makes the REPL a writer on every turn while agent goroutines are readers, and
+// an unguarded interface value written under a race can be torn.
+var (
+	promptMu       sync.RWMutex
+	activePrompter Prompter = cliPrompter{}
+)
 
 // SetPrompter installs the active prompter.
 func SetPrompter(p Prompter) {
-	if p != nil {
-		activePrompter = p
+	if p == nil {
+		return
 	}
+	promptMu.Lock()
+	activePrompter = p
+	promptMu.Unlock()
 }
 
 // ActivePrompter returns the currently installed prompter (used by mode
 // switching to save/restore the TTY prompter around voice mode).
 func ActivePrompter() Prompter {
+	promptMu.RLock()
+	defer promptMu.RUnlock()
+	return activePrompter
+}
+
+// prompter reads the active prompter for one call.
+func prompter() Prompter {
+	promptMu.RLock()
+	defer promptMu.RUnlock()
 	return activePrompter
 }
 
 // AskForConfirmation routes yes/no prompts through the active prompter.
 func AskForConfirmation(prompt string) bool {
-	return activePrompter.AskYesNo(prompt)
+	return prompter().AskYesNo(prompt)
 }
 
 // AskLine routes line-input prompts through the active prompter.
 func AskLine(prompt string) string {
-	return activePrompter.AskLine(prompt)
+	return prompter().AskLine(prompt)
 }
 
 // AskTypedConfirmation routes typed confirmations through the active prompter.
 func AskTypedConfirmation(label, requiredPhrase string) bool {
-	return activePrompter.AskTypedConfirmation(label, requiredPhrase)
+	return prompter().AskTypedConfirmation(label, requiredPhrase)
 }

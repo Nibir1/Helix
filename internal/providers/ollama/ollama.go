@@ -26,10 +26,21 @@ func (p *Provider) SetAPIKey(key string) {}
 
 func (p *Provider) RequiresAPIKey() bool { return false }
 func (p *Provider) IsLocal() bool        { return true }
-func (p *Provider) DefaultModel() string { return "gemma4:e2b" }
 
+// DefaultModel returns nothing compiled in.
+//
+// Ollama is the one provider where the answer is genuinely knowable without a
+// vendor catalogue — /api/tags lists what is PULLED — so the resolution goes
+// through the model cache like everything else rather than naming a tag that
+// may not be installed. A hardcoded "gemma4:e2b" was a recommendation
+// masquerading as a fact: on a machine that never pulled it, every turn failed.
+func (p *Provider) DefaultModel() string { return "" }
+
+// Capabilities answers at the provider level; see the Anthropic adapter for
+// why Vision consults the live catalogue first.
 func (p *Provider) Capabilities() providers.Capabilities {
-	return providers.CapabilitiesFor("ollama", p.DefaultModel())
+	return providers.CapabilitiesForProvider("ollama",
+		providers.Models().AnyVisionModel("ollama"))
 }
 
 // Chat delegates to the native Ollama client.
