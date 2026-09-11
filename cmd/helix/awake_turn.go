@@ -57,7 +57,7 @@ var awakeHooks = struct {
 	takeTerminal:     func() (func(), error) { return shell.MakeCbreak(os.Stdin) },
 	keyPending:       shell.KeyPending,
 	keyReady:         shell.KeyReady,
-	capture:          voiceTurnWithRetry,
+	capture:          awakeCapture,
 }
 
 // awakeKeyboardPossible reports whether this turn can watch the keyboard.

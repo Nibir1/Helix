@@ -282,6 +282,42 @@ type SpeechConfig struct {
 	STT      SpeechSTTConfig  `json:"stt"`
 	TTS      SpeechTTSConfig  `json:"tts"`
 	WakeWord SpeechWakeConfig `json:"wake_word"`
+	Live     SpeechLiveConfig `json:"live"`
+}
+
+// SpeechLiveConfig tunes a gpt-live-1 full-duplex session.
+//
+// It is NOT part of the STT or TTS chain and deliberately sits beside them
+// rather than inside either: for the life of a session gpt-live-1 replaces the
+// whole STT→LLM→TTS path, so a field here has no meaning to a provider
+// registry and putting it under `stt` would invite exactly the bending
+// internal/speech/chain_order_test.go exists to prevent.
+//
+// Every field is an escape hatch, on the rule SpeechSTTConfig.Realtime adopted:
+// parts of this wire format were obtained by walking the service's own 400s,
+// and a correction must be a config edit rather than a rebuild.
+type SpeechLiveConfig struct {
+	// Instructions replaces the session prompt. Empty uses live.DefaultInstructions,
+	// which is measured — an uninstructed session answers questions itself and
+	// sometimes drops a turn entirely. Changing this changes behaviour that was
+	// measured, not reasoned about.
+	Instructions string `json:"instructions,omitempty"`
+
+	// Voice is the spoken voice (session.audio.output.voice). Empty leaves the
+	// service default, "marin".
+	Voice string `json:"voice,omitempty"`
+
+	// CreateURL overrides the session-creation endpoint.
+	CreateURL string `json:"create_url,omitempty"`
+
+	// Session, when set, is sent as the create body's `session` object verbatim
+	// and every field above is ignored. The last resort if the schema moves.
+	Session json.RawMessage `json:"session,omitempty"`
+
+	// MaxSessionSeconds bounds one session's audio playback (0 → 1800). It is a
+	// backstop behind the AWAKE inactivity stand-down, not a substitute for it:
+	// an open duplex session bills per minute.
+	MaxSessionSeconds int `json:"max_session_seconds,omitempty"`
 }
 
 // Runtime converts the persisted section into the speech package's runtime

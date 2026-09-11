@@ -173,11 +173,20 @@ func blackBoxStatus() {
 	}
 
 	w := shell.KVWidth("MODE", "HEARING", "SIGHT", "WAKE", "INITIATIVE", "CONTEXT",
-		"INTERRUPT", "TRANSCRIPT")
+		"INTERRUPT", "TRANSCRIPT", "DUPLEX")
 	fmt.Println(shell.PanelTitle("blackbox"))
 	fmt.Println(shell.KV("MODE", mode, w))
 	fmt.Println(shell.KV("HEARING", blackBoxHearingLine(), w))
 	fmt.Println(shell.KV("SIGHT", blackBoxEyesLine(), w))
+	// Full duplex is the one row that costs MONEY while it is on — $0.05 a
+	// minute billed per second, plus the planner's own model — and it holds an
+	// open microphone for the whole conversation rather than for a turn. A
+	// panel that answers "what is listening right now" has to say so. The row
+	// is absent entirely when nothing selected it, so an ordinary install does
+	// not grow a line about a feature it is not using.
+	if line := duplexStatusLine(); line != "" {
+		fmt.Println(shell.KV("DUPLEX", blackBoxDuplexLine(line), w))
+	}
 	// The usage text has advertised wake since this command was created, and
 	// wake was the one state it never printed —
 	// it lived only behind /blackbox wake status. A summary that omits a state
@@ -203,6 +212,19 @@ func blackBoxStatus() {
 	// same one /voice-status printed; it is detail under the summary now rather
 	// than a second command nobody remembered to run.
 	handleVoiceStatus()
+}
+
+// blackBoxDuplexLine badges the duplex row by whether a session is actually
+// open, so "selected" never reads as "running".
+func blackBoxDuplexLine(line string) string {
+	switch {
+	case duplexActive():
+		return shell.Badge(shell.StateGood, "open") + shell.Muted("  ") + shell.Value(line)
+	case strings.Contains(line, "  ·  unavailable:"):
+		return shell.Badge(shell.StateBad, "unavailable") + shell.Muted("  ") + shell.Value(line)
+	default:
+		return shell.Badge(shell.StateIdle, "selected") + shell.Muted("  ") + shell.Value(line)
+	}
 }
 
 // blackBoxHearingLine summarises the ear in one line: can Helix record, and

@@ -221,6 +221,18 @@ func enterAwakeLocked(cause modeCause) {
 	speech.EnableConversationContext(cfg.Speech.TTS.ContextTurns, cfg.Speech.TTS.ContextMaxBytes)
 	speech.EnableBargeIn(cfg.Speech.TTS.BargeIn)
 
+	// Full duplex is a way of being AWAKE, so it opens where a conversation
+	// opens and is scoped to it exactly as the two lines above are. A failure
+	// WARNS and continues: the half-duplex chain still works, and refusing the
+	// conversation because the fancier transport is unavailable would be a
+	// worse outcome than taking it the proven way.
+	duplexWhy := ""
+	if duplexSelected() {
+		if err := startDuplex(); err != nil {
+			duplexWhy = err.Error()
+		}
+	}
+
 	if cause.persists() {
 		cfg.UserPrefs.VoiceMode = true
 		_ = cfg.SavePreferences()
@@ -237,6 +249,9 @@ func enterAwakeLocked(cause modeCause) {
 	}
 	audio.PlayAlert()
 	printLiveBanner()
+	if duplexWhy != "" {
+		uiWarn("full duplex", "unavailable, using the standard chain: "+duplexWhy)
+	}
 	if eyesWhy != "" {
 		fmt.Println(shell.Hint("camera stays off: " + eyesWhy))
 	}
@@ -250,6 +265,10 @@ func tearDownConversationLocked(from modeCause) {
 	// Leaving mid-sentence should stop the sentence; without this the prompt
 	// came back to the keyboard while the previous reply talked over it.
 	speech.StopSpeaking()
+	// Before the rest: an open duplex session holds the microphone AND bills
+	// per second, so it must not outlive the conversation by however long the
+	// teardown below takes.
+	stopDuplex()
 	speech.EnableConversationContext(0, 0)
 	speech.EnableBargeIn(false)
 	stopCompanion()
@@ -441,6 +460,12 @@ func turnIsSpoken() bool { return turnChannel.Load() == 1 }
 // hole in the wall ADR-005 §2 builds, and provenance is the only thing that
 // closes it.
 func prompterForChannel(ch input.Channel) commands.Prompter {
+	if ch == input.ChannelVoice && duplexActive() {
+		// A duplex session owns the microphone, so VoicePrompter's recorder
+		// cannot open. The duplex prompter asks through the session instead —
+		// and still refuses to approve a typed confirmation by voice.
+		return newDuplexPrompter()
+	}
 	if ch == input.ChannelVoice && voicePrompter != nil {
 		return voicePrompter
 	}

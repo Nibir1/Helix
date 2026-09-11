@@ -310,6 +310,43 @@ Three more things worth knowing:
   until you submit it, so the editor behaves identically whether the prompt is
   armed or not.
 
+### Full duplex, if you want it
+
+The three states above describe *when* Helix listens. `gpt-live-1` changes *how*
+a turn is taken inside AWAKE: the microphone stays open for the whole
+conversation, you can talk over Helix mid-sentence, and the model decides when
+you have finished speaking rather than a silence timer deciding for it.
+
+```text
+/blackbox setup     # pick openai / gpt-live-1 when it asks what should hear you
+```
+
+It is a row in the STT table like any other provider, and choosing it is the
+whole switch — there is no separate on/off. `/blackbox status` grows a `DUPLEX`
+row once it is picked.
+
+Three things to know before you turn it on, none of which is a detail:
+
+- **It bills while it is open** — $0.05 a minute, per second, on top of your
+  planner's model. The ten-minute stand-down is what stops a conversation you
+  walked away from running up a bill.
+- **It needs libopus** (`brew install opus` / `apt install libopus0`). Without
+  it Helix says so in `/blackbox status` and uses the ordinary chain.
+- **It paraphrases.** Helix therefore never gives it exact output: paths,
+  hashes, versions and error lines stay on the screen and it says *"done — it's
+  on screen"* instead. `docs/voice.md` §7c has the measurements behind that,
+  including the one where it deleted a path and invented an explanation.
+
+You do not need headphones: the service cancels its own voice out of the
+microphone, and it was measured doing so on built-in speakers at three volumes
+while still hearing a real voice talking over it. That is what makes
+interrupting it work.
+
+Everything else is unchanged — same stop phrases, same three states, same
+pipeline, and a destructive action still needs a typed confirmation. What is
+new is that typing one now works mid-conversation: Helix mutes the session
+first, so nothing in the room can answer the prompt for you.
+
 ### How loud is loud enough
 
 The energy detector measures the room and wakes on speech that rises above it,

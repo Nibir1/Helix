@@ -262,6 +262,12 @@ func speakDirect(text string) {
 	if text == "" {
 		return
 	}
+	// Same reason as agentCore.OnSpeak: in a duplex session gpt-live-1 is the
+	// only mouth. Bookkeeping still ignores /tts — duplexSpeak is not gated on
+	// it either.
+	if _, ok := duplexSpeak(text); ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if err := speech.SpeakStream(ctx, text); err != nil && utils.IsDebugMode() {

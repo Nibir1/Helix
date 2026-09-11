@@ -60,6 +60,16 @@ type StreamPlayback struct {
 	// Volume is 0..1 gain (outside the range, or zero, means full).
 	Volume float64
 
+	// MaxSeconds bounds playback, overriding maxStreamSeconds when > 0.
+	//
+	// The cap exists so a corrupt or hostile provider cannot hold the speaker
+	// forever, and 120 s is right for one spoken reply. A full-duplex session
+	// is a different shape: its audio track is continuous for the life of the
+	// conversation, and 120 s would cut it off mid-sentence two minutes in.
+	// So the caller may raise it — and must still pass a finite number, which
+	// is why this is a limit to override rather than a switch to disable.
+	MaxSeconds int
+
 	// OnFirstAudio fires once, at the instant playback is about to begin —
 	// i.e. the preroll is filled and the stream is being handed to the speaker.
 	//
@@ -145,7 +155,11 @@ func PlaySpeechStream(ctx context.Context, f StreamFormat, r io.ReadCloser, opts
 		})
 	}
 
-	if err := backendPlaySpeech(beep.Take(SampleRate*maxStreamSeconds, s)); err != nil {
+	capSeconds := maxStreamSeconds
+	if opts.MaxSeconds > 0 {
+		capSeconds = opts.MaxSeconds
+	}
+	if err := backendPlaySpeech(beep.Take(SampleRate*capSeconds, s)); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {

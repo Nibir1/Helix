@@ -605,6 +605,7 @@ Helix/
 │   ├── hooks/             # User policy hooks — the escape hatch Helix cannot know about
 │   ├── input/             # HybridSource: keyboard and microphone multiplexed into one stream
 │   ├── journal/           # The one append-only NDJSON writer behind every local log
+│   ├── live/              # gpt-live-1 full duplex — WebRTC, Opus via purego, client delegation
 │   ├── metrics/           # Local metrics journal and its reader
 │   ├── ollama/            # Ollama integration and GGUF discovery for llama.cpp reuse
 │   ├── providers/         # Per-provider adapters, capability flags, context limits, keystore

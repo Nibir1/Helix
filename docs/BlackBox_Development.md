@@ -41,8 +41,11 @@ exact sequence:
    reading all of §6. **As of 2026-08-23 every one of those is hardware-, key- or owner-gated** —
    there is no unwritten *planned* code left, so if you are here to work through the tracker, the
    honest answer is that the next task is a device, a credential, or a decision. (Full-duplex
-   barge-in is code, but its full-duplex form is parked on an ADR-level conflict; the
-   sentence-boundary form shipped 2026-08-26.)
+   barge-in shipped 2026-09-11 as `gpt-live-1` — ADR-020 — which resolved the parked conflict by
+   moving the duplex entirely into the vendor's session; the sentence-boundary form shipped
+   2026-08-26 and is still what every other chain uses. Echo was measured the same day on
+   built-in speakers into a built-in microphone at three volumes and is a NON-ISSUE: the service
+   cancels its own voice and still hears a real one over it. No AEC, no headphones.)
    Verify that before trusting it: on 2026-08-23 two "done" items turned out to be partly
    unwritten, one of them a checkbox naming two deliverables of which only one existed.
 
@@ -697,6 +700,88 @@ same person, and `/reboot check` reports without installing.
 **Revisit when** a signature check can be written with pinned identity and issuer
 and tested against a real release, at which point it becomes a second mandatory
 gate rather than a replacement for this one.
+
+### ADR-020 — `gpt-live-1` is a full-duplex SESSION, in client delegation, and it is not a speech provider.
+**Decision:** OpenAI's Live API is reached over WebRTC in **client delegation**
+(`internal/live`), hung on the existing AWAKE state, and it is deliberately NOT
+`speech.STTProvider` or `speech.TTSProvider`.
+
+Three separate decisions, each argued on its own:
+
+1. **Client delegation, not Responses delegation.** In Responses delegation
+   OpenAI's backend model reasons about the conversation and decides which tools
+   to call. That puts an external model in FRONT of the Instruction Firewall,
+   the Medium risk ceiling and the sandbox, which §12 guardrail 3 forbids
+   outright. In client delegation the model does turn-taking, hearing and
+   speaking; Helix's planner, policy and sandbox serve the turn exactly as they
+   serve a typed one. Measured bonus: client is the **default**, so the safe
+   configuration is the one you get by configuring nothing.
+2. **Not a speech provider.** For the life of a session it REPLACES the whole
+   STT→LLM→TTS chain rather than taking a place in it — there is no clip to
+   transcribe, no text to synthesise, and no provider order to slot into.
+   `internal/speech/chain_order_test.go` exists because a previous attempt to
+   bend that chain broke provider selection silently; `internal/live` sits
+   outside it, and `internal/speech/adapter_openai_realtime_stt.go`'s allowlist
+   already keeps `gpt-live-1` off the WebSocket path.
+3. **A way of being AWAKE, not a fourth state.** STANDBY/AWAKE/MANUAL already
+   express the three things a user can want (ADR-008, docs/blackbox.md §3). The
+   session opens in `enterAwakeLocked` and closes in
+   `tearDownConversationLocked`, which is what makes the stop phrases, the
+   inactivity stand-down and the live keyboard work without a line of new code
+   for any of them.
+
+**The model id is the switch, and the switch is DATA.** There is no `enabled`
+key: `duplexSelected()` reads `speech.stt.provider` and `speech.stt.model`, and
+the way a user reaches it is the `/blackbox setup` STT table — which is built
+from `internal/speech/pricing.json` (ADR-006). So turning this on cost one
+catalogue row and no new command, and a second way to say the same thing was
+never added. `TestTheModelIsSelectableFromTheCatalog` ties the constant to the
+row, because a feature whose only door is a data file fails silently when the
+row is missing.
+
+**libopus is a runtime dependency, loaded with purego.** WebRTC carries Opus and
+`session.input_audio.append` is measurably NOT available once a session has
+started, so an encoder is not optional. purego rather than cgo for ADR-003's
+reasoning applied to a library: `scripts/build.sh` cross-compiles five platforms
+from one machine, and cgo costs a C toolchain per target plus a glibc pin.
+purego is already an indirect dependency through oto. §12 guardrail 8 is intact —
+`CGO_ENABLED=0 go build ./...` still passes.
+
+**The screen carries exact output; gpt-live-1 carries the conversation.**
+`session.commentary.append` is paraphrased, and was measured dropping a name
+outright and replacing a sandbox-violation path with a FABRICATED explanation.
+`live.SpeakableSummary` therefore withholds any reply containing a path, a hash,
+a version, a bracketed level tag, a URL, a tab, a fence, a newline, or more than
+240 runes, and speaks a referral instead. The session prompt also demands
+verbatim reading, which measurably helps and is defence in depth, not a
+substitute.
+
+**ADR-005 is unchanged, and rule 2 is now ENFORCEABLE rather than merely
+declared.** A typed confirmation inside a duplex session mutes the session
+first (`session.input_audio.mute`, verified to stop transcription AND
+delegation), so the room cannot answer a destructive prompt while the user reads
+it — and a mute that FAILS refuses the confirmation. Before this, a destructive
+action inside a voice conversation was simply unreachable: VoicePrompter refuses
+every typed confirmation and nothing coordinated the handover.
+
+**Rationale:** the premise of this codebase is that voice lands in the SAME
+pipeline as typed input, not a weaker one beside it. Everything above is that
+premise applied to a vendor whose default posture happens to agree with it.
+
+**Consequences:** a runtime dependency on libopus; a per-minute bill while a
+conversation is open, bounded by the AWAKE stand-down; and a voice that does not
+read output verbatim, worked around by never giving it output.
+
+**Echo needed no decision, because it was measured.** The brief's resolution
+order ends at its first step: on a MacBook's own speakers feeding its own
+microphone, at output volumes 30/55/80, the service transcribed **none** of its
+own voice while transcribing a real voice arriving over the same speakers in the
+same frames. That is server-side echo cancellation, not input gating — the
+difference was tested explicitly, because the two are indistinguishable from the
+"it does not hear itself" result alone and only one of them leaves barge-in
+working. So no AEC ships, headphones are not required, and this ADR records a
+measurement rather than a deferral. §13 carries the numbers and the one
+confound that had to be removed from the probe first.
 
 ## §4. Target architecture (end state)
 
@@ -2113,6 +2198,40 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
 
 ---
 
+### `speech.live` — the full-duplex session (ADR-020)
+
+```json
+"speech": {
+  "stt": { "provider": "openai", "model": "gpt-live-1" },
+  "live": {
+    "instructions": "",
+    "voice": "",
+    "create_url": "",
+    "session": null,
+    "max_session_seconds": 0
+  }
+}
+```
+
+The **model id is the switch**; there is no `enabled` key, because model
+selection is already runtime-resolved and a second way to say the same thing is
+the drift shape this document has paid for four times. Users reach it through
+the `/blackbox setup` table, which is built from `internal/speech/pricing.json`
+(ADR-006) — the catalogue row is how the feature became selectable, and it is
+where its two non-obvious costs (libopus, and the paraphrase) are stated at the
+moment of choosing. Every field under `live`
+is an escape hatch and every one defaults to the measured value:
+
+| Key | Empty means | Why it exists |
+|---|---|---|
+| `instructions` | `live.DefaultInstructions` | An uninstructed session answers questions itself, and sometimes drops a turn with no event at all. The default is the wording that measured 5 delegations from 5 turns. Changing it changes measured behaviour. |
+| `voice` | the service default, `marin` | `session.audio.output.voice`. |
+| `create_url` | `https://api.openai.com/v1/live/sessions` | The route, if it moves. |
+| `session` | built from the fields above | Sent as the create body's `session` object **verbatim**, ignoring everything above it. The last resort if the schema changes — the same rule `stt.realtime.session` follows, adopted after four of that adapter's guesses turned out wrong. |
+| `max_session_seconds` | 1800 | Bounds playback of the model's audio. A backstop behind `wake_word.awake_idle_stand_down_s`, not a substitute for it. |
+
+---
+
 ## §8. Dependency decisions (summary table)
 
 | Need | Chosen approach | Alternative rejected | ADR |
@@ -2127,6 +2246,10 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
 | Camera frames | `ffmpeg` shell-out single-frame | gocv/OpenCV CGO | 003/005 |
 | IPC | stdlib UDS/named-pipe + NDJSON | Redis, ZeroMQ, gRPC | 004 |
 | Tray indicator | **decision deferred to Phase 7** (systray lib vs helper binary) | — | pending ADR-010 |
+| Full-duplex transport | `github.com/pion/webrtc/v4` (pure Go) | a WebSocket — the service refuses every transport but WebRTC | 020 |
+| Opus codec | **libopus via purego**, loaded at runtime | `hraban/opus` (cgo: a C toolchain per cross-compile target, glibc pinning); a data-channel audio path (does not exist after `session.started`) | 020 |
+| Full-duplex playback | existing beep/oto, with `StreamPlayback.MaxSeconds` raised for a session-long stream | a second audio backend | 007/020 |
+| Acoustic echo cancellation | **not needed** — measured absent on built-in speakers + mic at 3 volumes; the service cancels its own voice server-side | macOS VoiceProcessingIO (Go callbacks on CoreAudio's real-time thread); libspeexdsp; headphones | 020 |
 
 ---
 
@@ -2409,9 +2532,22 @@ more surfaced only by reading code against this table:
 
 Phases 1, 2, 6 and 9 lost their `code` markers above.
 
-The only remaining PLANNED item that is *code* is full-duplex barge-in, which is **parked rather
-than pending** — it needs acoustic echo cancellation, which conflicts with the CGO-free guarantee
-(guardrail #8) unless a headset is assumed, and that is a product decision, not a task.
+Full-duplex barge-in was the last PLANNED item that was *code*, and it landed on 2026-09-11 as
+`gpt-live-1` (ADR-020) — not by solving the conflict it was parked on, but by making it somebody
+else's: the duplex lives inside OpenAI's session, so Helix never runs a recorder and a speaker
+against each other and needs no echo canceller to have interruption. Guardrail #8 survived intact
+(libopus is loaded at runtime through purego; `CGO_ENABLED=0 go build ./...` still passes).
+
+Echo was the one thing left open there, and it was **measured the same day and closed**: on a
+MacBook's own speakers feeding its own microphone, at output volumes 30/55/80, the service
+transcribed none of its own voice and still transcribed a real voice arriving over those same
+speakers in the same frames. Server-side cancellation, not input gating — tested apart, because
+only one of those leaves barge-in working. No AEC, no headphones; the resolution order from the
+brief ends at its first step. §13 has the numbers.
+
+Nothing on this feature is now waiting on hardware. What remains is a second room and a second
+pair of speakers, which is a report rather than a task: the failure mode would be Helix answering
+things nobody said, which is self-describing and needs no detector.
 
 Two rows opened by `/reboot` that are not on any phase: the restart supervisor is
 one extra idle process for the life of the session and nobody has measured what
@@ -2428,6 +2564,237 @@ on real devices with real credentials.
 
 All task checkboxes inside §6 phase sections are the authoritative task list. Tick them as work
 completes and record evidence (test names, metrics, QA logs) in the dev log below.
+
+### gpt-live-1 — what the live service actually says (measured 2026-09-11)
+
+Everything below was obtained by dialling `api.openai.com` with a real key and
+reading the errors, not from a guide. Each 400 names the next required field, so
+the schema was walked out one refusal at a time. The prose guides for this model
+are wrong in ways that do not fail loudly (§9 rule 3, and the 2026-09-11 lesson
+about a plausible integration guide), so nothing here is inferred unless it says
+so. The throwaway that produced it was `internal/liveprobe`, deleted in the same
+commit that landed `internal/live`.
+
+**Session creation — REST, once, before any media flows.**
+
+```text
+POST https://api.openai.com/v1/live/sessions        Authorization: Bearer <key>
+{"session":{"model":"gpt-live-1", ...},"transport":{"type":"webrtc","sdp":"<offer>"}}
+  -> 201 {"session":{"id":"live_u0_…"},"transport":{"type":"webrtc","sdp":"<answer>"}}
+```
+
+| Sent | Answer |
+|------|--------|
+| `{}` | 400 `Only the webrtc transport is supported.` — `transport.type` |
+| `transport` only | 400 `WebRTC creation requires session configuration.` — `missing_session` |
+| top-level `"model"` | 400 `json: unknown field "model"` — **the model is `session.model`** |
+| `session:{type:"live"}` | 400 `Unknown parameter: 'session.type'.` — there is no session type here |
+| `session:{}` + real SDP | 400 `Missing required parameter: 'session.model'.` |
+| `session:{audio:{input:…}}` | 400 `Unknown parameter: 'session.audio.input'.` — input audio is not configurable |
+| `session:{zzz:1}` + bad SDP | SDP error first — **`session` is validated only after the offer parses** |
+
+Accepted inside `session`: `model`, `instructions`, `audio.output.voice`,
+`delegation`. `delegation` **defaults to `{"type":"client"}`** — the mode
+docs/blackbox.md §3 and ADR-005 require is the one you get by saying nothing,
+and `{"type":"responses"}` additionally demands `session.delegation.responses`.
+That is worth stating plainly because it inverts the usual risk: the safe
+configuration here is the default, and the dangerous one takes extra typing.
+
+**The offer must advertise Opus as stereo.** A track declared
+`Channels: 1` negotiates and then dies at `SetRemoteDescription` with `codec is
+not supported by remote`, because the answer's only Opus line is
+`a=rtpmap:111 opus/48000/2` with `a=fmtp:111 minptime=10;useinbandfec=1`. The
+media is still mono; the *declaration* has to be `/2`. The server is `ice-lite`
+and offers UDP/3478 and TCP/443 host candidates, so a host behind a firewall
+that permits 443 outbound still connects.
+
+**Client events, enumerated by the server itself** (send a junk `type` and the
+error lists every supported value — the cheapest schema dump in the API):
+
+```text
+session.update · session.input_audio.mute · session.input_audio.unmute
+session.instructions.append · session.thinking.append · session.commentary.append
+response.item.create · response.create · session.close
+```
+
+`session.start` and `session.input_audio.append` appear in that list **only
+before `session.started` arrives, and are gone afterwards.** That single
+observation is what makes the Opus dependency non-negotiable: there is no
+base64-PCM side door on the data channel, so audio can only reach the model as
+RTP, and RTP means an encoder. It was worth measuring rather than assuming,
+because assuming the opposite would have saved the whole of step 2.
+
+Required fields, each named by its own refusal: `commentary`, `instructions` and
+`thinking` all take `delegation_id` + `content`; `response.item.create` takes
+`item.role` ∈ `assistant|system|developer|user`; `response.create` answers
+`requires a session with Responses delegation` and is therefore unreachable for
+Helix by construction. `session.update` accepts **only** `session.delegation` —
+`instructions`, `audio` and `model` are all rejected mid-session, so the session
+prompt is fixed at creation and per-turn steering has to go through
+`session.instructions.append`.
+
+**Server events observed** (the complete set seen across eleven sessions):
+`session.started`, `session.input_transcript.delta`,
+`session.output_transcript.delta`, `session.delegation.created`,
+`session.commentary.appended`, `session.instructions.appended`,
+`session.thinking.appended`, `session.input_audio.muted`,
+`session.input_audio.unmuted`, `session.usage.updated`, `error`. Transcript
+deltas carry `start_ms`/`end_ms` in stream time, which lags wall clock by
+1.5–2 s — so they order events correctly against each other and must never be
+used as a clock.
+
+There is **no explicit end-of-user-turn event**. `session.delegation.created` is
+the only turn boundary, and it is the model's judgement rather than a signal.
+
+#### P1 — does it stay quiet while the backend thinks? **Yes, and better than hoped.**
+
+Within ~1.2 s of `session.delegation.created` it speaks a short, unprompted
+acknowledgement in its own words — *"Okay, I'll check it out."*, *"All right,
+I'm running that first check."*, *"Got it."* — and then goes silent. Measured
+25 s of silence with no filler, no second attempt and no self-answer; nothing
+times out. DeepSeek's 1–3 s is comfortably inside that. The documented "mhmm"
+behaviour is real and it is automatic, which means P1 needs no code at all.
+
+#### P2 — how aggressive is the paraphrase? **Aggressive enough to invent facts — and instruction-controllable.**
+
+Uninstructed, `session.commentary.append` was not paraphrase so much as
+replacement:
+
+| Appended | Spoken |
+|----------|--------|
+| `Nahasat Nibir` | *"On it."* — the content was **dropped entirely** |
+| `Nahasat Nibir` | *"Nah."* |
+| `[ERROR] sandbox violation: /tmp/helix_e2e_evil_1789033489` | *"Sandbox violation. That action touched a forbidden path."* |
+| `9f2a1c4e8b7d3056af19e2c5b0d84713a6e9f2c1` | *"9 f 2 a 1 c 4 e 8 b 7 d 3 0 5 6 af 19 e2 c5 b0 d84713 a6 e9 f2 c1."* |
+| `3 files deleted, 1.4 MB freed` | *"Three files deleted, 1.4 megabytes freed."* |
+| `Done - it's on screen.` | *"Done—it's on your screen."* |
+
+The third row is the one that settles the policy. The path did not survive, and
+in its place the model **invented an explanation that was never sent** — a
+plausible sentence about a forbidden path, generated rather than reported. A
+voice channel that can do that must never be the only channel carrying an error.
+
+Two mechanisms, both reproducible:
+
+1. **Commentary appended while the acknowledgement is still being spoken is
+   consumed by it.** Sending on the same tick as `session.delegation.created`
+   produced `session.commentary.appended` and *"On it."* and nothing else. Wait
+   for `session.output_transcript.delta` to stop before appending.
+2. **An explicit verbatim rule in the session instructions largely fixes it.**
+   The same error line then came back character for character, and
+   `helix v1.5.0 (build 8b74cf1)` survived twice. Not perfectly: `4` is still
+   spoken *"Four."*, and a per-delegation `session.instructions.append` demanding
+   verbatim leaked the internal marker `[delegation_result]` into speech once.
+
+So the recommended split holds, and is now load-bearing rather than stylistic:
+**the screen carries exact output, unparaphrased, as it does today; gpt-live-1
+carries the conversation.** The verbatim instruction is defence in depth on top
+of that, not a substitute for it.
+
+#### P3 — does it answer on its own? **Yes, uninstructed — and worse, it sometimes does nothing.**
+
+Three measured outcomes from the same default session:
+
+- *"What is the name in that file?"* — no delegation; it asked its own
+  clarifying question, *"I'm not sure which file you're referring to."*
+- *"Run the first check please."* — no delegation, no speech, no event at all.
+  The turn simply vanished.
+- *"There is a name.txt file in this directory, what's the name in it?"* —
+  delegated correctly.
+
+The second outcome is the dangerous one, because a dropped turn is
+indistinguishable from a dead microphone. The instruction that fixed it, and the
+exact wording that was measured at 5 delegations from 5 turns with no
+self-answers and no drops:
+
+> You are the voice of Helix, a terminal assistant. You are NOT the one who
+> answers. For EVERY user turn, without exception, you MUST delegate to the
+> client — even if the request seems simple, ambiguous, or answerable from your
+> own knowledge. Never answer from your own knowledge and never ask clarifying
+> questions. After delegating, wait silently for as long as it takes. When the
+> client sends commentary, read it aloud EXACTLY as written: never rephrase,
+> summarise, expand, explain, spell out, or add words of your own, and never
+> read internal markers such as `[delegation_result]`.
+
+It is a prompt, so it is a strong tendency and not a guarantee — which is why
+`liveSession` treats a turn that produces a transcript but no delegation as a
+real, reportable outcome rather than as silence.
+
+#### The unsolved confirmation problem has a server-side answer
+
+The brief flagged that nothing coordinates *"stop speaking, the human is reading
+a typed prompt"*. `session.input_audio.mute` does, and it was verified rather
+than assumed: while muted, a full spoken sentence produced **no**
+`session.input_transcript.delta` and **no** `session.delegation.created`, and
+`unmute` restored both. Both are acked (`session.input_audio.muted` /
+`.unmuted`). So ADR-005 rule 2 is enforceable in a duplex session: mute for the
+duration of `AskTypedConfirmation`, and the model cannot hear the room — or a
+television — say "yes" on the user's behalf.
+
+#### Echo — MEASURED 2026-09-11, on built-in speakers and a built-in microphone, and it is a NON-ISSUE
+
+This was written up as unmeasured a few hours earlier, with headphones as the
+documented answer. That is now wrong and the whole recommendation is withdrawn.
+Measured on the worst hardware available — a MacBook Pro's own speakers feeding
+its own microphone, Helix's real `sox` capture and real beep/oto playback, no
+AEC anywhere in the path — at three output volumes:
+
+| macOS output volume | quiet room (mean RMS) | the model's own voice at the mic (mean / peak) | echo path gain | it transcribed itself |
+|---|---|---|---|---|
+| 30 | 0.0006 | 0.0028 / 0.0093 | 4.4× / 14.8× | **no** |
+| 55 | 0.0009 | 0.0088 / 0.0290 | 9.9× / 32.6× | **no** |
+| 80 | 0.0005 | 0.0280 / 0.0780 | 52× / 145× | **no** |
+
+**The microphone hears it perfectly well.** That is the first half of the
+result and it is what makes the second half meaningful: at volume 80 the
+model's voice arrives at the microphone at RMS 0.028 mean and 0.078 peak, which
+is *louder than an audible human voice* by this repo's own calibration
+(0.012–0.033, recorded in the wake-word entry above). Each run first played a
+sentence through the same speakers with `say`, and the service transcribed it
+verbatim every time — so the speaker→microphone path is not merely live, it is
+good enough for transcription at every volume tested. The service then declined
+to transcribe a single word of its own voice over that same path.
+
+**And the input is not GATED — the echo is CANCELLED.** Those two produce an
+identical "it does not hear itself" and mean opposite things: gating would mean
+nothing is heard while the model talks, which would quietly make full duplex not
+full duplex and remove the only reason to pay for this model. So the probe
+talked over it, through the same speakers, mid-sentence:
+
+```text
+model speaking (mean RMS 0.0089) … "Excuse me, stop talking, I have a different question."
+  -> transcribed, verbatim: "Excuse me. Stop talking I have a different question"
+  -> of the model's own concurrent speech: nothing
+```
+
+A real voice and the model's own voice arrive at the microphone **in the same
+20 ms frames, at the same level**, and exactly one of them comes back. That is
+acoustic echo cancellation, server-side, and nobody has to install anything.
+
+**Barge-in works, and the first number measured for it was my own bug.** The
+first run reported the model talking for 15.3 s through an interruption — but
+the probe's session prompt said *"Never stop after one sentence"*, so that
+measured my instruction rather than the service. With the clause removed the
+model stopped **3.9 s** after the interruption began, measured on transcript
+timestamps that lag the audio by 1.5–2 s, for an interrupting sentence that
+itself takes ~3 s to play: it stopped speaking before the interruption had
+finished playing. A probe that tells its subject to ignore interruptions cannot
+then report that interruptions are ignored (§9 rule 8, in a new shape — the
+test was reachable, it was just measuring the wrong thing).
+
+**Consequences.** Resolution order (a)–(d) from the brief ends at **(a)**: the
+media path plus server-side handling makes it a non-issue, and (b) headphones,
+(c) VoiceProcessingIO and (d) libspeexdsp are all unnecessary. No AEC is
+shipped, and now that is a measurement rather than a deferral. Every "use
+headphones" line has been removed rather than softened.
+
+**What this does NOT cover**, stated because the temptation is to over-read a
+clean result: one machine, one room, one pair of speakers. A desk with a hard
+reflective surface, a loud external speaker across a room, or a Bluetooth
+headset with its own processing could all behave differently. The failure would
+be visible and self-describing — Helix would answer things nobody said — so it
+needs no detector, just a report.
+
 
 ### Dev log (append-only, newest last)
 
@@ -2682,6 +3049,10 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 | 2026-09-09 | **Doc sweep for the default-on microphone, and three surfaces that were still describing the old feature.** Every `.md` (12 files) plus the in-shell `/help` text. **The three that mattered were not the ones about wake.** `docs/SECURITY.md` said *"the microphone opens only for a turn — unless you ask otherwise"* — a security document making a claim the code had stopped honouring, so it now discloses the default-on prompt with the five properties that hold it up and the one config key that declines it. `docs/threat_model.md` §"The voice channel is a different threat" described a surface a user opts into; it now says the surface is open on a fresh install and points at V2b. `docs/RELEASE_NOTES.md` promised *"Nothing is required. Voice is entirely opt-in: every new subsystem is off until you enable it"* under **Upgrading**, which is exactly the reader who needs to hear the opposite. **`/help blackbox` said nothing about the default at all** — the surface the owner consulted when nothing listened — and now opens with "Helix is already listening" plus the one-command upgrade note, pinned by a test that RENDERS `printCommandDetail("/blackbox")` and reads it (§9 rule 12) rather than inspecting the slice the panel is built from. **`/blackbox wake status` gained the sentence the owner actually needed.** OFF can only ever be an explicit `"enabled": false`, because an absent key reads as the default — so the panel stops answering "what do I type" and says *"your config sets enabled: false — listening is on by default, so this is being honoured, not defaulted"*. The STATE and AT THE PROMPT rows are now said as a pair, since "listening between turns" alone is what read as "nothing is happening". Both mutation-tested. **P7.1 hybrid mode was still logged as unreachable**, three places deep including the `Source` doc comment that asked to be kept honest — resolved as *delivered by a different mechanism*: `input.HybridSource` is superseded rather than finally wired, because the armed prompt never starts the blocking read instead of racing it, so there is no losing source to cancel. `docs/edge_deployment.md`'s always-on cost table is relabelled default-install rather than opt-in, since `helix daemon` reads the same key. 2 new tests, both mutation-tested | Uncommitted on `main` | **My own verification was lying, and the shell was the reason.** The 3-OS vet loop read `for t in "linux amd64"; do set -- $t` — and **zsh does not word-split an unquoted parameter**, so every iteration ran `GOOS="linux amd64" GOARCH=""` and reported a bogus `modernc.org/libc` build-constraint failure that I nearly filed as a real one. Rewritten as `linux/amd64` pairs split with `${pair%/*}`. It then immediately earned itself: the new `wake_arms_e2e_test.go` was **missing the `//go:build !windows` tag** every other PTY test in that directory carries, so `GOOS=windows go vet` failed on `undefined: newHarness`. `go build` cannot see it (test files are not compiled) and CI's windows-latest `go test ./...` would have — the guard existed, my loop just hid it from me first |
 
 | 2026-09-11 | **The wake word could not fire on any real microphone, and fixing that exposed four more.** The energy detector's balanced preset was normalized RMS `0.12`, fitted to synthetic sine fixtures; a MacBook Pro built-in mic measures **0.0011** for a quiet room and **0.012–0.033** for an audible voice, so the bar sat ~25× above anything the hardware produces and the prompt said "listening" forever. The suite was green because `detectionCorpus` was fitted to the threshold rather than to a microphone — its "must NOT wake" bucket reached RMS 0.028, five times louder than real speech. Presets are now multiples of the **measured** room floor (strict 4×, balanced 2.5×, loose 2×) with an absolute audibility gate; fixtures are real recordings in `internal/wakeword/testdata/`. Also: `OnError: func(error) {}` in two places discarded every recorder failure, and five consecutive failures end the scan loop — so a dead mic presented as a shell still claiming to listen; `armedIdleWait` carried a comment saying a closed scanner "reports unavailable", which it could not, because nothing wrote to the channel the poll selected on. Then the three-state rewrite: STANDBY/AWAKE/MANUAL replacing a bool that could not tell "pause" from "close the mic", the per-turn wake hold deleted so a wake opens a **conversation**, an inactivity stand-down as the bound on an open transcribing mic, a re-arm grace window (without which the state machine alone just renames the bug — the tail of "you can turn off now" is itself a wake event on the energy engine), and the keyboard live during a capture via hand-rolled **cbreak** (raw clears `ISIG` and would have silently deleted Ctrl+C-cancels-the-recorder). Then models: twelve hardcoded model IDs emptied, resolution moved to per-provider choice → ranked live catalogue (`~/.helix/models.json`) → nothing, because a vendor retirement meant every turn 404'd forever while `/provider-status` reported **ok** (its health check has always been `ListModels`, which says nothing about the selected model). | Committed on `main`: `0ed3cd5`, `0ccc55e`, `2d3e20b`, `5bf758d` + uncommitted realtime fixes | **Four lessons, each from being wrong in public.** (1) *A test fitted to the constant it is testing proves nothing* — the corpus and the threshold agreed with each other and disagreed with every microphone. (2) *`break` inside a `switch` exits the switch* — the three-state REPL rewrite silently stopped Ctrl+D from quitting until the loop was labelled. (3) *Measure the endpoint, do not read it.* The `gpt-live-transcribe` adapter was built from docs and had the wrong route (`/v1/realtime/transcription_sessions` answers 403 to a socket), the wrong query (`?model=` is explicitly refused for a transcription model; `?intent=transcription` is correct), and the wrong sample rate (16000 rejected — the server floor is 24000). Each was found by one unauthenticated dial, and two of them were "corrections" I had made an hour earlier by reasoning. (4) *A plausible integration guide is the most dangerous input.* A pasted `gpt-live-1` walkthrough named the right endpoint and the wrong transport; `POST /v1/live/sessions` answers **"Only the webrtc transport is supported."** and wants an SDP offer, so the entire WebSocket code sample was unbuildable. Its citations were six copies of a bare domain. |
+
+| 2026-09-11 | **`gpt-live-1` implemented, and the three load-bearing unknowns were settled by asking the service rather than by reasoning.** The whole schema was walked out of the API's own 400s (findings above, `§13 → gpt-live-1`): the model is `session.model` and not a top-level field, `session` is required and validated only AFTER the SDP parses, `session.audio.input` does not exist, and **client delegation is the DEFAULT** — the mode ADR-005 requires is the one you get by configuring nothing. The client event vocabulary was obtained in one shot by sending a junk `type` and reading the enumeration in the refusal; that is also how it was established that `session.input_audio.append` exists ONLY before `session.started`, which is what makes libopus non-negotiable rather than a preference. **P1: it stays quiet.** A 2–5 word acknowledgement ~1.2 s after the delegation, then 25 s of measured silence with no filler and no self-answer — DeepSeek's 1–3 s is comfortably inside it, and P1 needed no code. **P2: the paraphrase invents facts.** `[ERROR] sandbox violation: /tmp/helix_e2e_evil_1789033489` was spoken as *"Sandbox violation. That action touched a forbidden path."* — the path deleted and the explanation fabricated; a name was spoken as *"On it."* and then as *"Nah."*. Two mechanisms, both reproducible: commentary appended over the model's own acknowledgement is CONSUMED by it, and an explicit verbatim rule largely fixes the rest. **P3: uninstructed it answers for itself, and sometimes does nothing at all** — one turn produced no delegation, no speech and no event, which to a user is a dead microphone. Shipped: `internal/live` (WebRTC + the measured event vocabulary + libopus through purego, CGO-free), `cmd/helix/duplex.go` hung on the existing AWAKE state so the stop phrases, the stand-down and the live keyboard all work unchanged, `live.SpeakableSummary` (screen keeps exact output, the model gets the conversation), and a duplex prompter that mutes the session for a typed confirmation — making ADR-005 rule 2 *enforceable* rather than merely declared, since a destructive action inside a voice conversation was previously unreachable. ADR-020, §7 `speech.live`, §8 dependency rows, `docs/voice.md` §7c, `docs/blackbox.md` §3, README tree | Committed on `feat/blackbox` | **Two lessons, both about my own tests.** (1) *A guard that cannot fire is not a guard.* `pcmQueue`'s sample-alignment fix looked correct and was unreachable — `write` appends two bytes per sample, so the byte-count drop was always even anyway. Mutating it away left the suite green (§9 rule 8). It is now a FRAME-boundary drop, which is a real property, with a ramp fixture whose first surviving sample says exactly where the cut landed; mutating that away fails. (2) *A test fake has to obey the transport's constraints.* The first `fakeCodec` was a passthrough, which made every 20 ms frame 1,920 bytes — over pion's receive MTU — and the audio test failed with `mux: short buffer`, a message that looks exactly like a broken transport and had nothing to do with one. **And one about the vendor:** the paraphrase is not a style preference to work around later. It fabricated a plausible sentence about a forbidden path. Any design that routes exact output through it is wrong, however good the prose sounds. |
+
+| 2026-09-11 | **Echo measured, and the answer withdrew the advice I had shipped that morning.** `gpt-live-1` landed with "use headphones, effect unmeasured" in three documents — the honest position when nothing had been played through a speaker. Measured properly on the worst hardware in the room (a MacBook's own speakers into its own microphone, Helix's real `sox` capture and real beep/oto playback, no AEC anywhere) at output volumes 30/55/80: the service transcribed **none** of its own voice, at every volume, while the microphone was demonstrably hearing it — at volume 80 the model arrives at RMS 0.028 mean and 0.078 peak, *louder than an audible person* by this repo's own wake-word calibration, and a `say` sentence through those same speakers seconds earlier was transcribed word for word every time. **Then the question that actually decides it:** "does not hear itself" has two causes that look identical and mean opposite things — the echo is CANCELLED, or the input is GATED while it speaks, the second of which would quietly make full duplex not full duplex and remove the only reason to pay for the model. So the probe talked over it through the same speakers mid-sentence: *"Excuse me, stop talking, I have a different question."* came back transcribed in full while nothing of the model's concurrent speech did. Two voices in the same 20 ms frames at the same level, exactly one heard. Server-side AEC, confirmed. Resolution order (a)–(d) from the brief therefore ends at **(a)**; (b) headphones, (c) VoiceProcessingIO and (d) libspeexdsp are all unnecessary and the headphone advice is deleted rather than softened, in `docs/voice.md` §7 and §7c, `docs/blackbox.md` §3, ADR-020, §8 and §0 | Committed on `feat/blackbox` | **The first barge-in number I produced was my own bug, and it was a rule-8 failure wearing a new coat.** The probe reported the model talking for 15.3 s straight through an interruption — which I nearly wrote up as "barge-in is slow". Its session prompt said *"Never stop after one sentence"*: I had instructed the subject to ignore interruptions and then measured that it ignored interruptions. Removing the clause gave **3.9 s**, on transcript timestamps that lag the audio by 1.5–2 s, for an interrupting sentence that takes ~3 s to play — so it stopped before the interruption had finished playing. §9 rule 8 is about tests that cannot reach their target; this is the sibling nobody had written down: **a test that reaches its target and measures the harness instead.** The tell was that the number was surprisingly bad rather than surprisingly good, and a surprising result is a reason to re-read your own fixture first. |
 
 *End of BlackBox_Development.md — maintain it as the single source of truth. If reality diverges
 from this document, update the document in the same commit as the code.*

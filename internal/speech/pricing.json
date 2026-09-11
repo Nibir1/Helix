@@ -45,6 +45,20 @@
       "notes": "OpenAI realtime transcription over WebSocket \u2014 live partials without adding a second vendor. ~3.5x whisper-1 per minute and ~25x groq turbo, so pick it when streaming matters and you already have an OpenAI key. Wire format is partly inferred; speech.stt.realtime in config corrects it."
     },
     {
+      "provider": "openai",
+      "kind": "stt",
+      "model": "gpt-live-1",
+      "price_per_unit": 0.05,
+      "unit": "minute",
+      "latency": "very_low",
+      "quality_tier": "premium",
+      "languages": "multi",
+      "requires_key": true,
+      "local": false,
+      "recommended": false,
+      "notes": "FULL DUPLEX, not transcription. gpt-live-1 hears AND speaks over WebRTC, replacing the whole STT\u2192LLM\u2192TTS chain for the life of a session \u2014 no TTS provider is used while one is open. You can talk over it, and it decides when your turn ended instead of a silence timer. ~3x gpt-live-transcribe and ~75x groq turbo, PLUS your planner's model, billed per second while the conversation is open. Needs libopus (brew install opus / apt install libopus0). It PARAPHRASES what Helix gives it, so exact output stays on screen \u2014 see docs/voice.md \u00a77c."
+    },
+    {
       "provider": "deepgram",
       "kind": "stt",
       "model": "nova-3",
