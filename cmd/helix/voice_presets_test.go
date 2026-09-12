@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"helix/internal/config"
 	"helix/internal/speech"
 )
 
@@ -298,4 +299,64 @@ func duplexPreset(t *testing.T) speechPreset {
 	}
 	t.Fatal("no duplex preset in this build")
 	return speechPreset{}
+}
+
+// THE LINK NOTHING TESTED: the config the preset writes must be the config
+// duplexSelected() recognises.
+//
+// These are two independent pieces of string matching in different files —
+// presetAPIModel resolves the model against the pricing catalog, duplexSelected
+// compares provider and model against constants — and nothing connected them.
+// If the catalog lookup returned "" (it does exactly that for local providers),
+// the preset would write a blank model, duplexSelected would be false, and
+// picking "Talk over it" would silently configure an ORDINARY OpenAI chain.
+// The wizard would report success and the user would never see a DUPLEX row.
+func TestTheDuplexPresetProducesAConfigThatSelectsDuplex(t *testing.T) {
+	catalog, err := speech.LoadMergedCatalog()
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	p := duplexPreset(t)
+
+	// apply() is not called: it assigns sidecar ports and prepares providers,
+	// which reads global config and can prompt for a key. What is under test is
+	// the pure half — the model that ENDS UP in config — so the one line of
+	// apply() that decides it is exercised directly.
+	model := presetAPIModel(catalog, "stt", p.STTProvider, p.STTModel)
+
+	saved := cfg
+	t.Cleanup(func() { cfg = saved })
+	cfg = &config.Config{}
+	cfg.Speech.STT.Provider = p.STTProvider
+	cfg.Speech.STT.Model = model
+
+	if model == "" {
+		t.Fatal("the preset resolves to an EMPTY stt.model — presetAPIModel returns \"\" for " +
+			"local providers and would here too if the catalog row were mislabelled, leaving " +
+			"an ordinary OpenAI transcription chain that never opens a session")
+	}
+	if !duplexSelected() {
+		t.Fatalf("the preset resolves to provider=%q model=%q, which duplexSelected() does "+
+			"not recognise — picking \"Talk over it\" would configure a non-duplex chain "+
+			"and say nothing about it",
+			p.STTProvider, model)
+	}
+}
+
+// And the reverse: the preset's own fallbacks must NOT select duplex, or a
+// degraded machine would keep trying the session it cannot open.
+func TestTheDuplexPresetsFallbacksAreNotThemselvesDuplex(t *testing.T) {
+	saved := cfg
+	t.Cleanup(func() { cfg = saved })
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	p := duplexPreset(t)
+	for _, f := range p.STTFallbacks {
+		cfg.Speech.STT.Provider = f
+		cfg.Speech.STT.Model = p.STTModel
+		if duplexSelected() {
+			t.Errorf("fallback %q still selects duplex", f)
+		}
+	}
 }

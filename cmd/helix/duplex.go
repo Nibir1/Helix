@@ -47,6 +47,7 @@ import (
 	"helix/internal/shell"
 	"helix/internal/speech"
 	"helix/internal/utils"
+	"helix/internal/ux"
 )
 
 // duplexModel is the only model that takes this path. An exact match, not a
@@ -76,6 +77,50 @@ const duplexQuietGap = 1500 * time.Millisecond
 // hold a turn open forever.
 const duplexQuietWait = 12 * time.Second
 
+// duplexTranscriptSettle is how long the input transcript must be quiet before a
+// delegated turn is considered complete.
+//
+// MEASURED, and the reason this exists: transcript deltas lag the audio they
+// describe by 1.5–2 s, and session.delegation.created arrives on the model's
+// own clock. So when the delegation lands, deltas for the sentence that just
+// ended are STILL IN FLIGHT. Snapshotting the transcript at that instant cuts
+// the end off the user's words and — worse — the late deltas then land in the
+// buffer for the NEXT turn. It shows up as a fragment of one sentence glued to
+// the front of the next: "[clear throat Are you still here", where the model
+// had annotated a throat-clear and only half of it survived the cut.
+const duplexTranscriptSettle = 600 * time.Millisecond
+
+// duplexSettleCap bounds that wait, so a stuck delta stream cannot hold a turn.
+const duplexSettleCap = 3 * time.Second
+
+// duplexOrphanWait is how long speech may sit un-delegated before Helix takes
+// the turn anyway.
+//
+// The model decides when a turn ends, and measurement showed it sometimes
+// decides NEVER: one probe utterance produced a full transcript, no delegation,
+// no speech and no event at all. §13 records that and says the case must be
+// reported rather than waited on — and then the first implementation waited on
+// it forever, which is how "manual mode" stopped working in a real session. The
+// transcript was on screen under [hearing] and never reached
+// finishVoiceTranscript, so the stop phrase never took effect.
+//
+// THE SAFETY VALVE MUST NOT DEPEND ON THE VENDOR'S TURN DETECTION. That is the
+// whole argument for this constant: ADR-005's "manual mode" is the way out of a
+// live microphone, and a way out that a third party can withhold is not one.
+// 2.5s, and the number was measured rather than chosen. When the model DOES
+// delegate it does so essentially the instant the user stops — the delegation
+// and the last transcript delta arrive together — so any silence past a couple
+// of seconds with no delegation means it has decided not to.
+//
+// The first value was 6s and it merged turns. A live run produced the single
+// turn "Are you still there Manual mode": two utterances four seconds apart,
+// both accumulated into one buffer because the rescue timer restarts on every
+// new delta and the second sentence arrived before it expired. The planner got
+// one garbled question, and the stop phrase only worked because matchModePhrase
+// is suffix-matched — a safety valve saved by an unrelated design decision is
+// not a safety valve that was working.
+const duplexOrphanWait = 2500 * time.Millisecond
+
 // duplexAnswerWait bounds a spoken yes/no inside a duplex session. ADR-005
 // rule 3: silence declines.
 const duplexAnswerWait = 20 * time.Second
@@ -90,10 +135,20 @@ type duplexSession struct {
 	heard      strings.Builder // the current turn's transcript, as it arrives
 	delegation string          // the delegation the current turn belongs to
 	lastSpoke  time.Time       // when the model last emitted an output delta
+	lastHeard  time.Time       // when the USER's transcript last grew
 	partial    bool            // a partial line is on screen and needs clearing
 
-	turns chan duplexTurn
-	stop  sync.Once
+	turns       chan duplexTurn
+	delegations chan string // delegation ids awaiting transcript settle
+	say         chan string // replies awaiting a gap in the model's speech
+	stop        sync.Once
+
+	// viz is the waveform HUD for the turn currently being waited on, or nil.
+	//
+	// An atomic pointer because the METER is fed from pumpMicrophone — a
+	// goroutine that has been running since the session opened — while the HUD
+	// itself belongs to one turn and is created and destroyed by the REPL.
+	viz atomic.Pointer[ux.VoiceViz]
 }
 
 // duplexTurn is one completed user turn.
@@ -181,7 +236,12 @@ func startDuplex() error {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	d := &duplexSession{cancel: cancel, turns: make(chan duplexTurn, 4)}
+	d := &duplexSession{
+		cancel:      cancel,
+		turns:       make(chan duplexTurn, 4),
+		delegations: make(chan string, 8),
+		say:         make(chan string, 16),
+	}
 
 	rec, err := speech.NewStreamRecorder(ctx, live.AudioSampleRate)
 	if err != nil {
@@ -219,6 +279,8 @@ func startDuplex() error {
 	}
 	go d.pumpMicrophone(ctx)
 	go d.playModelAudio(ctx)
+	go d.assembleTurns(ctx)
+	go d.pumpSpeech(ctx)
 	return nil
 }
 
@@ -270,6 +332,13 @@ func (d *duplexSession) pumpMicrophone(ctx context.Context) {
 			continue
 		}
 		failures = 0
+		// Metered on the way past, exactly as streamingVoiceTurn does it. The
+		// duplex path reads the microphone in chunks for its own reasons, so
+		// the waveform costs nothing extra and tracks the real input rather
+		// than animating regardless of whether anything is heard.
+		if v := d.viz.Load(); v != nil {
+			v.SetLevel(speech.ClipLevel(clip))
+		}
 		pcm, err := speech.DecodeWAVPCM16(clip.Bytes)
 		if err != nil {
 			continue
@@ -306,9 +375,15 @@ func (d *duplexSession) onHeard(delta string, _ int) {
 	d.mu.Lock()
 	d.heard.WriteString(delta)
 	text := strings.TrimSpace(d.heard.String())
+	d.lastHeard = time.Now()
 	d.partial = true
 	d.mu.Unlock()
 	noteVoiceActivity(time.Now())
+	// The HUD and the interim transcript share ONE terminal row, so the
+	// waveform hands it over as soon as there are words: before that the meter
+	// answers "is the microphone live?", after it the text is strictly more
+	// informative. Same handover streamingVoiceTurn calls yieldLine.
+	d.stopViz()
 	fmt.Printf("\r\x1b[2K[hearing] %s", text)
 }
 
@@ -327,20 +402,82 @@ func (d *duplexSession) onSpoke(string) {
 // duplexCapture reports it instead of waiting forever.
 func (d *duplexSession) onDelegation(id string) {
 	d.mu.Lock()
-	text := strings.TrimSpace(d.heard.String())
-	d.heard.Reset()
 	d.delegation = id
 	d.mu.Unlock()
-	d.clearPartial()
-	if text == "" {
-		return
-	}
+	// NOT snapshotted here. The transcript is still arriving — see
+	// duplexTranscriptSettle — so the assembler waits for it to settle first.
+	// Taking it at this instant is what glued the tail of one sentence onto the
+	// front of the next.
 	select {
-	case d.turns <- duplexTurn{text: text, delegation: id}:
+	case d.delegations <- id:
+	default:
+	}
+}
+
+// assembleTurns turns a delegation into a completed turn, once the transcript
+// that belongs to it has finished arriving.
+//
+// One goroutine, so turns stay in order and `heard` has exactly one writer of
+// its reset. A second delegation arriving mid-settle waits its turn in the
+// channel rather than racing this one.
+func (d *duplexSession) assembleTurns(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.closedOrDone():
+			return
+		case id := <-d.delegations:
+			d.waitTranscriptSettled(ctx)
+			d.mu.Lock()
+			text := strings.TrimSpace(d.heard.String())
+			d.heard.Reset()
+			d.mu.Unlock()
+			d.clearPartial()
+			if text == "" {
+				continue
+			}
+			d.emitTurn(duplexTurn{text: text, delegation: id})
+		}
+	}
+}
+
+// waitTranscriptSettled blocks until the user's transcript stops growing.
+func (d *duplexSession) waitTranscriptSettled(ctx context.Context) {
+	deadline := time.Now().Add(duplexSettleCap)
+	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			return
+		}
+		d.mu.Lock()
+		last := d.lastHeard
+		d.mu.Unlock()
+		if last.IsZero() || time.Since(last) >= duplexTranscriptSettle {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// emitTurn hands a completed turn to the REPL.
+func (d *duplexSession) emitTurn(t duplexTurn) {
+	select {
+	case d.turns <- t:
 	default:
 		// The REPL is busy serving the previous turn. Dropping is right: a
 		// queued turn would be answered minutes after it was spoken.
+		if utils.IsDebugMode() {
+			_, _ = fmt.Fprintf(stderrOut(), "[duplex] turn dropped, REPL busy: %q\n", t.text)
+		}
 	}
+}
+
+// closedOrDone is the session's closed channel, for selects.
+func (d *duplexSession) closedOrDone() <-chan struct{} {
+	if d.sess == nil {
+		return nil
+	}
+	return d.sess.Done()
 }
 
 func (d *duplexSession) onUsage(seconds int) {
@@ -396,10 +533,28 @@ func duplexDebugEvent(eventType, raw string) {
 // the guarantee voice_silence_test.go asserts about its body: that it has no
 // attempt cap.
 func awakeCapture(ctx context.Context) (input.InputEvent, error) {
-	if duplexActive() {
-		return duplexCapture(ctx)
+	if !duplexActive() {
+		return voiceTurnWithRetry(ctx)
 	}
-	return voiceTurnWithRetry(ctx)
+	// THE SILENCE LADDER, which the duplex path does not otherwise get.
+	//
+	// voiceTurnWithRetry absorbs ErrNoSpeech and ErrEmptyTranscript and loops;
+	// duplexCapture is not wrapped by it, so those errors went straight to the
+	// REPL — which prints a red "voice unavailable" panel and drops the user to
+	// the keyboard. An empty transcript is not an unavailable microphone, and
+	// mid-conversation it is not even unusual.
+	//
+	// The reassurance line voiceTurnWithRetry prints every few quiet turns is
+	// deliberately NOT copied: it exists because a half-duplex capture ends
+	// silently and leaves nothing on screen. Here the waveform is running the
+	// whole time, which answers the same question better.
+	for {
+		ev, err := duplexCapture(ctx)
+		if err != nil && silenceIsNotAFailure(err) {
+			continue
+		}
+		return ev, err
+	}
 }
 
 // duplexCapture takes one duplex turn. Installed as awakeHooks.capture, so the
@@ -412,8 +567,24 @@ func duplexCapture(ctx context.Context) (input.InputEvent, error) {
 		// so take the turn that way rather than ending the conversation.
 		return voiceTurnWithRetry(ctx)
 	}
+	// A reply still playing through the TTS chain is superseded by a new turn,
+	// the same way voiceTurn does it. Usually a no-op in duplex — the model's
+	// voice arrives over RTP, not through SpeakStream — but not always: a
+	// session that failed to open, or a remark queued before it opened, leaves
+	// the ordinary chain talking.
+	//
+	// There is deliberately NO ready chime here, and that is not an omission.
+	// voiceTurn plays one because its microphone opens for the turn; this one
+	// has been open since the conversation started, so a chime would mark
+	// nothing — and it would be HEARD. §13 records sox's silence gate opening
+	// on Helix's own 880 Hz ping and STT returning the word "you"; into an
+	// always-open transcribing microphone that would be a spurious turn every
+	// time.
+	speech.StopSpeaking()
+
 	// Anything the companion has been holding is said HERE, at the top of a
-	// turn, which is where voiceTurn drains it too.
+	// turn, which is where voiceTurn drains it too. It no longer blocks: the
+	// reply is queued for pumpSpeech and this returns immediately.
 	//
 	// It reaches the model on the PREVIOUS turn's delegation, which is still
 	// current — the id is replaced when the next one arrives, not cleared when
@@ -424,21 +595,101 @@ func duplexCapture(ctx context.Context) (input.InputEvent, error) {
 	// there, which is the same place every withheld thing goes.
 	drainCompanion()
 
-	select {
-	case turn := <-d.turns:
-		// The same funnel a typed line and a half-duplex clip reach. Nothing
-		// about this turn's origin gives it more authority: Channel stays
-		// ChannelVoice, so the Medium ceiling and the denied-command list apply.
-		return finishVoiceTranscript(turn.text, speech.Transcript{
-			Text:     turn.text,
-			Provider: duplexModel,
-			IsFinal:  true,
-		}, speech.AudioFormat{})
-	case <-d.sess.Done():
-		return input.InputEvent{}, errors.New("live session ended")
-	case <-ctx.Done():
-		return input.InputEvent{}, ctx.Err()
+	// THE WAVEFORM. Every other capture path in Helix has had one since P12.4 —
+	// streamingVoiceTurn, batchVoiceTurn and the armed standby prompt all start
+	// one — and the duplex turn is a third capture path that was written
+	// without it. The result on screen was a bare blinking cursor under the
+	// LIVE banner: a microphone that is open, listening, and showing nothing.
+	viz := ux.NewVoiceViz()
+	viz.Start(ux.VizListening)
+	d.viz.Store(viz)
+	defer d.stopViz()
+
+	// The orphan ticker is the reason this is not a bare three-way select.
+	//
+	// The model decides when a turn ends, and it sometimes decides never — a
+	// full transcript arrives, no delegation follows, and the words sit on
+	// screen under [hearing] having never reached the pipeline. In a real
+	// session that stranded "manual mode": the one phrase whose entire job is
+	// to close an open microphone, withheld by the vendor's turn detection.
+	orphan := time.NewTicker(time.Second)
+	defer orphan.Stop()
+
+	for {
+		select {
+		case turn := <-d.turns:
+			// The same funnel a typed line and a half-duplex clip reach. Nothing
+			// about this turn's origin gives it more authority: Channel stays
+			// ChannelVoice, so the Medium ceiling and the denied-command list apply.
+			return finishVoiceTranscript(turn.text, speech.Transcript{
+				Text:     turn.text,
+				Provider: duplexModel,
+				IsFinal:  true,
+			}, speech.AudioFormat{})
+		case <-orphan.C:
+			if turn, ok := d.takeOrphanedTurn(); ok {
+				return finishVoiceTranscript(turn.text, speech.Transcript{
+					Text:     turn.text,
+					Provider: duplexModel,
+					IsFinal:  true,
+				}, speech.AudioFormat{})
+			}
+		case <-d.sess.Done():
+			// The session died under us — a dropped network, an expiry, a
+			// transport failure. Fall back to the HALF-DUPLEX chain rather
+			// than returning an error, which the REPL renders as "voice
+			// unavailable" and answers by dropping the user to the keyboard.
+			//
+			// onClosed already says this is the intent ("falling back to the
+			// half-duplex chain is better than ending it") and then the one
+			// path that could act on it did the opposite. The conversation
+			// continues on whatever STT the preset configured as the fallback.
+			d.stopViz()
+			uiWarn("full duplex", "the live session ended — continuing on the standard chain")
+			return voiceTurnWithRetry(ctx)
+		case <-ctx.Done():
+			return input.InputEvent{}, ctx.Err()
+		}
 	}
+}
+
+// stopViz tears the HUD down and releases the terminal line. Idempotent: it is
+// called both when words arrive and again when the turn returns, and the second
+// call must not resurrect a line nobody owns.
+func (d *duplexSession) stopViz() {
+	if v := d.viz.Swap(nil); v != nil {
+		v.Stop()
+	}
+}
+
+// takeOrphanedTurn claims a transcript the model never handed over.
+//
+// Helix does all the reasoning anyway, so a delegation is only needed to SPEAK
+// the reply — and the previous one is still valid for that (appending
+// commentary to a delegation long after it was created was measured working).
+// Taking the turn therefore costs nothing and rescues the case where the model
+// simply never decides.
+//
+// Bounded by duplexOrphanWait rather than taken eagerly: a delegation usually
+// IS coming, and claiming a sentence the user is still speaking would split it
+// in half — the walkie-talkie failure the half-duplex path was fixed for.
+func (d *duplexSession) takeOrphanedTurn() (duplexTurn, bool) {
+	d.mu.Lock()
+	text := strings.TrimSpace(d.heard.String())
+	last := d.lastHeard
+	id := d.delegation
+	if text == "" || last.IsZero() || time.Since(last) < duplexOrphanWait {
+		d.mu.Unlock()
+		return duplexTurn{}, false
+	}
+	d.heard.Reset()
+	d.mu.Unlock()
+	d.clearPartial()
+	if utils.IsDebugMode() {
+		_, _ = fmt.Fprintf(stderrOut(),
+			"[duplex] no delegation after %s; taking the turn anyway: %q\n", duplexOrphanWait, text)
+	}
+	return duplexTurn{text: text, delegation: id}, true
 }
 
 // duplexSpeak hands a reply to the model to vocalise.
@@ -484,21 +735,58 @@ func duplexSpeak(text string) (spoken string, handled bool) {
 		}
 		return "", true
 	}
-	d.waitQuiet()
 	summary, _ := live.SpeakableSummary(text)
 	if summary == "" {
 		return "", true
 	}
-	if err := d.sess.Commentary(id, summary); err != nil {
+	// QUEUED, NOT SPOKEN HERE. This runs on the REPL goroutine, and waiting for
+	// a gap in the model's speech used to happen right here — up to 12 seconds
+	// of it, on every single reply.
+	//
+	// That was the reported "laggy, then stuck". gpt-live-1 is conversational
+	// and keeps talking, so the gap this waits for kept not arriving and the
+	// wait ran its full bound. Nothing else runs during it: the REPL is not
+	// reading a turn, and the keyboard watcher only exists inside
+	// awakeHooks.capture — so for those seconds neither the microphone nor the
+	// keyboard did anything, which is indistinguishable from a hang.
+	//
+	// pumpSpeech does the waiting instead, off the REPL, in order.
+	select {
+	case d.say <- summary:
+	default:
 		if utils.IsDebugMode() {
-			_, _ = fmt.Fprintf(stderrOut(), "[duplex] commentary: %v\n", err)
+			_, _ = fmt.Fprintf(stderrOut(), "[duplex] speech queue full, dropped: %q\n", summary)
 		}
-		// Still CLAIMED. The send failed, but the microphone is open and being
-		// transcribed, so handing this to the TTS chain would play Helix's own
-		// voice into the session and have it answer itself.
-		return "", true
 	}
 	return summary, true
+}
+
+// pumpSpeech appends queued replies, one at a time, each after the model has
+// stopped talking.
+//
+// Serial by construction: two commentary appends racing would interleave two
+// replies into one spoken sentence. The queue is what lets the REPL hand a
+// reply over and immediately go back to listening.
+func (d *duplexSession) pumpSpeech(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.closedOrDone():
+			return
+		case text := <-d.say:
+			d.waitQuiet()
+			d.mu.Lock()
+			id := d.delegation
+			d.mu.Unlock()
+			if id == "" {
+				continue
+			}
+			if err := d.sess.Commentary(id, text); err != nil && utils.IsDebugMode() {
+				_, _ = fmt.Fprintf(stderrOut(), "[duplex] commentary: %v\n", err)
+			}
+		}
+	}
 }
 
 // waitQuiet blocks until the model has been silent for duplexQuietGap.
@@ -528,6 +816,9 @@ func (d *duplexSession) duplexAwaitAnswer(question string) (string, bool) {
 	if id == "" {
 		return "", false
 	}
+	// Synchronous here, unlike duplexSpeak, and deliberately: this is a
+	// QUESTION, and the next turn is its answer. Queuing it would let the turn
+	// arrive before the question had been asked.
 	d.waitQuiet()
 	if err := d.sess.Commentary(id, shell.Plain(question)); err != nil {
 		return "", false

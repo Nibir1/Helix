@@ -508,6 +508,43 @@ build is still CGO-free and the binary still cross-compiles; this is the same
 posture as already needing `sox` or `ffmpeg` to record. Without it,
 `/blackbox status` says so and conversations quietly use the ordinary chain.
 
+### Who is actually doing what
+
+This is the question the design most often gets asked, and the answer is not
+what the screen used to suggest:
+
+| | |
+|---|---|
+| **hears you** | `gpt-live-1` |
+| **decides your turn ended** | `gpt-live-1` |
+| **works out what you meant, plans it, runs it** | **your own model** — DeepSeek, Claude, a local Ollama, whatever `/provider` says |
+| **speaks the answer** | `gpt-live-1` |
+
+`gpt-live-1` is the ear and the mouth. It has **no tools**, it never sees your
+files, and it decides nothing about what Helix does. That is *client
+delegation*: when you stop talking it hands the turn back and waits. The
+alternative — letting OpenAI's backend reason and call tools — is refused
+outright, because it would put an external model in front of the Instruction
+Firewall.
+
+**On cost**, which is the usual reason people ask. OpenAI's guide: *"GPT-Live
+voice sessions are billed by duration, per second"*, and backend model usage is
+billed separately. In client delegation **your** backend is the one doing the
+reasoning, so that half of the bill is your existing provider's, at your
+existing rates — there is no second OpenAI model quietly thinking behind the
+voice. You pay $0.05/min for the voice layer and whatever DeepSeek (or
+whoever) already charges you for the thinking.
+
+What you **cannot** get from `gpt-live-1` is a pure listen-and-speak pipe. It is
+a generative speech model: it writes its own acknowledgements and it paraphrases
+whatever you hand it (see below). If you want strictly verbatim speech with a
+brain of your choosing, that is `gpt-live-transcribe` at $0.017/min plus the
+ordinary TTS chain — one third the price, no interruption, no paraphrase.
+`/blackbox setup` offers both.
+
+The `LIVE` banner now names the thinker on its own `THINKING` row, on every
+chain rather than only this one.
+
 ### What it does not change
 
 **The pipeline.** A spoken turn reaches the planner through exactly the funnel a
@@ -579,10 +616,12 @@ nobody said.
 
 ### Other limits
 
-- **A turn can be dropped.** The model decides when to hand a turn to Helix, and
-  uninstructed it sometimes answers itself or does nothing at all. The session
-  prompt Helix sends is the measured fix for that (5 turns, 5 delegations) — but
-  it is a prompt, not a guarantee.
+- **The model sometimes never hands a turn over, and Helix takes it anyway.**
+  It decides when your turn ended, and occasionally it decides never — the words
+  are transcribed and then nothing happens. After 2.5 seconds of silence with no
+  hand-over, Helix finalises the turn itself. That matters most for the way out:
+  **"manual mode" must never depend on the vendor's turn detection**, or the
+  phrase that closes an open microphone could be withheld by a third party.
 - **Numbers are still spoken as words.** `4` comes out as *"Four."* even under
   an explicit verbatim instruction.
 - **The session prompt cannot be changed once a session is open.** The service

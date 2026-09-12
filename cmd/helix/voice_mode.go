@@ -96,8 +96,15 @@ func printLiveBanner() {
 
 	fmt.Println(shell.PanelTitle("live"))
 
-	w := shell.KVWidth("HEARING", "SIGHT", "VOICE", "EXIT")
+	w := shell.KVWidth("HEARING", "THINKING", "SIGHT", "VOICE", "EXIT")
 	fmt.Println(shell.KV("HEARING", blackBoxHearingLine(), w))
+	// WHO IS ACTUALLY THINKING. The banner named the ear, the eye and the
+	// mouth and never the brain, which is the one a user is most likely to be
+	// wrong about — reported as exactly that: "who is processing that text?"
+	// on a duplex session, where the ear and the mouth are a vendor's model and
+	// it is easy to assume the reasoning went with them. It did not, and the
+	// row says so on every chain, not only the duplex one.
+	fmt.Println(shell.KV("THINKING", blackBoxThinkingLine(), w))
 	fmt.Println(shell.KV("SIGHT", blackBoxEyesLine(), w))
 	if speech.TTSEnabled() {
 		fmt.Println(shell.KV("VOICE", shell.Badge(shell.StateGood, "replies spoken aloud"), w))

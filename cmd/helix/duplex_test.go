@@ -384,3 +384,61 @@ func TestTheVoiceLogRecordsWhatWasActuallySent(t *testing.T) {
 		t.Error("the duplex branch logs the full reply, overstating what was spoken")
 	}
 }
+
+// The session must not outlive the conversation — an open one bills per second.
+//
+// VERIFIED FOR REAL on 2026-09-11 against the live service, driving the shipped
+// binary over a PTY with the preset's own config: `/blackbox on` opened
+// live_u0_EN1QoBbF3h4ExsBmrXjtw, `/blackbox status` showed the DUPLEX row
+// badged "open" with that id, and after `/blackbox off` the same row read
+// "selected". The throwaway that did it is deleted; what the suite can hold is
+// the wiring that made it true, which is asserted here and in
+// TestTheSessionIsScopedToTheConversation.
+//
+// The BADGE is what says open, never the prose — "$0.05/min while open"
+// contains the word, and matching on it reported a closed session as open in
+// both the e2e and the probe. Twice in one day, which is why it is written down
+// in three places now.
+func TestTheStatusRowDistinguishesOpenFromSelectedByBadge(t *testing.T) {
+	body := stripLineComments(functionBody(readSourceFile(t, "blackbox.go"), "func blackBoxDuplexLine("))
+	if !strings.Contains(body, "duplexActive()") {
+		t.Error("the DUPLEX badge does not consult whether a session is actually open, " +
+			"so \"selected\" and \"open\" would render identically")
+	}
+	// The idle wording must not itself contain the badge word, or every reader
+	// of this row — human or test — has to disambiguate it.
+	saved := cfg
+	t.Cleanup(func() { cfg = saved })
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	duplexCur.Store(nil)
+	cfg.Speech.STT.Provider, cfg.Speech.STT.Model = "openai", duplexModel
+	if line := duplexStatusLine(); strings.Contains(blackBoxDuplexLine(line), "✔ open") {
+		t.Errorf("a closed session renders the open badge: %q", line)
+	}
+}
+
+// The banner named the ear, the eye and the mouth and never the brain — which
+// on a duplex session is the one a user is most likely to get wrong, because
+// the vendor's model hears them and answers in its own voice.
+func TestTheLiveBannerNamesTheModelThatThinks(t *testing.T) {
+	body := stripLineComments(functionBody(readSourceFile(t, "voice_mode.go"), "func printLiveBanner("))
+	if !strings.Contains(body, "THINKING") {
+		t.Error("the LIVE banner does not say which model reasons; on a duplex chain that " +
+			"invites the assumption that gpt-live-1 does")
+	}
+	if !strings.Contains(body, "blackBoxThinkingLine()") {
+		t.Error("the THINKING row is not populated from the active provider")
+	}
+}
+
+// And in a duplex session the HEARING row must not describe the fallback chain
+// as though it were what is listening.
+func TestTheHearingRowSaysFullDuplexWhenItIs(t *testing.T) {
+	body := stripLineComments(functionBody(readSourceFile(t, "blackbox.go"), "func blackBoxHearingLine("))
+	if !strings.Contains(body, "duplexActive()") {
+		t.Error("the HEARING row reports the provider chain in a duplex session, which " +
+			"describes the fallback rather than what is actually listening")
+	}
+}

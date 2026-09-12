@@ -29,6 +29,7 @@ package main
 
 import (
 	"fmt"
+	"helix/internal/ai"
 	"strings"
 
 	"helix/internal/shell"
@@ -239,6 +240,15 @@ func blackBoxHearingLine() string {
 		return shell.Badge(shell.StateWarn, "no transcription") +
 			shell.Muted("  /blackbox setup picks one")
 	default:
+		if duplexActive() {
+			// "openai → whisper-local" is the provider CHAIN, and in a duplex
+			// session it describes the fallback rather than what is listening.
+			// Naming the chain here read as ordinary transcription on the one
+			// configuration where it is not.
+			return shell.Badge(shell.StateGood, "full duplex") +
+				shell.Muted("  ") + shell.Value(duplexModel) +
+				shell.Muted("  ·  talk over it  ·  falls back to "+sttChainDescription())
+		}
 		return shell.Badge(shell.StateGood, "ready") +
 			shell.Muted("  ") + shell.Value(sttChainDescription())
 	}
@@ -277,6 +287,33 @@ func sttChainDescription() string {
 		return ""
 	}
 	return strings.Join(reg.STTChain(), " → ")
+}
+
+// blackBoxThinkingLine names the model that actually reasons.
+//
+// It exists because a duplex session makes the question genuinely confusing:
+// gpt-live-1 hears you and answers in its own voice, so the natural assumption
+// is that it is also deciding what to do. It is not — client delegation means it
+// hands every turn back and waits (ADR-020) — but nothing on screen said so.
+// The row is shown on every chain rather than only the duplex one, because
+// "which model is spending my money on reasoning" is not a duplex-only question.
+func blackBoxThinkingLine() string {
+	provider, model := ai.ActiveProviderName(), ai.ActiveModel()
+	switch {
+	case provider == "":
+		return shell.Badge(shell.StateWarn, "no provider") +
+			shell.Muted("  /provider use <name>")
+	case model == "":
+		return shell.Badge(shell.StateWarn, provider) +
+			shell.Muted("  no model selected  ·  /model <id>")
+	}
+	line := shell.Badge(shell.StateGood, provider+" / "+model)
+	if duplexActive() {
+		// The whole point of the row, said out loud on the one chain where it
+		// is counter-intuitive.
+		line += shell.Muted("  ·  gpt-live-1 only hears and speaks")
+	}
+	return line
 }
 
 // blackBoxWakeLine summarises hands-free triggering in one line.
