@@ -113,3 +113,40 @@ func TestAIStreamWriterStartedTracksContent(t *testing.T) {
 		w.Close()
 	})
 }
+
+// `/config typing-effect` says "Animate AI replies". The band rewrite dropped
+// the parameter and quietly turned that into a setting that did nothing.
+//
+// The streaming path deliberately does not animate — real arrival timing
+// replaces the simulation — but PrintAIMessage has no arrival timing to
+// replace, so the effect still has a job here.
+func TestTypingEffectStillReachesTheReply(t *testing.T) {
+	src, err := os.ReadFile("ux.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	if strings.Contains(body, "func (ux *UX) PrintAIMessage(text string, _ bool)") {
+		t.Error("PrintAIMessage ignores its typing-effect parameter, so /config " +
+			"typing-effect is a documented setting that does nothing")
+	}
+	if !strings.Contains(body, "typeIntoBand(") {
+		t.Error("there is no animated path for a non-streamed reply")
+	}
+}
+
+// Animated or not, the band must be identical — the effect changes the timing,
+// never the layout.
+func TestTheAnimatedReplyRendersTheSameBand(t *testing.T) {
+	const reply = "Spawn it in a sandbox, run tests against it, then promote it only if it passes."
+
+	plain := captureStdout(t, func() { NewUX().PrintAIMessage(reply, false) })
+
+	u := NewUX()
+	u.typingSpeed = 0 // no sleeping in a test
+	typed := captureStdout(t, func() { u.PrintAIMessage(reply, true) })
+
+	if plain != typed {
+		t.Errorf("the typing effect changed the layout:\nplain: %q\ntyped: %q", plain, typed)
+	}
+}

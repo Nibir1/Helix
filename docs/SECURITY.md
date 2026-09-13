@@ -195,8 +195,18 @@ structural rather than advisory:
   whatever the phrasing, and the refusal is spoken as well as printed.
 - **Typed confirmations stay typed.** Force push, hard reset, worktree clean,
   deleting a main branch: the voice prompter refuses these outright, so voice
-  cannot satisfy them even with a perfect impersonation.
-- **Voice may restart the shell, and nothing else in the danger category.**
+  cannot satisfy them even with a perfect impersonation. In a full-duplex
+  session Helix goes further and **deafens the session** for the duration —
+  `session.input_audio.mute`, verified to stop transcription and turn-taking
+  outright — so nothing in the room can speak the phrase while you read the
+  prompt. If that mute is refused, the confirmation is refused with it.
+- **Ending the machine is High risk.** `shutdown`, `reboot`, `halt`, `poweroff`
+  and the macOS `osascript` spelling are unreachable from voice and blocked at
+  the default posture. They analysed as **Low** until 2026-09-13 — which under
+  `ask` means they run with no confirmation — and the Medium voice cap does not
+  reach a Low command either, so neither guard applied. Found when a planner
+  offered to reboot the machine in answer to "reboot yourself".
+- **Voice may restart the SHELL, and nothing else in the danger category.**
   `/reboot` is reachable by voice because it destroys nothing: the continuity
   record is written before the process ends, so the worst a misheard "reboot"
   costs is a few seconds, after which the same mode, directory and conversation

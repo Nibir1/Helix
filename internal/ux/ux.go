@@ -267,20 +267,52 @@ func (ux *UX) PrintSystemMessage(text string) {
 // PrintAIMessage prints an AI response.
 // PrintAIMessage prints an AI response as a band.
 //
-// THE TYPEWRITER IS GONE FROM THIS PATH, and the reasoning is already written
-// on AIStreamWriter: it simulates live generation with fixed per-character
-// sleeps, which is strictly worse than real arrival timing and adds delay on
-// top of genuine latency. Inside a band it would also have to re-implement the
-// wrap, since the rail is emitted per line rather than per character. The
-// audible tick that gave it its character lives on in the streaming path.
-func (ux *UX) PrintAIMessage(text string, _ bool) {
+// THIS IS THE NON-STREAMING PATH — a vision answer, a fast-path reply, anything
+// the agent has in hand before it prints. The streaming path deliberately does
+// NOT animate (see AIStreamWriter: real arrival timing replaces the
+// simulation), but here there is no arrival timing to replace, so the typing
+// effect still has a job and `/config typing-effect` still governs it.
+//
+// It feeds the BAND rather than printing the text, because the rail is emitted
+// per line: animating the finished string would type over the frame. The first
+// version of this dropped the parameter entirely, which quietly turned a
+// documented setting — "Animate AI replies" — into one that did nothing.
+func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
 	fmt.Println(shell.BandHeader("HELIX", replyMeta(), shell.HexPrimary))
-	for _, line := range shell.BandLines(text) {
-		fmt.Println(line)
+
+	if !useTypingEffect && !ux.typewriteAll {
+		for _, line := range shell.BandLines(text) {
+			fmt.Println(line)
+		}
+		return
 	}
+	ux.typeIntoBand(text)
+}
+
+// typeIntoBand animates a finished reply through the band writer.
+//
+// Fed rune by rune so the WRITER decides every line break — the alternative is
+// animating pre-wrapped lines, which types the rail glyph as though it were
+// content and puts the frame inside the animation.
+func (ux *UX) typeIntoBand(text string) {
+	band := shell.NewBandWriter()
+	delay := ux.typingSpeed
+	if n := len([]rune(text)); n > 400 {
+		delay = 8 * time.Millisecond
+	} else if n > 200 {
+		delay = 15 * time.Millisecond
+	}
+	for _, r := range text {
+		if r != ' ' && r != '\n' && r != '\r' && r != '\t' {
+			audio.PlayType()
+		}
+		band.WriteString(string(r))
+		time.Sleep(delay)
+	}
+	band.Close()
 }
 
 // PrintCommand prints a command execution header.

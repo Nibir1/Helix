@@ -368,7 +368,11 @@ Helix has a **persona**, not a default assistant register: it answers first, kee
 
 **Sesame CSM-1B** is the quality local voice: the speech model from Sesame's "uncanny valley" demo, run through a Rust sidecar with **no Python and no Docker**, and — uniquely among Helix's voices — conditioned on the last few turns of the conversation rather than synthesizing each sentence cold. Helix builds it for you: `/blackbox setup` detects the compute backend (CUDA if `nvidia-smi` answers, Metal on Apple Silicon, otherwise a tuned CPU build), installs `git` and `cargo` if the host lacks them, and compiles it — printing the evidence for its choice before it starts, because a detected backend you can see is not a choice made on your behalf. The one step left to you is accepting Sesame's licence, which needs your own account. It wants a discrete GPU (~8 GB VRAM); pair it with `piper-local` as the fallback so a machine that cannot keep up simply uses the fast voice. Context retention is opt-in, memory-only and bounded, and `/blackbox status` reports whether the sidecar is *actually* conditioning on it rather than assuming so — an unpatched server accepts the context field and silently discards it. See [docs/local_runtimes.md](docs/local_runtimes.md) §3.5.
 
-See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits. Capture is half-duplex: the mic is muted while Helix speaks, so you cannot talk *over* a reply. `Ctrl+C` stops one instantly, and `/config barge-in on` lets you stop it by speaking in the pause **between sentences** — the speaker is idle there, so no echo cancellation is needed. That is interruption at the pace of punctuation, not full duplex: a long sentence plays to its end.
+See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits.
+
+On most chains capture is half-duplex: the mic is muted while Helix speaks, so you cannot talk *over* a reply. `Ctrl+C` stops one instantly, and `/config barge-in on` lets you stop it by speaking in the pause **between sentences** — the speaker is idle there, so no echo cancellation is needed. That is interruption at the pace of punctuation, not full duplex: a long sentence plays to its end.
+
+**`gpt-live-1` is the exception and lifts all of that.** Pick "Talk over it" in `/blackbox setup` and the microphone stays open for the whole conversation: you can cut in mid-sentence, and the model decides when your turn ended rather than a silence timer. It costs $0.05/min while open (plus your own planner) and needs libopus. Your own model still does every bit of the reasoning — `gpt-live-1` only hears and speaks, which the `THINKING` row in the live banner states on every turn. Speakers are fine; the service cancels its own voice out of the microphone, measured at three volumes. See [docs/voice.md §7c](docs/voice.md).
 
 | Command | Description |
 | :--- | :--- |
@@ -567,7 +571,7 @@ Helix includes a built-in multi-tool recon orchestrator (`nmap`, `masscan`, `ffu
 
 ### Synthetic Tonal Audio (`internal/audio/`)
 A custom `beep`/`oto` synthesizer generates Tron-style audio feedback:
-- **350Hz percussive data-tap** synchronized perfectly with the AI typewriter effect.
+- **350Hz percussive data-tap**, one per streamed token as a reply arrives, and per character when `/config typing-effect` animates a non-streamed one.
 - **880Hz high-tech alert ping** for modals and confirmations.
 - **110Hz sawtooth buzz** for errors.
 - 50ms buffer latency for tight rhythm sync.
@@ -651,7 +655,7 @@ Helix/
 │   ├── uninstall/         # Removing Helix: binary, shell registration, service, data
 │   ├── update/            # Self-update: fetch, checksum, atomic install, rollback
 │   ├── utils/             # Quote/brace validation, syntax highlighting, history, interrupts
-│   ├── ux/                # Terminal UX (typewriter, prompts, colors)
+│   ├── ux/                # Terminal UX (reply bands, voice HUD, prompts, colors)
 │   ├── vision/            # Single-frame camera capture via ffmpeg
 │   └── wakeword/          # Hands-free wake detection
 ├── tests/                 # Cross-cutting checks (portability guards)
@@ -789,7 +793,7 @@ Ranking is **vision first, then fast/flash**, then tool use, then context size; 
 * SYNAPSE TrueColor animated prompt with glitch effects and transient history
 * Semantic syntax highlighting (10+ token types) in real-time
 * Synthetic tonal audio feedback (350Hz tap, 880Hz alert, 110Hz error)
-* Animated typewriter effects synchronized with audio
+* Conversation rendered as labelled bands, each naming the model that answered
 * In-place terminal resize healing (no duplicate prompt lines)
 
 ---

@@ -1,3 +1,98 @@
+## Unreleased — full duplex, and the session that found its bugs
+
+`gpt-live-1` was listed as impossible in the last release. It is now a chain you
+can pick, and most of what follows is the result of using it and writing down
+what happened.
+
+> No version heading yet: `make release` tags `v` + `HelixVersion` and refuses
+> if the two disagree, so the number is the owner's to choose.
+
+### Full duplex
+
+Pick **"Talk over it"** in `/blackbox setup`. The microphone stays open for the
+whole conversation, you can cut in mid-sentence, and the model decides when your
+turn ended instead of a silence timer.
+
+Everything about the endpoint was measured against the live service rather than
+read, because the prose about it is wrong in ways that do not fail loudly. The
+model is `session.model` and not a top-level field; `session` is required and is
+validated only after the SDP parses; there is no WebSocket transport at all. A
+widely circulating guide says otherwise and is unbuildable.
+
+**Your own model still does all the reasoning.** `gpt-live-1` has no tools and
+decides nothing — it hands every turn back and waits. That is *client
+delegation*, and the alternative, letting OpenAI's backend reason and call tools,
+is refused: it would put an external model in front of the Instruction Firewall.
+OpenAI bills the voice session by duration; the thinking is billed by whoever
+you already use, at your existing rates. The `LIVE` banner now has a `THINKING`
+row that names the model on every chain.
+
+**It paraphrases, so it is never given exact output.** Measured: an appended
+`[ERROR] sandbox violation: /tmp/…` came back as *"Sandbox violation. That action
+touched a forbidden path."* — the path deleted and an explanation invented.
+Paths, hashes, versions and error lines stay on the screen; the model gets
+"done — it's on screen".
+
+**Speakers are fine.** The obvious worry is the microphone hearing the model.
+It does hear it — at volume 80 louder than an audible person — and the service
+transcribes none of it, while still transcribing a real voice talking over it
+through the same speakers. Measured at three volumes; no headphones, no echo
+canceller.
+
+Costs $0.05/min while open, plus your planner. Needs libopus (`brew install
+opus` / `apt install libopus0`), loaded at runtime so the build stays CGO-free.
+
+### Removing Helix
+
+`make uninstall`, or `helix uninstall` from anywhere. Prints a manifest and asks
+before touching anything: the binary, the `/etc/shells` registration, the
+launchd or systemd service, and `~/.helix`. If Helix is your login shell it is
+set back **first**, and if that fails the binary is deliberately kept — the two
+failures together are a machine that cannot open a terminal. Ollama, `sox` and
+`ffmpeg` are named as not touched.
+
+`/purge` offers the same thing as a separate third confirmation after the data
+wipe, so a clean slate never takes the shell away by surprise.
+
+### The conversation looks like an instrument
+
+A turn is now a labelled band rather than a `[NEURAL_NET] →` prefix: a rule
+naming the speaker and the model that answered, and a rail holding the prose to
+one measure. Panels use the whole terminal — the 92-column cap is gone — and the
+band re-reads the width per line, so resizing mid-reply never leaves a line the
+terminal has to wrap.
+
+Three phases of a turn that showed nothing now have a HUD: the model speaking, a
+shell step executing under the sandbox, and a camera frame becoming an insight.
+
+### Fixes worth calling out
+
+- **`sudo shutdown -r now` was Low risk**, which under the default `ask` posture
+  runs with no confirmation — and the Medium voice cap does not reach a Low
+  command either. Now High. Found when a planner offered to reboot the machine
+  in answer to "reboot yourself".
+- **"Reboot yourself, please" did nothing.** The matcher is a suffix match and
+  that sentence ends on "please". Courtesy is trimmed now, as it already was for
+  the stop phrases.
+- **`/blackbox eyes on` refused on `deepseek-flash`**, which sees perfectly
+  well. Measured through Helix's own provider path: the flagship and its three
+  aliases all describe a test image; `deepseek-v4-pro` genuinely cannot, which
+  is why vision stays a per-model property.
+- **`/doctor` now warns when the binary you are running is not the one on
+  disk** — either replaced under a live process, or newer in `dist/` because
+  `make current` builds without installing. Both cost real time in this session.
+
+### Known limits
+
+- A long spoken sentence is truncated in the live caption rather than wrapped.
+  Keeping the tail is deliberate: the words just spoken are the useful ones.
+- Output already on screen does not reflow when you resize. That is the
+  terminal's scrollback, not something Helix can reach.
+- The duplex path is macOS- and Linux-tested. Windows compiles and vets; nobody
+  has run it.
+
+---
+
 ## Helix v1.5.1 — Listening that behaves like a conversation
 
 v1.5.0 could listen. It could not hold a conversation: every turn needed its own

@@ -179,6 +179,14 @@ does not change that rule — it opens the mic only in the gap where the speaker
 idle, measures loudness, and never transcribes — so "provably closed" still means
 what it meant.
 
+**On a `gpt-live-1` chain the microphone is never closed**, so that rule has
+nowhere to stand and a different one replaces it: a remark is handed to the
+session as commentary on the turn in flight, which the model speaks in its own
+voice. The one case with no delegation to attach to — a remark before the first
+turn of a conversation — is printed and not spoken. Helix's own TTS never runs
+while a duplex session is open, because it would play into a microphone that is
+open and being transcribed.
+
 Pacing adapts by backing OFF — the gap is `max(interval, smoothed last look)` —
 so a slow host never queues behind itself. It deliberately does not speed up on
 a fast one: a companion is bounded by how often a person wants to be spoken to.
@@ -353,7 +361,19 @@ a wrong explanation.
 
 ### 5. Terminal UX & Audio (`internal/shell/reader.go`, `internal/audio/`)
 - **SYNAPSE Prompt**: TrueColor animated prompt with glitch effects, git telemetry, and transient history.
-- **Synthetic Audio**: A `beep`/`oto` based synthesizer providing 350Hz data taps, 880Hz alerts, and 110Hz error buzzes synchronized with the typewriter effect.
+- **Synthetic Audio**: A `beep`/`oto` based synthesizer providing 350Hz data taps, 880Hz alerts, and 110Hz error buzzes. The tap fires once per streamed token as a reply arrives, and per character when `/config typing-effect` animates a reply the agent already had in hand.
+- **Conversation bands**: a turn renders as a labelled rule and a rail
+  (`internal/shell/band.go`) rather than an inline prefix. The rule names the
+  speaker and the model that produced the turn; the rail holds the prose to one
+  measure. `BandWriter` wraps a STREAM — a reply arrives token by token, so the
+  break cannot be computed over a finished string — and re-reads the terminal
+  per line, so a window resized mid-reply never emits a line the terminal has to
+  wrap. Panels use the whole terminal width above a 52-column floor.
+- **Voice HUD** (`internal/ux/voiceviz.go`): one animated line per phase of a
+  turn — listening, decoding, the model speaking, a shell step executing under
+  the sandbox, a camera frame becoming an insight, and the wake-standby pulse.
+  It owns the terminal line while it runs and publishes that with
+  `ux.LineHeld()`, so background writers do not splice into the animation.
 - **Completion**: Tab completes slash commands and paths, extending to the
   longest common prefix and listing the alternatives. The command names come
   from the registry via `shell.SetSlashCommands`, so completion cannot become a
