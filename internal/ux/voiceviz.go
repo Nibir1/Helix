@@ -39,6 +39,23 @@ const (
 	VizSpeaking
 	// VizStandby renders the wake-word breathing pulse.
 	VizStandby
+
+	// VizExecuting renders a shell step running under the sandbox.
+	//
+	// A turn spends most of its wall-clock here and the screen showed NOTHING —
+	// the planner has its own Thinker, the microphone has a waveform, and the
+	// part that actually touches the machine had no indicator at all. A block
+	// travelling left to right, distinct from the Thinker's scanner so
+	// "deciding" and "doing" are not the same animation.
+	VizExecuting
+
+	// VizSeeing renders a camera frame on its way to an insight.
+	//
+	// Frame-to-insight is measured in SECONDS on a local vision model (§10A
+	// records 8.8s warm), which is a long time to show nothing while the camera
+	// is open. An iris, because the one thing a user must never be unsure about
+	// is whether the camera is looking.
+	VizSeeing
 )
 
 // vizWidth is the waveform window width in cells.
@@ -62,6 +79,11 @@ type VoiceViz struct {
 	// because only the CALLER knows which engine is running, and the two
 	// engines can honestly promise different things — see SetStandbyHint.
 	standbyHint string
+
+	// detail is the trailing context a state may carry — the sandbox backend
+	// for EXECUTING, the vision model for SEEING. Optional: a state that has
+	// nothing useful to add shows nothing rather than a placeholder.
+	detail string
 }
 
 // NewVoiceViz creates an idle voice HUD.
@@ -96,6 +118,14 @@ func (v *VoiceViz) SetStandbyHint(hint string) {
 		hint = DefaultStandbyHint
 	}
 	v.standbyHint = hint
+}
+
+// SetDetail sets the trailing context for the current state. Safe at any time;
+// the next frame picks it up.
+func (v *VoiceViz) SetDetail(detail string) {
+	v.mu.Lock()
+	v.detail = detail
+	v.mu.Unlock()
 }
 
 // Start begins the animation loop in the given state. No-op on non-TTY
@@ -212,6 +242,10 @@ func (v *VoiceViz) renderLocked() string {
 		return v.renderSweepLocked("◌ DECODING SPEECH")
 	case VizSpeaking:
 		return v.renderWaveLocked(thinkOrange, "◈ HELIX SPEAKING", false)
+	case VizExecuting:
+		return v.renderRunLocked()
+	case VizSeeing:
+		return v.renderIrisLocked()
 	default:
 		return v.renderPulseLocked()
 	}
@@ -281,6 +315,46 @@ func (v *VoiceViz) renderSweepLocked(label string) string {
 	b.WriteString(thinkSubtle + "╟" + thinkReset)
 	b.WriteString(" " + thinkOrange +
 		fmt.Sprintf("%.1fs", time.Since(v.start).Seconds()) + thinkReset)
+	return b.String()
+}
+
+// renderRunLocked draws a block travelling through the cell window.
+//
+// Deliberately NOT the Thinker's scanner. The Thinker means "Helix is waiting
+// on a model"; this means "Helix is running something on your machine", and two
+// phases a user is told to treat differently must not look the same.
+func (v *VoiceViz) renderRunLocked() string {
+	var b strings.Builder
+	b.WriteString(thinkOrange + "●" + thinkReset + " ")
+	b.WriteString(thinkMagenta + "⬡ EXECUTING" + thinkReset + " ")
+	b.WriteString(thinkSubtle + "╢" + thinkReset)
+
+	cells := make([]rune, vizWidth)
+	for i := range cells {
+		cells[i] = '░'
+	}
+	head := (v.frame * 2) % vizWidth
+	for i, glyph := range []rune{'▒', '▓', '█', '█'} {
+		cells[(head+i)%vizWidth] = glyph
+	}
+	b.WriteString(thinkCyan + string(cells) + thinkReset)
+	b.WriteString(thinkSubtle + "╟" + thinkReset)
+	if v.detail != "" {
+		b.WriteString(" " + thinkSubtle + v.detail + thinkReset)
+	}
+	return b.String()
+}
+
+// renderIrisLocked draws an opening and closing aperture.
+func (v *VoiceViz) renderIrisLocked() string {
+	phases := []string{"(  ◦  )", "( ◦◉◦ )", "(◦ ◉ ◦)", "( ◦◉◦ )"}
+	var b strings.Builder
+	b.WriteString(thinkOrange + "●" + thinkReset + " ")
+	b.WriteString(thinkMagenta + "◎ SEEING" + thinkReset + " ")
+	b.WriteString(thinkCyan + phases[(v.frame/3)%len(phases)] + thinkReset)
+	if v.detail != "" {
+		b.WriteString("  " + thinkSubtle + v.detail + thinkReset)
+	}
 	return b.String()
 }
 

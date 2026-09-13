@@ -120,3 +120,33 @@ func newThinkerFor(r Renderer, label string) thinkerShim {
 	}
 	return thinkerShim{}
 }
+
+// vizShim is thinkerShim's counterpart for the voice HUD, so a headless run
+// never animates and no call site needs a guard. Same reasoning, same shape.
+type vizShim struct{ real *ux.VoiceViz }
+
+func (v vizShim) Start(state ux.VizState, detail string) {
+	if v.real != nil {
+		v.real.SetDetail(detail)
+		v.real.Start(state)
+	}
+}
+
+func (v vizShim) Stop() {
+	if v.real != nil {
+		v.real.Stop()
+	}
+}
+
+// newVizFor returns the HUD for interactive renderers and a no-op otherwise.
+//
+// EXECUTING and SEEING exist because a turn spends most of its wall clock in
+// those two phases and the screen showed nothing for either: the planner has
+// the Thinker and the microphone has a waveform, while the parts that touch the
+// machine and the camera had no indicator at all.
+func newVizFor(r Renderer) vizShim {
+	if r.Interactive() {
+		return vizShim{real: ux.NewVoiceViz()}
+	}
+	return vizShim{}
+}

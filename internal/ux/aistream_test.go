@@ -46,18 +46,20 @@ func TestAIStreamWriterRendersChunksInOrder(t *testing.T) {
 	if !strings.Contains(got, "Hello, world") {
 		t.Fatalf("streamed text lost or reordered: %q", got)
 	}
-	// The prefix is what marks an AI response; it must appear exactly once,
-	// not per chunk.
-	if n := strings.Count(got, "[NEURAL_NET]"); n != 1 {
-		t.Fatalf("prefix emitted %d times, want exactly 1: %q", n, got)
+	// The HEADER is what marks an AI response, and it must appear exactly once,
+	// not per chunk. It was "[NEURAL_NET]" until the band layout replaced the
+	// prefix with a labelled rule; the guarantee is unchanged and only the
+	// marker moved, so this is re-pointed rather than relaxed.
+	if n := strings.Count(got, "HELIX"); n != 1 {
+		t.Fatalf("band header emitted %d times, want exactly 1: %q", n, got)
 	}
 	if !strings.HasSuffix(got, "\n") {
 		t.Fatalf("stream must end the line: %q", got)
 	}
 }
 
-// Models commonly open with a newline; without trimming, the answer would be
-// pushed off the prefix line.
+// Models commonly open with a newline; without trimming, the answer would start
+// one or more blank rail lines below the header.
 func TestAIStreamWriterTrimsLeadingWhitespace(t *testing.T) {
 	got := captureStdout(t, func() {
 		w := NewUX().StreamAIMessage()
@@ -66,14 +68,17 @@ func TestAIStreamWriterTrimsLeadingWhitespace(t *testing.T) {
 		w.Close()
 	})
 
-	idx := strings.Index(got, "[NEURAL_NET]")
+	idx := strings.Index(got, "HELIX")
 	if idx < 0 {
-		t.Fatalf("prefix missing: %q", got)
+		t.Fatalf("band header missing: %q", got)
 	}
-	// No newline may sit between the prefix and the first word.
+	// Exactly one newline may sit between the header and the first word: the
+	// one that ends the header rule itself. Anything more is untrimmed
+	// whitespace rendering as empty rail lines.
 	between := got[idx:strings.Index(got, "Answer")]
-	if strings.Contains(between, "\n") {
-		t.Fatalf("leading whitespace was not trimmed: %q", got)
+	if n := strings.Count(between, "\n"); n != 1 {
+		t.Fatalf("leading whitespace was not trimmed — %d newlines between the header "+
+			"and the answer: %q", n, got)
 	}
 }
 

@@ -621,7 +621,7 @@ func streamingVoiceTurn(parent context.Context, s speech.StreamingSTTProvider) (
 				if text != "" && text != last {
 					yieldLine()
 					last = text
-					fmt.Printf("\r[hearing] %s", text)
+					paintHearing(text)
 				}
 				resetTimer(idle, 3*time.Second)
 				continue

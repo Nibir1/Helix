@@ -143,6 +143,12 @@ type duplexSession struct {
 	say         chan string // replies awaiting a gap in the model's speech
 	stop        sync.Once
 
+	// speakViz is the HUD shown while the MODEL is talking, distinct from viz
+	// because the two are owned by different goroutines and different phases:
+	// one belongs to a turn the REPL is waiting on, the other to speech the
+	// data channel is reporting.
+	speakViz atomic.Pointer[ux.VoiceViz]
+
 	// viz is the waveform HUD for the turn currently being waited on, or nil.
 	//
 	// An atomic pointer because the METER is fed from pumpMicrophone — a
@@ -295,6 +301,7 @@ func stopDuplex() {
 
 func (d *duplexSession) shutdown() {
 	d.stop.Do(func() {
+		d.stopSpeakingViz()
 		if d.sess != nil {
 			_ = d.sess.Close()
 		}
@@ -384,7 +391,7 @@ func (d *duplexSession) onHeard(delta string, _ int) {
 	// answers "is the microphone live?", after it the text is strictly more
 	// informative. Same handover streamingVoiceTurn calls yieldLine.
 	d.stopViz()
-	fmt.Printf("\r\x1b[2K[hearing] %s", text)
+	paintHearing(text)
 }
 
 // onSpoke records when the model last said something. Only the TIME is kept:
@@ -392,8 +399,64 @@ func (d *duplexSession) onHeard(delta string, _ int) {
 // timing is what duplexQuietGap is measured against.
 func (d *duplexSession) onSpoke(string) {
 	d.mu.Lock()
+	first := d.lastSpoke.IsZero() || time.Since(d.lastSpoke) > duplexQuietGap
 	d.lastSpoke = time.Now()
 	d.mu.Unlock()
+
+	// The model started talking. Until now this showed NOTHING: the listening
+	// waveform stops as soon as words arrive, and the reply is spoken rather
+	// than printed, so the screen sat blank for the whole of Helix's answer —
+	// the longest silent stretch of a duplex turn.
+	//
+	// VizSpeaking has existed since P12.4 and was never started by anything;
+	// it renders `◈ HELIX SPEAKING` over an orange wave, which is exactly this.
+	if first {
+		d.startSpeakingViz()
+	}
+}
+
+// startSpeakingViz shows the speaking HUD until the model goes quiet.
+//
+// Torn down by a watcher rather than by a matching call, because there is no
+// "stopped speaking" event — the service publishes output deltas and simply
+// stops sending them. The quiet gap that duplexSpeak already waits on is the
+// same signal, so the same constant decides both.
+func (d *duplexSession) startSpeakingViz() {
+	if d.viz.Load() != nil {
+		return // the turn's own HUD owns the line
+	}
+	v := ux.NewVoiceViz()
+	v.Start(ux.VizSpeaking)
+	if !d.speakViz.CompareAndSwap(nil, v) {
+		v.Stop()
+		return
+	}
+	go func() {
+		for {
+			time.Sleep(150 * time.Millisecond)
+			select {
+			case <-d.closedOrDone():
+			default:
+				d.mu.Lock()
+				quiet := time.Since(d.lastSpoke) >= duplexQuietGap
+				d.mu.Unlock()
+				if !quiet {
+					continue
+				}
+			}
+			if cur := d.speakViz.Swap(nil); cur != nil {
+				cur.Stop()
+			}
+			return
+		}
+	}()
+}
+
+// stopSpeakingViz tears the speaking HUD down immediately.
+func (d *duplexSession) stopSpeakingViz() {
+	if v := d.speakViz.Swap(nil); v != nil {
+		v.Stop()
+	}
 }
 
 // onDelegation closes the turn. This is the ONLY end-of-turn signal the service
@@ -600,6 +663,11 @@ func duplexCapture(ctx context.Context) (input.InputEvent, error) {
 	// one — and the duplex turn is a third capture path that was written
 	// without it. The result on screen was a bare blinking cursor under the
 	// LIVE banner: a microphone that is open, listening, and showing nothing.
+	// The model's speaking HUD releases the line first: one terminal row, one
+	// owner. Without this the two animations interleave on the same line and
+	// neither is readable.
+	d.stopSpeakingViz()
+
 	viz := ux.NewVoiceViz()
 	viz.Start(ux.VizListening)
 	d.viz.Store(viz)

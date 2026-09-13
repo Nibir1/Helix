@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"helix/internal/audio"
+	"helix/internal/shell"
 	"helix/internal/utils"
 
 	"github.com/fatih/color"
@@ -181,6 +182,29 @@ func (ux *UX) Typewriter(text string) {
 type AIStreamWriter struct {
 	ux      *UX
 	started bool
+	band    *shell.BandWriter
+}
+
+// ReplyMeta names the model that produced the reply, for the band header.
+//
+// A HOOK rather than a parameter, because the alternative was widening
+// agent.Renderer's StreamAIMessage/PrintAIMessage signatures and every
+// implementation of them — including the headless one, which has no band and no
+// use for the value. It is read at RENDER time, not turn start, so a mid-turn
+// failover to the local model is named correctly rather than reporting whatever
+// was selected when the turn began.
+//
+// nil is the honest default: a caller that has not wired it gets a band with no
+// model in the rule, which is what a caller that does not know the model should
+// produce.
+var ReplyMeta func() string
+
+// replyMeta reads the hook safely.
+func replyMeta() string {
+	if ReplyMeta == nil {
+		return ""
+	}
+	return ReplyMeta()
 }
 
 // StreamAIMessage begins an incrementally rendered AI response. The caller
@@ -199,12 +223,13 @@ func (w *AIStreamWriter) Chunk(text string) {
 	}
 	if !w.started {
 		// Models commonly open with a newline or spaces; leading whitespace
-		// would push the answer off the prefix line.
+		// would push the answer off the first rail line.
 		text = strings.TrimLeft(text, " \t\r\n")
 		if text == "" {
 			return
 		}
-		fmt.Print(w.ux.scifiPrefix("[NEURAL_NET]", w.ux.colors.Primary))
+		fmt.Println(shell.BandHeader("HELIX", replyMeta(), shell.HexPrimary))
+		w.band = shell.NewBandWriter()
 		w.started = true
 	}
 
@@ -214,7 +239,7 @@ func (w *AIStreamWriter) Chunk(text string) {
 	if strings.TrimSpace(text) != "" {
 		audio.PlayType()
 	}
-	fmt.Print(text)
+	w.band.WriteString(text)
 }
 
 // Started reports whether any content was rendered, so callers can fall back
@@ -224,7 +249,7 @@ func (w *AIStreamWriter) Started() bool { return w.started }
 // Close terminates the streamed line.
 func (w *AIStreamWriter) Close() {
 	if w.started {
-		fmt.Println()
+		w.band.Close()
 	}
 }
 
@@ -240,18 +265,21 @@ func (ux *UX) PrintSystemMessage(text string) {
 }
 
 // PrintAIMessage prints an AI response.
-func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
-	prefix := ux.scifiPrefix("[NEURAL_NET]", ux.colors.Primary)
-	if ux.typewriteAll {
-		// Phase 15: Typewrite the prefix and text together
-		ux.Typewriter(prefix + text)
-	} else {
-		fmt.Print(prefix)
-		if useTypingEffect {
-			ux.Typewriter(text)
-		} else {
-			fmt.Println(text)
-		}
+// PrintAIMessage prints an AI response as a band.
+//
+// THE TYPEWRITER IS GONE FROM THIS PATH, and the reasoning is already written
+// on AIStreamWriter: it simulates live generation with fixed per-character
+// sleeps, which is strictly worse than real arrival timing and adds delay on
+// top of genuine latency. Inside a band it would also have to re-implement the
+// wrap, since the rail is emitted per line rather than per character. The
+// audible tick that gave it its character lives on in the streaming path.
+func (ux *UX) PrintAIMessage(text string, _ bool) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	fmt.Println(shell.BandHeader("HELIX", replyMeta(), shell.HexPrimary))
+	for _, line := range shell.BandLines(text) {
+		fmt.Println(line)
 	}
 }
 
@@ -421,17 +449,11 @@ func (ux *UX) scifiPrint(label, text string, colorFunc func(...interface{}) stri
 	}
 }
 
-// scifiPrefix creates a colored prefix for inline messages.
-//
-// Args:
-//   - label: log label.
-//   - colorFunc: colorizer.
-//
-// Returns: string.
-// Complexity: O(1).
-func (ux *UX) scifiPrefix(label string, colorFunc func(...interface{}) string) string {
-	return fmt.Sprintf("%s → ", colorFunc(label))
-}
+// scifiPrefix is GONE. It built the `[NEURAL_NET] →` inline prefix, and the
+// band layout replaced that with a labelled rule — the prefix could not say
+// which model produced the turn and could not hold the prose to a measure, and
+// both were the reported complaint. scifiPrint keeps its own inline form for
+// SYSTEM and WARNING lines, which are single-line notices rather than turns.
 
 // scifiLabel creates a neutral bracketed label.
 //

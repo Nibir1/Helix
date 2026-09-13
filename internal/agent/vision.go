@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"helix/internal/ux"
 	"strings"
 	"time"
 
@@ -89,8 +90,18 @@ func (a *Agent) visionTurn(prompt string) (string, error) {
 	// §10 frame-to-insight latency (≤5s best-effort on llava): from frame
 	// capture start to the vision model returning its answer.
 	start := time.Now()
+
+	// The camera is open and a model is looking at the frame. §10A measures
+	// frame-to-insight at 8.8s warm on a local vision model, which is a long
+	// time to show nothing — and the one thing a user must never be unsure
+	// about is whether the camera is looking.
+	viz := newVizFor(a.render)
+	viz.Start(ux.VizSeeing, "1 frame")
+	defer viz.Stop()
+
 	frame, err := a.VisionCapture(ctx)
 	if err != nil {
+		viz.Stop()
 		a.render.PrintWarning(fmt.Sprintf("Vision capture failed: %v", err))
 		a.speak("I could not access the camera.")
 		return "", fmt.Errorf("capture: %w", err)
@@ -98,10 +109,17 @@ func (a *Agent) visionTurn(prompt string) (string, error) {
 
 	resp, err := a.VisionCall(prompt, frame)
 	if err != nil {
+		viz.Stop()
 		a.render.PrintWarning(fmt.Sprintf("Vision failed: %v", err))
 		a.speak("I could not analyze what I saw.")
 		return "", fmt.Errorf("vision model: %w", err)
 	}
+
+	// Stopped before ANY output: the HUD owns one terminal line and redraws it
+	// in place, so a warning or a reply printed while it runs lands inside the
+	// animation. §13 records that exact splice — an NVD notice rendered into
+	// the middle of the LISTENING waveform.
+	viz.Stop()
 
 	if a.OnVisionMetric != nil {
 		a.OnVisionMetric("frame_to_insight", time.Since(start))

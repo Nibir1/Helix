@@ -294,3 +294,66 @@ func TestTheWaveformSurvivesConcurrentMeteringAndTeardown(t *testing.T) {
 		t.Error("the HUD pointer survived; the pump would keep metering a stopped viz")
 	}
 }
+
+// The model speaking used to show NOTHING: the listening waveform stops when
+// words arrive, and the reply is spoken rather than printed, so the screen sat
+// blank for the whole of Helix's answer.
+func TestTheModelSpeakingShowsTheSpeakingHUD(t *testing.T) {
+	body := stripLineComments(functionBody(readSourceFile(t, "duplex.go"), "func (d *duplexSession) onSpoke("))
+	if !strings.Contains(body, "startSpeakingViz()") {
+		t.Error("nothing is shown while the model talks; VizSpeaking has existed since P12.4 " +
+			"and is still started by nothing")
+	}
+	start := stripLineComments(functionBody(readSourceFile(t, "duplex.go"),
+		"func (d *duplexSession) startSpeakingViz("))
+	if !strings.Contains(start, "ux.VizSpeaking") {
+		t.Error("the speaking HUD does not use VizSpeaking")
+	}
+}
+
+// One terminal row, one owner. The listening HUD and the speaking HUD animate
+// the same line; both running interleaves them and neither is readable.
+func TestOnlyOneHUDOwnsTheLine(t *testing.T) {
+	capture := stripLineComments(functionBody(readSourceFile(t, "duplex.go"), "func duplexCapture("))
+	if !strings.Contains(capture, "d.stopSpeakingViz()") {
+		t.Error("the turn's waveform starts without releasing the speaking HUD")
+	}
+	start := stripLineComments(functionBody(readSourceFile(t, "duplex.go"),
+		"func (d *duplexSession) startSpeakingViz("))
+	if !strings.Contains(start, "d.viz.Load() != nil") {
+		t.Error("the speaking HUD starts even when the turn's waveform owns the line")
+	}
+	// And teardown must take it down, or a closed session leaves it animating.
+	shutdown := stripLineComments(functionBody(readSourceFile(t, "duplex.go"),
+		"func (d *duplexSession) shutdown("))
+	if !strings.Contains(shutdown, "stopSpeakingViz()") {
+		t.Error("closing the session leaves the speaking HUD running")
+	}
+}
+
+// Both HUD pointers are touched from goroutines that did not create them.
+func TestTheSpeakingHUDSurvivesConcurrentStartAndStop(t *testing.T) {
+	d, _ := newTestDuplex(t)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 50 {
+			d.stopSpeakingViz()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 50 {
+			v := ux.NewVoiceViz()
+			if !d.speakViz.CompareAndSwap(nil, v) {
+				v.Stop()
+			}
+		}
+	}()
+	wg.Wait()
+	d.stopSpeakingViz()
+	if d.speakViz.Load() != nil {
+		t.Error("the speaking HUD pointer survived teardown")
+	}
+}

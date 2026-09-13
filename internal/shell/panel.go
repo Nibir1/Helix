@@ -578,6 +578,43 @@ func truncateANSI(s string, width int) string {
 // auto-sizing cannot do.
 func Truncate(s string, width int) string { return truncateANSI(s, width) }
 
+// TruncateTail keeps the END of a string, dropping the front to an ellipsis.
+//
+// The counterpart to Truncate, and the right one for a LIVE CAPTION: while
+// somebody is still speaking, the words that matter are the ones they just
+// said, not the ones a minute ago. Truncate would pin the opening of the
+// sentence and hide everything arriving.
+//
+// PLAIN TEXT ONLY. Slicing from the tail through ANSI would cut a sequence in
+// half and leave the terminal in whatever colour the fragment set; the callers
+// here are transcripts, which carry no escapes. Columns are measured with
+// runewidth for the reason truncateANSI documents at length — a CJK rune is two
+// cells and a rune count is not a width.
+func TruncateTail(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if visibleWidth(s) <= width {
+		return s
+	}
+	const ellipsis = '…'
+	budget := width - runewidth.RuneWidth(ellipsis)
+	if budget <= 0 {
+		return string(ellipsis)
+	}
+	runes := []rune(s)
+	used, cut := 0, len(runes)
+	for i := len(runes) - 1; i >= 0; i-- {
+		w := runewidth.RuneWidth(runes[i])
+		if used+w > budget {
+			break
+		}
+		used += w
+		cut = i
+	}
+	return string(ellipsis) + string(runes[cut:])
+}
+
 // Hint renders an actionable suggestion — the thing to type next.
 //
 // Visually distinct from a warning on purpose: a warning says something is

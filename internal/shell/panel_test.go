@@ -447,3 +447,48 @@ func TestTableStaysAlignedWithWideRunes(t *testing.T) {
 		}
 	}
 }
+
+// TruncateTail budgets COLUMNS, not runes — the same mistake truncateANSI was
+// fixed for, in its counterpart.
+func TestTruncateTailBudgetsColumnsNotRunes(t *testing.T) {
+	// Every rune two cells wide. A rune count would come back double.
+	const cjk = "日本語のテキストがここにあります"
+	for _, width := range []int{4, 7, 10, 15, 20} {
+		got := TruncateTail(cjk, width)
+		if w := runeLen(got); w > width {
+			t.Errorf("TruncateTail(cjk, %d) is %d columns: %q", width, w, got)
+		}
+	}
+}
+
+// It keeps the END, which is the whole reason it exists beside Truncate.
+func TestTruncateTailKeepsTheEnd(t *testing.T) {
+	const s = "alpha bravo charlie delta echo foxtrot"
+	got := TruncateTail(s, 20)
+	if !strings.HasSuffix(got, "foxtrot") {
+		t.Errorf("TruncateTail dropped the end: %q", got)
+	}
+	if !strings.HasPrefix(got, "…") {
+		t.Errorf("TruncateTail does not mark the cut: %q", got)
+	}
+	if runeLen(got) > 20 {
+		t.Errorf("TruncateTail(%q, 20) is %d columns", s, runeLen(got))
+	}
+}
+
+// Short input is returned untouched, with no ellipsis.
+func TestTruncateTailLeavesShortInputAlone(t *testing.T) {
+	const s = "short enough"
+	if got := TruncateTail(s, 40); got != s {
+		t.Errorf("TruncateTail(%q, 40) = %q", s, got)
+	}
+}
+
+// A budget too small for even the ellipsis must still not overflow.
+func TestTruncateTailSurvivesAnAbsurdBudget(t *testing.T) {
+	for _, width := range []int{-1, 0, 1, 2} {
+		if got := TruncateTail("a long string", width); runeLen(got) > max(width, 1) {
+			t.Errorf("TruncateTail(_, %d) = %q (%d columns)", width, got, runeLen(got))
+		}
+	}
+}

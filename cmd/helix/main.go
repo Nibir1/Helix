@@ -272,6 +272,21 @@ func main() {
 	// initVoiceMode is deliberately NOT here — it prints the live banner for a
 	// restored voice session, and that banner reports the camera. See its call
 	// site below the vision seams.
+	// The band header names the model that produced each reply. Wired here
+	// because internal/ux must not import internal/ai, and read at render time
+	// so a mid-turn failover to the local model is named correctly.
+	ux.ReplyMeta = func() string {
+		provider, model := ai.ActiveProviderName(), ai.ActiveModel()
+		switch {
+		case provider == "":
+			return ""
+		case model == "":
+			return provider
+		default:
+			return provider + " / " + model
+		}
+	}
+
 	initVoiceLog()
 	agentCore.OnSpeak = func(text string) {
 		if !speech.TTSEnabled() {
