@@ -42,20 +42,39 @@ const (
 	glyphArrow   = "→"
 )
 
-// panelWidth is the rule width, adapted to the terminal and clamped.
+// panelWidth is the rule width, adapted to the terminal.
 //
-// Clamped at both ends deliberately: below ~52 the columns collide, and above
-// ~92 a full-width rule stops reading as a frame and starts reading as a
-// horizon.
-func panelWidth() int {
-	w := TerminalWidth()
+// THE UPPER CLAMP IS GONE, by owner decision (2026-09-13). It was 92, on the
+// argument that "above ~92 a full-width rule stops reading as a frame and
+// starts reading as a horizon" — a real typographic concern, and the owner
+// overruled it after seeing a 125-column terminal with 33 dead columns on the
+// right: the frame read as *misplaced* long before it read as a horizon. That
+// argument is recorded rather than deleted, because it is the thing to weigh
+// again if this is ever revisited.
+//
+// The LOWER clamp stays and is not a matter of taste: below ~52 the KV label
+// column and its value collide, and Table's shaving has nothing left to shave.
+//
+// Recomputed on every call, never cached. That is what makes a resize work for
+// everything drawn after it — see BandWriter for the one place that used to
+// cache it and the step in the right edge that caused.
+func panelWidth() int { return panelWidthFor(TerminalWidth()) }
+
+// panelWidthFor is the arithmetic, with the measurement passed in.
+//
+// Separated because TerminalWidth probes real file descriptors and returns 0
+// under `go test`, so every width lands on the no-terminal default and a test
+// of panelWidth() cannot tell the clamps apart. Reinstating the 92 cap passed
+// the whole suite until this split existed — the third time in this session a
+// width rule has been untestable for exactly this reason.
+func panelWidthFor(w int) int {
 	switch {
 	case w <= 0:
+		// No measurable terminal: a pipe, a test binary, a CI log. 72 is a
+		// readable default and the one this package has always used.
 		return 72
 	case w < 52:
 		return 52
-	case w > 92:
-		return 92
 	default:
 		return w - 4
 	}

@@ -15,7 +15,7 @@ import (
 // capture collects what a BandWriter emits.
 func capture() (*BandWriter, *strings.Builder) {
 	var sb strings.Builder
-	w := &BandWriter{width: bandContentWidth(), out: func(s string) { sb.WriteString(s) }}
+	w := &BandWriter{pinned: bandContentWidth(), out: func(s string) { sb.WriteString(s) }}
 	return w, &sb
 }
 
@@ -139,5 +139,91 @@ func TestAWordLongerThanTheMeasureTerminates(t *testing.T) {
 	// path or a hash — but it must not produce unbounded lines.
 	if len(lines) > 3 {
 		t.Errorf("a single word produced %d lines", len(lines))
+	}
+}
+
+// A terminal SHRUNK mid-reply must not produce lines the terminal has to wrap.
+//
+// The first version cached the measure at construction, arguing that a resize
+// would otherwise give one band two right edges. That had the trade backwards:
+// the lines already printed cannot be reflowed whatever we do — they belong to
+// the terminal's scrollback — so caching buys no straight edge and guarantees
+// every line after a shrink is too wide. Which is the marching-lines bug this
+// layout exists to fix, one level up.
+func TestAShrinkMidReplyNeverEmitsAnOverWideLine(t *testing.T) {
+	var lines []string
+	var cur strings.Builder
+	w := &BandWriter{pinned: 60, out: func(s string) {
+		for i, part := range strings.Split(s, "\n") {
+			if i > 0 {
+				lines = append(lines, cur.String())
+				cur.Reset()
+			}
+			cur.WriteString(part)
+		}
+	}}
+
+	w.WriteString("alpha bravo charlie delta echo foxtrot golf hotel india juliett ")
+	// The window shrinks. Every line from here must fit the NEW measure.
+	w.pinned = 30
+	w.WriteString("kilo lima mike november oscar papa quebec romeo sierra tango uniform ")
+	w.Close()
+	if cur.Len() > 0 {
+		lines = append(lines, cur.String())
+	}
+
+	var afterShrink int
+	for _, line := range lines {
+		if strings.Contains(line, "kilo") || afterShrink > 0 {
+			afterShrink++
+			if visibleWidth(line) > 30+visibleWidth(bandRail()) {
+				t.Errorf("line after the shrink is %d columns, measure is 30: %q",
+					visibleWidth(line), Plain(line))
+			}
+		}
+	}
+	if afterShrink == 0 {
+		t.Fatal("the test never reached the post-shrink lines")
+	}
+}
+
+// And a terminal WIDENED mid-reply uses the new room from the next line.
+func TestAWidenMidReplyUsesTheNewRoom(t *testing.T) {
+	var widths []int
+	var cur strings.Builder
+	w := &BandWriter{pinned: 30, out: func(s string) {
+		for i, part := range strings.Split(s, "\n") {
+			if i > 0 {
+				widths = append(widths, visibleWidth(cur.String()))
+				cur.Reset()
+			}
+			cur.WriteString(part)
+		}
+	}}
+	w.WriteString("alpha bravo charlie delta echo foxtrot golf hotel ")
+	w.pinned = 90
+	w.WriteString("india juliett kilo lima mike november oscar papa quebec romeo sierra tango ")
+	w.Close()
+	if cur.Len() > 0 {
+		widths = append(widths, visibleWidth(cur.String()))
+	}
+
+	var widest int
+	for _, n := range widths {
+		if n > widest {
+			widest = n
+		}
+	}
+	if widest <= 34 {
+		t.Errorf("no line used the widened terminal; widest was %d columns", widest)
+	}
+}
+
+// With no terminal to measure, the band must still produce a usable width
+// rather than collapsing to the 24-column floor on every CI log.
+func TestAnUnmeasurableTerminalStillGetsAReadableMeasure(t *testing.T) {
+	if got := bandContentWidth(); got < 40 {
+		t.Errorf("bandContentWidth() = %d with no terminal; CI logs would wrap every "+
+			"few words", got)
 	}
 }

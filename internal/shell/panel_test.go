@@ -115,7 +115,7 @@ func TestKVAlignsOnTheWidestLabel(t *testing.T) {
 // The rule width has to survive a hostile terminal size rather than emit a
 // negative repeat count (a panic) or a 200-column horizon.
 func TestPanelWidthIsClamped(t *testing.T) {
-	if w := panelWidth(); w < 52 || w > 92 {
+	if w := panelWidth(); w < 52 {
 		t.Errorf("panel width %d escaped its clamp", w)
 	}
 }
@@ -490,5 +490,44 @@ func TestTruncateTailSurvivesAnAbsurdBudget(t *testing.T) {
 		if got := TruncateTail("a long string", width); runeLen(got) > max(width, 1) {
 			t.Errorf("TruncateTail(_, %d) = %q (%d columns)", width, got, runeLen(got))
 		}
+	}
+}
+
+// The panel uses the WHOLE terminal. The 92 cap was removed by owner decision
+// (2026-09-13) after a 125-column window showed 33 dead columns on the right —
+// the frame read as misplaced long before it read as a horizon.
+//
+// Asserted on panelWidthFor rather than panelWidth because TerminalWidth
+// returns 0 under `go test`: reinstating the cap passed the entire suite until
+// this arithmetic was separated from the measurement.
+func TestPanelUsesTheWholeTerminal(t *testing.T) {
+	for terminal, want := range map[int]int{
+		125: 121, // the reported window
+		200: 196,
+		96:  92, // just past the old cap
+		60:  56,
+	} {
+		if got := panelWidthFor(terminal); got != want {
+			t.Errorf("panelWidthFor(%d) = %d, want %d — a capped panel leaves dead columns "+
+				"on the right", terminal, got, want)
+		}
+	}
+}
+
+// The LOWER clamp is not taste and stays: below ~52 the KV label column and its
+// value collide, and Table has nothing left to shave.
+func TestPanelStillRefusesToCollapse(t *testing.T) {
+	for _, terminal := range []int{1, 20, 40, 51} {
+		if got := panelWidthFor(terminal); got != 52 {
+			t.Errorf("panelWidthFor(%d) = %d, want the 52 floor", terminal, got)
+		}
+	}
+}
+
+// No terminal to measure — a pipe, a CI log — gets a readable default rather
+// than the floor.
+func TestPanelHasAReadableDefaultWithNoTerminal(t *testing.T) {
+	if got := panelWidthFor(0); got != 72 {
+		t.Errorf("panelWidthFor(0) = %d, want 72", got)
 	}
 }

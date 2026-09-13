@@ -92,9 +92,21 @@ func BandClose() string {
 //
 // Not safe for concurrent use: a turn has one producer.
 type BandWriter struct {
-	// width is the prose measure, captured once so a terminal resized
-	// mid-reply cannot produce a band with two different right edges.
-	width int
+	// width is unused as a cache and kept only for tests to pin a measure.
+	//
+	// IT USED TO BE CAPTURED ONCE, on the argument that a resize mid-reply
+	// would otherwise give one band two right edges. That argument had the
+	// trade backwards: the lines already printed cannot be reflowed whatever we
+	// do — they are the terminal's scrollback now — so caching does not buy a
+	// straight edge, it only guarantees that every line AFTER a shrink is wider
+	// than the terminal. Which is the marching-lines bug this layout was
+	// written to fix, reintroduced one level up.
+	//
+	// So the measure is re-read per line: a resize leaves a step in the right
+	// edge, and never a line the terminal has to wrap.
+	//
+	// pinned is a fixed measure for tests, which have no terminal to read.
+	pinned int
 
 	col     int             // columns used on the current line
 	word    strings.Builder // the word in flight, not yet committed
@@ -106,7 +118,7 @@ type BandWriter struct {
 
 // NewBandWriter starts a band body.
 func NewBandWriter() *BandWriter {
-	return &BandWriter{width: bandContentWidth(), out: func(s string) { fmt.Print(s) }}
+	return &BandWriter{out: func(s string) { fmt.Print(s) }}
 }
 
 // WriteString feeds one streamed fragment.
@@ -142,7 +154,7 @@ func (b *BandWriter) flushWord() {
 	if b.space && b.col > 0 {
 		sep = 1
 	}
-	if b.col > 0 && b.col+sep+b.wordW > b.width {
+	if b.col > 0 && b.col+sep+b.wordW > b.measure() {
 		b.newline() // the owed separator dies with the line break
 	} else if sep == 1 {
 		b.emit(" ")
@@ -153,6 +165,17 @@ func (b *BandWriter) flushWord() {
 	b.col += b.wordW
 	b.word.Reset()
 	b.wordW = 0
+}
+
+// measure is the prose width for the line being started RIGHT NOW.
+//
+// A pinned width (tests) wins; otherwise the terminal is re-read, so a window
+// resized mid-reply changes the wrap from the next line onward.
+func (b *BandWriter) measure() int {
+	if b.pinned > 0 {
+		return b.pinned
+	}
+	return bandContentWidth()
 }
 
 // newline ends the current rail line and opens the next.
@@ -195,7 +218,7 @@ func BandLines(text string) []string {
 	// did the latter and got it wrong three different ways — the writer streams
 	// arbitrary pieces and only IT knows where a line ends.
 	var sb strings.Builder
-	w := &BandWriter{width: bandContentWidth(), out: func(s string) { sb.WriteString(s) }}
+	w := &BandWriter{out: func(s string) { sb.WriteString(s) }}
 	w.WriteString(text)
 	w.Close()
 
