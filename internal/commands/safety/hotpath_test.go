@@ -179,3 +179,54 @@ func TestHoistedPatternsMatchInlineOriginals(t *testing.T) {
 		}
 	}
 }
+
+// Ending the machine is HIGH, and it took a live session to notice it was not.
+//
+// `sudo shutdown -r now` analysed as LOW, and under the default `ask` posture
+// LOW RUNS WITHOUT ASKING. Voice-originated plans are capped at Medium, so that
+// cap did not stop it either. The trigger was a user saying "reboot yourself"
+// to their shell and the planner offering to reboot the Mac instead.
+//
+// HIGH rather than Medium on ADR-005's own criterion — recoverability, not how
+// alarming it sounds. /reboot restarts the SHELL, destroys nothing, writes a
+// continuity record first, and is deliberately voice-reachable. Ending the
+// machine discards unsaved work in every other application on it.
+func TestEndingTheMachineIsHighRisk(t *testing.T) {
+	for _, cmd := range []string{
+		"sudo shutdown -r now",
+		"sudo reboot",
+		"shutdown -r now",
+		"reboot",
+		"halt",
+		"poweroff",
+		"sudo poweroff",
+		"echo done; sudo shutdown -h now",
+		"osascript -e 'tell app \"System Events\" to restart'",
+	} {
+		lvl, reasons := AnalyzeShellRisk(cmd)
+		if lvl != ShellRiskHigh {
+			t.Errorf("AnalyzeShellRisk(%q) = %v, want HIGH — under `ask` this runs with no "+
+				"confirmation, and the voice cap does not reach it either", cmd, lvl)
+		}
+		if len(reasons) == 0 {
+			t.Errorf("AnalyzeShellRisk(%q) gave no reason", cmd)
+		}
+	}
+}
+
+// And it must not swallow the ordinary words. A rule that over-matches gets
+// turned off, which protects nothing.
+func TestHaltMatchingDoesNotSwallowOrdinaryCommands(t *testing.T) {
+	for _, cmd := range []string{
+		"git rebase -i main",
+		"echo reboot the shell",
+		"cat /var/log/shutdown.log",
+		"grep -r shutdown ./src",
+		"ls /etc/init.d/halt",
+	} {
+		if lvl, _ := AnalyzeShellRisk(cmd); lvl == ShellRiskHigh {
+			t.Errorf("AnalyzeShellRisk(%q) = HIGH; an over-eager rule is one that gets "+
+				"disabled", cmd)
+		}
+	}
+}

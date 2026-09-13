@@ -149,3 +149,41 @@ func TestRebootExitCodeIsDistinct(t *testing.T) {
 		}
 	}
 }
+
+// "Reboot yourself, please" is a documented instruction and did not work.
+//
+// isVoiceRebootPhrase is a SUFFIX match, and a politeness marker after the
+// phrase hides it: the utterance ends on "please", so nothing matched and a
+// voice instruction went to the planner — which answered conversationally and
+// offered to reboot the Mac. matchModePhrase had already solved exactly this
+// with trimTrailingCourtesy; this matcher never inherited it.
+func TestRebootPhrasesSurviveTrailingCourtesy(t *testing.T) {
+	for _, said := range []string{
+		"reboot yourself, please",
+		"reboot yourself please",
+		"please reboot, thanks",
+		"restart the shell, thank you",
+		"okay, reboot now please",
+		"reboot, thanks",
+	} {
+		if !isVoiceRebootPhrase(said) {
+			t.Errorf("isVoiceRebootPhrase(%q) = false; a documented instruction reaches the "+
+				"planner instead of restarting", said)
+		}
+	}
+}
+
+// The courtesy trim must not turn a non-instruction into one.
+func TestCourtesyTrimDoesNotCreateRebootInstructions(t *testing.T) {
+	for _, said := range []string{
+		"how do I reboot this thing, please",
+		"so you don't have any memory that I told you to reboot, thanks",
+		"what does reboot do please",
+		"please",
+		"thanks",
+	} {
+		if isVoiceRebootPhrase(said) {
+			t.Errorf("isVoiceRebootPhrase(%q) = true; the shell would restart mid-sentence", said)
+		}
+	}
+}

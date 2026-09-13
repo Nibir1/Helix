@@ -304,6 +304,13 @@ it keeps that path's confirmations, journalling, and hooks.
 | `~/.helix/hooks.json` | local policy hooks | 0600 |
 | `<repo>/HELIX.md` | project context | 0644 |
 
+`/doctor` opens with a **BINARY** row when the process answering you is older
+than the file it was started from, or when a local `dist/` build is newer than
+the binary you are running. Neither is visible from inside a running shell: a
+process keeps its own image, so replacing the file changes nothing until it
+restarts, and `make current` builds without installing. The row is absent when
+everything agrees.
+
 `/purge` removes everything under `~/.helix/` above, plus `~/.helix_history`. It
 does **not** touch `HELIX.md`: that file lives in your repository, not in Helix's
 state directory, and a wipe of Helix's own data has no business reaching into a

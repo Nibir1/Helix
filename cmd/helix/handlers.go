@@ -1409,9 +1409,33 @@ func handleKnowledgeReindex() {
 // does the scanning.
 func handleDoctor() {
 	w := shell.KVWidth("CONFIG", "DATABASE", "PROVIDER", "NETWORK", "CONFINEMENT",
-		"DAEMON", "HOOKS", "PROJECT", "CRASH REPORTS")
+		"DAEMON", "HOOKS", "PROJECT", "CRASH REPORTS", "BINARY")
 
 	fmt.Println(shell.PanelTitle("doctor"))
+
+	// FIRST, because a stale binary invalidates every row beneath it. If the
+	// process answering you is not the one on disk, then "ok" against the
+	// config, the database and the providers is a report about a Helix that no
+	// longer exists — and the user is most likely running /doctor precisely
+	// because something they just fixed is still broken.
+	//
+	// Absent entirely when everything agrees: a row that says "not stale" on
+	// every healthy machine is a row people learn to skip past.
+	if report := checkStaleBinary(); report.stale() {
+		fmt.Println(shell.KV("BINARY", shell.Badge(shell.StateWarn, "stale")+
+			shell.Muted("  the process is older than what is on disk"), w))
+		// StepDetail, not PanelLine. The detail names a PATH, and an installed
+		// binary under a long home directory ran 190 columns past the panel
+		// border while the CONFIG row two lines below wrapped correctly —
+		// found by printing it (§9 rule 12), invisible in source. StepDetail is
+		// the existing wrap-with-indent helper, so the continuation lines sit
+		// under the row rather than flush against the frame.
+		for _, line := range stalenessLines(report) {
+			for _, wrapped := range shell.StepDetail(line, shell.Muted) {
+				fmt.Println(wrapped)
+			}
+		}
+	}
 
 	if home, err := os.UserHomeDir(); err != nil {
 		fmt.Println(shell.KV("CONFIG", shell.Badge(shell.StateBad, "unreadable")+
