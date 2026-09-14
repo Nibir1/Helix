@@ -441,6 +441,34 @@ Hooks are trusted local configuration, and that is a bounded decision:
    skipping a bad rule is how a hook someone believes is guarding them turns out
    never to have run.
 
+### Output that is not Helix's
+
+A package install prints Helix's lines, then hands the terminal to pip, brew,
+cargo or apt, then takes it back. Nothing used to mark the handover, so a
+stranger's error text sat in the middle of Helix's own report and the reader had
+to work out which lines they could act on.
+
+Helix does not reformat that output — reflowing someone's progress bar would be
+worse than leaving it. It marks where the handover happens, in both directions,
+and says who is talking:
+
+```
+  │ ! piper-local  not installed — installing it
+  │   → pip3 install --user piper-tts
+  ╷ output below is pip3's own
+
+Collecting piper-tts
+Successfully installed piper-tts-1.2.0
+
+  ╵ pip3 finished
+  │ ✔ piper-local  installed
+```
+
+The marks are deliberately not the gutter Helix's own lines carry, and the
+closing one reports the verdict so a long scroll does not have to be read
+backwards. The label names the program rather than its wrapper: `sudo apt-get
+install` is **apt-get** talking, and `python3 -m pip` is **pip**.
+
 ---
 
 ## 6. Context — what the model is told

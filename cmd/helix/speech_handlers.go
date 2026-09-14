@@ -1212,7 +1212,8 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 		return true
 	}
 
-	key := commands.AskSecret(fmt.Sprintf("API key for %s", provider))
+	printKeyPrompt(provider, secretsStoreLabel(), commands.SecretInputIsHidden())
+	key := commands.AskSecret("  " + shell.Fg(shell.HexPrimary, shell.GlyphPrompt) + " paste the key")
 	if key == "" {
 		if hasKey {
 			wizStep(shell.StateGood, provider, "nothing entered — keeping the saved key")

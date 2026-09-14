@@ -1416,9 +1416,15 @@ func (a *Agent) installPackage(pkg string) error {
 		return fmt.Errorf("no supported package manager found")
 	}
 	installCmd := pm.InstallCommand(pkg)
-	a.render.PrintInfo(fmt.Sprintf("Running: %s", installCmd))
+	// The package manager's output lands on the terminal unframed otherwise —
+	// the same handover problem the sidecar installs had, in a path nobody had
+	// looked at because it usually succeeds quietly.
+	source := shell.SourceOf(installCmd)
+	a.render.PrintCommand(installCmd)
+	a.render.PrintSystemMessage(shell.ForeignOpen(source))
 
 	err := a.sandbox.WrapCommand(installCmd, a.execConfig, a.env)
+	a.render.PrintSystemMessage(shell.ForeignClose(source, err == nil))
 	if err != nil {
 		// Post-install verification. Some package managers (like brew)
 		// exit non-zero if a dependency fails to link or cleanup fails, even if the

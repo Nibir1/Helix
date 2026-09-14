@@ -915,7 +915,13 @@ func runVisibleArgvOpts(
 		return false
 	}
 	cmdLine := strings.Join(fields, " ")
+	source := shell.SourceOf(cmdLine)
 	fmt.Println(shell.StepCommand(cmdLine))
+	// Say where Helix stops talking. Everything from here to the closing mark
+	// belongs to the installer, and without the boundary a stranger's error text
+	// sits in the middle of Helix's own report with nothing indicating who is
+	// speaking.
+	fmt.Println(shell.ForeignOpen(source))
 	fmt.Println()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -951,6 +957,7 @@ func runVisibleArgvOpts(
 
 	if err := c.Run(); err != nil {
 		fmt.Println()
+		fmt.Println(shell.ForeignClose(source, false))
 		if ctx.Err() != nil {
 			fmt.Println(shell.Step(shell.StateWarn, "cancelled", ""))
 			return false
@@ -963,6 +970,7 @@ func runVisibleArgvOpts(
 		return false
 	}
 	fmt.Println()
+	fmt.Println(shell.ForeignClose(source, true))
 	return true
 }
 

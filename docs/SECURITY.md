@@ -420,7 +420,35 @@ it; the key had to be revoked. Nothing about the bug was Windows-specific. It
 had echoed on every platform since keys were first asked for, and Windows was
 simply the first time anyone photographed it.
 
-Two properties are worth stating because they are deliberate:
+The prompt itself says what it is about to do with the value. Before anything is
+typed it names the provider, the page that issues its keys, the file the key
+lands in with its mode, and the environment variable that avoids the disk
+entirely:
+
+```
+   API KEY
+  ────────────────────────────────────────────────────────────────
+  │ PROVIDER  openai
+  │ GET ONE   https://platform.openai.com/api-keys
+  │ STORED    ~/.helix/secrets.json  (0600, this machine only)
+  │ OR SET    $OPENAI_API_KEY  (never written to disk)
+  │
+  │ Nothing is echoed as you type. The key is never logged, never
+  │ passed as a command-line argument, and goes nowhere but openai.
+```
+
+**On a terminal that cannot suppress echo the last paragraph is replaced, not
+softened.** It says plainly that the key will be visible on screen and in the
+scrollback, and suggests pasting it elsewhere. Promising hiding that will not
+happen is worse than saying nothing, because the reader pastes a credential on
+the strength of it — which is how a live key ended up in a screenshot.
+
+A provider with no single key-issuing page (`custom`) gets no URL rather than a
+plausible one. A wrong link in a security prompt is worse than no link: the
+reader follows it and then has to work out that Helix, not their memory, was
+wrong.
+
+Two further properties are worth stating because they are deliberate:
 
 - **Not routed through `Prompter`.** ADR-005 puts `/setup` on the voice-denied
   list precisely because it "would have you dictate API keys aloud". A secret

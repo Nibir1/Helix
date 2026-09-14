@@ -166,6 +166,19 @@ a full planner round trip. Failed edits and writes still abort.
 
 **A task whose work the agent did is `done`, never `superseded`.**
 
+**The key prompt says what it is about to do with your key.** It was one bare
+line at column zero — "Paste API key for openai (hidden):" — which assumed you
+knew where to get a key, where the pasted one goes, and whether it was safe to
+type there. It now names the provider's key page, the file and its mode, and the
+environment variable that avoids the disk. On a terminal that cannot suppress
+echo it says so outright instead of promising hiding it cannot do.
+
+**Installs mark where Helix stops talking.** A package install hands the
+terminal to pip, brew or cargo and takes it back; nothing said so, and a failure
+left a stranger's error text in the middle of Helix's own report. There is a
+boundary now, in both directions, naming the program — `sudo apt-get install` is
+apt-get talking — and the closing mark reports the verdict.
+
 **A verification task is not closed on stale evidence.** "Run the tests" may only
 be marked done from a result gathered after the last change; a test run followed
 by an edit says nothing about the current state.

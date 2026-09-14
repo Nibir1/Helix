@@ -27,6 +27,16 @@ import (
 	"golang.org/x/term"
 )
 
+// SecretInputIsHidden reports whether this terminal lets Helix suppress echo.
+//
+// Exported so a prompt can TELL the user before they paste. The answer differs
+// per terminal — MSYS2 hands a Go binary a pipe, where echo belongs to the
+// emulator — and a panel that promises the key will not appear on screen, on a
+// terminal where it will, is worse than one that says nothing.
+func SecretInputIsHidden() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
 // AskSecret prompts for a credential and reads it without echoing.
 //
 // Falls back to a plain read when stdin is not a terminal — a pipe or a script,
@@ -37,7 +47,7 @@ import (
 // than a console, echo is the emulator's to control and not ours, and silently
 // reading would reproduce the original bug while looking fixed.
 func AskSecret(prompt string) string {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !SecretInputIsHidden() {
 		fmt.Printf("%s (input is NOT hidden here — this terminal does not give Helix a console): ", prompt)
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
