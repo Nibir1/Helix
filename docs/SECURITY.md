@@ -373,6 +373,33 @@ plainly because an updater is the highest-consequence code in the project:
   The check is negative-only: it never asserts what a valid key looks like, since
   vendors change formats and a positive rule would start rejecting good keys.
 
+### Entering them
+
+A key is read **without echo**. `commands.AskSecret` reads the terminal in raw
+mode and prints nothing back, so the value does not reach the screen, the
+scrollback or a screenshot.
+
+This was not always true, and the gap was not theoretical. Every key prompt used
+`AskLine` — the same reader that asks which provider you want, which echoes by
+design — so a pasted key was printed in full. It was found when a user sent a
+screenshot of the Windows setup wizard with a live `sk-proj-…` key visible in
+it; the key had to be revoked. Nothing about the bug was Windows-specific. It
+had echoed on every platform since keys were first asked for, and Windows was
+simply the first time anyone photographed it.
+
+Two properties are worth stating because they are deliberate:
+
+- **Not routed through `Prompter`.** ADR-005 puts `/setup` on the voice-denied
+  list precisely because it "would have you dictate API keys aloud". A secret
+  that travelled through the same abstraction as an ordinary question would be
+  one refactor away from reaching the voice prompter, so `AskSecret` reads the
+  terminal directly and there is no channel to misroute.
+- **A terminal that cannot hide input says so.** Some emulators — MSYS2's
+  MINGW64 among them — hand a Go binary a pipe rather than a console, and echo
+  there belongs to the emulator, not to Helix. Rather than reading silently and
+  looking fixed, the prompt states that input is **not** hidden, so the choice
+  to paste a key is an informed one.
+
 ### Removing them
 `make delete-secrets` removes every credential Helix stores and nothing else:
 `secrets.json` (all provider keys), `daemon.conn.json` (the daemon's per-start

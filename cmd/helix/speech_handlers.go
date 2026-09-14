@@ -1212,7 +1212,7 @@ func settleSpeechKey(kind, provider string, hasKey bool) bool {
 		return true
 	}
 
-	key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("API key for %s", provider)))
+	key := commands.AskSecret(fmt.Sprintf("API key for %s", provider))
 	if key == "" {
 		if hasKey {
 			wizStep(shell.StateGood, provider, "nothing entered — keeping the saved key")
