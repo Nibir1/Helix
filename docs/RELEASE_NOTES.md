@@ -1,13 +1,30 @@
-## Unreleased — full duplex, and the session that found its bugs
+## Unreleased
 
-`gpt-live-1` was listed as impossible in the last release. It is now a chain you
+**The latest published release is v1.0.0.** Everything below it on this page is
+unreleased work, grouped by the theme it was built under rather than by a version
+number, because none of these were tagged. A `v1.5.0` tag existed briefly and was
+withdrawn; nothing was ever published under it, and no binary carrying that
+version was ever downloadable.
+
+Source builds report `1.5.0-dev` for that reason. The `-dev` suffix is not
+decoration: `internal/update` orders a pre-release below the release it precedes,
+so a machine running this build is correctly offered v1.5.0 on the day v1.5.0 is
+actually published, instead of being told it already has it.
+
+> `scripts/release.sh` refuses to run while this **Unreleased** heading is here.
+> Cutting a release means renaming it *and* setting `HelixVersion` in
+> `internal/config/config.go` to match — the script derives the tag from that
+> constant, so the two cannot drift apart.
+
+---
+
+### Full duplex, and the session that found its bugs
+
+`gpt-live-1` was listed as impossible in the notes below. It is now a chain you
 can pick, and most of what follows is the result of using it and writing down
 what happened.
 
-> No version heading yet: `make release` tags `v` + `HelixVersion` and refuses
-> if the two disagree, so the number is the owner's to choose.
-
-### Full duplex
+#### Full duplex
 
 Pick **"Talk over it"** in `/blackbox setup`. The microphone stays open for the
 whole conversation, you can cut in mid-sentence, and the model decides when your
@@ -42,7 +59,7 @@ canceller.
 Costs $0.05/min while open, plus your planner. Needs libopus (`brew install
 opus` / `apt install libopus0`), loaded at runtime so the build stays CGO-free.
 
-### Removing Helix
+#### Removing Helix
 
 `make uninstall`, or `helix uninstall` from anywhere. Prints a manifest and asks
 before touching anything: the binary, the `/etc/shells` registration, the
@@ -54,7 +71,7 @@ failures together are a machine that cannot open a terminal. Ollama, `sox` and
 `/purge` offers the same thing as a separate third confirmation after the data
 wipe, so a clean slate never takes the shell away by surprise.
 
-### The conversation looks like an instrument
+#### The conversation looks like an instrument
 
 A turn is now a labelled band rather than a `[NEURAL_NET] →` prefix: a rule
 naming the speaker and the model that answered, and a rail holding the prose to
@@ -65,8 +82,47 @@ terminal has to wrap.
 Three phases of a turn that showed nothing now have a HUD: the model speaking, a
 shell step executing under the sandbox, and a camera frame becoming an insight.
 
-### Fixes worth calling out
+#### API keys were printed to the terminal
 
+Every key prompt used the same reader that asks which provider you want, and
+that reader echoes. A pasted key appeared on screen in full, in scrollback, and
+in any screenshot taken afterwards. It had behaved that way on every platform
+since keys were first asked for.
+
+Keys are read without echo now. Where a terminal cannot suppress echo — some
+emulators hand a Go binary a pipe rather than a console — the prompt says so
+outright rather than reading silently and looking fixed.
+
+**If you set up a provider before this change, treat that key as exposed and
+rotate it.**
+
+#### Windows
+
+- **`make install` died at line 31 having installed nothing.** It called `sudo`
+  unconditionally, and MSYS2/MINGW64 has none: `sudo: command not found`, exit
+  127. Elevation is now decided per destination rather than assumed, which also
+  fixes a root container, where sudo is absent and unnecessary. Two smaller
+  defects went with it — the Windows guard compared `$OSTYPE` for equality with
+  `msys`, which MSYS2 (`msys2.0`) never matches, and the installed binary had no
+  `.exe` suffix, so Windows would not find it on `PATH`.
+- **The microphone was a guess.** DirectShow addresses a device by its literal
+  friendly name, and the hardcoded `audio=Microphone` is a name almost no
+  machine has — real ones read `Microphone Array (Realtek(R) Audio)`. ffmpeg
+  could not resolve it and exited `0xffffffff`, reported as
+  `✘ voice unavailable` on a machine whose microphone worked. Helix enumerates
+  now and uses the first audio device; `HELIX_AUDIO_DEVICE` picks another, and a
+  failed capture prints the devices ffmpeg could see. **The camera had the same
+  defect** — `video=Integrated Camera`, equally a guess — found while fixing the
+  microphone and fixed with the same enumerator.
+- `install.ps1` looked for `dist\helix.exe`, which no build target writes.
+
+#### Fixes worth calling out
+
+- **A live session could be billed after you closed it.** `Close` sent the
+  goodbye and tore the transport down in the same breath; the frame lost that
+  race about one time in twelve, and a session the service never heard closed
+  keeps billing until it times out on its own. It now waits for the far end to
+  acknowledge, capped at two seconds.
 - **`sudo shutdown -r now` was Low risk**, which under the default `ask` posture
   runs with no confirmation — and the Medium voice cap does not reach a Low
   command either. Now High. Found when a planner offered to reboot the machine
@@ -82,25 +138,27 @@ shell step executing under the sandbox, and a camera frame becoming an insight.
   disk** — either replaced under a live process, or newer in `dist/` because
   `make current` builds without installing. Both cost real time in this session.
 
-### Known limits
+#### Known limits
 
 - A long spoken sentence is truncated in the live caption rather than wrapped.
   Keeping the tail is deliberate: the words just spoken are the useful ones.
 - Output already on screen does not reflow when you resize. That is the
   terminal's scrollback, not something Helix can reach.
-- The duplex path is macOS- and Linux-tested. Windows compiles and vets; nobody
-  has run it.
+- The duplex path is macOS- and Linux-tested. Windows compiles, vets, installs
+  and now picks a real microphone, but nobody has held a live conversation on
+  it. `install.ps1` in particular is fixed by reading the build scripts, not by
+  running it — there is no Windows machine in this loop.
 
 ---
 
-## Helix v1.5.1 — Listening that behaves like a conversation
+### Listening that behaves like a conversation
 
-v1.5.0 could listen. It could not hold a conversation: every turn needed its own
+The work below it could listen. It could not hold a conversation: every turn needed its own
 wake word, "manual mode" did not stick because the wake word put you straight
 back, and typing while it listened did nothing. This release is mostly the
 result of using it and writing down what actually happened.
 
-### Three listening states
+#### Three listening states
 
 `voiceModeActive` was a bool, and a bool cannot tell "stop talking to me for a
 minute" from "close the microphone" — so both were the same phrase list calling
@@ -137,7 +195,7 @@ No new config key: the states map onto `user_preferences.voice_mode` and
   transition, so it holds for every door rather than for the one command anybody
   remembered to guard.
 
-### The wake word could not fire at all
+#### The wake word could not fire at all
 
 The energy detector shipped with absolute thresholds fitted to synthetic test
 tones (balanced = 0.12 normalized RMS). A MacBook Pro built-in microphone
@@ -154,7 +212,7 @@ in two places; failures now reach the screen, and a scan loop that dies takes
 down the HUD and says why instead of leaving a "listening" line over a dead
 microphone.
 
-### Models stop rotting
+#### Models stop rotting
 
 No provider compiles in a model ID any more. A vendor retiring one meant every
 turn failed with an unexplained 404 while `/provider-status` reported *ok* —
@@ -171,7 +229,7 @@ the model you selected.
 - Startup replaces a model the provider no longer lists, and says so once. A
   dropped connection is **not** treated as evidence of retirement.
 
-### Other
+#### Other
 
 - **`gpt-live-transcribe`** — OpenAI realtime STT over WebSocket, $0.017/min,
   verified against the live service. Not a chain default: there is no
@@ -185,9 +243,9 @@ the model you selected.
 
 ---
 
-## Helix v1.5.0 — BlackBox: The Voice-First Companion
+### BlackBox: the voice-first companion
 
-v1.0.0 taught the terminal to speak human. v1.5.0 lets you stop typing.
+v1.0.0 taught the terminal to speak human. This work lets you stop typing.
 
 BlackBox turns Helix from a reactive text tool into an always-on multimodal companion: it listens, transcribes, plans, executes, watches through a camera when you ask, answers aloud, and — with `helix daemon` — keeps doing so after you close the terminal. The intelligence is the same intelligence. Every spoken word lands in the *same* pipeline typed input has always used (classify → plan → Instruction Firewall → risk tiers → sandbox → kernel confinement), because a new input channel is not a reason to build a second, weaker door.
 
@@ -195,7 +253,7 @@ It remains local-first and telemetry-free. The whole voice stack runs offline if
 
 **56,000 lines across 13 new packages, one unchanged moat.**
 
-### Voice
+#### Voice
 
 - **Multi-provider speech** with failover chains: Groq, OpenAI (batch Whisper and `gpt-live-transcribe` realtime over WebSocket) and Deepgram for transcription; OpenAI, Deepgram, ElevenLabs for speech; whisper.cpp, Piper, Kokoro and **Sesame CSM-1B** as local sidecars. Pricing is *data* (`pricing.json`, user-overridable), never hardcoded routing.
 - **Recommended chains** — one keystroke in `/blackbox setup` picks cheapest-cloud (Groq + `gpt-4o-mini-tts`), lowest-latency (Deepgram Nova-3 + Aura-2), or fully-local/private (whisper.cpp + Piper). Every cloud chain pre-fills a *local* fallback, because the failure worth surviving is the network.
@@ -204,7 +262,7 @@ It remains local-first and telemetry-free. The whole voice stack runs offline if
 - **Barge-in** — Ctrl+C stops a spoken reply mid-sentence (~50 ms), not at the next sentence boundary. Opt-in voice interruption stops it by speaking in the pause between sentences, with no echo cancellation required.
 - **A sci-fi HUD** — listening waveform driven by the real microphone level (log-scaled, because speech RMS on a linear meter barely leaves the floor), decode sweep, speaking wave, wake-standby pulse. Terminal-native; no GUI dependency.
 
-### Waking without touching the keyboard
+#### Waking without touching the keyboard
 
 `/blackbox wake on` — **on by default** — keeps the microphone open at an idle
 prompt and switches Helix into live mode on any sound. The keyboard and the
@@ -253,7 +311,7 @@ new default only reaches a config where the key is *absent*, and an explicit
 reading it as consent to open a microphone would be a guess in the one direction
 ADR-005 forbids. One typed command, and it persists.
 
-### Sesame CSM-1B — a local voice that sounds like a conversation
+#### Sesame CSM-1B — a local voice that sounds like a conversation
 
 The speech model behind Sesame's "crossing the uncanny valley of voice" demo, running on your own machine with **no Python, no Docker and no API calls**. Not the whole demo — what Sesame open-sourced is the speech *generator*, which cannot produce text — so Helix's planner still decides what to say. What it changes is how that sounds.
 
@@ -264,14 +322,14 @@ The speech model behind Sesame's "crossing the uncanny valley of voice" demo, ru
 
 **It wants a discrete GPU.** Measured 1.69× real-time on an M4 Air (slower than playback: csm.rs runs the quantized weights on CPU regardless of the Metal build), against a ~0.8× reference figure on an NVIDIA GPU. Pair it with `piper-local` as the fallback and a machine that cannot keep up simply uses the fast voice. Setup, per-platform build flags and a per-machine expectation table are in `docs/local_runtimes.md` §3.5–3.6.
 
-### Vision
+#### Vision
 
 - **Opt-in camera** via `ffmpeg`, one frame at a time, downscaled to ≤1024 px, **held in memory and never written to disk** — enforced by a filesystem-snapshot test. Only metadata reaches the journal.
 - **The planner has a `vision` tool.** Ask "what can you see?" and the model chooses the camera itself. An earlier heuristic that fired on any sentence containing "this" was removed: it answered "what do we have in *this* directory?" by describing the room.
 - **A companion loop** that looks on a timer and may speak unprompted — with a 16×16 luminance fingerprint diffed in-process, so an unchanged scene never costs a model call.
 - **Capture failures are legible.** A camera the OS has not authorized opens and then delivers nothing; Helix gives up after 8 seconds and names the likely cause, and `/blackbox status` will not claim the camera is watching until a frame has actually arrived.
 
-### The agentic harness
+#### The agentic harness
 
 - **Bounded plan → act → observe → replan** (`/agentic on`). A failed step feeds its exit code and a sanitized tail of its output back to the planner, which self-corrects. Every iteration re-enters the *entire* safety pipeline; the harness decides only whether to plan again.
 - **Native tool calling** across eight providers — one normalized `ToolDefinition` over three different wire formats (OpenAI-shaped, Anthropic's flat `input_schema` blocks, Ollama's `/api/chat`), sharing one streamed-fragment reassembler instead of three chances to re-bug it. Capability reporting describes what the *adapter* can drive, not what the vendor sells: `custom` and llama.cpp are excluded because their tool support is genuinely undetectable, and Ollama is gated **per model** — the small local models Helix recommends ship no tool template, so it does not waste a round trip pretending otherwise. Where tool calling is unavailable the planner falls back to the prompt ladder silently, costing at most one request.
@@ -279,26 +337,26 @@ The speech model behind Sesame's "crossing the uncanny valley of voice" demo, ru
 - **Session memory** — a persisted ring of recent turns, injected as a zero-authority fenced block. "What did I ask a moment ago" works; a transcript Helix did not trust is labelled `not understood` rather than quoted back as if you had said it cleanly.
 - **Safe-subset undo** — `"undo that"` reverses a journalled action (a commit becomes a soft reset) through the normal confirmation and safety path. Overwrites and deletions are explicitly out of scope, and the docs say so.
 
-### The Living AI daemon
+#### The Living AI daemon
 
 - **`helix daemon`** — a supervised background service with its own headless Agent, session memory, wake loop and sidecar health checks. Panic-guarded, restart-backed-off, and it heartbeats its own liveness so uptime is measurable rather than asserted.
 - **NDJSON IPC over a 0600 Unix socket** (loopback TCP + token on Windows), driven by `helix remote status|say|mode|logs|stop`. No Redis, no gRPC, no broker — filesystem permissions are the auth.
 - **Service installers** for launchd, `systemd --user` and Windows, consent-gated, with lingering detection on Linux because a `--user` service that stops at logout is not installed in any useful sense.
 - **Graceful degradation** — a connectivity monitor moves ears, voice *and* brain to local providers together, says so out loud, and journals it.
 
-### Providers & offline resilience
+#### Providers & offline resilience
 
 - **Twelve LLM providers**: OpenAI, Anthropic, Google Gemini, Meta (Muse Spark), DeepSeek, Kimi, Qwen, GLM, xAI (Grok), Ollama, llama.cpp, and any OpenAI-compatible custom endpoint. **None of them compiles in a model ID** — the model is discovered from the provider at runtime and ranked vision-first, so the camera path works on a fresh key without naming a model that may not exist next month.
 - **Circuit-breaker failover** (CLOSED → OPEN → HALF-OPEN) keeps Helix *thinking* when the cloud disappears, not merely hearing and speaking. It health-checks the local brain before every switch, so a machine with no local runtime never degrades onto a dead endpoint, and an explicit `/provider use` always outranks it.
 - **Misdirected-key guard** — a pasted key whose prefix unambiguously belongs to another vendor is caught before it is stored. GroqCloud and xAI are different companies one letter apart.
 
-### Linux edge devices
+#### Linux edge devices
 
 - **A per-board deployment matrix** (`docs/edge_deployment.md`) for Raspberry Pi 5/4, first-gen Jetson Nano, amd64 mini-PCs, arm64 SBCs and RISC-V — including the two Linux gotchas that fail *silently*: `audio_cgo` for on-device speaker output, and bubblewrap where Landlock is unavailable.
 - **`scripts/edge-setup.sh`** — arch/board detection, consent-gated installs, and a SHA-256-verified Ollama install that fails closed. It refuses Ollama on the Jetson Nano, the one board in the matrix that cannot run it, and points at the cloud path instead.
 - **`/doctor` gained an edge section**: board, build flavour, the confinement backend *actually* in force, recorder presence, per-sidecar reachability, and thermals with a throttling verdict.
 
-### New security & privacy controls
+#### New security & privacy controls
 
 Voice is treated as an **untrusted input channel**, because a television, a podcast or a person in the room becomes text with user authority the moment it is transcribed.
 
@@ -314,7 +372,7 @@ Voice is treated as an **untrusted input channel**, because a television, a podc
 
 Full model: `docs/threat_model_voice.md`. Policy summary: `docs/SECURITY.md`.
 
-### Measured, not asserted
+#### Measured, not asserted
 
 `/blackbox stats` reads the latency and liveness samples Helix records locally and grades them against the project's targets — local and cloud paths separately, because they have different budgets. Measured on an M-series Mac:
 
@@ -330,7 +388,7 @@ Full model: `docs/threat_model_voice.md`. Policy summary: `docs/SECURITY.md`.
 
 The report refuses to flatter: it will not print a p95 a small sample cannot support, it says "not measured" rather than implying a pass, and where the median meets a budget but the worst case does not it says **typical only**.
 
-### Fixed after auditing the code against its own documents
+#### Fixed after auditing the code against its own documents
 
 Read top-to-bottom against this repository's roadmap, five defects turned up that
 no test had reached and no hardware was needed to find. Four sat in the layer
@@ -369,7 +427,7 @@ ordinary commands, now 5. Each fix is pinned by a test that fails against the ol
 code, including one asserting the old device pattern really was inert, because a
 regression test that also passes against the bug proves nothing.
 
-### Fixed after real-hardware testing
+#### Fixed after real-hardware testing
 
 A live session on a second machine surfaced defects no test had reached:
 
@@ -379,7 +437,7 @@ A live session on a second machine surfaced defects no test had reached:
 - **"Voice link configured." printed above its own contradiction** — the success line came before the verification that disproved it.
 - `/doctor` suggested `ollama pull <cloud-model-name>`, and the port-collision report named a sidecar's old port after the wizard had moved it. Both fixed.
 
-### Interface
+#### Interface
 
 The terminal UI is the whole product surface here, so it gets the same honesty rules as everything else: a panel may not report a state the machine cannot deliver.
 
@@ -396,11 +454,11 @@ The terminal UI is the whole product surface here, so it gets the same honesty r
 - **`/about`, `/help <command>` and the unknown-command screen** were the last three drawing themselves by hand. `/about` closed three sections with a rule that had no opening rule, and hand-wrapped its prose to one fixed width. A mistyped command and `/help <mistyped>` rendered the *same* error two different ways; they are one screen now.
 - **Panels stay inside their frame.** Over-wide status values wrapped at the terminal edge and restarted at column zero, escaping the panel — including a camera message at 95 columns in a 74-column row. Fixed in the primitive rather than in each caller: `shell.KV` now wraps at word boundaries and hangs continuation lines under the value column, joining the table and prose renderers so nothing can spill outside the frame. The wrapping is colour-aware — escapes are never counted toward a width or severed, and the active colour is closed at a break and reopened on the next line — and a value that already fits is returned byte for byte unchanged, so no panel that rendered correctly before changed. The prose renderer was measuring byte length rather than columns, so panels built from `·`, `—` and `→` wrapped into twice as many lines as their width needed; and a word longer than the panel (a URL, an absolute path) was emitted whole, once rendering 188 columns into a 74-column frame. Table cells were cut to a count of runes rather than columns, so a CJK model name came back at twice its budget and shifted every column after it. All fixed, and every panel primitive now measures width through one shared definition.
 
-### New commands
+#### New commands
 
 `/blackbox` (`on·off·status·setup·look·eyes·wake·tts·say·log·stats`) replaces eight separate voice verbs — typing an old name tells you where it went. Plus `/agentic`, `/memory`, `/undo`, `/listen`, `/mictest`, `/web`, `/todo`, `/plan`, `/review`, `/diff`, `/context`, `/cost`, `/tools`, `/hooks`, `/permissions`, `/export`, `/resume`, `/compact`, `/reboot`, `helix --version`, and `helix daemon` / `helix remote`.
 
-### One visual language, everywhere
+#### One visual language, everywhere
 
 All 57 slash commands, the first-run stages, the startup path and the `helix daemon` CLI render through the same primitives — a titled panel, a gutter, aligned rows, state badges — instead of the flat stacks of coloured lines they had each grown independently. 561 raw colour calls became zero.
 
@@ -408,9 +466,9 @@ All 57 slash commands, the first-run stages, the startup path and the `helix dae
 - **Four outcome states, not three.** "No crash reports" and "nothing to prune" are not warnings; rendering them yellow is how a screen full of yellow teaches people to stop reading yellow.
 - **`/blackbox setup`, `/doctor`'s appliance section, `/config`, `/purge`, `/provider`, `/version`** and the rest were converted individually rather than repainted, and several content bugs fell out — `/audio` reported "ON (NOT READY)", a contradiction in brackets, and `/debug` read the config field while logging is actually governed by the environment.
 
-### Known limits, stated plainly
+#### Known limits, stated plainly
 
-This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
+This project keeps an honest ledger, so here is what this work does *not* do:
 
 - ~~**Hybrid mode is not reachable.**~~ **Shipped 2026-09-08, on by default 2026-09-09** — see *Waking without touching the keyboard* above. It arrived by inverting the premise: the blocking read is never *started* rather than raced, so `input.HybridSource` is superseded rather than finally wired. It is **Unix-only**; Windows reports unavailable and says why.
 - **Music ducking was specified and is not implemented** — and as written it cannot be: Helix controls only its own voice, so "ducking" would make it *less* audible. Music is recognised and deliberately not remarked upon.
@@ -424,7 +482,7 @@ This project keeps an honest ledger, so here is what v1.5.0 does *not* do:
 - **The restart supervisor is one extra idle process** for the life of the session, and nobody has measured what that costs on a Pi. `/reboot` also has never been run with Helix as a **login** shell — which is precisely the case the supervisor exists for, since a parent that simply exited would end the session.
 - **Full-duplex barge-in is parked; sentence-boundary interruption is not.** You can stop a reply by speaking in the gap *between* sentences (`/config barge-in on`, off by default) — the speaker is idle there, so no echo cancellation is needed. You still cannot talk *over* a sentence: that needs concurrent capture plus AEC, which conflicts with the CGO-free build unless a headset is assumed. `Ctrl+C` remains the instant, microphone-free stop.
 
-### Upgrading from v1.0.0
+#### Upgrading from v1.0.0
 
 Existing configs keep working and typed behaviour is unchanged by design (the PTY end-to-end suite is the proof). One thing to know rather than nothing at all:
 
@@ -439,9 +497,9 @@ To start talking:
 
 Say **"manual mode"** to get back to the keyboard, or **"reboot"** to restart the shell without losing your place.
 
-### Setup that finishes the job
+#### Setup that finishes the job
 
-Late additions to v1.5.0, from a live `/blackbox setup` on an Intel Mac and an Apple Silicon one. Each is a case where the wizard knew what to do and stopped short of doing it.
+Late additions, from a live `/blackbox setup` on an Intel Mac and an Apple Silicon one. Each is a case where the wizard knew what to do and stopped short of doing it.
 
 - **The speech wizard installs instead of skipping.** Choosing a chain is the decision, so what that chain needs — runtime, model file, server, and host packages such as Python, git or cargo — is installed and started without a further prompt. A host with no Python used to be told *"there is no single install command for this platform"*, which was a true sentence about a situation Helix could have fixed in one step. First boot still asks per package; the difference is deliberate and documented in SECURITY.md §5c.
 - **CSM is built, not printed.** `/blackbox setup` detects the compute backend (CUDA if `nvidia-smi` answers, Metal on Apple Silicon, otherwise a tuned CPU build), prints the evidence for that choice before compiling, installs `git` and `cargo` if absent, and builds csm.rs into `~/.helix/csm.rs`. The refusal it replaces rested on the word *silently*: guessing a backend is wrong, detecting one and showing your working is not. The licence gate remains yours.
@@ -455,7 +513,7 @@ Late additions to v1.5.0, from a live `/blackbox setup` on an Intel Mac and an A
 - **One provider, one key prompt.** A vendor on both sides of a chain — Deepgram does both — was asked for the same credential twice in a single wizard run.
 - **A sidecar's moved port survives the save.** A local provider chosen as a *fallback* and reassigned off an occupied port had its address written to a field that belongs to the primary, so the move was lost and the adapter dialled the default anyway. There is one writer for that address now.
 - **The CSM licence gate is walked, not just described.** Helix installs the Hugging Face CLI, opens the terms page in a browser and runs the login — stopping at the token, which is the only part that is actually consent.
-- **A conversation ends four ways** (see the v1.5.1 notes). Silence had a retry budget: three quiet turns and the shell reported "voice unavailable" and dropped to a typed prompt. Being quiet is the ordinary state of someone who is not talking, and leaving live mode is your decision — "manual mode" or `/blackbox off`, and nothing else.
+- **A conversation ends four ways** (see "Listening that behaves like a conversation", above). Silence had a retry budget: three quiet turns and the shell reported "voice unavailable" and dropped to a typed prompt. Being quiet is the ordinary state of someone who is not talking, and leaving live mode is your decision — "manual mode" or `/blackbox off`, and nothing else.
 - **A readiness budget measures readiness.** Both sidecars that download on first run — kokoro's container image and CSM's model weights — were fetching inside the window that asks "did the server bind its port?", so Helix reported them dead while their own logs showed them working. Downloads are pulled as their own step now.
 - **The provider you chose is the provider that speaks.** A chain of `csm-local → piper-local` skipped CSM entirely: it has no streaming adapter, the streaming path passed over it to a fallback that has one, and the turn then succeeded — so the buffered path, where chain order is honoured, was never reached. CSM was built, its weights downloaded, its server started and verified, and its log recorded not one synthesis request.
 - **The CSM preset enables the conversational context it advertises.** "Most natural, local" sells conversational prosody and shipped with the conditioning off, so CSM synthesized each reply cold and sounded like the fallback it was chosen over.
@@ -508,10 +566,18 @@ git clone https://github.com/Nibir1/Helix.git && cd Helix && ./scripts/install.s
 ```
 
 ### Option 2: Windows (PowerShell)
-Open PowerShell as Administrator and run the automated Windows setup script. This will build the binary, add it to your system `PATH`, and optionally bootstrap Ollama.
+Open PowerShell as Administrator and run the automated Windows setup script. This will build the binary, add it to your system `PATH`, and optionally bootstrap Ollama. Installs to `C:\Program Files\Helix`; both steps need elevation.
 
 ```powershell
 git clone https://github.com/Nibir1/Helix.git; cd Helix; .\scripts\install.ps1
+```
+
+### Option 2b: Windows under MSYS2 / MINGW64 / Git Bash
+`make install` works from a POSIX shell on Windows and needs no administrator rights. It installs into that environment's `/usr/local/bin` as `helix.exe` and skips the `/etc/shells` and `chsh` steps, which have no meaning there. The binary is then on `PATH` inside that shell only; the installer prints the Windows path so you can add the folder to your Windows `PATH`. Redirect it with `HELIX_INSTALL_DIR=/some/dir make install`.
+
+```bash
+make install
+pacman -S mingw-w64-x86_64-ffmpeg mingw-w64-x86_64-opus   # voice; opus is gpt-live-1 only
 ```
 
 ### Option 3: Go Install (Cross-Platform)

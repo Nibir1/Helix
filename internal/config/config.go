@@ -940,7 +940,20 @@ const (
 	// `go install` and a plain `go build` do not — so this constant is what a
 	// source build reports, and it has to track the tag or /version lies about
 	// which Helix you are running.
-	HelixVersion  = "1.5.0"
+	//
+	// THE -dev SUFFIX IS LOAD-BEARING, not decoration. It said "1.5.0" for a
+	// while when no v1.5.0 tag existed, which is the one thing this constant
+	// must never do: every source build claimed to be a release nobody could
+	// download. The latest published tag is v1.0.0; everything since is
+	// unreleased, and a pre-release suffix is how internal/update says so —
+	// Version.Newer orders 1.5.0-dev BELOW 1.5.0, so the day v1.5.0 is
+	// actually published, a machine running this build is correctly offered
+	// the upgrade instead of being told it already has it.
+	//
+	// Cutting a release means editing this to "1.5.0" AND renaming the
+	// "Unreleased" heading in docs/RELEASE_NOTES.md. scripts/release.sh
+	// refuses to run while that heading is there, so the two cannot drift.
+	HelixVersion  = "1.5.0-dev"
 	ModelName     = "TinyLlama-1.1B-Chat-v1.0-GGUF"
 	ModelURL      = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf"
 	ModelChecksum = "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556"

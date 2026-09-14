@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"helix/internal/dshow"
 )
 
 // ErrNoRecorder is returned when neither sox nor ffmpeg is installed.
@@ -427,7 +429,7 @@ func ffmpegInputFormat() string {
 // word "default", but DirectShow takes the device's literal friendly name, so
 // there is nothing generic to pass — the name has to be looked up. It used to
 // be hardcoded to "audio=Microphone", which is a name essentially no machine
-// has; see capture_dshow.go for what that cost.
+// has; see internal/dshow for what that cost.
 func ffmpegInputDevice() string {
 	if dev := os.Getenv("HELIX_AUDIO_DEVICE"); dev != "" {
 		return dev
@@ -436,7 +438,7 @@ func ffmpegInputDevice() string {
 	case "darwin":
 		return ":0" // avfoundation: first audio input
 	case "windows":
-		if devices := dshowAudioDevices(); len(devices) > 0 {
+		if devices := dshow.Devices(dshow.Audio); len(devices) > 0 {
 			return "audio=" + devices[0]
 		}
 		// Nothing enumerated: keep the old guess rather than passing an empty
@@ -455,7 +457,7 @@ func recordingHint(recorder string) string {
 	if recorder != "ffmpeg" || runtime.GOOS != "windows" {
 		return ""
 	}
-	devices := dshowAudioDevices()
+	devices := dshow.Devices(dshow.Audio)
 	if len(devices) == 0 {
 		return "\n  ffmpeg found no DirectShow audio devices at all. Check that a" +
 			"\n  microphone is enabled in Settings > Privacy > Microphone, then:" +

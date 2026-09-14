@@ -483,6 +483,12 @@ yet do:
   Windows prints the devices ffmpeg could see, because the exit status alone
   names nothing.
 
+  **The camera had the identical defect** and was found while fixing the
+  microphone: `video=Integrated Camera`, equally a guess, equally unresolvable
+  on a machine whose webcam reports `HD Webcam C920`. Same listing, same fix,
+  and it is one shared enumerator (`internal/dshow`) rather than two copies —
+  it was one bug written twice, and a second copy is a second thing to fix.
+
 ---
 
 ## 7c. Full duplex (`gpt-live-1`)

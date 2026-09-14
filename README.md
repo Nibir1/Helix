@@ -688,6 +688,7 @@ Helix/
 │   ├── daemon/            # Headless service + IPC (Unix socket; loopback TCP on Windows)
 │   ├── deps/              # System package catalogue (sox, ffmpeg) and verified install commands
 │   ├── diagnostics/       # Telemetry-free, redacted crash reporting
+│   ├── dshow/             # Windows DirectShow device enumeration (mic and camera)
 │   ├── edge/              # Edge-appliance diagnostics and deployment checks
 │   ├── hooks/             # User policy hooks — the escape hatch Helix cannot know about
 │   ├── input/             # HybridSource: keyboard and microphone multiplexed into one stream
@@ -742,7 +743,7 @@ Two sources, and by default whichever is newer wins:
   meant to run.
 
 **The restart says what the check found.** The panel carries an `UPDATE` row —
-`already on the newest release (1.5.0)`, `not checked — update.check is off`, or
+`already on the newest release (1.5.0-dev)`, `not checked — update.check is off`, or
 `found 1.6.0 but could not install it` — and that sentence crosses the restart,
 so asking afterwards gets a report rather than a guess. Every path records one,
 including the ones that decline to look: "did not check" and "checked and found

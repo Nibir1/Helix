@@ -23,18 +23,27 @@ exact sequence:
    cd <your Helix clone>                   # wherever it lives on this machine
    git rev-parse --show-toplevel           # you should be at the repo ROOT, not a subdirectory
    grep '^module' go.mod                   # MUST be: module helix
-   git branch --show-current               # main — see below; this said blackBox until 2026-09-08
+   git branch --show-current               # feat/blackbox — see below
    git log --oneline -10                   # see what changed since this doc was written
    git status                              # note any uncommitted work
    ```
    **`blackBox` is merged and is no longer where the work happens.** It landed on `main` as
-   `d2c2d1f` ("Black box (#5)", 2026-08-28) with owner approval, `v1.5.0` was tagged from
-   `main`, and every commit since — the Windows fixes, `/reboot`, the CSM gate, the interface
-   passes — is on `main`. The `blackBox` branch still exists and is now BEHIND: checking it out
-   and following the old instruction would mean working against a tree missing a dozen
-   commits, which is a worse outcome than the wrong-looking branch name. ADR-009's rule that a
-   merge to `main` needs explicit owner approval is unchanged and was honoured; what expired is
-   the assumption that the integration branch is still open.
+   `d2c2d1f` ("Black box (#5)", 2026-08-28) with owner approval. The `blackBox` branch still
+   exists and is BEHIND; checking it out and following the old instruction would mean working
+   against a tree missing a dozen commits. ADR-009's rule that a merge to `main` needs explicit
+   owner approval is unchanged and was honoured; what expired is the assumption that the
+   integration branch is still open.
+
+   **The current branch is `feat/blackbox`**, which is `main` plus the `gpt-live-1` work and
+   the fixes that came out of using it. `main` has nothing the branch does not.
+
+   **THERE IS NO v1.5.0.** A `v1.5.0` tag existed for a while and was withdrawn by the owner —
+   nothing was published under it, and no binary carrying that version is downloadable. The
+   latest published tag is `v1.0.0`. Log rows below that describe tagging or publishing
+   `v1.5.0` are a record of what happened at the time and are left as written; they are not a
+   statement of the current state. Source builds report `1.5.0-dev`, and
+   `docs/RELEASE_NOTES.md` carries an **Unreleased** heading that `scripts/release.sh` refuses
+   to run past — deliberately, until the owner decides the polish is finished.
 3. **Check §13 Progress Tracker** → find the first phase that is not `DONE`. That is your phase.
    Note that "core DONE" is not "done": phases 7, 9, 10, 11 and 12 all carry unfinished tasks,
    and §13 now lists every open checkbox in one place so the remaining work is visible without
@@ -1682,6 +1691,12 @@ mode and opt-in**.
       > direction: recording a deliverable because its PURPOSE was served. The gate this box
       > guarded is closed; if the owner still wants the phase tag for navigation it is one
       > command, and this line is the reminder.
+      >
+      > **Annotated 2026-09-14: `v1.5.0` no longer exists.** The owner withdrew the tag and
+      > the release to finish polishing first, so `git tag` now lists `v1.0.0` alone and
+      > nothing was ever published under 1.5.0. The paragraph above is left as written
+      > because it records what was true on 2026-09-08, not what is true of the repository
+      > today.
 
 **Acceptance criteria:** all §10 targets measured and logged; full suite green 3-OS; docs complete;
 release tagged.
@@ -2564,7 +2579,7 @@ hardware- or key-gated, not unwritten code**:
 | 4 | logout/reboot survival on 3 OSes; the 72h soak wall clock (tooling ready); hearing the offline notice | manual |
 | 5 | camera QA (needs macOS camera permission granted by a human); frame-to-insight ≤5s (local measured at 8.8s warm, cloud unmeasured — needs a vision key) | hardware + keys |
 | 3 | live openWakeWord sidecar accuracy; a real FP/hour figure from daily use | manual |
-| 7 | P7.9 `blackbox-v0.1.0` tag — **superseded 2026-08-28**: `blackBox` merged to `main` (`d2c2d1f`) and shipped as `v1.5.0`, so the gate this box guarded is closed. The phase tag itself was never created | owner (cosmetic) |
+| 7 | P7.9 `blackbox-v0.1.0` tag — **superseded 2026-08-28**: `blackBox` merged to `main` (`d2c2d1f`), so the gate this box guarded is closed. The phase tag itself was never created. *(2026-09-14: it was tagged `v1.5.0` at the time; that tag has since been withdrawn and there is no published release past `v1.0.0`.)* | owner (cosmetic) |
 | 7 | §10 rows still unmeasured: wake FP/hour, wake→exec latency, mode-switch latency (all need a mic); cloud STT/TTS/vision (keys); TTS naturalness (a human); 72h uptime (a clock) — see §10A | hardware + keys + owner |
 | 7 | P7.1 hybrid mode is built but unwired — no user can reach it (found 2026-08-23) | **owner decision** |
 | 9 | P9.8 real-key QA (Groq / Kokoro sidecar) | manual |
@@ -3149,6 +3164,8 @@ needs no detector, just a report.
 | 2026-09-14 | **`make install` on Windows died at line 31 having installed nothing, and `sudo` was not the only wrong assumption.** Screenshot: `scripts/install.sh: line 31: sudo: command not found`, `make: *** [Makefile:187: install] Error 127`. Reproduced it exactly on this Mac by sourcing the pre-fix script with `OSTYPE=msys2.0` and a PATH with no sudo on it — same message, same 127 — which is also how the fix was checked (exit 0, `helix.exe` in place, `/etc/shells` untouched). Three defects, not one. **(1) sudo was unconditional**; it does not exist under MSYS2 and is not needed in a root container, so `run_privileged` now runs plainly when it can, elevates when it must, and names the command it could not run when it cannot. **(2) The Windows guard never matched.** `"$OSTYPE" != "msys"` compares for equality with a bare name; MSYS2 reports `msys2.0` and Cygwin appends a version, so the `/etc/shells` branch was taken on Windows too — invisible only because the script never got that far. **(3) The binary had no extension.** `go build -o dist/helix` does NOT append `.exe` (Go supplies it only when it picks the name itself — measured), so a Windows install produced a PE file Windows will not find on PATH. While there: `install.ps1` looked for `dist\helix.exe`, which **no** build target writes — `make windows` writes `helix-windows-amd64.exe` — so its build succeeded and its copy then failed; it now takes the names from what `build.sh` actually produces, and the test derives that list from `build.sh` so a rename fails here rather than on a user's machine. `/etc/shells` registration is non-fatal now: it gates only the optional login-shell step, and reporting a working install as a failure is the worse wrong answer. Not verified by execution: `install.ps1` — no PowerShell on this machine, and I am not claiming otherwise. |
 | 2026-09-14 | **`audio=Microphone` is not a device class, and no machine is called that.** Screenshot: `capture: ffmpeg recording failed: exit status 0xffffffff` → `✘ voice unavailable`, on a box where the MIC row said `✔ ffmpeg`. DirectShow addresses a device by its literal friendly name — there is no `default` the way PulseAudio has one, and no index the way avfoundation has one — so the hardcoded `audio=Microphone` was a guess against names that actually read `Microphone Array (Realtek(R) Audio)`. Helix now enumerates and takes the first audio device. The listing format was **read out of ffmpeg's own `libavdevice/dshow.c`**, not remembered, and it was worth doing: master prints one line per device with the type as a suffix and no section headers at all, while ≤ 4.4 prints `DirectShow audio devices` headers and no suffix — MSYS2, gyan.dev and winget do not ship the same build, so both are parsed. Two things measured rather than assumed: `-list_devices` writes to **stderr** and exits **non-zero** even when the listing is perfect (confirmed locally against avfoundation, exit 251), and the listing prints at `AV_LOG_INFO`, so the `-loglevel error` the recording command uses would have silenced the very output being asked for. Four mutations on the parser — un-skip the `Alternative name` lines, drop the section tracking, accept only a literal `(audio)` so the `(video, audio)` webcam mic is lost, trust the section over the per-device type so a camera becomes a microphone — all four killed. A failed Windows capture now prints the devices ffmpeg could see, because `0xffffffff` on its own points at nothing. |
 | 2026-09-14 | **`Close()` said goodbye and hung up in the same breath; the goodbye lost about one time in twelve.** Found as a flaky `TestCloseTellsTheServiceFirst` — 2 of 3, then 11 of 12 — which is the kind of number that gets a test quarantined. It was the implementation. `Close` did `s.send(session.close)` and then `s.fail(nil)` → `pc.Close()` back to back: **sending is not delivering**, and tearing the association down races the frame out of it. Every lost goodbye is a session that bills until the service times it out on its own — the exact cost the ordering was written to avoid, defeated in-process with no network between the peers. `waitForGoodbye` now waits for the data channel's buffered amount to drain, capped at 2s. That signal was checked rather than assumed: pion decrements a stream's buffered amount when the **SACK** arrives (`pion/sctp` association.go → `onBufferReleased`), so zero means the far end received it, not merely that we queued it. 12 of 12 after; reverting the wait put the failure back. |
+| 2026-09-14 | **The version constant claimed a release that had been withdrawn.** Owner deleted `v1.5.0` — still polishing — and asked that nothing refer to it. `HelixVersion` was `"1.5.0"`, so every source build reported itself as a release nobody could download, and the only thing that would have caught it was comparing the constant to the one file that says whether a release has been cut. Now `"1.5.0-dev"`, and the ordering was **measured, not assumed**: `1.5.0` beats `1.5.0-dev`, `1.5.0-dev` beats `1.0.0`, so a machine on a source build is correctly offered v1.5.0 the day it is published rather than told it already has one. Two guards, both mutation-killed: while `RELEASE_NOTES.md` carries an **Unreleased** heading the constant must be a pre-release, and once that heading is gone it must NOT be — otherwise `release.sh`, which derives the tag from the constant, would publish `v1.5.0-dev` as the release. The local tag was deleted (remote never had it; `git ls-remote` showed `v1.0.0` alone). `RELEASE_NOTES.md` collapsed its three never-published version sections under one **Unreleased** heading. Where a log row or a checkbox asserts the tag exists it is **annotated in place, not rewritten** (guardrail 11): those record what was true when written. What is NOT changed: `release.sh`'s usage examples (`./scripts/release.sh v1.5.0`) illustrate an argument's shape and claim nothing, and the `helix v1.5.0 (build 8b74cf1)` in the §7c probe is measured output — editing it would falsify an experiment. Doc sweep on top: all 12 `.md` audited by cross-checking claims against the code rather than reading for tone — every documented `/command`, `make` target, `HELIX_*` variable and backticked path still exists, so nothing was stale enough to delete and nothing was deleted. |
+| 2026-09-14 | **The camera had the microphone's bug, and nobody had reported it.** Found while fixing `audio=Microphone`: `internal/vision` hardcoded `video=Integrated Camera`, which is the same mistake — a literal DirectShow friendly name standing in for a device class — and fails identically on any machine whose webcam reports `HD Webcam C920` or `USB2.0 HD UVC WebCam`. Fixing only the half that was screenshotted would have left the other half broken in the way I had just written up. The enumerator moved to `internal/dshow` and serves both, because it was one bug written twice and a second copy is a second thing to fix next time. The video half of the parser is tested against the same two real listing formats; mutating the camera to enumerate the audio half kills the guard. |
 
 *End of BlackBox_Development.md — maintain it as the single source of truth. If reality diverges
 from this document, update the document in the same commit as the code.*

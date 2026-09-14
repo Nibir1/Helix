@@ -214,8 +214,8 @@ fi
 # ---------------------------------------------------------------------------
 # 3. The tag
 #
-# Re-tagging a released version is genuinely dangerous NOW in a way it was not
-# before v1.5.0: the self-updater verifies a download against the checksums file
+# Re-tagging a released version is genuinely dangerous now in a way it was not
+# when v1.0.0 shipped: the self-updater verifies a download against the checksums file
 # published with that release. Replacing the artifacts under a tag someone has
 # already fetched means their update refuses with a checksum mismatch — which
 # looks exactly like an attack. Hence --force rather than delete-and-recreate by
@@ -463,7 +463,7 @@ RELEASE_URL="https://github.com/${REPO_SLUG}/releases/tag/${TAG}"
 # ---------------------------------------------------------------------------
 # 8. Watch, then verify the release is actually installable
 #
-# The second half is new in v1.5.0 and is the part nobody would think to do.
+# The second half is the part nobody would think to do.
 # /reboot self-updates by matching a per-platform asset AND reading the SHA-256
 # out of the release's checksums file — and it REFUSES rather than degrading if
 # either is missing. A release that builds fine but publishes no checksums file

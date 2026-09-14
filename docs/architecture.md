@@ -639,7 +639,7 @@ provider and model, in-progress task texts, a one-line summary of the work, and
   the latest binaries?" is asked AFTER the restart, and the only thing that
   could answer it was the model's guess at what the program had done — which it
   answered plausibly, correctly, and without evidence. `Update` holds a sentence
-  ("already on the newest release (1.5.0)", "not checked — update.check is off",
+  ("already on the newest release (1.5.0-dev)", "not checked — update.check is off",
   "found 1.6.0 but could not install it"), the restart panel prints it, and the
   synthetic turn appended on resume repeats it so the model reports rather than
   infers. Recorded on every path including the ones that decline to look,

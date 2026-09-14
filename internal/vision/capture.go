@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"helix/internal/dshow"
 )
 
 // VisionCaptureService grabs one camera frame per conversational turn.
@@ -285,7 +287,19 @@ func (s *VisionCaptureService) inputArgs(framerate string) []string {
 	case "windows":
 		dev := s.Device
 		if dev == "" {
-			dev = "video=Integrated Camera"
+			// "Integrated Camera" was hardcoded here, and it is a literal
+			// DirectShow friendly name rather than a device class — the exact
+			// mistake that made the microphone unusable on Windows
+			// (audio=Microphone). A machine whose webcam reports
+			// "HD Webcam C920" or "USB2.0 HD UVC WebCam" failed identically.
+			// Ask ffmpeg what is there; see internal/dshow.
+			if cams := dshow.Devices(dshow.Video); len(cams) > 0 {
+				dev = "video=" + cams[0]
+			} else {
+				// Nothing enumerated: keep the old guess rather than passing an
+				// empty device, so the failure is ffmpeg's own message.
+				dev = "video=Integrated Camera"
+			}
 		}
 		return append([]string{"-hide_banner", "-f", "dshow"}, append(rate, "-i", dev)...)
 	default:
