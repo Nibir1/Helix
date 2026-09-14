@@ -161,6 +161,7 @@ func (c *captureRenderer) PrintError(string)           {}
 func (c *captureRenderer) PrintWarning(m string)       { c.warnings = append(c.warnings, m) }
 func (c *captureRenderer) PrintInfo(string)            {}
 func (c *captureRenderer) PrintDebug(m string)         { c.debugs = append(c.debugs, m) }
+func (c *captureRenderer) PrintChrome(string)          {}
 func (c *captureRenderer) Interactive() bool           { return false }
 
 // A critic that returns nothing must STILL quarantine — fail-closed is the

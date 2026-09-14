@@ -19,6 +19,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/mattn/go-runewidth"
+
+	"helix/internal/shell"
 )
 
 func resetLine(t *testing.T) {
@@ -256,5 +260,158 @@ func TestAnimationLoopSkipsFramesWhileSuspended(t *testing.T) {
 	})
 	if !strings.Contains(painted, "SPEAKING") {
 		t.Errorf("the animation never resumed after the hold was released:\n%q", painted)
+	}
+}
+
+// The HUD is redrawn in place ten times a second, so a field that grows
+// re-lays the whole row. Measured before the fix: 42 → 43 → 44 columns as the
+// timer crossed 10s and 100s, which in a terminal narrower than the line wraps
+// and makes the waveform appear to jump. Reported as "the progress bar shakes".
+func TestHUDWidthIsStableAsTheTimerGrows(t *testing.T) {
+	resetLine(t)
+
+	for _, state := range []VizState{VizListening, VizSpeaking, VizTranscribing} {
+		v := NewVoiceViz()
+		v.mu.Lock()
+		v.state = state
+		v.mu.Unlock()
+
+		widths := map[int]bool{}
+		for _, elapsed := range []time.Duration{
+			0, 9 * time.Second, 10 * time.Second, 99 * time.Second, 100 * time.Second,
+		} {
+			v.mu.Lock()
+			v.start = time.Now().Add(-elapsed)
+			line := shell.Plain(v.renderLocked())
+			v.mu.Unlock()
+			widths[runewidth.StringWidth(line)] = true
+		}
+		if len(widths) != 1 {
+			t.Errorf("%v renders at %d different widths as the timer grows (%v) — the "+
+				"row re-lays itself and the waveform appears to shake", state, len(widths), widths)
+		}
+	}
+}
+
+// And across frames, so the animation itself does not move the row.
+func TestHUDWidthIsStableAcrossFrames(t *testing.T) {
+	resetLine(t)
+
+	v := NewVoiceViz()
+	v.mu.Lock()
+	v.state = VizSpeaking
+	v.start = time.Now()
+	v.mu.Unlock()
+
+	widths := map[int]bool{}
+	for f := 0; f < 60; f++ {
+		v.mu.Lock()
+		v.frame = f
+		line := shell.Plain(v.renderLocked())
+		v.mu.Unlock()
+		widths[runewidth.StringWidth(line)] = true
+	}
+	if len(widths) != 1 {
+		t.Errorf("the speaking HUD renders at %d widths across 60 frames: %v", len(widths), widths)
+	}
+}
+
+// The SPEAKING indicator must not animate a level Helix does not have.
+//
+// The model's audio is decoded and played, never metered, so a full-range
+// waveform beside it is a fabricated signal — which is what "the progress bar
+// shakes" looks like. Measured: the old interference pattern changed 41% of the
+// row every frame at 10fps; the pulse changes 12%.
+func TestSpeakingIndicatorIsCalmerThanTheListeningWave(t *testing.T) {
+	churn := func(state VizState) float64 {
+		v := NewVoiceViz()
+		v.mu.Lock()
+		v.state, v.start = state, time.Now()
+		v.mu.Unlock()
+
+		prev := ""
+		changed, total := 0, 0
+		for f := 0; f < 30; f++ {
+			v.mu.Lock()
+			v.frame = f
+			line := shell.Plain(v.renderLocked())
+			v.mu.Unlock()
+			// Compare RUNES between the brackets. The bar glyphs are
+			// three bytes each, so a byte-wise diff of a slice taken at
+			// byte offsets compares the wrong things.
+			runes := []rune(line)
+			a, b := -1, -1
+			for i, r := range runes {
+				if r == '╢' {
+					a = i + 1
+				}
+				if r == '╟' {
+					b = i
+				}
+			}
+			if a < 0 || b <= a {
+				continue
+			}
+			bar := string(runes[a:b])
+			if prev != "" && len([]rune(bar)) == len([]rune(prev)) {
+				pr := []rune(prev)
+				for i, r := range []rune(bar) {
+					total++
+					if r != pr[i] {
+						changed++
+					}
+				}
+			}
+			prev = bar
+		}
+		if total == 0 {
+			t.Fatalf("%v rendered no bar to measure", state)
+		}
+		return float64(changed) / float64(total)
+	}
+
+	speaking := churn(VizSpeaking)
+	listening := churn(VizListening)
+
+	if speaking >= listening {
+		t.Errorf("the SPEAKING indicator churns %.0f%% per frame against LISTENING's "+
+			"%.0f%% — it animates a level Helix does not have",
+			speaking*100, listening*100)
+	}
+	if speaking > 0.25 {
+		t.Errorf("the speaking indicator changes %.0f%% of the row per frame; at 10fps "+
+			"that reads as shaking", speaking*100)
+	}
+}
+
+// Chrome carries no label. `┄ step 1 of 3` was polished and still came out as
+// `[SYSTEM]    ┄ step 1 of 3`: the new line inside the old frame, which reads
+// worse than either alone and is what "the UI is still stale" meant.
+func TestChromeCarriesNoLabelPrefix(t *testing.T) {
+	u := NewUX()
+
+	out := captureStdout(t, func() { u.PrintChrome("┄ step 1 of 3") })
+	plain := strings.TrimSpace(shell.Plain(out))
+
+	if strings.Contains(plain, "[") {
+		t.Errorf("chrome was stamped with a label: %q", plain)
+	}
+	if plain != "┄ step 1 of 3" {
+		t.Errorf("chrome was altered: %q, want it emitted verbatim", plain)
+	}
+
+	// And a message still IS labelled — the two channels must stay different.
+	msg := shell.Plain(captureStdout(t, func() { u.PrintSystemMessage("a real message") }))
+	if !strings.Contains(msg, "SYSTEM") {
+		t.Errorf("PrintSystemMessage lost its label: %q", strings.TrimSpace(msg))
+	}
+}
+
+// An empty chrome line prints nothing. stepLine returns "" for a single-step
+// plan, and a blank row between every step is worse than no marker at all.
+func TestEmptyChromePrintsNothing(t *testing.T) {
+	u := NewUX()
+	if out := captureStdout(t, func() { u.PrintChrome("") }); out != "" {
+		t.Errorf("an empty chrome line printed %q", out)
 	}
 }

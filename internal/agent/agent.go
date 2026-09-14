@@ -129,6 +129,10 @@ type Agent struct {
 	// says nothing.
 	todoTouched map[int]bool
 
+	// planAnnounced stops the spoken plan being read out more than once per
+	// turn. Reset with todoTouched, since a new turn is a new plan.
+	planAnnounced bool
+
 	// ProjectContext, when set, returns the repository's own instructions for
 	// an assistant (HELIX.md and friends), the path it came from, and whether
 	// one was found. Wired by the shell, which owns filesystem discovery; nil =
@@ -368,7 +372,7 @@ func (a *Agent) HandleInput(userInput string) {
 	case planned && a.Agentic:
 		a.agenticFollowUp(userInput, envDesc, ragContext, obs, 0)
 	case planned && needsAnswer(obs):
-		a.agenticFollowUp(userInput, envDesc, ragContext, obs, retrievalFollowUpBudget)
+		a.agenticFollowUp(userInput, envDesc, ragContext, obs, retrievalBudget(obs))
 	}
 }
 
@@ -376,6 +380,34 @@ func (a *Agent) HandleInput(userInput string) {
 // retrieved something. One iteration: enough to answer from the results, and not
 // enough to become the self-correction loop the user did not enable.
 const retrievalFollowUpBudget = 1
+
+// fileRetrievalBudget is the allowance for a turn whose retrieval touched the
+// filesystem.
+//
+// A web lookup is one hop: search, then answer from the results. A file
+// question is routinely three — find the file, read it, answer — because the
+// model does not know the layout of a repository it has never seen. With the
+// web's single follow-up, "read me the parser file and tell me what it does"
+// spent its one iteration on a glob and stopped, having read nothing:
+//
+//	[EXEC] glob **/parser.go
+//	HELIX :: ANSWERING :: reading retrieved results (1/1)
+//
+// Three is that chain plus one correction, and no more. This is NOT the
+// agentic loop arriving by the back door: it still cannot self-correct a
+// failing command, and /agentic off still means Helix plans once and executes.
+// It means a question the user asked gets read before it is answered.
+const fileRetrievalBudget = 3
+
+// retrievalBudget picks the allowance from what was actually retrieved.
+func retrievalBudget(obs []StepObservation) int {
+	for _, o := range obs {
+		if o.NeedsAnswer && o.OK && o.Tool == "file" {
+			return fileRetrievalBudget
+		}
+	}
+	return retrievalFollowUpBudget
+}
 
 // planFirewallExecute runs one plan→firewall→execute cycle. It returns the
 // per-step observation trace and whether a plan actually executed (false when
@@ -534,7 +566,7 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 	obs := make([]StepObservation, 0, len(plan.Steps))
 	for i, step := range plan.Steps {
 		if len(plan.Steps) > 1 {
-			a.render.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
+			a.render.PrintChrome(stepLine(i+1, len(plan.Steps)))
 		}
 
 		// CRITICAL FIX: Trust AI-generated steps to stop nagging the user with

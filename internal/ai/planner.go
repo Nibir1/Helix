@@ -315,6 +315,20 @@ you address an item, and the author tells you whose plan you are editing.
   current as you go. It is the only thing you will still have on the next
   planning round.
 
+WHEN THE USER ASKS FOR WORK RATHER THAN AN ANSWER — anything that takes more
+than one step — the FIRST plan you return does this and nothing else:
+
+  1. one "todo" add step per task, in the order you will do them;
+  2. one "todo" state step marking the first task in_progress.
+
+Do not start the work in that same plan. The list is read back to you on the
+next round, and the user HEARS it — that is how they learn you understood them
+before anything happens. Then work one task at a time: do it, mark it done, mark
+the next one in_progress, and carry on until the list is settled.
+
+A single question ("what does this file do?") is NOT work: answer it, and do not
+open a task list for it. The test is whether there is anything to come back to.
+
 ### VISION TOOL RULES
 
 - tool = "vision"

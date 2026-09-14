@@ -72,6 +72,7 @@ type VoiceViz struct {
 	stop    chan struct{}
 	frame   int
 	level   float64 // 0..1 live amplitude; <0 = synthetic animation
+	smooth  float64 // exponentially-averaged level; what the bar draws
 	start   time.Time
 	tty     bool
 
@@ -291,7 +292,7 @@ func (v *VoiceViz) renderLocked() string {
 	case VizTranscribing:
 		return v.renderSweepLocked("◌ DECODING SPEECH")
 	case VizSpeaking:
-		return v.renderWaveLocked(thinkOrange, "◈ HELIX SPEAKING", false)
+		return v.renderSpeakingLocked(thinkOrange, "◈ HELIX SPEAKING")
 	case VizExecuting:
 		return v.renderRunLocked()
 	case VizSeeing:
@@ -299,6 +300,48 @@ func (v *VoiceViz) renderLocked() string {
 	default:
 		return v.renderPulseLocked()
 	}
+}
+
+// renderSpeakingLocked draws the SPEAKING indicator: a single lit cell travelling
+// along a quiet track.
+//
+// IT IS NOT A WAVEFORM, AND THAT IS THE POINT. A waveform claims to depict an
+// audio level, and while the model is speaking Helix has no such level — the
+// audio is decoded and played, never metered. So the old full-range interference
+// pattern was animating a signal that did not exist, at full amplitude, beside
+// the reply text. Reported twice as "the progress bar shakes", which is exactly
+// what a fabricated signal looks like: motion with nothing behind it.
+//
+// A travelling pulse says the true thing — something is happening, Helix does
+// not know how loud — and says it without 41% of the row changing every frame.
+// The LISTENING bar keeps its waveform, because there the level is real: it
+// comes off the microphone.
+func (v *VoiceViz) renderSpeakingLocked(colour, label string) string {
+	var b strings.Builder
+	b.WriteString(thinkOrange + "●" + thinkReset + " ")
+	b.WriteString(thinkMagenta + label + thinkReset + " ")
+	b.WriteString(thinkSubtle + "╢" + thinkReset)
+
+	// One cell per two frames: a 5 Hz step, slow enough to read as travel
+	// rather than flicker.
+	head := (v.frame / 2) % vizWidth
+	for i := 0; i < vizWidth; i++ {
+		switch (i - head + vizWidth) % vizWidth {
+		case 0:
+			b.WriteString(colour + "▇" + thinkReset)
+		case 1:
+			b.WriteString(colour + "▄" + thinkReset)
+		case 2:
+			b.WriteString(thinkSubtle + "▂" + thinkReset)
+		default:
+			b.WriteString(thinkSubtle + "▁" + thinkReset)
+		}
+	}
+
+	b.WriteString(thinkSubtle + "╟" + thinkReset)
+	b.WriteString(" " + thinkOrange +
+		fmt.Sprintf("%5.1fs", time.Since(v.start).Seconds()) + thinkReset)
+	return b.String()
 }
 
 // renderWaveLocked draws the amplitude bars. Mic-reactive when a live level
@@ -313,13 +356,29 @@ func (v *VoiceViz) renderWaveLocked(waveColor, label string, micDot bool) string
 	b.WriteString(thinkMagenta + label + thinkReset + " ")
 	b.WriteString(thinkSubtle + "╢" + thinkReset)
 
-	t := float64(v.frame) * 0.45
+	// SLOWER, AND SMOOTHED. At 0.45 rad/frame the phase advanced 4.5 rad every
+	// second, and a product of two sines beats on top of that — so adjacent
+	// frames shared almost nothing and the bar read as static rather than as a
+	// waveform. Halving the phase step and widening the spatial period gives a
+	// travelling wave the eye can follow.
+	t := float64(v.frame) * 0.22
+	// The live level is smoothed with an exponential average for the same
+	// reason: a microphone sample is noisy, and feeding it raw made the whole
+	// bar twitch on room noise. The filter is in the renderer rather than in
+	// SetLevel so the meter stays the caller's honest instantaneous value.
+	level := v.level
+	if level >= 0 {
+		v.smooth += (level - v.smooth) * 0.35
+		level = v.smooth
+	} else {
+		v.smooth = 0
+	}
 	for i := 0; i < vizWidth; i++ {
 		x := float64(i)
 		// Two out-of-phase sines make a lively interference pattern.
-		amp := 0.5 + 0.5*math.Sin(t+x*0.9)*math.Sin(t*0.7+x*0.4)
-		if v.level >= 0 {
-			amp *= 0.25 + 0.75*v.level // live-amplitude scaling
+		amp := 0.5 + 0.5*math.Sin(t+x*0.45)*math.Sin(t*0.7+x*0.2)
+		if level >= 0 {
+			amp *= 0.25 + 0.75*level // live-amplitude scaling
 		}
 		idx := int(amp * float64(len(vizBars)-1))
 		if idx < 0 {
@@ -336,8 +395,13 @@ func (v *VoiceViz) renderWaveLocked(waveColor, label string, micDot bool) string
 	}
 
 	b.WriteString(thinkSubtle + "╟" + thinkReset)
+	// FIXED WIDTH, and it is not cosmetic. The line is redrawn in place ten
+	// times a second, so a field that grows re-lays the whole row: measured,
+	// the HUD went 42 → 43 → 44 columns as the timer crossed 10s and 100s, and
+	// in a terminal narrower than the line that wraps and the waveform appears
+	// to jump. "%5.1fs" holds 6 cells from 0.0s to 999.9s.
 	b.WriteString(" " + thinkOrange +
-		fmt.Sprintf("%.1fs", time.Since(v.start).Seconds()) + thinkReset)
+		fmt.Sprintf("%5.1fs", time.Since(v.start).Seconds()) + thinkReset)
 	return b.String()
 }
 
@@ -363,8 +427,13 @@ func (v *VoiceViz) renderSweepLocked(label string) string {
 	}
 
 	b.WriteString(thinkSubtle + "╟" + thinkReset)
+	// FIXED WIDTH, and it is not cosmetic. The line is redrawn in place ten
+	// times a second, so a field that grows re-lays the whole row: measured,
+	// the HUD went 42 → 43 → 44 columns as the timer crossed 10s and 100s, and
+	// in a terminal narrower than the line that wraps and the waveform appears
+	// to jump. "%5.1fs" holds 6 cells from 0.0s to 999.9s.
 	b.WriteString(" " + thinkOrange +
-		fmt.Sprintf("%.1fs", time.Since(v.start).Seconds()) + thinkReset)
+		fmt.Sprintf("%5.1fs", time.Since(v.start).Seconds()) + thinkReset)
 	return b.String()
 }
 

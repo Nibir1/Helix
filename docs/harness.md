@@ -128,6 +128,14 @@ and shelling out:
    repository is content written by whoever wrote that repository, which is
    exactly the provenance the Instruction Firewall exists for.
 
+**An empty search result is an answer, not a failure.** A real session asked for
+a file that did not exist and the model globbed eight times for it — the same
+pattern twice, then progressively looser ones, then `**/*.py` in a Go repository
+— before concluding what the first result had already said. The loop directive
+now says so explicitly when a search came back empty, because "do not re-run a
+search that already succeeded" did not cover it: a search that found nothing
+does not feel like a success.
+
 Generated and vendored trees — `.git`, `node_modules`, `vendor`, `dist`,
 `target`, `__pycache__` and the rest — are pruned from `glob` and `grep`. A
 search that spends its match budget inside `node_modules` has answered a question
@@ -318,6 +326,49 @@ rule is in the planner prompt and repeated in the loop's directive, because by
 round three the directive is what the model is actually reading. It came from a
 real run that closed "run the tests" on a result predating its own edit, and
 reported honestly that it had done so.
+
+### Chrome carries no label
+
+Step markers and phase lines are structure, not speech, so they print with no
+bracketed label and no typewriter:
+
+```
+  ┄ step 1 of 3
+  ┄ answering 1/3  reading retrieved results
+```
+
+They used to be `--- Step 1 ---` and `HELIX :: ANSWERING :: reading retrieved
+results (1/1)`. Rewriting the text alone was not enough — routed through
+`PrintSystemMessage` they came out as `[SYSTEM]    ┄ step 1 of 3`, the new line
+inside the old frame, which reads worse than either alone. `PrintChrome` is the
+channel that adds nothing.
+
+### It says what it is doing
+
+In a live conversation the screen is the thing you are not looking at. A
+multi-step job ran for half a minute emitting `EXEC` lines nobody heard, and the
+only spoken output was the final reply — so from the listener's side Helix went
+quiet with no sign that it had understood, started, or finished. Each edit to
+the plan now gets one short spoken line:
+
+| When | Spoken |
+| :--- | :--- |
+| the plan is written | *"Right — 3 steps. First, read parser.go."* |
+| a task starts | *"Now: bump the version."* |
+| a task finishes | *"Done. Next: run the tests."* |
+| a task is set aside | *"Skipping the retry loop — the reason is on screen."* |
+| your task is rewritten | *"Changing one of your tasks: … The reason is on screen."* |
+| the run ends | *"All 3 done. The details are on screen."* |
+
+Short is the design. These interrupt a conversation, so nothing spoken carries a
+path, a line number or a reason — an absolute path is reduced to its base name
+and the detail stays on screen where it can be read. The plan is announced
+**once**, naming the first task and counting the rest: reading five tasks aloud
+is a list nobody retains, while the first task plus a count tells you Helix
+understood and how long this will take.
+
+Adds are silent for the same reason — a three-task plan arrives as three add
+steps, and narrating each is three interruptions for one decision.
 
 ### Every run says how it ended
 

@@ -169,6 +169,7 @@ func (r *allLines) PrintError(m string)             { r.lines = append(r.lines, 
 func (r *allLines) PrintWarning(m string)           { r.lines = append(r.lines, m) }
 func (r *allLines) PrintInfo(m string)              { r.lines = append(r.lines, m) }
 func (r *allLines) PrintDebug(m string)             { r.lines = append(r.lines, m) }
+func (r *allLines) PrintChrome(m string)            { r.lines = append(r.lines, m) }
 func (r *allLines) Interactive() bool               { return false }
 
 func (r *allLines) joined() string { return strings.Join(r.lines, "\n") }

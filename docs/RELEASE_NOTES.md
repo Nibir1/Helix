@@ -179,6 +179,19 @@ left a stranger's error text in the middle of Helix's own report. There is a
 boundary now, in both directions, naming the program — `sudo apt-get install` is
 apt-get talking — and the closing mark reports the verdict.
 
+**Helix narrates its plan out loud.** In a live conversation the screen is the
+thing you are not looking at, and a multi-step job used to run for half a minute
+in silence. It now says the plan once when it writes it, names each task as it
+starts and finishes, and reports both halves at the end. Nothing spoken carries a
+path or a line number — those stay on screen.
+
+**A file question is no longer told to answer from a list of filenames.** The
+"a retrieval already ran, your only job is to answer" directive was written for
+web search and started firing for file steps; a `glob` returns *paths*, so
+"read me the parser file and tell me what it does" globbed four times, read
+nothing, and answered nothing. Web keeps that directive; file steps are told to
+read what they found, and get room to find → read → answer.
+
 **A verification task is not closed on stale evidence.** "Run the tests" may only
 be marked done from a result gathered after the last change; a test run followed
 by an edit says nothing about the current state.

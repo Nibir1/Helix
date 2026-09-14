@@ -516,6 +516,29 @@ nicely: the HUD skips its frame entirely while a reply is being written, and
 resumes when the band closes. Holds nest, because a turn's own HUD and the
 speaking HUD can be alive at once.
 
+### The speaking indicator is not a waveform
+
+While the model speaks, Helix has **no audio level** — the audio is decoded and
+played, never metered. So the full-range interference pattern that used to sit
+beside `◈ HELIX SPEAKING` was animating a signal that did not exist, and that is
+what a fabricated signal looks like: motion with nothing behind it. Reported
+twice as "the progress bar shakes".
+
+It is a travelling pulse now — one lit cell moving along a quiet track, which
+says the true thing (something is happening; Helix does not know how loud).
+Measured: the old pattern changed 41% of the row every frame at 10fps, the pulse
+changes 12%. `◉ LISTENING` keeps its waveform, because there the level is real —
+it comes off the microphone.
+
+### The HUD holds its width
+
+The waveform is redrawn in place ten times a second, so any field that grows
+re-lays the whole row. The elapsed timer was `%.1fs`: measured, the line went
+42 → 43 → 44 columns as it crossed 10s and 100s, and in a terminal narrower than
+the line that wraps and the bar appears to jump. It is a fixed six cells now, and
+the live level is smoothed with an exponential average so the meter tracks your
+voice instead of twitching on room noise.
+
 ---
 
 ## 7c. Full duplex (`gpt-live-1`)

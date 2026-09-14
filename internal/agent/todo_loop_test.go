@@ -139,7 +139,10 @@ func TestDirectiveAppearsOnlyWithOutstandingWorkAndSaysToCloseTasks(t *testing.T
 	if d == "" {
 		t.Fatal("no directive with work outstanding")
 	}
-	for _, want := range []string{"mark tasks done", "supersede"} {
+	// Wording, not phrasing: the directive must tell the model to CLOSE what it
+	// finished and to supersede what turned out unnecessary. Asserting an exact
+	// sentence makes every rewrite a test failure for no gain.
+	for _, want := range []string{"mark it done", "supersede"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("the directive never mentions %q, so a model that finishes its "+
 				"work but leaves it open will loop to the budget:\n%s", want, d)

@@ -73,6 +73,12 @@ func (a *Agent) handleTodoStep(step ai.PlanStep) (string, error) {
 	// moment it becomes this run's work, regardless of who wrote it down.
 	a.noteTodoTouched(item.ID)
 
+	// Say it. In a live conversation the screen is the thing nobody is looking
+	// at: a multi-step job used to run for half a minute emitting EXEC lines
+	// with no spoken sign that Helix had understood, started, or finished.
+	a.speakTodoStep(action, item, a.Todos.Items())
+	a.announcePlanOnce(action)
+
 	// Always on screen. The agent revising the user's own plan is exactly the
 	// thing that must not happen quietly, and an edit the user only discovers
 	// later by typing /todo is a plan that changed behind their back.
@@ -86,6 +92,20 @@ func (a *Agent) handleTodoStep(step ai.PlanStep) (string, error) {
 	}
 
 	return todoReceipt(action, item) + "\n\nCurrent list:\n" + a.Todos.Summary(0), nil
+}
+
+// announcePlanOnce speaks the plan the first time a task is STARTED.
+//
+// Not on the adds. A three-task plan arrives as three separate add steps, and
+// narrating each is three interruptions for one decision; waiting for the first
+// "in progress" means the plan is announced once, complete, at the moment the
+// user is waiting to hear that Helix understood them.
+func (a *Agent) announcePlanOnce(action string) {
+	if action != "state" || a.planAnnounced || a.Todos == nil {
+		return
+	}
+	a.planAnnounced = true
+	a.speakPlan(a.Todos.Items())
 }
 
 // applyTodoAction routes to the agent-scoped list API, which is where the

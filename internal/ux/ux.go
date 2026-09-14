@@ -408,6 +408,17 @@ func (ux *UX) PrintInfo(message string) {
 //
 // Returns: none.
 // Complexity: O(1).
+// PrintChrome writes an already-formatted line with no label and no typewriter.
+//
+// Chrome is structure, not speech: a step marker animated character by
+// character is the frame pretending to be content.
+func (ux *UX) PrintChrome(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	fmt.Println(text)
+}
+
 func (ux *UX) PrintDebug(message string) {
 	if !utils.IsDebugMode() {
 		return
