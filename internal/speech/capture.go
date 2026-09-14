@@ -179,7 +179,7 @@ func RecordClip(ctx context.Context, opts CaptureOptions) (AudioFormat, error) {
 	if err := cmd.Run(); err != nil {
 		// A killed recorder may still have flushed a usable partial clip.
 		if ctx.Err() == nil {
-			return AudioFormat{}, fmt.Errorf("%s recording failed: %w", recorder, err)
+			return AudioFormat{}, fmt.Errorf("%s recording failed: %w%s", recorder, err, recordingHint(recorder))
 		}
 	}
 
@@ -422,6 +422,12 @@ func ffmpegInputFormat() string {
 
 // ffmpegInputDevice returns the platform default audio-input device spec.
 // Override with HELIX_AUDIO_DEVICE for exotic setups.
+//
+// Windows is the odd one out. avfoundation takes an index and pulse takes the
+// word "default", but DirectShow takes the device's literal friendly name, so
+// there is nothing generic to pass — the name has to be looked up. It used to
+// be hardcoded to "audio=Microphone", which is a name essentially no machine
+// has; see capture_dshow.go for what that cost.
 func ffmpegInputDevice() string {
 	if dev := os.Getenv("HELIX_AUDIO_DEVICE"); dev != "" {
 		return dev
@@ -430,8 +436,37 @@ func ffmpegInputDevice() string {
 	case "darwin":
 		return ":0" // avfoundation: first audio input
 	case "windows":
+		if devices := dshowAudioDevices(); len(devices) > 0 {
+			return "audio=" + devices[0]
+		}
+		// Nothing enumerated: keep the old guess rather than passing an empty
+		// device. It will probably fail, but it fails with ffmpeg's own
+		// message, and recordingHint below explains what was and was not found.
 		return "audio=Microphone"
 	default:
 		return "default"
 	}
+}
+
+// recordingHint turns a recorder's exit status into something a user can act
+// on. "exit status 0xffffffff" is the whole of what ffmpeg reports when a
+// DirectShow device name does not match, and on its own it points at nothing.
+func recordingHint(recorder string) string {
+	if recorder != "ffmpeg" || runtime.GOOS != "windows" {
+		return ""
+	}
+	devices := dshowAudioDevices()
+	if len(devices) == 0 {
+		return "\n  ffmpeg found no DirectShow audio devices at all. Check that a" +
+			"\n  microphone is enabled in Settings > Privacy > Microphone, then:" +
+			"\n      ffmpeg -list_devices true -f dshow -i dummy"
+	}
+	var b strings.Builder
+	b.WriteString("\n  DirectShow audio devices ffmpeg can see:")
+	for _, d := range devices {
+		b.WriteString("\n      " + d)
+	}
+	b.WriteString("\n  Helix used the first. To pick another:" +
+		"\n      set HELIX_AUDIO_DEVICE=audio=" + devices[len(devices)-1])
+	return b.String()
 }

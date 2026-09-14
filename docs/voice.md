@@ -468,6 +468,20 @@ yet do:
   predictable and costs no tokens, but it only knows the phrases in the table.
   Anything else goes to the planner — which is the correct fallback, not a
   failure.
+- **The microphone is chosen for you, and on Windows that took measuring.**
+  avfoundation takes an index and PulseAudio takes the word `default`, but
+  DirectShow has no such thing: it addresses a device by its literal friendly
+  name. Helix used to pass `audio=Microphone`, which reads like a device class
+  and is in fact a name almost no machine has — real ones are
+  `Microphone Array (Realtek(R) Audio)` or `Microphone (2- USB Audio Device)`.
+  ffmpeg could not resolve it, exited `0xffffffff`, and voice was reported
+  unavailable on a machine whose microphone worked.
+
+  Helix now enumerates (`ffmpeg -list_devices true -f dshow -i dummy`, once per
+  run) and uses the first audio device. Override with `HELIX_AUDIO_DEVICE`, which
+  takes the whole `-i` argument on every platform. A capture that fails on
+  Windows prints the devices ffmpeg could see, because the exit status alone
+  names nothing.
 
 ---
 

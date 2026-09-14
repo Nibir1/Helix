@@ -593,12 +593,46 @@ func (s *Session) Audio() io.ReadCloser { return s.audioOut }
 // MaxSeconds is the playback bound to hand audio.StreamPlayback.
 func (s *Session) MaxSeconds() int { return s.maxSeconds }
 
+// closeFlushWait caps how long Close waits for the goodbye to be acknowledged
+// before tearing the transport down regardless. A session.close is one small
+// text frame on an association that is already up, so this is a ceiling for a
+// dead link, not a budget anything normally spends.
+const closeFlushWait = 2 * time.Second
+
 // Close ends the session. It tells the service first — a session left to time
 // out keeps billing — and then tears the transport down.
+//
+// SENDING IS NOT DELIVERING. SendText hands the frame to SCTP and returns;
+// pc.Close() tears the association down. Doing both back to back is a race,
+// and it is a race the goodbye loses often enough to matter — a third of runs
+// in a local harness, where the two peers are in the same process with no
+// network between them. Every lost goodbye is a session that bills until the
+// service times it out on its own.
+//
+// So wait for the acknowledgement. pion decrements a stream's buffered amount
+// when the SACK for those bytes arrives (pion/sctp association.go handles the
+// SACK chunk and calls onBufferReleased), so BufferedAmount falling to zero
+// means the far end received it — not merely that we queued it.
 func (s *Session) Close() error {
-	_ = s.send(clientEvent{Type: evtSessionClose})
+	sent := s.send(clientEvent{Type: evtSessionClose}) == nil
+	if sent {
+		s.waitForGoodbye()
+	}
 	s.fail(nil)
 	return nil
+}
+
+// waitForGoodbye blocks until the data channel's outbound buffer drains or
+// closeFlushWait elapses, whichever comes first. It never reports: a hung link
+// must still get torn down, and the caller has nothing useful to do about it.
+func (s *Session) waitForGoodbye() {
+	deadline := time.Now().Add(closeFlushWait)
+	for time.Now().Before(deadline) {
+		if s.dc == nil || s.dc.BufferedAmount() == 0 {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 // fail ends the session exactly once, whatever ended it.

@@ -46,6 +46,36 @@ Open PowerShell as Administrator and run the automated Windows setup script. Thi
 git clone https://github.com/Nibir1/Helix.git; cd Helix; .\scripts\install.ps1
 ```
 
+Installs to `C:\Program Files\Helix` and puts it on the machine `PATH`, so
+`helix` works from cmd, PowerShell and Windows Terminal. It needs elevation for
+both of those.
+
+### Option 2b: Windows under MSYS2 / MINGW64 / Git Bash
+`make install` works from a POSIX shell on Windows and needs no administrator
+rights. It installs into that environment's `/usr/local/bin` under the name
+`helix.exe` and skips the `/etc/shells` and `chsh` steps, which have no meaning
+there.
+
+```bash
+make install
+```
+
+The trade-off is reach: the binary is on `PATH` inside that shell only. The
+installer prints the Windows path at the end so you can add the folder to your
+Windows `PATH`, or run `install.ps1` for a system-wide install instead. Point
+it somewhere else with `HELIX_INSTALL_DIR=/some/dir make install`.
+
+**Windows prerequisites for voice.** `ffmpeg` (microphone capture) and, for
+`gpt-live-1` only, `libopus`:
+
+```bash
+pacman -S mingw-w64-x86_64-ffmpeg mingw-w64-x86_64-opus
+```
+
+Helix names the missing library and this command if it starts a live session
+without it. Microphone selection is automatic — see
+[Picking a microphone on Windows](#picking-a-microphone-on-windows).
+
 ### Option 3: Go Install (Cross-Platform)
 If you already have Go 1.25+ installed and just want the binary in your `$GOPATH/bin`:
 
@@ -87,6 +117,27 @@ open a terminal.
 **Ollama, `sox` and `ffmpeg` are left alone.** Helix may have suggested
 installing them; it does not own them, and you may be using them for something
 else.
+
+### Picking a microphone on Windows
+
+DirectShow addresses a microphone by its literal friendly name — there is no
+`default` — so Helix asks ffmpeg what exists and uses the first audio device it
+reports. You can see the same list yourself:
+
+```bash
+ffmpeg -list_devices true -f dshow -i dummy
+```
+
+To choose a different one, set `HELIX_AUDIO_DEVICE` to the full `-i` argument:
+
+```bash
+set HELIX_AUDIO_DEVICE=audio=Microphone (2- USB Audio Device)
+```
+
+The same variable overrides the device on macOS (`:0`, an avfoundation index)
+and Linux (`default`, a PulseAudio sink). If a recording fails on Windows,
+Helix prints the devices ffmpeg could see alongside the error, because
+`exit status 0xffffffff` on its own says nothing.
 
 Inside a running session, `/purge` offers the same thing as a **separate, third**
 confirmation after it has wiped your data — so a data wipe never takes the shell
