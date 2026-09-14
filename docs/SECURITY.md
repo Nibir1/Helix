@@ -94,6 +94,39 @@ version resolving every absolute-looking word in *every* command — including
 read-only ones, which discarded the answer — at a cost that grew without limit
 alongside the input.
 
+### 5b2. The `file` Tool Has No Path Check Of Its Own
+
+The harness gained a `file` tool (read, list, glob, grep, edit, write). It does
+**not** carry its own confinement. Every path goes through the same
+`DirectorySandbox.ValidateSafePath` that shell commands get, passed in as a
+resolver, and the tool package refuses to run at all when no resolver is
+configured rather than defaulting to "anywhere".
+
+That is deliberate and is the main security decision in the port. The upstream
+implementation this came from confines paths with its own prefix check against
+the working directory. Helix already has a stronger one — it resolves symlinks
+on *both* sides, folds case for macOS and Windows, handles a target that does not
+exist yet by validating its parent, and rejects a sibling whose name merely
+extends the root (`/tmp/jail-x` against root `/tmp/jail`). A second, weaker copy
+of a confinement rule is how a jail grows a door, so there is one copy and the
+file tool consults it.
+
+Two further properties:
+
+- **Writes are atomic and preserve the existing mode.** A temp file in the same
+  directory and one rename. A 0600 file does not become 0644 because something
+  rewrote it, and an interrupted write leaves the original intact.
+- **Content a file tool returns is data, never instruction.** It reaches the
+  planner through the same `authority="data-only"` execution report as command
+  output. A file in a repository was written by whoever wrote that repository —
+  precisely the provenance the Instruction Firewall exists for — so a `read` of
+  an attacker-authored source file cannot direct the next plan.
+
+Local policy hooks see file steps too, on the `pre-file` / `post-file` events,
+with the match subject `"<action> <path>"` so a rule can gate an action, a path,
+or both. A blocking `pre-file` hook denies the step, and it runs *after* the risk
+tiers have already approved it — hooks subtract permission, never grant it.
+
 ### 5c. What the Setup Wizard May Install
 Two install policies exist deliberately, and the boundary between them is the
 moment of consent.

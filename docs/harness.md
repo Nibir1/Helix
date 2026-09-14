@@ -58,11 +58,74 @@ tool's gate and whether it is usable right now.
 | `git` | Repository operations | typed confirmation for destructive actions; never by voice |
 | `package` | Install / update / remove | package safety check → confirmation |
 | `recon` | Scans a target | written-scope authorization required |
+| `file` | Read, list, glob, grep, edit and write files | sandbox root → risk tiers (edit/write are medium) → hooks |
 | `web` | Search or fetch a public page | public-address guard; retrieved text has zero authority |
 | `vision` | Looks through the camera and describes one frame | `/blackbox eyes` opt-in; one in-memory frame per turn, never written to disk |
 
 Adding a tool widens what Helix can do by exactly that capability. It does not
 loosen the gate in front of the others.
+
+### The `file` tool
+
+Six actions: `read`, `list`, `glob`, `grep`, `edit`, `write`.
+
+**Why it exists.** Until it did, a plan could only touch a file through `shell`,
+and the planner prompt said so in as many words — *"For in-place file editing on
+macOS, use: `sed -i '' 's/OLD/NEW/g' FILE`"*. That is a bad instruction to give a
+model, and not because sed is bad. **An in-place sed whose pattern does not match
+exits 0 and changes nothing**, so the model is told the edit succeeded when the
+file is untouched, reports the work as done, and the next step builds on a change
+that was never made. It cannot tell one occurrence from six. Quoting real code
+through a shell line means escaping it twice.
+
+`file/edit` replaces an exact snippet and **fails** when the snippet is absent,
+saying so; fails when it is ambiguous, saying how many times it appeared and how
+to disambiguate; and reports the number of replacements it made. The planner is
+now told to use it and told why.
+
+| Action | Args | Tier |
+| :--- | :--- | :--- |
+| `read` | `path` | low — 20 KB cap, binaries and directories refused |
+| `list` | `path` (default `.`) | low — 200 entries |
+| `glob` | `pattern`, `path` | low — 200 results, `**` supported, newest first |
+| `grep` | `pattern`, `path` | low — case-insensitive, 60 matches, `file:line:` |
+| `edit` | `path`, `old_string`, `new_string`, `replace_all` | **medium** |
+| `write` | `path`, `content` | **medium** |
+
+Reads are low because they change nothing; edits and writes are medium because
+they change the machine, so under the default `ask` posture a write asks exactly
+as a medium-risk shell command does. Nothing here is high — a path that *would*
+be is refused by the sandbox before a tier is consulted.
+
+Four properties are worth stating because they are the difference between this
+and shelling out:
+
+1. **Confinement is the sandbox's, not the tool's.** Every path goes through
+   `DirectorySandbox.ValidateSafePath` — the same check `shell` gets, resolving
+   symlinks on both sides, folding case for macOS and Windows, and validating a
+   not-yet-existing file by its parent. The tool package has no path check of its
+   own and refuses to run without a resolver; a second, weaker copy of a
+   confinement rule is how a jail grows a door.
+2. **Writes are atomic and preserve permissions.** A temp file in the same
+   directory and one rename, with the existing file's mode carried over. A crash
+   mid-write leaves the original intact, and a 0600 file does not quietly become
+   0644.
+3. **A near-miss filename is refused.** Creating `hepers.go` beside an existing
+   `helpers.go` is almost always a path mistake; left alone it writes a stray
+   file, reports success, and the edit is nowhere. The refusal names the file
+   that was probably meant.
+4. **Everything a file tool returns is data.** Contents come back through the
+   same `authority="data-only"` execution report as command output. A file in a
+   repository is content written by whoever wrote that repository, which is
+   exactly the provenance the Instruction Firewall exists for.
+
+Generated and vendored trees — `.git`, `node_modules`, `vendor`, `dist`,
+`target`, `__pycache__` and the rest — are pruned from `glob` and `grep`. A
+search that spends its match budget inside `node_modules` has answered a question
+nobody asked.
+
+The implementation is ported from Synapse's agent loop; the gating, the sandbox
+wiring and the data-only fencing are Helix's.
 
 ---
 
@@ -150,13 +213,23 @@ cannot know about: *this* machine, *this* repository, *this* team.
       "event": "post-shell",
       "match": "\\.go\\b",
       "command": "gofmt -l ."
+    },
+    {
+      // A file step's subject is "<action> <path>", so a rule can key on
+      // either: `^write ` gates every write, `\\.env$` gates one file
+      // whatever is done to it.
+      "name": "no-writes-to-secrets",
+      "event": "pre-file",
+      "match": "^(write|edit) .*(secrets/|\\.env)",
+      "command": "echo 'secrets are edited by hand' >&2; exit 1",
+      "blocking": true
     }
   ]
 }
 ```
 
-**Events**: `pre-shell`, `post-shell`, `pre-git`, `post-git`, `session-start`,
-`session-end`. `/hooks events` prints them; `/hooks test <event> <command>` runs
+**Events**: `pre-shell`, `post-shell`, `pre-git`, `post-git`, `pre-file`,
+`post-file`, `session-start`, `session-end`. `/hooks events` prints them; `/hooks test <event> <command>` runs
 one once with the hook environment populated, so a rule can be checked before it
 is trusted to block real work.
 
@@ -170,7 +243,7 @@ string:
 | Variable | Meaning |
 | :--- | :--- |
 | `HELIX_HOOK_EVENT` | the event that fired |
-| `HELIX_TOOL` | `shell`, `git`, `session` |
+| `HELIX_TOOL` | `shell`, `git`, `file`, `session` |
 | `HELIX_ACTION` | planner action, where the tool has one |
 | `HELIX_COMMAND` | the command (or git action) in question |
 | `HELIX_CWD` | working directory |

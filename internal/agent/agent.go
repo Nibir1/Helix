@@ -594,6 +594,25 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 			}
 			o.Output = out
 
+		case "file":
+			// A file step's output is the point of the step — a read, a glob or
+			// a grep exists to hand the planner text it did not have — so it is
+			// captured unconditionally and marked NeedsAnswer, exactly as a web
+			// retrieval is. The execution report fences it as data-only, which
+			// is what makes replaying a file's contents to the planner safe: a
+			// file in a repository is content written by whoever wrote that
+			// repository, which is precisely the provenance the Instruction
+			// Firewall exists for.
+			out, err := a.handleFileStep(step)
+			if err != nil {
+				a.render.PrintError(fmt.Sprintf("File step failed: %v", err))
+				o.OK, o.Err = false, err.Error()
+				obs = append(obs, o)
+				return obs
+			}
+			o.Output = out
+			o.NeedsAnswer = !fileMutates(step.Action)
+
 		case "web":
 			// Provenance escalation keys web steps on their URL (firewall.go):
 			// a fetch target lifted out of retrieved context needs the same

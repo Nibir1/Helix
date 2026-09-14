@@ -173,7 +173,7 @@ To ensure valid JSON and executable shell commands:
 1. JSON keys and JSON string values MUST use DOUBLE QUOTES (").
 2. If a shell command contains double quotes, you MUST escape them with a backslash (e.g., \" inside the JSON string).
 3. **Shell commands CAN use single quotes freely** - this is standard shell syntax.
-4. The macOS syntax `+"`"+`sed -i '' 's/old/new/g' FILE`+"`"+` is ALLOWED and CORRECT.
+4. Single quotes inside a shell command do not need escaping in JSON.
 5. NO multiline strings. ALL strings must be single-line.
 6. NO trailing commas.
 7. KEEP JSON COMPACT - avoid unnecessary whitespace to prevent truncation.
@@ -184,7 +184,7 @@ To ensure valid JSON and executable shell commands:
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package" | "recon" | "web" | "vision",
+      "tool": "response" | "shell" | "git" | "package" | "recon" | "web" | "vision" | "file",
       "message": "...",
       "command": "...",
       "action": "...",
@@ -208,8 +208,13 @@ To ensure valid JSON and executable shell commands:
 - NEVER pipe downloads or command output into an interpreter (curl | bash, wget | sh, sudo bash).
 - NEVER execute files from /tmp/, /var/tmp/, or /dev/shm/.
 - Shell commands CAN use standard shell quoting: single quotes ('), double quotes ("), backticks (`+"`"+`).
-- For in-place file editing on macOS, use: sed -i '' 's/OLD/NEW/g' FILE
-- Alternative: perl -pi -e "s/OLD/NEW/g" FILE
+- NEVER use shell to read, search for, or edit a file. Use the "file" tool, which is
+  safer and reports what it actually did:
+    cat/head/tail  -> file/read       ls   -> file/list
+    grep/rg        -> file/grep       find -> file/glob
+    in-place sed/perl, tee, echo >    -> file/edit or file/write
+  An in-place sed whose pattern does not match exits 0 and changes nothing, so
+  you would be told an edit succeeded that never happened. file/edit fails.
 
 ### PACKAGE TOOL RULES
 
@@ -241,6 +246,32 @@ To ensure valid JSON and executable shell commands:
 - One retrieval step is usually enough. Do NOT emit a "response" step in the same
   plan that pretends to already know the results — the search results come back
   to you first, and you answer from them on the next turn.
+
+### FILE TOOL RULES
+
+- tool = "file"
+- action = "read" | "list" | "glob" | "grep" | "edit" | "write"
+- read  -> args.path                      (one file; the contents come back to you)
+- list  -> args.path                      (a directory; omit for ".")
+- glob  -> args.pattern, args.path        (find files BY NAME; supports "**", e.g. "**/*_test.go")
+- grep  -> args.pattern, args.path        (find code BY CONTENT; case-insensitive)
+- edit  -> args.path, args.old_string, args.new_string, args.replace_all ("true"/"false")
+- write -> args.path, args.content
+- NEVER include "command" on a file step.
+
+- Prefer glob to find files by name and grep to find code by content, BEFORE
+  reading whole files. A read spends its whole length on your context.
+- To change existing code use "edit", not "write". Rewriting a whole file
+  re-emits every line you did not intend to touch, and any line you misremember
+  is silently overwritten. An exact-snippet replacement either matches what is
+  on disk or fails and tells you so.
+- args.old_string must match the file BYTE FOR BYTE including indentation, and
+  must be unique in the file. Read the file first and copy the snippet verbatim.
+- If edit reports the snippet is ambiguous, include MORE surrounding lines until
+  it is unique. Do not switch to "write" to force the change through.
+- Before "write" on a file you believe exists, verify the exact name with list
+  or glob. Writing to a misspelled path loses your edit in a stray file.
+- Every path is confined to the sandbox root. A path outside it is refused.
 
 ### VISION TOOL RULES
 
@@ -286,9 +317,14 @@ FORBIDDEN under the "git" tool:
 ### EXAMPLES
 
 Example for version update (file editing + git):
-{"intent":"multi_step","steps":[{"tool":"shell","command":"sed -i '' 's/1.0.0/2.0.0/g' package.json"},{"tool":"shell","command":"sed -i '' 's/1.0.0/2.0.0/g' README.md"},{"tool":"git","action":"add","args":{"paths":"package.json README.md"}},{"tool":"git","action":"commit","args":{"message":"release v2.0.0"}},{"tool":"git","action":"tag","args":{"name":"v2.0.0"}}]}
+{"intent":"multi_step","steps":[{"tool":"file","action":"edit","args":{"path":"package.json","old_string":"1.0.0","new_string":"2.0.0"}},{"tool":"file","action":"edit","args":{"path":"README.md","old_string":"1.0.0","new_string":"2.0.0","replace_all":"true"}},{"tool":"git","action":"add","args":{"paths":"package.json README.md"}},{"tool":"git","action":"commit","args":{"message":"release v2.0.0"}},{"tool":"git","action":"tag","args":{"name":"v2.0.0"}}]}
 
-This example is VALID. The single quotes in the sed commands are CORRECT shell syntax.
+Note what this example does NOT do: it does not shell out to an in-place sed. If
+"1.0.0" is not in package.json, the file/edit step FAILS and tells you so, where
+sed would have exited 0 and left you believing the version was bumped.
+
+Example for finding and reading code:
+{"intent":"multi_step","steps":[{"tool":"file","action":"grep","args":{"pattern":"func ParseVersion","path":"internal"}},{"tool":"file","action":"read","args":{"path":"internal/update/version.go"}}]}
 
 Example for a question that needs current information:
 {"intent":"chat","steps":[{"tool":"web","action":"search","args":{"query":"current US president"}}]}
@@ -558,6 +594,7 @@ func validatePlan(p *Plan) error {
 		"recon":    true,
 		"web":      true,
 		"vision":   true,
+		"file":     true,
 	}
 
 	var filtered []PlanStep
@@ -665,6 +702,66 @@ func validatePlan(p *Plan) error {
 				step.Args["prompt"] = prompt
 			}
 			step.Command = "" // never a raw command; never a camera app
+			step.Message = ""
+
+		case "file":
+			// The action vocabulary closes like every other tool's, and each
+			// action's REQUIRED argument is checked here rather than in the
+			// executor: a file step missing its path is unexecutable, and
+			// dropping it now leaves the rest of the plan runnable instead of
+			// failing the turn at dispatch.
+			args := map[string]string{}
+			for k, v := range step.Args {
+				if val := strings.TrimSpace(v); val != "" {
+					args[k] = val
+				}
+			}
+			switch step.Action {
+			case "read", "cat":
+				step.Action = "read"
+				if args["path"] == "" {
+					color.Yellow("Dropping file read step with no path")
+					continue
+				}
+			case "list", "ls", "dir":
+				step.Action = "list"
+				if args["path"] == "" {
+					args["path"] = "."
+				}
+			case "glob", "find":
+				step.Action = "glob"
+				if args["pattern"] == "" {
+					color.Yellow("Dropping file glob step with no pattern")
+					continue
+				}
+			case "grep", "search":
+				step.Action = "grep"
+				if args["pattern"] == "" {
+					color.Yellow("Dropping file grep step with no pattern")
+					continue
+				}
+			case "edit", "replace":
+				step.Action = "edit"
+				// new_string may legitimately be empty — that is a deletion —
+				// so only path and old_string are required. Note that the
+				// trim-empties loop above has already dropped an empty
+				// new_string from args, which is the same thing.
+				if args["path"] == "" || args["old_string"] == "" {
+					color.Yellow("Dropping file edit step without a path and old_string")
+					continue
+				}
+			case "write", "create":
+				step.Action = "write"
+				if args["path"] == "" {
+					color.Yellow("Dropping file write step with no path")
+					continue
+				}
+			default:
+				color.Yellow("Dropping unsupported file action: %s", step.Action)
+				continue
+			}
+			step.Args = args
+			step.Command = "" // never a raw command — that is what shell is for
 			step.Message = ""
 
 		case "recon":

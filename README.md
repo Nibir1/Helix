@@ -690,6 +690,7 @@ Helix/
 │   ├── diagnostics/       # Telemetry-free, redacted crash reporting
 │   ├── dshow/             # Windows DirectShow device enumeration (mic and camera)
 │   ├── edge/              # Edge-appliance diagnostics and deployment checks
+│   ├── filetools/         # The file tool — read, list, glob, grep, exact-snippet edit, atomic write
 │   ├── hooks/             # User policy hooks — the escape hatch Helix cannot know about
 │   ├── input/             # HybridSource: keyboard and microphone multiplexed into one stream
 │   ├── journal/           # The one append-only NDJSON writer behind every local log

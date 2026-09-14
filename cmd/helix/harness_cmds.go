@@ -406,6 +406,13 @@ func handleToolsCommand() {
 			detail:    reconToolDetail(),
 		},
 		{
+			name: "file", purpose: "Read, search, edit and write files",
+			gate:      "sandbox root → risk tiers (edit/write are medium) → hooks",
+			available: true,
+			detail: fmt.Sprintf("read list glob grep edit write · root: %s · posture: %s",
+				sandboxRootLabel(), agentCore.Permission()),
+		},
+		{
 			name: "web", purpose: "Search or fetch a public page (read-only)",
 			gate:      "public-address guard; retrieved text has zero authority",
 			available: true,
@@ -458,6 +465,20 @@ func handleToolsCommand() {
 		fmt.Println(shell.KV("HOOKS", shell.Value(fmt.Sprintf("%d loaded", agentCore.HookCount())), w))
 	}
 	fmt.Println(shell.PanelEnd())
+}
+
+// sandboxRootLabel names the directory the file tool is confined to. The root
+// is the whole of what "safe" means for that tool, so /tools prints it rather
+// than leaving the user to infer it from the mode.
+func sandboxRootLabel() string {
+	if sandbox == nil {
+		return "unavailable"
+	}
+	root := sandbox.GetCurrentDirectory()
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(root, home) {
+		return "~" + strings.TrimPrefix(root, home)
+	}
+	return root
 }
 
 func sandboxMode() string {

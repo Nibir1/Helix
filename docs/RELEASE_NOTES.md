@@ -82,6 +82,38 @@ terminal has to wrap.
 Three phases of a turn that showed nothing now have a HUD: the model speaking, a
 shell step executing under the sandbox, and a camera frame becoming an insight.
 
+#### The agent can work on files now
+
+The harness gained a `file` tool — `read`, `list`, `glob`, `grep`, `edit`,
+`write` — so a plan no longer has to shell out to touch a file.
+
+The one that matters is `edit`. Until now the planner prompt told the model, in
+as many words, *"For in-place file editing on macOS, use: `sed -i '' 's/OLD/NEW/g'
+FILE"*. That is a bad instruction, and not because sed is bad: **an in-place sed
+whose pattern does not match exits 0 and changes nothing.** The model was told
+the edit succeeded when the file was untouched, reported the work as done, and
+built the next step on a change that never happened. It could not tell one
+occurrence from six, and quoting real code through a shell line meant escaping it
+twice.
+
+`file/edit` replaces an exact snippet and fails loudly when the snippet is
+absent, fails when it is ambiguous — saying how many times it appeared and how to
+disambiguate — and reports how many replacements it made. `glob` finds files by
+name (`**` supported, most recently modified first), `grep` finds code by content,
+and both prune `.git`, `node_modules`, `vendor` and the rest.
+
+It arrives through the existing gates rather than beside them: every path goes
+through the same sandbox check shell commands get, `edit` and `write` are graded
+medium risk so the default posture asks first, `/dry-run` and `plan` mode stop
+them, and local hooks see them on two new events (`pre-file`, `post-file`) whose
+match subject is `"<action> <path>"`. Writes are atomic and keep the file's
+existing permissions. A near-miss filename — `hepers.go` beside `helpers.go` — is
+refused with the name that was probably meant, because the alternative is a
+stray file, a success message, and an edit nobody can find.
+
+Ported from Synapse's agent loop. The gating, the sandbox wiring and the
+data-only fencing are Helix's.
+
 #### API keys were printed to the terminal
 
 Every key prompt used the same reader that asks which provider you want, and
