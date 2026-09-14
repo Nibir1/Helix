@@ -160,3 +160,16 @@ had never matched anything, being mis-escaped — works too. See `SECURITY.md` �
 The general lesson, since this file will be read again after the next feature:
 a control expressed as "capped at Medium" inherits every bug in how Medium is
 decided, and those bugs live in a different package from this policy.
+
+**The next feature arrived on 2026-09-14, and it is worth naming here because
+its Medium comes from somewhere new.** The planner's `file` tool reaches the
+filesystem without a shell command, so its tier is not a validator's verdict on
+a command string — it is a hand-assigned constant: reads are Low, `edit` and
+`write` are Medium. That is a different provenance for the same claim. The
+pattern rules the paragraph above is about cannot misgrade it, and equally
+cannot protect it; what bounds a voice-originated `file/write` is the sandbox
+root, the Medium cap, and a `pre-file` hook. The `todo` tool is deliberately
+ungated, which is safe only for as long as the list stays what it is — sentences
+in a file that nothing executes. A future version that let a task trigger work
+on its own would make that ungated tool a voice-reachable one, and this
+paragraph is the reminder to revisit the cap before that ships.

@@ -13,7 +13,16 @@ The entry point for all user input. It uses a weighted evidence system to classi
 
 ### 2. AI Planner & Agent Orchestrator (`internal/ai/planner.go`, `internal/agent/agent.go`)
 - **Strict JSON Protocol**: The planner is forced to output a rigid JSON schema defining `intent` and `steps`.
-- **Tool Use**: Supports `response`, `shell`, `git`, `package`, `recon`, `web`, and `vision` tools.
+- **Tool Use**: Supports `response`, `shell`, `git`, `package`, `recon`, `web`, `vision`, `file` and `todo` tools.
+- **File Tool** (`internal/filetools/`, `internal/agent/file.go`): `read`, `list`,
+  `glob`, `grep`, `edit`, `write`. Path confinement is the sandbox's own
+  `ValidateSafePath` — the package carries no check of its own and refuses to run
+  without a resolver. `edit`/`write` are graded medium risk; a failed read does not
+  abort the plan, a failed mutation does.
+- **Todo Tool** (`internal/agent/todo.go`, `internal/session/todo_agent.go`): the
+  agent maintaining the plan of record. It may redirect any task and delete only
+  its own; a user-authored task can be superseded but never erased, and a revision
+  keeps the original wording.
 - **Web Tool** (`internal/agent/web.go`): read-only network retrieval —
   `action: "search"` (DuckDuckGo Lite, top 5 results) and `action: "fetch"` (one URL,
   HTML stripped to text). Classified at the same risk tier as a read-only shell
@@ -374,10 +383,36 @@ a wrong explanation.
   the sandbox, a camera frame becoming an insight, and the wake-standby pulse.
   It owns the terminal line while it runs and publishes that with
   `ux.LineHeld()`, so background writers do not splice into the animation.
+  **Real output takes the line rather than asking for it.** `LineHeld` is the
+  right contract for background chatter — a database-sync notice is not worth
+  interrupting a conversation for — but a reply is not chatter, and it had no
+  way to say so: a duplex turn printed its answer into the band while the
+  speaking HUD repainted over it ten times a second, so the text was wiped as
+  fast as it streamed and only the fragment after the last repaint survived.
+  `ux.SuspendLine`/`ResumeLine` stop the animation instead; the frame is
+  skipped rather than painted and overwritten, and holds nest because a turn's
+  HUD and the speaking HUD can both be alive.
+- **Foreign output is framed** (`internal/shell/foreign.go`): an install hands
+  the terminal to pip, brew or cargo and takes it back. Helix does not reformat
+  that output — reflowing someone's progress bar would be worse — but it marks
+  the handover in both directions with a glyph unlike its own gutter, names the
+  program rather than its wrapper (`sudo apt-get` is apt-get talking), and
+  reports the verdict on the closing mark.
 - **Completion**: Tab completes slash commands and paths, extending to the
   longest common prefix and listing the alternatives. The command names come
   from the registry via `shell.SetSlashCommands`, so completion cannot become a
   stale second copy of the command list.
+
+### 5-bis. Credential Entry (`internal/commands/secret.go`, `cmd/helix/keyprompt_view.go`)
+API keys are read through `commands.AskSecret`, which suppresses echo, and
+**never** through the `Prompter` abstraction — ADR-005 denies voice `/setup`
+precisely because it would have you dictate keys aloud, and a secret travelling
+through the same channel as an ordinary question is one refactor from getting
+there. `commands.SecretInputIsHidden` reports whether this terminal can actually
+suppress echo; the prompt panel states the answer rather than assuming it,
+because promising hiding that will not happen is worse than silence. Console
+URLs live in `internal/providers/keyconsole.go` beside `envName`, where the rest
+of the per-vendor account knowledge already is.
 
 ### 5c. Report Rendering (`internal/shell/panel.go`, `wizard.go`)
 **Colour is gated on whether anything can render it.** `NO_COLOR` disables it,
@@ -521,8 +556,17 @@ command reference against the same table.
 - **Snapshots** (`snapshot.go`): every wipe (`/clear`, `/compact`,
   `/memory clear`, `/resume`) archives first, so no path through the session
   commands destroys a transcript.
-- **Task list** (`todo.go`): persisted open work, injected as data-only context
-  so the agentic harness can resume a multi-turn task.
+- **Task list** (`todo.go`, `todo_agent.go`): persisted open work, injected as
+  data-only context so the agentic harness can resume a multi-turn task — and
+  writable by the agent, which is the party that finds out the plan was wrong.
+  `TodoOrigin` records who wrote each item, with the user as the zero value
+  because every item in a file written before the field existed was typed by a
+  human. The agent may redirect anything and erase only its own: a user task can
+  be revised (keeping `WasText`) or superseded with a reason, never deleted,
+  because deletion is the only one of those that cannot be seen or undone. The
+  harness treats a task it created *or adopted* this turn as outstanding work,
+  which is what keeps the loop running until the plan is finished rather than
+  until one batch of steps exits 0.
 - **Usage meter** (`internal/ai/meter.go`): per-purpose call counts, failures,
   latency, and *estimated* tokens behind `/cost`. Exact counts are unavailable
   because no provider returns a usage block on the streaming path Helix uses;

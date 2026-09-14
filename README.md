@@ -310,11 +310,24 @@ Nothing here destroys a transcript. `/clear`, `/compact`, `/memory clear`, and `
 | `/agentic [on\|off\|steps <n>]` | Iterative harness: observe step results and self-correct |
 | `/plan <request>` | Show the plan for a request without executing anything |
 | `/permissions [mode]` | Approval posture: plan, cautious, ask, or auto |
-| `/todo [add\|start\|done\|rm\|...]` | Task list the planner can see |
+| `/todo [add\|start\|done\|rm\|...]` | Task list the planner can see **and edit** |
 | `/tools` | The harness tool vocabulary and each tool's gate |
 | `/hooks [list\|add\|rm\|test\|...]` | Run your own commands around tool execution |
 | `/undo` | Reverse the most recent journalled action |
 | `/dry-run` | Toggle command execution preview mode |
+
+The planner reaches files through a `file` tool — `read`, `list`, `glob`, `grep`,
+`edit`, `write` — rather than shelling out to `cat` and `sed`. `edit` replaces an
+exact snippet and **fails** when the snippet is absent or ambiguous, where an
+in-place `sed` that matches nothing exits 0 and reports success. Every path goes
+through the same sandbox check a shell command gets; `edit` and `write` are
+medium risk, so the default posture asks first.
+
+`/todo` has two authors. The agent can add work it discovered is needed, rewrite
+a task that is wrong in detail, and supersede one that should not happen — each
+with a reason, each announced on screen. It can delete only its own: a task you
+wrote can be set aside but never erased, and a rewrite keeps your original
+wording. See [docs/harness.md](docs/harness.md) §4.
 
 **Approval posture** (`/permissions`) layers on top of the risk tiers and never replaces them:
 
@@ -488,7 +501,7 @@ The planner always returns a JSON `Plan`:
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package" | "recon" | "web",
+      "tool": "response" | "shell" | "git" | "package" | "recon" | "web" | "vision" | "file" | "todo",
       "message": "...",
       "command": "...",
       "action": "...",
@@ -808,7 +821,7 @@ Ranking is **vision first, then fast/flash**, then tool use, then context size; 
 * **Instruction Firewall** with canary honeypots and fail-closed critic passes
 
 ### Planner, Agent System & Tool Protocol
-* Unified multi-tool agent system: response, shell, git, package, recon, web
+* Unified multi-tool agent system: response, shell, git, package, recon, web, vision, file, todo
 * Ultra-strict JSON planner protocol with schema enforcement and truncation-resistance
 * Dual-provider inference: local Ollama + remote APIs
 * Argument normalization (array flattening, trimming, synonym resolution)

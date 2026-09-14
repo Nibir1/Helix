@@ -76,6 +76,28 @@ successful attack require defeating five independent layers, and limits blast
 radius via the existing safety pipeline (validation, risk tiers, sandbox,
 typed confirmations).
 
+**The pipeline named there is the SHELL pipeline, and since 2026-09-14 it is not
+the only path to the filesystem.** The planner gained a `file` tool — read,
+list, glob, grep, edit, write — which does not pass through `ValidateCommand`,
+because there is no command to validate. What bounds it instead:
+
+- **The same sandbox root.** Paths go through `DirectorySandbox.ValidateSafePath`,
+  the check shell arguments already get: symlinks resolved on both sides, case
+  folded, a not-yet-existing target validated by its parent. The tool package
+  carries no path check of its own and refuses to run without a resolver, so
+  there is one implementation rather than two that can disagree.
+- **The same tiers and posture.** `edit` and `write` are Medium, so the default
+  posture asks; `plan` mode and `/dry-run` stop them.
+- **Hooks**, on `pre-file`/`post-file`, with the subject `"<action> <path>"` so a
+  rule can refuse a write to a path the machine's owner cares about.
+
+What it does NOT inherit is the shell validator's pattern rules, and that cuts
+both ways: a `file/write` cannot be a `curl | sh`, because it writes bytes to a
+confined path and executes nothing — but equally, the hard-block list that
+refuses `> /dev/sda` is not what stops it. The sandbox root is. On a session
+rooted at `/`, that is a weaker bound than it sounds, which is the honest
+statement this section exists for.
+
 **That blast-radius argument is only as good as the pipeline behind it, and on
 2026-09-08 two of its rules turned out to be ornamental** (both fixed; see
 `SECURITY.md` §1). The hard-block rule against writing to a raw block device had
