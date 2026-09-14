@@ -385,13 +385,33 @@ a wrong explanation.
   `ux.LineHeld()`, so background writers do not splice into the animation.
   **Real output takes the line rather than asking for it.** `LineHeld` is the
   right contract for background chatter — a database-sync notice is not worth
-  interrupting a conversation for — but a reply is not chatter, and it had no
-  way to say so: a duplex turn printed its answer into the band while the
+  interrupting a conversation for — but foreground output is not chatter, and it
+  had no way to say so: a duplex turn printed its answer into the band while the
   speaking HUD repainted over it ten times a second, so the text was wiped as
   fast as it streamed and only the fragment after the last repaint survived.
   `ux.SuspendLine`/`ResumeLine` stop the animation instead; the frame is
   skipped rather than painted and overwritten, and holds nest because a turn's
   HUD and the speaking HUD can both be alive.
+
+  **Every print path takes the hold, not just the reply.** That was the second
+  half of the same bug and it was fixed a commit later: step markers, tool
+  steps, warnings and info all print *between* HUD frames and all landed on the
+  animated row. They funnel through `scifiPrint` and `PrintChrome`, so it is two
+  call sites rather than nine. `SuspendLine` also bumps an atomic high-water
+  mark — a print is faster than any sampler and `os.Stdout` cannot be swapped
+  for a checking writer, so that counter is the only way a test can prove a path
+  took the line.
+- **`PrintChrome` is the label-free channel** on `agent.Renderer`. Every other
+  method stamps a bracketed label, which is right for a message and wrong for
+  structure: `┄ step 1 of 3` routed through `PrintSystemMessage` came out as
+  `[SYSTEM]    ┄ step 1 of 3`, the new line inside the old frame. Step markers,
+  phase lines and tool steps use it, and all of them start at column two so a
+  running session has one left edge.
+- **The SPEAKING indicator is a travelling pulse, not a waveform.** While the
+  model speaks Helix has no audio level — the audio is decoded and played, never
+  metered — so a full-range wave there was animating a signal that does not
+  exist. Measured, the old pattern changed 41% of the row per frame at 10fps and
+  the pulse changes 12%. `LISTENING` keeps its waveform: that level is real.
 - **Foreign output is framed** (`internal/shell/foreign.go`): an install hands
   the terminal to pip, brew or cargo and takes it back. Helix does not reformat
   that output — reflowing someone's progress bar would be worse — but it marks
