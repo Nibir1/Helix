@@ -182,6 +182,7 @@ func (ux *UX) Typewriter(text string) {
 type AIStreamWriter struct {
 	ux      *UX
 	started bool
+	held    bool // a SuspendLine is outstanding and Close must release it
 	band    *shell.BandWriter
 }
 
@@ -228,6 +229,12 @@ func (w *AIStreamWriter) Chunk(text string) {
 		if text == "" {
 			return
 		}
+		// Taken on FIRST CONTENT and released in Close, so the hold spans the
+		// whole stream rather than each chunk. Per-chunk would let the HUD
+		// repaint in the gaps between tokens, which is the same bug arriving
+		// one token at a time.
+		SuspendLine()
+		w.held = true
 		fmt.Println(shell.BandHeader("HELIX", replyMeta(), shell.HexPrimary))
 		w.band = shell.NewBandWriter()
 		w.started = true
@@ -250,6 +257,12 @@ func (w *AIStreamWriter) Started() bool { return w.started }
 func (w *AIStreamWriter) Close() {
 	if w.started {
 		w.band.Close()
+	}
+	// Released here and not in a defer on Chunk: the hold has to outlive every
+	// chunk, and a stream that produced no content never took one.
+	if w.held {
+		w.held = false
+		ResumeLine()
 	}
 }
 
@@ -281,6 +294,12 @@ func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
+	// The reply owns the line while it writes. Without this an animated HUD —
+	// the duplex SPEAKING waveform, say — repaints over the band ten times a
+	// second and the answer is wiped as fast as it is drawn.
+	SuspendLine()
+	defer ResumeLine()
+
 	fmt.Println(shell.BandHeader("HELIX", replyMeta(), shell.HexPrimary))
 
 	if !useTypingEffect && !ux.typewriteAll {

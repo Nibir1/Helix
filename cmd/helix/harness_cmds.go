@@ -287,6 +287,7 @@ func handleTodoCommand(c cmdArgs) {
 	default:
 		uiFail(c.Arg(0), "is not a /todo subcommand")
 		uiUsage("/todo [add <text>|start <id>|done <id>|block <id>|open <id>|rm <id>|prune|clear]")
+		uiDetail("open also reopens a task Helix superseded.")
 	}
 }
 
@@ -334,32 +335,92 @@ func printTodoList() {
 
 	fmt.Println()
 	fmt.Println(shell.PanelTitle("tasks"))
-	for _, it := range items {
-		paint := shell.HexText
-		switch it.State {
-		case session.TodoDone:
-			paint = shell.HexMuted
-		case session.TodoInProgress:
-			paint = shell.HexSecondary
-		case session.TodoBlocked:
-			paint = shell.HexRectifier
+	for _, line := range todoView(items, shell.PanelRuleWidth()-2) {
+		if line == "" {
+			fmt.Println(shell.PanelGap())
+			continue
 		}
-		fmt.Printf("  %s %s %s\n",
-			shell.Fg(shell.HexMuted, fmt.Sprintf("%3d", it.ID)),
-			shell.Fg(paint, it.State.Symbol()),
-			shell.Fg(paint, it.Text))
-		if it.Note != "" {
-			fmt.Printf("      %s\n", shell.Fg(shell.HexMuted, "note: "+it.Note))
+		fmt.Println(shell.PanelLine(paintTodoLine(line)))
+	}
+	fmt.Println(shell.PanelGap())
+	fmt.Println(shell.PanelLine(paintTodoMeter(todoMeter(items, shell.PanelRuleWidth()-2))))
+	fmt.Println(shell.PanelEnd())
+}
+
+// paintTodoLine colours one rendered row. Colour is applied HERE rather than in
+// todoView so the layout can be rendered and read in a test — an assertion
+// against a string full of escape codes tests the paint, not the shape.
+func paintTodoLine(line string) string {
+	trimmed := strings.TrimLeft(line, " ")
+	indent := line[:len(line)-len(trimmed)]
+
+	// A hanging note: the label is chrome, the value is what you read.
+	if strings.HasPrefix(trimmed, "↳ ") {
+		rest := trimmed[len("↳ "):]
+		label, value, ok := strings.Cut(rest, "  ")
+		if !ok {
+			return indent + shell.Fg(shell.HexSubtle, "↳ ") + shell.Fg(shell.HexMuted, rest)
 		}
+		// The gap between label and value is padding the layout already sized;
+		// it is reproduced rather than recomputed so colour cannot shift it.
+		gap := len(rest) - len(label) - len(value)
+		return indent + shell.Fg(shell.HexSubtle, "↳ "+label+strings.Repeat(" ", gap)) +
+			shell.Fg(shell.HexMuted, value)
 	}
 
-	counts := todoList.Counts()
-	fmt.Println(shell.PanelGap())
-	fmt.Println(shell.KV("TOTALS", shell.Muted(fmt.Sprintf(
-		"%d pending  ·  %d in progress  ·  %d blocked  ·  %d done",
-		counts[session.TodoPending], counts[session.TodoInProgress],
-		counts[session.TodoBlocked], counts[session.TodoDone])), shell.KVWidth("TOTALS")))
-	fmt.Println(shell.PanelEnd())
+	// A task row.
+	glyph, rest, ok := strings.Cut(trimmed, " ")
+	if !ok {
+		return indent + shell.Fg(shell.HexText, trimmed)
+	}
+	glyphColour, textColour := todoRowColours(glyph)
+
+	body := rest
+	author := ""
+	// The author tag is chrome, never the headline.
+	if strings.HasSuffix(rest, "helix") {
+		body = strings.TrimSuffix(rest, "helix")
+		author = shell.Fg(shell.HexSecondary, "helix")
+	}
+	return indent + shell.Fg(glyphColour, glyph) + " " + shell.Fg(textColour, body) + author
+}
+
+// todoRowColours maps a state marker to the colour of the marker and of the
+// text beside it. One table rather than a switch that assigns both separately:
+// the previous version set a default pair and then overwrote both in every
+// branch, so the default was dead and the two could drift apart.
+//
+// Settled work is dimmed. It is kept on screen because the reasons matter, and
+// dimmed because it is not what you are deciding about.
+func todoRowColours(glyph string) (glyphColour, textColour string) {
+	switch glyph {
+	case "✔": // done
+		return shell.HexPrimary, shell.HexMuted
+	case "⊘": // superseded
+		return shell.HexSubtle, shell.HexSubtle
+	case "▸": // in progress — the one the eye should find
+		return shell.HexAmber, shell.HexText
+	case "✖": // blocked
+		return shell.HexRectifier, shell.HexText
+	default: // pending
+		return shell.HexSubtle, shell.HexText
+	}
+}
+
+// paintTodoMeter dims the empty half of the bar so the filled half reads as
+// progress rather than as a pattern.
+func paintTodoMeter(meter string) string {
+	if meter == "" {
+		return ""
+	}
+	bar, rest, ok := strings.Cut(meter, "  ")
+	if !ok {
+		return shell.Fg(shell.HexMuted, meter)
+	}
+	filled := strings.Count(bar, "▓")
+	return shell.Fg(shell.HexPrimary, strings.Repeat("▓", filled)) +
+		shell.Fg(shell.HexSubtle, strings.Repeat("░", len([]rune(bar))-filled)) +
+		"  " + shell.Fg(shell.HexMuted, rest)
 }
 
 // -------------------------------------------------------
@@ -404,6 +465,12 @@ func handleToolsCommand() {
 			gate:      "written-scope authorization required",
 			available: agentCore != nil && len(agentCore.ListAuthorizedReconTargets()) > 0,
 			detail:    reconToolDetail(),
+		},
+		{
+			name: "todo", purpose: "Keep the task list current while it works",
+			gate:      "may redirect any task; may delete only its own",
+			available: todoList != nil,
+			detail:    todoToolDetail(),
 		},
 		{
 			name: "file", purpose: "Read, search, edit and write files",
@@ -470,6 +537,26 @@ func handleToolsCommand() {
 // sandboxRootLabel names the directory the file tool is confined to. The root
 // is the whole of what "safe" means for that tool, so /tools prints it rather
 // than leaving the user to infer it from the mode.
+// todoToolDetail says how much of the list is whose, which is the fact a user
+// wants when they are deciding whether to trust what it did.
+func todoToolDetail() string {
+	if todoList == nil {
+		return "no task list in this session"
+	}
+	mine, theirs := 0, 0
+	for _, it := range todoList.Items() {
+		if it.State == session.TodoDone || it.State == session.TodoSuperseded {
+			continue
+		}
+		if it.Origin.ByAgent() {
+			theirs++
+		} else {
+			mine++
+		}
+	}
+	return fmt.Sprintf("%d open by you · %d by helix", mine, theirs)
+}
+
 func sandboxRootLabel() string {
 	if sandbox == nil {
 		return "unavailable"

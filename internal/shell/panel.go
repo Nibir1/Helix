@@ -364,6 +364,24 @@ func Badge(s State, text string) string {
 // fmt's %-9s counts the ANSI escape bytes, so padding a coloured cell that way
 // pads to nothing at all — the alignment bug this whole file exists to stop
 // re-inventing.
+// Columns reports how many terminal cells a string occupies, ignoring ANSI
+// escapes and counting wide runes correctly.
+//
+// Exported because len() is the wrong answer and callers keep reaching for it.
+// "↳" is three bytes and one column; a len()-based pad aligns two labels to
+// different left edges and quietly destroys a column the layout depends on.
+func Columns(s string) int { return visibleWidth(s) }
+
+// PadColumns right-pads a string to a COLUMN width. One space is always added
+// when the string already fills the field, so adjacent values never touch.
+func PadColumns(s string, width int) string {
+	w := visibleWidth(s)
+	if w >= width {
+		return s + " "
+	}
+	return s + strings.Repeat(" ", width-w)
+}
+
 func PadVisible(s string, width int) string {
 	if pad := width - runeLen(s); pad > 0 {
 		return s + strings.Repeat(" ", pad)

@@ -120,3 +120,26 @@ func TestFileChangeReasonNamesTheEffect(t *testing.T) {
 			"everything and how much is coming", w)
 	}
 }
+
+// A read that finds nothing is an ANSWER, not a failure. Aborting the plan on
+// it spends a whole planner round trip discovering that a file is absent — a
+// real run lost two thirds of a four-iteration budget to exactly that, before
+// any work had happened. Mutations must still abort: an edit that failed may
+// have left the tree in a state the following steps assumed away.
+func TestOnlyMutatingFileStepsAbortThePlan(t *testing.T) {
+	readOnly := []string{"read", "list", "glob", "grep"}
+	mutating := []string{"edit", "write"}
+
+	for _, a := range readOnly {
+		if fileMutates(a) {
+			t.Errorf("file/%s is treated as mutating, so a not-found result would "+
+				"abort the whole plan", a)
+		}
+	}
+	for _, a := range mutating {
+		if !fileMutates(a) {
+			t.Errorf("file/%s is treated as read-only, so a failed change would let "+
+				"the plan carry on as though it had worked", a)
+		}
+	}
+}

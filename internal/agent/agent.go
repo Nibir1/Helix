@@ -122,6 +122,13 @@ type Agent struct {
 	// never gain authority from them.
 	Todos *session.TodoList
 
+	// todoTouched is the set of task ids THIS turn acted on. Unexported and
+	// reset per turn: it is what lets the harness tell "a task I am working
+	// on" from "a task sitting on the user's list", which is the difference
+	// between a loop that finishes the job and one that stops halfway and
+	// says nothing.
+	todoTouched map[int]bool
+
 	// ProjectContext, when set, returns the repository's own instructions for
 	// an assistant (HELIX.md and friends), the path it came from, and whether
 	// one was found. Wired by the shell, which owns filesystem discovery; nil =
@@ -267,6 +274,9 @@ func (a *Agent) HandleInput(userInput string) {
 	if userInput == "" {
 		return
 	}
+
+	// A new turn owns none of the previous turn's tasks.
+	a.beginTodoTurn()
 
 	// --- Slash-command interception ---
 	if strings.HasPrefix(userInput, "/") && a.Slash != nil {
@@ -605,13 +615,53 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 			// Firewall exists for.
 			out, err := a.handleFileStep(step)
 			if err != nil {
-				a.render.PrintError(fmt.Sprintf("File step failed: %v", err))
+				o.OK, o.Err = false, err.Error()
+				// A READ THAT FINDS NOTHING IS AN ANSWER, NOT A FAILURE.
+				//
+				// Every other tool aborts the plan on error because later steps
+				// usually depend on the earlier one. A read is different: the
+				// model asked precisely because it did not know, and "no such
+				// file" is the thing it wanted to learn. Aborting spent a whole
+				// planner round trip on that discovery — a real run went
+				//
+				//   TASK #1 in_progress → glob **/parser.go → read package.json
+				//
+				// and the failed read cancelled the rest of a five-step plan,
+				// which is two thirds of a four-iteration budget gone before any
+				// work happened.
+				//
+				// Mutations still abort. An edit or a write that failed may have
+				// left the tree in a state the following steps assumed away, and
+				// carrying on from there is how a half-applied change gets
+				// reported as finished.
+				if fileMutates(step.Action) {
+					a.render.PrintError(fmt.Sprintf("File step failed: %v", err))
+					obs = append(obs, o)
+					return obs
+				}
+				a.render.PrintWarning(fmt.Sprintf("%s: %v", fileSubject(step.Action, step.Args), err))
+				o.NeedsAnswer = true // the planner has to read what it found out
+				obs = append(obs, o)
+				continue
+			}
+			o.Output = out
+			o.NeedsAnswer = !fileMutates(step.Action)
+
+		case "todo":
+			// The result is the receipt PLUS the whole current list, and
+			// NeedsAnswer is deliberately false: editing a plan is not
+			// retrieval, so this must not on its own earn an extra planner
+			// round. What it does is make the list the next round sees
+			// correct — which is the entire point of letting the agent write
+			// to it.
+			out, err := a.handleTodoStep(step)
+			if err != nil {
+				a.render.PrintError(fmt.Sprintf("Task list step failed: %v", err))
 				o.OK, o.Err = false, err.Error()
 				obs = append(obs, o)
 				return obs
 			}
 			o.Output = out
-			o.NeedsAnswer = !fileMutates(step.Action)
 
 		case "web":
 			// Provenance escalation keys web steps on their URL (firewall.go):

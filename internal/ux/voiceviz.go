@@ -208,6 +208,50 @@ func releaseTerminalLine() { terminalLineHeld.Store(false) }
 // user is mid-conversation.
 func LineHeld() bool { return terminalLineHeld.Load() }
 
+// lineSuspends counts outstanding holds taken by REAL output — a reply band, a
+// streamed answer — as opposed to the background chatter LineHeld exists for.
+//
+// THE BUG THIS FIXES. LineHeld asks background writers to stay quiet, which is
+// right for them: an NVD progress line is not worth interrupting a conversation
+// for. But the reply is not background chatter, and it had no way to take the
+// line. A duplex turn printed its answer into the band while the SPEAKING HUD
+// repainted "\r\033[2K" ten times a second underneath it, so the text was wiped
+// as fast as it streamed. A real session produced
+//
+//	● ◈ HELIX SPEAKING |▄▁▁▃▄▄▃▄▇▇▅▃▃▄▄▂| 2.6s outstanding.
+//
+// — the last fragment written after the final repaint, and nothing else of a
+// whole paragraph. The answer was generated, spoken, and destroyed on screen.
+//
+// So output that MUST be seen suspends the animation instead of asking it
+// nicely. A counter rather than a flag because several HUDs can be alive at
+// once (the turn's own, the speaking one) and nesting must not let an inner
+// release resume the line under an outer writer.
+var lineSuspends atomic.Int32
+
+// SuspendLine pauses every animated HUD and clears the line so real output
+// starts on clean ground. Always pair it with ResumeLine.
+func SuspendLine() {
+	if lineSuspends.Add(1) == 1 && terminalLineHeld.Load() {
+		// Wipe the frame that is sitting there, and show the cursor again so a
+		// typewriter-style write does not appear to come from nowhere.
+		fmt.Print("\r\033[2K\033[?25h")
+	}
+}
+
+// ResumeLine releases one suspension. The HUD repaints on its next tick.
+func ResumeLine() {
+	if lineSuspends.Add(-1) <= 0 {
+		lineSuspends.Store(0)
+		if terminalLineHeld.Load() {
+			fmt.Print("\033[?25l") // an animating HUD hides the cursor again
+		}
+	}
+}
+
+// LineSuspended reports whether real output currently owns the line.
+func LineSuspended() bool { return lineSuspends.Load() > 0 }
+
 // Running reports whether the HUD is animating.
 func (v *VoiceViz) Running() bool {
 	v.mu.Lock()
@@ -224,6 +268,12 @@ func (v *VoiceViz) loop(stop chan struct{}) {
 		case <-stop:
 			return
 		case <-tick.C:
+			// Real output owns the line. Skip the frame entirely rather than
+			// painting and being overwritten: a half-drawn waveform spliced
+			// into a sentence is worse than no waveform.
+			if LineSuspended() {
+				continue
+			}
 			v.mu.Lock()
 			v.frame++
 			line := v.renderLocked()

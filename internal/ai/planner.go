@@ -184,7 +184,7 @@ To ensure valid JSON and executable shell commands:
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package" | "recon" | "web" | "vision" | "file",
+      "tool": "response" | "shell" | "git" | "package" | "recon" | "web" | "vision" | "file" | "todo",
       "message": "...",
       "command": "...",
       "action": "...",
@@ -272,6 +272,48 @@ To ensure valid JSON and executable shell commands:
 - Before "write" on a file you believe exists, verify the exact name with list
   or glob. Writing to a misspelled path loses your edit in a stray file.
 - Every path is confined to the sandbox root. A path outside it is refused.
+
+### TODO TOOL RULES
+
+- tool = "todo"
+- action = "add" | "revise" | "state" | "drop"
+- add    -> args.text, args.reason
+- revise -> args.id, args.text, args.reason
+- state  -> args.id, args.state ("pending"|"in_progress"|"done"|"blocked"|"superseded"), args.reason
+- drop   -> args.id
+
+The task list you are shown under <task_list> is the plan of record, and you can
+now CHANGE it. Each line is "#ID [state] (by you|by helix) text" — the ID is how
+you address an item, and the author tells you whose plan you are editing.
+
+- The list may have been written before any work happened, so it can be WRONG.
+  When what you have just read or run shows a task is unnecessary, out of order,
+  or misses a step, say so by editing the list — do not silently work around it.
+- Use "add" for work you discovered is needed. Use "revise" when a task is right
+  in spirit but wrong in detail. Use "state" with "superseded" when a task
+  should not be done at all, and "done" when you have actually finished it.
+- IF YOU DID THE WORK, THE TASK IS "done" — never "superseded". Superseded means
+  the task should not happen; done means it has happened, including when YOU are
+  the reason it has. Finding the desired state already in place is also "done":
+  the goal holds, and whether it was you or someone before you is not what the
+  state records. A task you edited a file for and then set aside as "already in
+  place" reads as work that was never needed, which is the opposite of true.
+- A reason is REQUIRED whenever you revise, supersede or complete a task the
+  user wrote. Say what you found, not what you decided: "the retry loop is
+  already in transport.go:88", not "not needed".
+- "drop" deletes an item and only works on items YOU added. A task the user
+  wrote can be superseded but never deleted — it stays visible and reversible.
+- Mark exactly ONE task "in_progress" at a time. Marking six is narration.
+- NEVER claim a task is done that you did not do.
+- A VERIFICATION task — run the tests, check it builds, confirm the output — may
+  only be marked done from evidence gathered AFTER the last change you made. If
+  the tests ran and then you edited a file, that run no longer says anything
+  about the current state: run them again before closing the task. "It already
+  passed earlier in this turn" is exactly the reasoning that ships a broken
+  build, because the edit you made after it is the one nobody checked.
+- On a multi-step job, put the plan on the list BEFORE starting, then keep it
+  current as you go. It is the only thing you will still have on the next
+  planning round.
 
 ### VISION TOOL RULES
 
@@ -595,6 +637,7 @@ func validatePlan(p *Plan) error {
 		"web":      true,
 		"vision":   true,
 		"file":     true,
+		"todo":     true,
 	}
 
 	var filtered []PlanStep
@@ -762,6 +805,46 @@ func validatePlan(p *Plan) error {
 			}
 			step.Args = args
 			step.Command = "" // never a raw command — that is what shell is for
+			step.Message = ""
+
+		case "todo":
+			args := map[string]string{}
+			for k, v := range step.Args {
+				if val := strings.TrimSpace(v); val != "" {
+					args[k] = val
+				}
+			}
+			switch step.Action {
+			case "add", "create":
+				step.Action = "add"
+				if args["text"] == "" {
+					color.Yellow("Dropping todo add step with no text")
+					continue
+				}
+			case "revise", "rewrite", "edit":
+				step.Action = "revise"
+				if args["id"] == "" || args["text"] == "" {
+					color.Yellow("Dropping todo revise step without an id and text")
+					continue
+				}
+			case "state", "set", "status":
+				step.Action = "state"
+				if args["id"] == "" || args["state"] == "" {
+					color.Yellow("Dropping todo state step without an id and state")
+					continue
+				}
+			case "drop", "remove", "delete":
+				step.Action = "drop"
+				if args["id"] == "" {
+					color.Yellow("Dropping todo drop step with no id")
+					continue
+				}
+			default:
+				color.Yellow("Dropping unsupported todo action: %s", step.Action)
+				continue
+			}
+			step.Args = args
+			step.Command = ""
 			step.Message = ""
 
 		case "recon":

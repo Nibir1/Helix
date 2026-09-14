@@ -491,6 +491,33 @@ yet do:
 
 ---
 
+### The reply and the waveform cannot both own the line
+
+The HUD — `◉ LISTENING`, `◈ HELIX SPEAKING` — owns one terminal line and repaints
+it in place ten times a second. Background chatter checks `LineHeld()` and stays
+quiet, which is right for a database-sync notice nobody needs mid-conversation.
+
+The reply is not background chatter, and for a while it had no way to say so. A
+duplex turn printed its answer into the band while the speaking HUD repainted
+underneath it, and the text was wiped as fast as it streamed:
+
+```
+  ┏━ HELIX ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ deepseek / deepseek-flash ━
+● ◈ HELIX SPEAKING ╢▄▁▁▃▄▄▃▄▇▇▅▃▃▄▄▂╟ 2.6s outstanding.
+```
+
+The header survived because it ends in a newline. The paragraph after it did
+not — only the fragment written after the final repaint reached the screen. The
+answer was generated, spoken aloud correctly, and destroyed on its way to the
+terminal, which is why it read as the model "not finishing its sentences".
+
+Output that must be seen now **suspends** the animation rather than asking it
+nicely: the HUD skips its frame entirely while a reply is being written, and
+resumes when the band closes. Holds nest, because a turn's own HUD and the
+speaking HUD can be alive at once.
+
+---
+
 ## 7c. Full duplex (`gpt-live-1`)
 
 Pick **"Talk over it"** from the recommended chains in `/blackbox setup` and a

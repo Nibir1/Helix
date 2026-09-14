@@ -114,6 +114,66 @@ stray file, a success message, and an edit nobody can find.
 Ported from Synapse's agent loop. The gating, the sandbox wiring and the
 data-only fencing are Helix's.
 
+#### The agent keeps the plan honest
+
+`/todo` used to be yours alone: the agent was shown your open tasks and could not
+change them. That is backwards. A plan written before any work happens is a
+guess, and the agent is the one that finds out it was wrong — it reads the code,
+runs the tests, and discovers step 3 is already done and step 4 has to come
+first. It also had nowhere to record work it discovered was needed, so on a long
+job the real plan lived inside one planner call and was re-derived from scratch
+on the next.
+
+It can write to the list now. It adds tasks, rewrites ones that are right in
+spirit and wrong in detail, marks them done, and supersedes ones that should not
+happen at all.
+
+**The rule is that it may redirect anything and erase only its own.** Not a
+judgement about whose plan is better — deletion is simply the only one of those
+operations that cannot be seen or undone. A superseded task stays in `/todo` with
+the reason it was set aside and comes back with `/todo open <id>`. A deleted one
+is a task you still believe is tracked. When it rewrites something you wrote,
+your original wording is kept and shown:
+
+```
+  2 · bump the version in internal/config/config.go
+      you wrote: bump the version in package.json
+      helix: this is a Go repo; there is no package.json
+```
+
+A reason is required whenever it revises, completes or supersedes a task of
+yours. Every edit is announced on screen as it happens.
+
+And the list now steers the loop. The harness used to stop when the last batch of
+steps exited 0, which is not the same as the work being finished — an agent that
+wrote a five-step plan and completed step one was stopped there, with four steps
+it had declared necessary left undone and nothing saying so. It continues while
+the agent has open tasks it created **or adopted** this turn. Your own list is
+never a work queue: a task nobody picked up is never something the harness will
+attempt.
+
+**The task list reads as an instrument.** Open work above settled work, one
+marker per state so the live task is findable at a glance, the author at the
+right edge, wrapped reasons hanging in an aligned column, and a meter that
+reports only the states that are not empty — a fresh three-task list used to say
+"3 pending · 0 in progress · 0 blocked · 0 done · 0 superseded". Live edits are
+announced in the same shape, so the running commentary and the list it is
+editing finally look like the same thing.
+
+**A read that finds nothing no longer aborts the plan.** It is an answer, not a
+failure; a `read` of a missing file used to cancel every remaining step and cost
+a full planner round trip. Failed edits and writes still abort.
+
+**A task whose work the agent did is `done`, never `superseded`.**
+
+**A verification task is not closed on stale evidence.** "Run the tests" may only
+be marked done from a result gathered after the last change; a test run followed
+by an edit says nothing about the current state.
+
+**And a run now always says how it ended** — finished, stalled, or out of budget
+— naming the tasks left open. Previously it printed nothing: the prompt simply
+came back, and "finished" looked exactly like "ran out of road".
+
 #### API keys were printed to the terminal
 
 Every key prompt used the same reader that asks which provider you want, and

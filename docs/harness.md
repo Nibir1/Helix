@@ -59,6 +59,7 @@ tool's gate and whether it is usable right now.
 | `package` | Install / update / remove | package safety check → confirmation |
 | `recon` | Scans a target | written-scope authorization required |
 | `file` | Read, list, glob, grep, edit and write files | sandbox root → risk tiers (edit/write are medium) → hooks |
+| `todo` | Keep the task list current while it works | may redirect any task; may delete only its own |
 | `web` | Search or fetch a public page | public-address guard; retrieved text has zero authority |
 | `vision` | Looks through the camera and describes one frame | `/blackbox eyes` opt-in; one in-memory frame per turn, never written to disk |
 
@@ -114,7 +115,15 @@ and shelling out:
    `helpers.go` is almost always a path mistake; left alone it writes a stray
    file, reports success, and the edit is nowhere. The refusal names the file
    that was probably meant.
-4. **Everything a file tool returns is data.** Contents come back through the
+4. **A read that finds nothing does not abort the plan.** Every other tool stops
+   the remaining steps on error, because they usually depend on the one that
+   failed. A read is different: the model asked precisely because it did not
+   know, and "no such file" is the answer. Aborting spent a whole planner round
+   trip on that discovery — a real run lost two thirds of a four-iteration
+   budget to a `read package.json` that cancelled the rest of its own plan.
+   `edit` and `write` failures still abort: a change that failed may have left
+   the tree in a state the following steps assumed away.
+5. **Everything a file tool returns is data.** Contents come back through the
    same `authority="data-only"` execution report as command output. A file in a
    repository is content written by whoever wrote that repository, which is
    exactly the provenance the Instruction Firewall exists for.
@@ -176,19 +185,177 @@ the plan instead.
 ## 4. Task list — `/todo`
 
 A persisted list in `~/.helix/todo.json` (0600). It is not a notepad: the **open**
-tasks are injected into every planner prompt as a zero-authority fenced block, so
-a multi-turn task can be picked up where the last turn stopped.
+tasks are injected into every planner prompt, and the agent can now write back.
 
 ```
 /todo add migrate the config loader
 /todo start 1
 /todo block 1 waiting on the schema decision
 /todo done 1
+/todo open 1          # also un-supersedes something Helix set aside
 /todo prune           # drop completed tasks, keep the IDs you just read
 ```
 
-Completed tasks are excluded from the injected block — presenting finished work
-as outstanding invites the planner to redo it.
+Completed and superseded tasks are excluded from the injected block — presenting
+finished work as outstanding invites the planner to redo it, and re-presenting a
+task the agent already set aside invites it to re-litigate its own decision.
+
+### The list has two authors
+
+A plan written before any work happens is a guess, and the agent is the party
+that finds out it was wrong: it reads the code, runs the tests, and discovers
+that step 3 is already done and step 4 has to happen first. Until it could write
+here, it had no way to say so — and no way to record work it decided was needed,
+so on a long job the real plan lived inside one planner call and was re-derived
+from scratch on the next.
+
+So it writes here now, through a `todo` tool with four actions:
+
+| Action | Does |
+| :--- | :--- |
+| `add` | record work it discovered is needed |
+| `revise` | rewrite a task that is right in spirit, wrong in detail |
+| `state` | move a task, including `done` and `superseded` |
+| `drop` | delete a task — **its own only** |
+
+**The rule is: it may redirect anything and erase only its own.**
+
+That is not a judgement about whose plan is better; you asked for this precisely
+because a human plan can be wrong. It is that deletion is the only one of those
+operations that cannot be seen or undone. A superseded task stays in `/todo`,
+carries the reason it was set aside, and comes back with `/todo open <id>`. A
+deleted one is a task you still believe is tracked.
+
+Revision follows the same principle. When the agent rewrites something you wrote,
+your original wording is kept and `/todo` shows it:
+
+```
+  2 · bump the version in internal/config/config.go
+      you wrote: bump the version in package.json
+      helix: this is a Go repo; there is no package.json
+```
+
+The agent gets to change the plan. It does not get to change the record of what
+you asked for.
+
+**A reason is required** whenever it revises, completes or supersedes a task you
+wrote. An overrule with no stated reason is indistinguishable from a mistake.
+Progress — marking your task `in_progress` — needs none: it says nothing you
+would dispute, and demanding a reason for it only trains the model to emit
+filler. Its own tasks are its own business.
+
+Every edit is **announced on screen as it happens**, in the same shape `/todo`
+uses — state marker, id, what just happened, then the reasons hanging in a
+column:
+
+```
+  ▸ TASK 1   started    add empty-input validation to parser.go
+                        ↳ why       starting on the panic fix first
+  · TASK 2   rewrote    bump the version in version.go to 1.2.0
+                        ↳ you wrote bump the version in package.json to 1.2.0
+                        ↳ why       there is no package.json; this is a Go module
+  ⊘ TASK 6   set aside  add a retry loop to transport.go
+```
+
+An edit you only discover later by typing `/todo` is a plan that changed behind
+your back.
+
+`/todo` itself reads as an instrument: open work above settled work, one marker
+per state so the live task is findable, the author at the right edge, and a
+meter that reports only the states that are not empty.
+
+```
+  │ ▸  2  bump the version in version.go to 1.2.0
+  │       ↳ you wrote bump the version in package.json to 1.2.0
+  │       ↳ why       there is no package.json here; this is a Go module
+  │ ·  4  update the CHANGELOG for the bump                            helix
+  │
+  │ ✔  1  add empty-input validation to parser.go
+  │ ⊘  6  add a retry loop to transport.go
+  │
+  │ ▓▓▓▓▓░░░░░░░░░░░  1 in progress · 1 pending · 1 done · 1 superseded   2 of 4 settled
+```
+
+### It steers the loop
+
+The agentic loop used to stop when the last batch of steps exited 0. That is not
+the same as the work being finished: an agent that writes a five-step plan and
+completes step one was stopped there, with four steps it had declared necessary
+left undone and nothing reporting it. The loop now also continues while the agent
+has an open task **of its own, created this turn** — three conditions, each
+load-bearing:
+
+- *created this turn*, so a task left open by an earlier run cannot make an
+  unrelated question spend twenty planner calls finishing yesterday's job;
+- *the agent's own*, because your list is not a work queue — "renew the domain"
+  sitting in `/todo` must never become something the harness attempts;
+- *not settled*, where superseded counts as settled because the agent itself
+  decided that task should not happen.
+
+"The agent's own" means **created or touched this turn**, and the second half
+matters more than the first. The rule was originally "tasks the agent created",
+and the first real run broke on it: the agent worked through three tasks the
+*user* had written, created none of its own, and so reported no outstanding work
+at every iteration. The loop never said it was working, the budget ran out, and
+the turn ended with a task in progress whose edit was never made. Marking a task
+`in_progress` is the agent **adopting** it — that is the moment it becomes this
+run's work, whoever wrote it down.
+
+A task nobody touched this turn is still ignored, so the property that rule
+existed for survives: "renew the domain" sitting in `/todo` never becomes
+something the harness attempts.
+
+**A task whose work you did is `done`, never `superseded`.** Superseded means the
+task should not happen; done means it has, including when the agent is the reason.
+A real run edited `version.go` successfully and then set the task aside as
+"already in place" — it having been the thing that put it there — which reads as
+work that was never needed.
+
+**A verification task is not closed on stale evidence.** "Run the tests" may only
+be marked done from a result gathered *after* the last change — if the tests ran
+and then a file was edited, that run says nothing about the current state. The
+rule is in the planner prompt and repeated in the loop's directive, because by
+round three the directive is what the model is actually reading. It came from a
+real run that closed "run the tests" on a result predating its own edit, and
+reported honestly that it had done so.
+
+### Every run says how it ended
+
+A run that stops prints why, in all four cases:
+
+```
+Done — 2 tasks closed.
+```
+```
+Step budget reached (4 follow-ups) with work still open. Nothing was lost — the tasks are on the list.
+      #2 [in_progress] bump the version constant to 1.2.0 in version.go
+      /todo shows the list · /agentic steps <n> raises the budget
+```
+```
+Stopped with work still open.
+      #2 [in_progress] bump the version constant to 1.2.0 in version.go
+```
+```
+Stopped with an unresolved error after 4 follow-ups.
+```
+
+This is not decoration. The first real run ended by printing *nothing at all* —
+the last iteration executed, the budget ran out, the prompt came back, and the
+only way to discover that a task was left half-done was to type `/todo` and read
+it. "Finished" and "ran out of road" look identical from a returned prompt, and
+the open tasks are named because "some work is open" is not actionable.
+
+### Why this tool is not gated
+
+Every other tool runs commands, changes files, reaches the network or opens a
+camera. This one edits a list of sentences in a file in Helix's own state
+directory. Grading it medium and asking *"may I update my task list?"* between
+every step would train you to approve without reading, which is the failure
+confirmations exist to prevent. Its authority is bounded by what the list can do
+— nothing — and by the erase rule above.
+
+`plan` mode still prints instead of acting, and `/dry-run` still declines to
+change state.
 
 ---
 
@@ -287,7 +454,7 @@ can never instruct it.
 | :--- | :--- | :--- |
 | Retrieved knowledge | MAN pages, CVE/MITRE corpus | per-request retrieval |
 | Session history | recent conversation turns | 10 turns, 160 chars each |
-| Task list | open `/todo` items | 10 items |
+| Task list | open `/todo` items, with ids and author | 10 items |
 | Project context | `HELIX.md` / `AGENTS.md` / `CLAUDE.md` | 16 KB read, 6 KB injected |
 
 `/context` shows the live size of each, with estimated token counts. `/memory`
