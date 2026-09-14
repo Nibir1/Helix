@@ -342,7 +342,14 @@ func (ux *UX) typeIntoBand(text string) {
 // Returns: none.
 // Complexity: O(1).
 func (ux *UX) PrintCommand(command string) {
-	ux.scifiPrint("EXEC", command, ux.colors.Secondary)
+	// `[EXEC] glob **/*.md` was the last of the bracketed labels left in a
+	// live trace, and it sat at column ZERO while the step markers, the prompt
+	// and the reply band all start at column two — so the left edge of a
+	// running session broke in and out by two cells, line by line.
+	//
+	// A tool step is the same family as `┄ step 1 of 2`: a record of what
+	// happened, not something Helix is saying. It reads as one now.
+	ux.PrintChrome("  " + shell.Fg(shell.HexSubtle, "▸ ") + shell.Fg(shell.HexAmber, command))
 }
 
 // PrintData prints structured data output.
@@ -416,6 +423,8 @@ func (ux *UX) PrintChrome(text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
+	SuspendLine()
+	defer ResumeLine()
 	fmt.Println(text)
 }
 
@@ -502,6 +511,19 @@ func BuildShellCommand(command string, shellName string) *exec.Cmd {
 
 // scifiPrint prints a labeled message using the Helix UX style.
 func (ux *UX) scifiPrint(label, text string, colorFunc func(...interface{}) string) {
+	// EVERY print yields the animated line, not just the reply.
+	//
+	// SuspendLine started life around PrintAIMessage, because a reply being
+	// wiped by the speaking HUD was the visible half of the problem. It is not
+	// the whole of it: a live session prints step markers, EXEC lines, warnings
+	// and info between HUD frames, and each one lands on the row the HUD is
+	// repainting ten times a second. Reported as "the progress bar glitches
+	// when it starts to speak OR ANYTHING ELSE PRINTS ON THE SCREEN" — the
+	// second half of that sentence is the general case, and this is the one
+	// place all of it funnels through.
+	SuspendLine()
+	defer ResumeLine()
+
 	msg := fmt.Sprintf("%s %s", ux.scifiLabel(label), colorFunc(text))
 	if ux.typewriteAll {
 		// Route all system messages through the typewriter engine

@@ -329,17 +329,26 @@ reported honestly that it had done so.
 
 ### Chrome carries no label
 
-Step markers and phase lines are structure, not speech, so they print with no
-bracketed label and no typewriter:
+A tool step is a record of what happened, not something Helix is saying, so it
+carries no bracketed label and starts where every other line starts:
 
 ```
-  ┄ step 1 of 3
+  ❯ Tell me what the parser file is doing
+  ▸ glob **/*parser*
   ┄ answering 1/3  reading retrieved results
+  ▸ read parser.go
 ```
 
-They used to be `--- Step 1 ---` and `HELIX :: ANSWERING :: reading retrieved
-results (1/1)`. Rewriting the text alone was not enough — routed through
-`PrintSystemMessage` they came out as `[SYSTEM]    ┄ step 1 of 3`, the new line
+`[EXEC] glob **/*.md` was the last bracketed label left in a live trace, and it
+sat at column **zero** while the step markers, the prompt and the reply band all
+start at column two — so the left edge of a running session broke in and out by
+two cells, line by line.
+
+
+Step markers and phase lines are the same family. They used to be
+`--- Step 1 ---` and `HELIX :: ANSWERING :: reading retrieved results (1/1)`;
+rewriting the text alone was not enough, because routed through
+`PrintSystemMessage` they came out as `[SYSTEM]    ┄ step 1 of 3` — the new line
 inside the old frame, which reads worse than either alone. `PrintChrome` is the
 channel that adds nothing.
 

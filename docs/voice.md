@@ -516,6 +516,17 @@ nicely: the HUD skips its frame entirely while a reply is being written, and
 resumes when the band closes. Holds nest, because a turn's own HUD and the
 speaking HUD can be alive at once.
 
+### Every print yields the animated line
+
+`SuspendLine` began around the reply, because a wiped answer was the visible
+half of the problem. It was not the whole of it. A live session prints step
+markers, tool steps, warnings and info **between HUD frames**, and each one
+lands on the row the animation is repainting ten times a second — so the bar
+glitched whenever anything at all appeared, not only when Helix spoke.
+
+Every print path in `internal/ux` takes the hold now. They all funnel through
+two functions, which is what made it one fix rather than nine.
+
 ### The speaking indicator is not a waveform
 
 While the model speaks, Helix has **no audio level** — the audio is decoded and

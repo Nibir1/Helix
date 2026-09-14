@@ -233,6 +233,12 @@ var lineSuspends atomic.Int32
 // SuspendLine pauses every animated HUD and clears the line so real output
 // starts on clean ground. Always pair it with ResumeLine.
 func SuspendLine() {
+	// The peak is package state so a test can verify that a print DID take the
+	// line. A print is faster than any poll interval, so a sampler racing it
+	// reports false failures, and os.Stdout cannot be swapped for a writer that
+	// checks synchronously — this is the one observation point that cannot miss
+	// the window. It costs one atomic on a path that runs once per printed line.
+	lineSuspendPeak.Add(1)
 	if lineSuspends.Add(1) == 1 && terminalLineHeld.Load() {
 		// Wipe the frame that is sitting there, and show the cursor again so a
 		// typewriter-style write does not appear to come from nowhere.
@@ -252,6 +258,10 @@ func ResumeLine() {
 
 // LineSuspended reports whether real output currently owns the line.
 func LineSuspended() bool { return lineSuspends.Load() > 0 }
+
+// lineSuspendPeak counts how many holds have been taken since it was last
+// reset. Test-facing: see SuspendLine.
+var lineSuspendPeak atomic.Int32
 
 // Running reports whether the HUD is animating.
 func (v *VoiceViz) Running() bool {

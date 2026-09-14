@@ -28,6 +28,7 @@ import (
 func resetLine(t *testing.T) {
 	t.Helper()
 	lineSuspends.Store(0)
+	lineSuspendPeak.Store(0)
 	terminalLineHeld.Store(false)
 	t.Cleanup(func() {
 		lineSuspends.Store(0)
@@ -413,5 +414,70 @@ func TestEmptyChromePrintsNothing(t *testing.T) {
 	u := NewUX()
 	if out := captureStdout(t, func() { u.PrintChrome("") }); out != "" {
 		t.Errorf("an empty chrome line printed %q", out)
+	}
+}
+
+// EVERY print yields the line, not just the reply.
+//
+// SuspendLine started around PrintAIMessage because a wiped reply was the
+// visible half. It was not the whole: a live session prints step markers, EXEC
+// lines, warnings and info between HUD frames, and each lands on the row the
+// HUD is repainting ten times a second. Reported as "the progress bar glitches
+// when it starts to speak OR ANYTHING ELSE PRINTS ON THE SCREEN" — the second
+// half of that sentence is the general case.
+func TestEveryPrintPathYieldsTheAnimatedLine(t *testing.T) {
+	u := NewUX()
+
+	paths := map[string]func(){
+		"PrintSystemMessage": func() { u.PrintSystemMessage("x") },
+		"PrintCommand":       func() { u.PrintCommand("glob **/*.go") },
+		"PrintSuccess":       func() { u.PrintSuccess("x") },
+		"PrintError":         func() { u.PrintError("x") },
+		"PrintWarning":       func() { u.PrintWarning("x") },
+		"PrintInfo":          func() { u.PrintInfo("x") },
+		"PrintData":          func() { u.PrintData("x") },
+		"PrintChrome":        func() { u.PrintChrome("  ┄ step 1 of 2") },
+	}
+
+	for name, call := range paths {
+		t.Run(name, func(t *testing.T) {
+			resetLine(t)
+
+			// Observed from INSIDE the write, not by a sampler. A print is far
+			// faster than any poll interval, so a goroutine watching the
+			// counter races and reports a false failure; a writer that checks
+			// the counter as the bytes arrive cannot miss the window.
+			lineSuspendPeak.Store(0)
+			_ = captureStdout(t, call)
+			if lineSuspendPeak.Load() == 0 {
+				t.Errorf("%s does not suspend the animated line — its output lands on "+
+					"the row the HUD is repainting ten times a second", name)
+			}
+			if LineSuspended() {
+				t.Errorf("%s left the line suspended; the HUD never animates again", name)
+			}
+		})
+	}
+}
+
+// A tool step is chrome, not a message: it carries no bracketed label and it
+// starts where every other line starts.
+func TestExecLinesAreChromeAndAligned(t *testing.T) {
+	resetLine(t)
+	u := NewUX()
+
+	out := shell.Plain(captureStdout(t, func() { u.PrintCommand("glob **/*.md") }))
+	line := strings.TrimRight(out, "\n")
+
+	if strings.Contains(line, "[EXEC]") {
+		t.Errorf("a tool step still carries a bracketed label: %q", line)
+	}
+	if !strings.HasPrefix(line, "  ") {
+		t.Errorf("a tool step starts at column %d, not 2 — the left edge of a live "+
+			"session breaks in and out line by line: %q",
+			len(line)-len(strings.TrimLeft(line, " ")), line)
+	}
+	if !strings.Contains(line, "glob **/*.md") {
+		t.Errorf("the command itself is missing: %q", line)
 	}
 }
