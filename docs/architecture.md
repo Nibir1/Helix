@@ -406,7 +406,10 @@ a wrong explanation.
   structure: `┄ step 1 of 3` routed through `PrintSystemMessage` came out as
   `[SYSTEM]    ┄ step 1 of 3`, the new line inside the old frame. Step markers,
   phase lines and tool steps use it, and all of them start at column two so a
-  running session has one left edge.
+  running session has one left edge. `scifiPrint` indents to the same column,
+  because warnings, errors and data were the last lines starting at column
+  zero — a warning that breaks the margin does not read as more urgent, it
+  reads as a different program.
 - **The SPEAKING indicator is a travelling pulse, not a waveform.** While the
   model speaks Helix has no audio level — the audio is decoded and played, never
   metered — so a full-range wave there was animating a signal that does not

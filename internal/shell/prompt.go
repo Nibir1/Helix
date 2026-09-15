@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattn/go-runewidth"
@@ -245,6 +246,21 @@ func visibleWidth(s string) int { return runewidth.StringWidth(Plain(s)) }
 // TerminalWidth returns the current terminal column count.
 // Probes stdout, stdin, and the controlling terminal; keeps the largest
 // valid answer so wrapped launchers never report a stale width.
+// lastGoodWidth remembers the last successful measurement.
+//
+// THE PROBE IS NOT RELIABLE, AND IT IS CALLED PER LINE. BandWriter re-measures
+// on every line so a window resized mid-reply reflows — which means a long
+// answer probes the terminal a hundred times, each probe opening and closing
+// /dev/tty. One failed probe in the middle returns 0, panelWidth falls to its
+// floor, and the REST of that reply wraps at ~46 columns on a 200-column
+// terminal. On screen the band header spans the full width (measured once, when
+// it worked) and the text under it is a narrow ragged column, which reads as
+// the reply having been capped.
+//
+// A zero is never a real terminal. Returning the last width that WAS real is
+// strictly better than returning a floor nobody asked for.
+var lastGoodWidth atomic.Int32
+
 func TerminalWidth() int {
 	best := 0
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > best {
@@ -261,7 +277,13 @@ func TerminalWidth() int {
 			_ = tty.Close()
 		}
 	}
-	return best
+	if best > 0 {
+		lastGoodWidth.Store(int32(best))
+		return best
+	}
+	// Every probe failed. Fall back to the last real measurement rather than
+	// letting callers floor themselves; zero only means "could not ask".
+	return int(lastGoodWidth.Load())
 }
 
 func runtime_isUnix() bool {

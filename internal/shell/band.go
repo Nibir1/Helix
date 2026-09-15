@@ -69,16 +69,26 @@ func BandHeader(label, meta, colour string) string {
 	label = strings.TrimSpace(label)
 	meta = strings.TrimSpace(meta)
 
-	left := Fg(HexSubtle, glyphBandCorner+glyphBandRule) + " " + Fg(colour, label) + " "
-	right := ""
+	// A SHORT LEAD-IN, NOT A FULL-WIDTH RULE.
+	//
+	// The header used to stretch to the panel edge, with the model name pinned
+	// right. One turn looked deliberate; a long conversation is a stack of
+	// full-width horizontal bars every three or four lines, and on a wide
+	// terminal they are the loudest thing on screen — the eye reads the rules
+	// instead of the words between them.
+	//
+	// The job of the header is to mark where a turn STARTS and say who is
+	// answering. A few cells of rule does that, and the rail down the left
+	// already carries the turn's extent. Reported as "with all these long
+	// conversations, these horizontal lines, they look weird".
+	const leadIn = 2
+
+	out := bandIndent + Fg(HexSubtle, glyphBandCorner+strings.Repeat(glyphBandRule, leadIn)) +
+		" " + Fg(colour, label)
 	if meta != "" {
-		right = " " + Muted(meta) + " " + Fg(HexSubtle, glyphBandRule)
+		out += " " + Fg(HexSubtle, glyphBandRule) + " " + Muted(meta)
 	}
-	fill := panelWidth() - visibleWidth(left) - visibleWidth(right) - len(bandIndent)
-	if fill < 2 {
-		fill = 2
-	}
-	return bandIndent + left + Fg(HexSubtle, strings.Repeat(glyphBandRule, fill)) + right
+	return out
 }
 
 // BandClose renders the closing rule. Used at the end of a run of bands rather

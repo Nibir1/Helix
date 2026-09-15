@@ -192,6 +192,19 @@ web search and started firing for file steps; a `glob` returns *paths*, so
 nothing, and answered nothing. Web keeps that directive; file steps are told to
 read what they found, and get room to find → read → answer.
 
+**Long replies stopped being cut off.** The band re-measures the terminal on
+every line so a mid-reply resize reflows — which means a long answer probes the
+terminal a hundred times, and one failed probe returned zero. The rest of that
+reply then wrapped at ~46 columns on a 200-column terminal, under a header that
+had measured correctly the one time it ran. It reads as the answer being capped.
+A failed probe now falls back to the last real measurement.
+
+**The conversation is quieter.** The band header is a short lead-in instead of a
+full-width rule: one turn looked deliberate, a long conversation was a stack of
+horizontal bars every three or four lines. And warnings, errors and search
+results were the last lines starting at column zero, so the left edge stepped in
+and out depending on what came next — everything is at column two now.
+
 **A verification task is not closed on stale evidence.** "Run the tests" may only
 be marked done from a result gathered after the last change; a test run followed
 by an edit says nothing about the current state.

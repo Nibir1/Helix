@@ -481,3 +481,33 @@ func TestExecLinesAreChromeAndAligned(t *testing.T) {
 		t.Errorf("the command itself is missing: %q", line)
 	}
 }
+
+// Every printed line starts at column two. Warnings, errors and data were the
+// last ones starting at column zero, so a live session's left edge stepped in
+// and out depending on which kind of line came next.
+func TestEveryPrintedLineStartsAtColumnTwo(t *testing.T) {
+	resetLine(t)
+	u := NewUX()
+
+	paths := map[string]func(){
+		"PrintWarning": func() { u.PrintWarning("Instruction Firewall: plan quarantined") },
+		"PrintError":   func() { u.PrintError("Planner model error: context deadline exceeded") },
+		"PrintData":    func() { u.PrintData("1. 50 Funniest YouTube videos of All Time") },
+		"PrintInfo":    func() { u.PrintInfo("a note") },
+		"PrintSuccess": func() { u.PrintSuccess("done") },
+		"PrintCommand": func() { u.PrintCommand("glob **/*.go") },
+	}
+	for name, call := range paths {
+		out := shell.Plain(captureStdout(t, call))
+		for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+			if line == "" {
+				continue
+			}
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			if indent != 2 {
+				t.Errorf("%s starts at column %d, not 2 — the left edge of a live "+
+					"session steps in and out line by line: %q", name, indent, line)
+			}
+		}
+	}
+}

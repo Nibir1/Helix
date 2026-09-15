@@ -524,7 +524,12 @@ func (ux *UX) scifiPrint(label, text string, colorFunc func(...interface{}) stri
 	SuspendLine()
 	defer ResumeLine()
 
-	msg := fmt.Sprintf("%s %s", ux.scifiLabel(label), colorFunc(text))
+	// INDENTED TO COLUMN TWO, like everything else. The prompt, the reply band,
+	// the step markers and the tool steps all start there; these were the last
+	// lines starting at column zero, so a live session's left edge stepped in
+	// and out depending on which kind of line came next. A warning that breaks
+	// the margin does not read as more urgent, it reads as a different program.
+	msg := "  " + fmt.Sprintf("%s %s", ux.scifiLabel(label), colorFunc(text))
 	if ux.typewriteAll {
 		// Route all system messages through the typewriter engine
 		ux.Typewriter(msg)
