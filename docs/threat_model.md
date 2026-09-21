@@ -109,3 +109,16 @@ population. The lesson this file should carry is about the shape of the claim
 rather than the two rules: "limits blast radius via the safety pipeline" is a
 statement about code that must be tested by behaviour, and a layer nobody has
 watched fire is a layer nobody knows is there.
+
+**And on 2026-09-21 the file tool's own scoping was wrong on one platform.**
+`MatchGlob` normalises its arguments to forward slashes, then matched them with
+`filepath.Match`, whose separator is the host's — so on Windows `/` was not a
+path boundary and a single `*` matched through it, making `internal/*.go` match
+`internal/ai/x.go` as well. Stated precisely, because it is **not** a
+confinement failure: every path still went through `ValidateSafePath` and
+nothing escaped the sandbox root. What broke is the narrower bound the operator
+expressed — a pattern written to scope a search to one directory returned the
+whole subtree, so the model saw files the request had tried to leave out. The
+bound that holds is still the root. The lesson is that a scope a human writes
+is not a boundary until something enforces it as one, and this one was enforced
+by a standard-library call whose behaviour depended on the operating system.

@@ -1,20 +1,24 @@
-## Unreleased
+## Helix v1.5.0 — Voice, and an agent that can work
 
-**The latest published release is v1.0.0.** Everything below it on this page is
-unreleased work, grouped by the theme it was built under rather than by a version
-number, because none of these were tagged. A `v1.5.0` tag existed briefly and was
-withdrawn; nothing was ever published under it, and no binary carrying that
-version was ever downloadable.
+v1.0.0 taught the terminal to speak human. v1.5.0 lets you stop typing at it:
+full-duplex conversation you can interrupt, a planner that can read and edit
+files instead of shelling out to `sed`, and a turn that renders as an
+instrument rather than a log.
 
-Source builds report `1.5.0-dev` for that reason. The `-dev` suffix is not
-decoration: `internal/update` orders a pre-release below the release it precedes,
-so a machine running this build is correctly offered v1.5.0 on the day v1.5.0 is
-actually published, instead of being told it already has it.
+A `v1.5.0` tag existed briefly once before and was withdrawn while the work was
+still being polished. Nothing was ever published under it and no binary
+carrying that version was downloadable; **this is the first v1.5.0 anyone can
+install.** Everything from here down to the v1.0.0 section is what it contains,
+grouped by the theme it was built under rather than by patch number.
 
-> `scripts/release.sh` refuses to run while this **Unreleased** heading is here.
-> Cutting a release means renaming it *and* setting `HelixVersion` in
-> `internal/config/config.go` to match — the script derives the tag from that
-> constant, so the two cannot drift apart.
+> **Cutting the next release.** New work goes under an `## Unreleased` heading
+> at the top of this file; at tag time that heading is renamed to the version
+> *and* `HelixVersion` in `internal/config/config.go` is set to match.
+> `scripts/release.sh` derives the tag from that constant and refuses to run
+> while an `Unreleased` heading is present — goreleaser embeds this file
+> verbatim as the release body, so the heading would otherwise be the first
+> thing on the published page. Two tests in `internal/config/version_test.go`
+> hold the constant and this file to each other in both directions.
 
 ---
 
@@ -654,6 +658,48 @@ Late additions, from a live `/blackbox setup` on an Intel Mac and an Apple Silic
 - **`/purge` reaches the model stores outside `~/.helix`** — Ollama's blobs and the CSM weights in the Hugging Face cache. A purge that reported a clean sweep was leaving 6 GB behind.
 - **One copy of the CSM weights, not three.** The repo carries `model.safetensors`, a sharded `transformers-*` set and `ckpt.pt`; fetching it whole is 19.6 GB where 6.2 will do.
 - **The Hugging Face CLI is located, not merely installed.** `pip install --user` writes console scripts to a directory it warns is not on `PATH`; Helix asks Python where that is rather than telling you to open a new shell. Its login command is probed too, since `huggingface_hub` 1.x moved authentication under `hf auth`.
+
+### Cross-platform correctness, and a test suite that had been measuring the host
+
+The last work before the tag was a red CI board, and four of its six failures
+were the suite testing the machine it ran on rather than Helix. One was not.
+
+**`glob` matched across directory boundaries on Windows.** The planner's `file`
+tool normalises its arguments to forward slashes and documents itself as taking
+a slash-separated path — then matched them with `filepath.Match`, which takes
+its separator from the host. On Windows that separator is `\`, so `/` was not a
+boundary and a single `*` matched straight through it: `internal/*.go` also
+matched `internal/ai/x.go`. A pattern meant to scope a search to one directory
+quietly searched the whole subtree. Matching is `path.Match` now, which is
+always `/`-separated, and identical to the old behaviour on macOS and Linux.
+
+**A security advisory in a transitive dependency.** `golang.org/x/net` is
+upgraded to v0.56.0 for GO-2026-5942, a panic when parsing a malformed SVCB or
+HTTPS DNS record. It was reachable from Helix's own code — govulncheck traced
+it through the full-duplex path, `live.Session.negotiate` →
+`SetLocalDescription` → `dnsmessage.Message.Unpack` — so it is a real call
+path rather than an advisory against code nobody runs.
+
+**The e2e harness was not hermetic, and said it was.** It promises "zero real
+AI and zero external network", and that held for every request but one:
+`update.check` defaults to on, so `/reboot` made a live GitHub API call with a
+12-second timeout before printing its panel. On a developer machine that is
+invisible; from a rate-limited CI address it consumed a test's entire budget
+and failed a tree that had passed minutes earlier. The seeded config turns the
+check off, so the suite's clock is now its own.
+
+**`make build` was the only cgo build in the project.** `scripts/build.sh`
+calls itself a CGO-free build script, and every other target is — the
+cross-compiled ones because cross-compiling disables cgo, CI's step because it
+is named for it, and every shipped artifact because `.goreleaser.yml` sets it.
+The native path did not, so `make build` produced a binary built unlike the one
+you download and was the only thing here that needed a working system linker.
+
+Three test-only fixes came with them: two assertions compared POSIX permission
+bits on Windows, which has none to compare, and the staleness tests spelled
+`dist/helix` by hand where the code they exercise looks for `dist\helix.exe` —
+so the one that mattered failed and the two either side of it had been passing
+without ever reaching their subject.
 
 ---
 
