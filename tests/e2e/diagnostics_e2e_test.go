@@ -166,6 +166,16 @@ func TestE2E_DoctorAppliancePanelStaysInsideItsFrame(t *testing.T) {
 	// Every body line between the two chips belongs behind the gutter. This is
 	// the invariant the old block broke, and the only one worth asserting: what
 	// each row SAYS depends on the host, but nothing may escape the frame.
+	// WAIT for the chip that bounds the slice below. Nothing above does: the
+	// test waited for APPLIANCE and three of its rows, then assumed the panel
+	// AFTER it had already been printed. On a loaded runner the poll loop
+	// returned while ENVIRONMENT was still in flight and the frame assertion
+	// read a half-written report — green here, red on ubuntu, on a tree that
+	// had just passed. §9 rule 8: a test has to be able to reach what it
+	// asserts, and that includes the end marker it slices on.
+	if err := h.Expect("ENVIRONMENT", 20*time.Second); err != nil {
+		t.Fatalf("the ENVIRONMENT panel must follow the appliance panel: %v", err)
+	}
 	body := h.stripped()
 	start := strings.Index(body, "APPLIANCE")
 	end := strings.Index(body[start:], "ENVIRONMENT")

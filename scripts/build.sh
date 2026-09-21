@@ -12,7 +12,16 @@ mkdir -p "$DIST_DIR"
 
 build_current() {
     echo "Building Helix for current platform..."
-    go build -o "$DIST_DIR/helix" "$MAIN_PACKAGE"
+    # CGO_ENABLED=0, like every other target here and like what actually ships.
+    # This was the ONE build in the project that used cgo: the cross-compiled
+    # targets below are CGO-free because cross-compiling disables cgo, CI's
+    # step is named "Build Binary (CGO-free)" and sets this explicitly, and
+    # .goreleaser.yml sets it for every released artifact. So `make build`
+    # produced a binary built differently from the one users get, and it was
+    # the only thing in the repo that needed a working system linker — which
+    # is how a host Xcode/CommandLineTools SDK mismatch turned into "Helix
+    # does not build" on a machine where nothing about Helix was wrong.
+    CGO_ENABLED=0 go build -o "$DIST_DIR/helix" "$MAIN_PACKAGE"
     echo "Build completed: $DIST_DIR/helix"
 }
 
