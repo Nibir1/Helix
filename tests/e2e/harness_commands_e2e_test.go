@@ -44,7 +44,11 @@ func TestE2E_PermissionsCommandShowsAndSetsMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := h.SendExpect("/permissions plan", "plan", 15*time.Second); err != nil {
+	// SendTurn, not SendExpect("plan"): "plan" is in the line being typed, so
+	// the prompt's echo satisfies that wait before the command has run. The
+	// assertion here is the persisted config below, and the only thing the
+	// send has to guarantee is that the turn finished.
+	if err := h.SendTurn("/permissions plan", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// And it must persist, so a posture survives the restart it was chosen for.
@@ -81,7 +85,10 @@ func TestE2E_PlanModeRefusesToExecute(t *testing.T) {
 	defer h.Close()
 
 	marker := filepath.Join(h.project, "plan-mode-should-not-create-this")
-	if err := h.SendExpect("/permissions plan", "plan", 15*time.Second); err != nil {
+	// The mode has to be IN EFFECT before the next line is typed, and an echo
+	// of the word "plan" says only that it was typed — so this waits for the
+	// turn to end, and the refusal below is what proves the mode took.
+	if err := h.SendTurn("/permissions plan", 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	// A direct shell command bypasses the planner but not the pipeline, so it
@@ -190,7 +197,10 @@ func TestE2E_HooksAddRunAndDeny(t *testing.T) {
 	}
 
 	// /hooks test proves a rule before it is trusted to block real work.
-	if err := h.SendExpect("/hooks test pre-shell exit 7", "exit 7", 20*time.Second); err != nil {
+	// "exit 7" is part of the command, so waiting for it waited for the echo.
+	// The verdict is what this proves, and "would deny" appears only in the
+	// output.
+	if err := h.SendTurn("/hooks test pre-shell exit 7", 20*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.Expect("would deny", 5*time.Second); err != nil {

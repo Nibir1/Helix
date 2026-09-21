@@ -35,7 +35,7 @@ func TestE2E_UnarmedPromptIsUnchanged(t *testing.T) {
 	}
 
 	// The shell still works, which is the half a terminal-mode bug would break.
-	if err := h.SendExpect("echo unarmed-ok", "unarmed-ok", 10*time.Second); err != nil {
+	if err := h.SendForOutput("echo unarmed-ok", "unarmed-ok", 10*time.Second); err != nil {
 		t.Fatalf("typed command after the status report failed: %v", err)
 	}
 }
@@ -51,7 +51,7 @@ func TestE2E_AlwaysListenWithoutARecorderKeepsTheKeyboard(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 
 	// Whatever it decided, the shell must still take a typed line afterwards.
-	if err := h.SendExpect("echo still-here", "still-here", 10*time.Second); err != nil {
+	if err := h.SendForOutput("echo still-here", "still-here", 10*time.Second); err != nil {
 		t.Fatalf("the prompt stopped accepting input after arming was requested: %v", err)
 	}
 

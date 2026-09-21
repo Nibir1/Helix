@@ -52,7 +52,7 @@ func TestE2E_FreshInstallArmsTheKeyboardPrompt(t *testing.T) {
 		t.Fatalf("a fresh install did not arm the prompt: %v\n--- output ---\n%s",
 			err, tailOf(h.stripped(), 2000))
 	}
-	if err := h.SendExpect("echo armed-and-typing", "armed-and-typing", 20*time.Second); err != nil {
+	if err := h.SendForOutput("echo armed-and-typing", "armed-and-typing", 20*time.Second); err != nil {
 		t.Fatalf("the keyboard stopped working while armed: %v", err)
 	}
 }
@@ -77,7 +77,7 @@ func TestE2E_ExplicitFalseIsNeverOverriddenByTheDefault(t *testing.T) {
 	defer h.Close()
 
 	// Give it at least as long as the armed case needed to print.
-	if err := h.SendExpect("echo not-armed-check", "not-armed-check", 20*time.Second); err != nil {
+	if err := h.SendForOutput("echo not-armed-check", "not-armed-check", 20*time.Second); err != nil {
 		t.Fatalf("shell unusable: %v", err)
 	}
 	if strings.Contains(h.stripped(), "make any sound to go live") {
