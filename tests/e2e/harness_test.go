@@ -118,6 +118,27 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 			"typing_effect": false,
 			"user_name":     "E2E",
 		},
+		// THE ONE THING IN THIS HARNESS THAT REACHED THE INTERNET. This file
+		// promises "zero external network", and it was true of every request
+		// except one: update.check defaults to TRUE, so /reboot called
+		// maybeInstallUpdate and made a live HTTPS request to the GitHub API
+		// before printing its panel, with a 12s timeout attached
+		// (cmd/helix/reboot_update.go). Locally that resolves in
+		// milliseconds; on a runner it is a rate-limited shared IP, and
+		// TestE2E_RebootRestartsAndResumes spent its whole 20s budget waiting
+		// for a network round trip before the shell said anything. It failed
+		// on ubuntu against a tree that had passed every check minutes
+		// earlier, which is the signature of a clock, not of a regression.
+		//
+		// "channel" is NOT decoration. mergeUpdate takes the section at its
+		// word only if it says something other than check:false — absent and
+		// false are identical in the decoded struct — so a section
+		// containing check alone is silently discarded and the default TRUE
+		// survives. See internal/config/config.go.
+		"update": map[string]interface{}{
+			"channel": "auto",
+			"check":   false,
+		},
 	}
 	if os.Getenv("HELIX_E2E_SPEECH") != "" {
 		cfg["speech"] = map[string]interface{}{
