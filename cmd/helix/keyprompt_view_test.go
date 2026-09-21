@@ -21,7 +21,11 @@ func renderKeyPanel(t *testing.T, provider string, hidden bool) string {
 
 // The three questions the old prompt left unanswered.
 func TestKeyPanelAnswersWhereToGetWhereItGoesAndWhetherItIsSafe(t *testing.T) {
-	out := renderKeyPanel(t, "openai", true)
+	// Flattened: these are assertions about what the panel SAYS, and a panel
+	// wraps to the terminal — on a narrow one "never logged" breaks across
+	// the gutter and a substring search stops finding a sentence that is
+	// plainly there.
+	out := flattenPanel(renderKeyPanel(t, "openai", true))
 
 	if !strings.Contains(out, "platform.openai.com") {
 		t.Error("the panel does not say where to get a key; the URL is not guessable")
@@ -44,7 +48,7 @@ func TestKeyPanelAnswersWhereToGetWhereItGoesAndWhetherItIsSafe(t *testing.T) {
 // a credential on the strength of it. This is the exact situation that put a
 // live key in a screenshot.
 func TestKeyPanelNeverPromisesHidingItCannotDo(t *testing.T) {
-	visible := renderKeyPanel(t, "openai", false)
+	visible := flattenPanel(renderKeyPanel(t, "openai", false))
 
 	if strings.Contains(visible, "Nothing is echoed") {
 		t.Fatal("the panel promises hidden input on a terminal that cannot hide it")
@@ -59,7 +63,7 @@ func TestKeyPanelNeverPromisesHidingItCannotDo(t *testing.T) {
 		t.Error("the warning drops the reassurance that is still true")
 	}
 
-	hidden := renderKeyPanel(t, "openai", true)
+	hidden := flattenPanel(renderKeyPanel(t, "openai", true))
 	if strings.Contains(hidden, "CANNOT hide") {
 		t.Error("a terminal that DOES hide input is warned as though it does not")
 	}

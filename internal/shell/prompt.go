@@ -261,7 +261,22 @@ func visibleWidth(s string) int { return runewidth.StringWidth(Plain(s)) }
 // strictly better than returning a floor nobody asked for.
 var lastGoodWidth atomic.Int32
 
-func TerminalWidth() int {
+// probeTerminalWidth asks the terminal how wide it is, or 0 when nothing can
+// be asked.
+//
+// Indirected through a variable so a test can model a FAILED probe, which is
+// the only condition the fallback below exists for. The test that covered it
+// could not: it assumed `go test` never has a terminal, and that is a property
+// of the MACHINE rather than of the code — /dev/tty still opens under `go
+// test` when the process has a controlling terminal, so the real width came
+// back and the injected one never did. Green in CI and red for anyone running
+// `make test` from a terminal that was not exactly 200 columns wide, which is
+// how it reached a release gate before anything caught it.
+var probeTerminalWidth = measureTerminalWidth
+
+// measureTerminalWidth is the real probe: the widest answer of the three
+// sources, or 0 if none of them answers.
+func measureTerminalWidth() int {
 	best := 0
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > best {
 		best = w
@@ -277,7 +292,11 @@ func TerminalWidth() int {
 			_ = tty.Close()
 		}
 	}
-	if best > 0 {
+	return best
+}
+
+func TerminalWidth() int {
+	if best := probeTerminalWidth(); best > 0 {
 		lastGoodWidth.Store(int32(best))
 		return best
 	}

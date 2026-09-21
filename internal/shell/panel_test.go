@@ -64,6 +64,7 @@ func TestTableColumnsAlignWithColouredCells(t *testing.T) {
 // PanelWrap the endpoint-conflict note wrapped at the terminal edge and its
 // tail restarted at column zero, visually leaving the block.
 func TestPanelWrapKeepsEveryLineBehindTheGutter(t *testing.T) {
+	pinFlooredWidth(t)
 	long := strings.Repeat("port collision on 127.0.0.1:8080 and more words ", 6)
 	lines := PanelWrap(long, nil)
 	if len(lines) < 2 {
@@ -125,6 +126,7 @@ func TestPanelWidthIsClamped(t *testing.T) {
 // screenshotting: the nine-column pricing table pushed "★ best value" onto its
 // own line outside the gutter.
 func TestTableRowsFitInsideThePanel(t *testing.T) {
+	pinFlooredWidth(t)
 	// A realistic worst case: the longest real provider and model names.
 	rows := [][]string{
 		{Muted(" 5)"), Value("elevenlabs"), Fg(HexText, "eleven_multilingual_v2"),
@@ -206,6 +208,7 @@ func TestKVLeavesFittingValuesAlone(t *testing.T) {
 // over-wide value wrapped at the TERMINAL edge and its tail restarted at column
 // zero, outside the gutter. /blackbox status carried one 95 columns wide.
 func TestKVWrapsInsideThePanel(t *testing.T) {
+	pinFlooredWidth(t)
 	w := KVWidth("MODE", "INITIATIVE", "TRANSCRIPT")
 	value := Badge(StateBad, "no frames") + Muted("  camera opens but delivers "+
 		"nothing — likely an OS permission; /blackbox look shows why")
@@ -257,6 +260,7 @@ func TestKVWrapPreservesTextAndBreaksOnWords(t *testing.T) {
 // A token longer than the column has no break point, so it must be split rather
 // than allowed to overflow — a long path or URL is the realistic case.
 func TestKVWrapHardBreaksAnUnbreakableToken(t *testing.T) {
+	pinFlooredWidth(t)
 	w := KVWidth("LABEL")
 	lines := strings.Split(KV("LABEL", strings.Repeat("x", 200), w), "\n")
 	if len(lines) < 3 {
@@ -329,6 +333,7 @@ func TestWrapANSIMakesProgressAtAbsurdWidths(t *testing.T) {
 // room. Never past the frame, but wrong, and the same class of bug as measuring
 // ANSI escapes as content.
 func TestPanelWrapMeasuresColumnsNotBytes(t *testing.T) {
+	pinFlooredWidth(t)
 	// Same column width per word, very different byte counts: "ab" is 2 bytes
 	// wide and 2 columns; "——" is 6 bytes and 2 columns.
 	ascii := strings.TrimSpace(strings.Repeat("ab ", 40))
@@ -355,6 +360,7 @@ func TestPanelWrapMeasuresColumnsNotBytes(t *testing.T) {
 // its own over-wide line — letting content escape the very frame it exists to
 // keep it inside. A URL or an absolute path is the realistic case.
 func TestPanelWrapSplitsAnUnbreakableWord(t *testing.T) {
+	pinFlooredWidth(t)
 	url := "https://example.invalid/" + strings.Repeat("segment/", 20)
 	lines := PanelWrap("the endpoint is "+url+" which is unreachable", nil)
 	if len(lines) < 2 {
@@ -411,6 +417,7 @@ func TestTruncateANSIBudgetsColumnsNotRunes(t *testing.T) {
 // the difference, so an over-wide truncation drove the pad negative, collapsed
 // the two-space gap and shifted every column after it.
 func TestTableStaysAlignedWithWideRunes(t *testing.T) {
+	pinFlooredWidth(t)
 	// Wide enough that fitTableWidths must SHAVE the CJK column — otherwise the
 	// truncation path is never reached and this test proves nothing about it.
 	rows := [][]string{

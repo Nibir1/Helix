@@ -408,18 +408,31 @@ func TestHelpBlackBoxStatesTheDefault(t *testing.T) {
 // The old text was "/blackbox wake on enables hands-free conversation", which
 // answers "what do I type" and not "why is an on-by-default feature off" — the
 // question the owner actually had, twice.
+// flattenPanel collapses a rendered panel to one line of words.
+//
+// For assertions about what a panel SAYS rather than how it looks. The panel
+// wraps to the terminal, so at 80 columns "listening is on by default" breaks
+// after "on" and continues behind the gutter on the next line — a substring
+// search for the phrase then fails on a narrow terminal and passes on a wide
+// one, which makes the test a measurement of the window. Layout is asserted
+// by the tests that are about layout (§9 rule 12); this is about wording.
+func flattenPanel(s string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, "│", " ")), " ")
+}
+
 func TestWakeStatusOffNamesTheConfig(t *testing.T) {
 	withWakeConfig(t, false, false)
 	out := shell.Plain(captureStdout(t, printWakeStatus))
 	if out == "" {
 		t.Fatal("printWakeStatus rendered nothing")
 	}
+	flat := flattenPanel(out)
 	for _, want := range []string{
 		"enabled: false", // the key in their file, spelled as it appears
 		"on by default",  // so they know this is a deviation, not the norm
 		"/blackbox wake on",
 	} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(flat, want) {
 			t.Errorf("the off state never says %q\n--- rendered ---\n%s", want, out)
 		}
 	}
@@ -428,7 +441,7 @@ func TestWakeStatusOffNamesTheConfig(t *testing.T) {
 	// below, which checks a recorder and a transcriber this one does not.
 	withWakeConfig(t, true, true)
 	on := shell.Plain(captureStdout(t, printWakeStatus))
-	if strings.Contains(on, "enabled: false") {
+	if strings.Contains(flattenPanel(on), "enabled: false") {
 		t.Errorf("the on state reports a config value that is not set:\n%s", on)
 	}
 	if !strings.Contains(on, "AT THE PROMPT") {

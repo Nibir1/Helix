@@ -27,6 +27,7 @@ func behindTheGutter(t *testing.T, label string, lines []string) {
 // A step wide enough to wrap must still be one block, not a subject inside the
 // frame and a detail that restarts at column zero.
 func TestStepWrapsInsideTheGutter(t *testing.T) {
+	pinFlooredWidth(t)
 	long := "port 8080 is already claimed by another service on this machine, " +
 		"so whisper-local cannot bind it and has been moved elsewhere"
 	out := Step(StateWarn, "whisper-local", long)

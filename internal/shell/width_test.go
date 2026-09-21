@@ -14,14 +14,44 @@ import (
 	"testing"
 )
 
+// failProbe makes every width measurement fail, for the duration of the test.
+//
+// This used to be left to the environment, on the reasoning that `go test` has
+// no terminal. It does when it is run from one: /dev/tty opens, answers with
+// the real width, and the probe SUCCEEDS — so the fallback under test never
+// ran. The test therefore passed in CI and on any host with no terminal, and
+// failed on every developer machine whose terminal was not exactly 200 columns
+// wide. Modelled explicitly now, because "the probe failed" is the entire
+// precondition of what is being asserted (§9 rule 8).
+func failProbe(t *testing.T) {
+	t.Helper()
+	restore := probeTerminalWidth
+	probeTerminalWidth = func() int { return 0 }
+	t.Cleanup(func() { probeTerminalWidth = restore })
+}
+
+// pinFlooredWidth makes the measure deterministic at the floor.
+//
+// Every wrap test in this package was written against a host with no terminal,
+// where the probe fails, the width is 0 and panelWidth drops to its floor —
+// so text wraps and the assertions hold. Run from a wide terminal the probe
+// SUCCEEDS, nothing wraps, and six of them fail on correct code. They were
+// asserting a property of the window the suite happened to run in. Pinning
+// reproduces exactly the condition they were written for, on any host.
+func pinFlooredWidth(t *testing.T) {
+	t.Helper()
+	prev := lastGoodWidth.Load()
+	failProbe(t)
+	lastGoodWidth.Store(0)
+	t.Cleanup(func() { lastGoodWidth.Store(prev) })
+}
+
 func TestAFailedProbeFallsBackToTheLastRealWidth(t *testing.T) {
 	prev := lastGoodWidth.Load()
 	t.Cleanup(func() { lastGoodWidth.Store(prev) })
+	failProbe(t)
 
 	lastGoodWidth.Store(200)
-	// TerminalWidth cannot be driven from a test — there is no terminal — so
-	// the fallback is exercised directly. Under `go test` every probe fails,
-	// which is precisely the condition being modelled.
 	if got := TerminalWidth(); got != 200 {
 		t.Fatalf("TerminalWidth() = %d after a failed probe, want the last real "+
 			"width 200 — a blip mid-reply narrows everything after it", got)
@@ -32,6 +62,31 @@ func TestAFailedProbeFallsBackToTheLastRealWidth(t *testing.T) {
 	lastGoodWidth.Store(0)
 	if got := TerminalWidth(); got != 0 {
 		t.Errorf("TerminalWidth() = %d with nothing ever measured, want 0", got)
+	}
+}
+
+// The other half of the contract, which nothing covered: a probe that WORKS
+// is what makes a later failure survivable, so it has to be recorded.
+func TestASuccessfulProbeBecomesTheRememberedWidth(t *testing.T) {
+	prev := lastGoodWidth.Load()
+	t.Cleanup(func() { lastGoodWidth.Store(prev) })
+
+	restore := probeTerminalWidth
+	probeTerminalWidth = func() int { return 173 }
+	t.Cleanup(func() { probeTerminalWidth = restore })
+
+	lastGoodWidth.Store(0)
+	if got := TerminalWidth(); got != 173 {
+		t.Fatalf("TerminalWidth() = %d, want the measured 173", got)
+	}
+	if got := lastGoodWidth.Load(); got != 173 {
+		t.Fatalf("a successful probe left lastGoodWidth at %d; the next failed "+
+			"probe would fall back to a width that was never real", got)
+	}
+	// And now the failure it exists to survive.
+	probeTerminalWidth = func() int { return 0 }
+	if got := TerminalWidth(); got != 173 {
+		t.Errorf("after one bad probe TerminalWidth() = %d, want 173", got)
 	}
 }
 
