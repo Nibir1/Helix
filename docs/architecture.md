@@ -955,14 +955,34 @@ that is merely unreachable should still let the prompt listen.
 
 **`update.check` is seeded off, and that is a correctness property rather than
 a speed one.** It defaults to ON, so `/reboot` called the GitHub API — a real
-HTTPS request with a 12-second timeout — before printing its panel. The suite
-therefore had one foot outside the sandbox it claims: on a developer machine
-the call resolves instantly, while from a rate-limited CI address it consumed
-`TestE2E_RebootRestartsAndResumes`'s entire budget and failed a tree that had
-passed every check minutes earlier. The seeded section also names `channel`,
-which is load-bearing: `mergeUpdate` cannot distinguish `check: false` from
-`check` absent, so a section naming `check` alone is discarded and the default
-survives.
+HTTPS request with a 12-second timeout — before printing its panel, and the
+suite therefore had one foot outside the sandbox it claims. The seeded section
+also names `channel`, which is load-bearing: `mergeUpdate` cannot distinguish
+`check: false` from `check` absent, so a section naming `check` alone is
+discarded and the default survives.
+
+> This was first written here as the explanation for an intermittent
+> `TestE2E_RebootRestartsAndResumes` failure on ubuntu. **It was not.** The
+> test failed again, identically, with the call removed. Removing it is still
+> right — a suite that promises no external network should not make one — but
+> the flake's cause is recorded honestly below, and the note is left rather
+> than deleted because a plausible fix that did not work is worth more to the
+> next reader than a clean page.
+
+**Synchronise on the turn marker, not on text the prompt echoes.** The prompt
+re-renders the line being typed one character at a time, so a token that
+appears in a command is in the capture many times over before the shell has
+run anything: `SendExpect("echo ok", "ok")` is satisfied by the terminal
+echoing. Nine calls across the suite were written that way, five of them in
+tests whose whole purpose is to prove the keyboard still *executes*. The
+harness offers three waits and they are not interchangeable — `ExpectTurnAfter`
+and `SendTurn` for "the shell finished and is ready for another line" (the OSC
+133;D marker), `SendForOutput` for "the command printed this", which requires
+a line equal to the expected output because only the command's own output is
+alone on its line, and `SendExpect`'s occurrence count for markers that cannot
+appear in the input. Whether this is also what fails the reboot test on ubuntu
+is **not established**: it has never reproduced locally, on Linux under
+Docker, or on a single pinned CPU running the whole suite.
 
 **Host-capability tests skip rather than assert.**
 `tests/e2e/wake_arms_e2e_test.go` **skips** when the host has no `sox`/`rec`

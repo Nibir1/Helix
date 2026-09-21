@@ -683,10 +683,18 @@ path rather than an advisory against code nobody runs.
 **The e2e harness was not hermetic, and said it was.** It promises "zero real
 AI and zero external network", and that held for every request but one:
 `update.check` defaults to on, so `/reboot` made a live GitHub API call with a
-12-second timeout before printing its panel. On a developer machine that is
-invisible; from a rate-limited CI address it consumed a test's entire budget
-and failed a tree that had passed minutes earlier. The seeded config turns the
-check off, so the suite's clock is now its own.
+12-second timeout before printing its panel. The seeded config turns the check
+off, so the suite's clock is now its own.
+
+**And nine of its waits could be satisfied by the terminal echoing.** The
+prompt re-renders the line being typed one character at a time, so a token
+that appears in a command is already in the capture many times before the
+shell has run anything — `SendExpect("echo ok", "ok")` returns on the echo.
+Five of the nine were in tests written to prove the keyboard still *executes*
+after the wake machinery is touched, so they would have survived a regression
+that broke command execution while leaving the line editor intact. They now
+wait on the shell's turn-end marker and require the command's own output,
+which is the only occurrence alone on its line.
 
 **`make build` was the only cgo build in the project.** `scripts/build.sh`
 calls itself a CGO-free build script, and every other target is — the
@@ -700,6 +708,14 @@ bits on Windows, which has none to compare, and the staleness tests spelled
 `dist/helix` by hand where the code they exercise looks for `dist\helix.exe` —
 so the one that mattered failed and the two either side of it had been passing
 without ever reaching their subject.
+
+One thing is deliberately not claimed here. An intermittent failure of the
+reboot end-to-end test on Linux runners prompted the first two of those fixes,
+and neither is known to have cured it: it failed again, identically, after the
+network call was removed, and it has never once reproduced locally, under
+Docker, or on a single pinned CPU running the whole suite. Both changes stand
+on their own merits. The test now prints its captured transcript when it
+fails, which the next occurrence will need.
 
 ---
 
