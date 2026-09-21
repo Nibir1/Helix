@@ -213,7 +213,8 @@ func ensureRemoteAPIKey(provider string) error {
 		}
 	}
 
-	key := strings.TrimSpace(commands.AskLine(fmt.Sprintf("Paste API key for %s", provider)))
+	printKeyPrompt(provider, secretsStoreLabel(), commands.SecretInputIsHidden())
+	key := commands.AskSecret("  " + shell.Fg(shell.HexPrimary, shell.GlyphPrompt) + " paste the key")
 	if key == "" {
 		return fmt.Errorf("API key cannot be empty")
 	}

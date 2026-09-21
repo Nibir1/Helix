@@ -13,7 +13,16 @@ The entry point for all user input. It uses a weighted evidence system to classi
 
 ### 2. AI Planner & Agent Orchestrator (`internal/ai/planner.go`, `internal/agent/agent.go`)
 - **Strict JSON Protocol**: The planner is forced to output a rigid JSON schema defining `intent` and `steps`.
-- **Tool Use**: Supports `response`, `shell`, `git`, `package`, `recon`, `web`, and `vision` tools.
+- **Tool Use**: Supports `response`, `shell`, `git`, `package`, `recon`, `web`, `vision`, `file` and `todo` tools.
+- **File Tool** (`internal/filetools/`, `internal/agent/file.go`): `read`, `list`,
+  `glob`, `grep`, `edit`, `write`. Path confinement is the sandbox's own
+  `ValidateSafePath` — the package carries no check of its own and refuses to run
+  without a resolver. `edit`/`write` are graded medium risk; a failed read does not
+  abort the plan, a failed mutation does.
+- **Todo Tool** (`internal/agent/todo.go`, `internal/session/todo_agent.go`): the
+  agent maintaining the plan of record. It may redirect any task and delete only
+  its own; a user-authored task can be superseded but never erased, and a revision
+  keeps the original wording.
 - **Web Tool** (`internal/agent/web.go`): read-only network retrieval —
   `action: "search"` (DuckDuckGo Lite, top 5 results) and `action: "fetch"` (one URL,
   HTML stripped to text). Classified at the same risk tier as a read-only shell
@@ -178,6 +187,14 @@ closed, or Helix would transcribe and answer itself. Sentence-boundary barge-in
 does not change that rule — it opens the mic only in the gap where the speaker is
 idle, measures loudness, and never transcribes — so "provably closed" still means
 what it meant.
+
+**On a `gpt-live-1` chain the microphone is never closed**, so that rule has
+nowhere to stand and a different one replaces it: a remark is handed to the
+session as commentary on the turn in flight, which the model speaks in its own
+voice. The one case with no delegation to attach to — a remark before the first
+turn of a conversation — is printed and not spoken. Helix's own TTS never runs
+while a duplex session is open, because it would play into a microphone that is
+open and being transcribed.
 
 Pacing adapts by backing OFF — the gap is `max(interval, smoothed last look)` —
 so a slow host never queues behind itself. It deliberately does not speed up on
@@ -353,11 +370,72 @@ a wrong explanation.
 
 ### 5. Terminal UX & Audio (`internal/shell/reader.go`, `internal/audio/`)
 - **SYNAPSE Prompt**: TrueColor animated prompt with glitch effects, git telemetry, and transient history.
-- **Synthetic Audio**: A `beep`/`oto` based synthesizer providing 350Hz data taps, 880Hz alerts, and 110Hz error buzzes synchronized with the typewriter effect.
+- **Synthetic Audio**: A `beep`/`oto` based synthesizer providing 350Hz data taps, 880Hz alerts, and 110Hz error buzzes. The tap fires once per streamed token as a reply arrives, and per character when `/config typing-effect` animates a reply the agent already had in hand.
+- **Conversation bands**: a turn renders as a labelled rule and a rail
+  (`internal/shell/band.go`) rather than an inline prefix. The rule names the
+  speaker and the model that produced the turn; the rail holds the prose to one
+  measure. `BandWriter` wraps a STREAM — a reply arrives token by token, so the
+  break cannot be computed over a finished string — and re-reads the terminal
+  per line, so a window resized mid-reply never emits a line the terminal has to
+  wrap. Panels use the whole terminal width above a 52-column floor.
+- **Voice HUD** (`internal/ux/voiceviz.go`): one animated line per phase of a
+  turn — listening, decoding, the model speaking, a shell step executing under
+  the sandbox, a camera frame becoming an insight, and the wake-standby pulse.
+  It owns the terminal line while it runs and publishes that with
+  `ux.LineHeld()`, so background writers do not splice into the animation.
+  **Real output takes the line rather than asking for it.** `LineHeld` is the
+  right contract for background chatter — a database-sync notice is not worth
+  interrupting a conversation for — but foreground output is not chatter, and it
+  had no way to say so: a duplex turn printed its answer into the band while the
+  speaking HUD repainted over it ten times a second, so the text was wiped as
+  fast as it streamed and only the fragment after the last repaint survived.
+  `ux.SuspendLine`/`ResumeLine` stop the animation instead; the frame is
+  skipped rather than painted and overwritten, and holds nest because a turn's
+  HUD and the speaking HUD can both be alive.
+
+  **Every print path takes the hold, not just the reply.** That was the second
+  half of the same bug and it was fixed a commit later: step markers, tool
+  steps, warnings and info all print *between* HUD frames and all landed on the
+  animated row. They funnel through `scifiPrint` and `PrintChrome`, so it is two
+  call sites rather than nine. `SuspendLine` also bumps an atomic high-water
+  mark — a print is faster than any sampler and `os.Stdout` cannot be swapped
+  for a checking writer, so that counter is the only way a test can prove a path
+  took the line.
+- **`PrintChrome` is the label-free channel** on `agent.Renderer`. Every other
+  method stamps a bracketed label, which is right for a message and wrong for
+  structure: `┄ step 1 of 3` routed through `PrintSystemMessage` came out as
+  `[SYSTEM]    ┄ step 1 of 3`, the new line inside the old frame. Step markers,
+  phase lines and tool steps use it, and all of them start at column two so a
+  running session has one left edge. `scifiPrint` indents to the same column,
+  because warnings, errors and data were the last lines starting at column
+  zero — a warning that breaks the margin does not read as more urgent, it
+  reads as a different program.
+- **The SPEAKING indicator is a travelling pulse, not a waveform.** While the
+  model speaks Helix has no audio level — the audio is decoded and played, never
+  metered — so a full-range wave there was animating a signal that does not
+  exist. Measured, the old pattern changed 41% of the row per frame at 10fps and
+  the pulse changes 12%. `LISTENING` keeps its waveform: that level is real.
+- **Foreign output is framed** (`internal/shell/foreign.go`): an install hands
+  the terminal to pip, brew or cargo and takes it back. Helix does not reformat
+  that output — reflowing someone's progress bar would be worse — but it marks
+  the handover in both directions with a glyph unlike its own gutter, names the
+  program rather than its wrapper (`sudo apt-get` is apt-get talking), and
+  reports the verdict on the closing mark.
 - **Completion**: Tab completes slash commands and paths, extending to the
   longest common prefix and listing the alternatives. The command names come
   from the registry via `shell.SetSlashCommands`, so completion cannot become a
   stale second copy of the command list.
+
+### 5-bis. Credential Entry (`internal/commands/secret.go`, `cmd/helix/keyprompt_view.go`)
+API keys are read through `commands.AskSecret`, which suppresses echo, and
+**never** through the `Prompter` abstraction — ADR-005 denies voice `/setup`
+precisely because it would have you dictate keys aloud, and a secret travelling
+through the same channel as an ordinary question is one refactor from getting
+there. `commands.SecretInputIsHidden` reports whether this terminal can actually
+suppress echo; the prompt panel states the answer rather than assuming it,
+because promising hiding that will not happen is worse than silence. Console
+URLs live in `internal/providers/keyconsole.go` beside `envName`, where the rest
+of the per-vendor account knowledge already is.
 
 ### 5c. Report Rendering (`internal/shell/panel.go`, `wizard.go`)
 **Colour is gated on whether anything can render it.** `NO_COLOR` disables it,
@@ -501,8 +579,17 @@ command reference against the same table.
 - **Snapshots** (`snapshot.go`): every wipe (`/clear`, `/compact`,
   `/memory clear`, `/resume`) archives first, so no path through the session
   commands destroys a transcript.
-- **Task list** (`todo.go`): persisted open work, injected as data-only context
-  so the agentic harness can resume a multi-turn task.
+- **Task list** (`todo.go`, `todo_agent.go`): persisted open work, injected as
+  data-only context so the agentic harness can resume a multi-turn task — and
+  writable by the agent, which is the party that finds out the plan was wrong.
+  `TodoOrigin` records who wrote each item, with the user as the zero value
+  because every item in a file written before the field existed was typed by a
+  human. The agent may redirect anything and erase only its own: a user task can
+  be revised (keeping `WasText`) or superseded with a reason, never deleted,
+  because deletion is the only one of those that cannot be seen or undone. The
+  harness treats a task it created *or adopted* this turn as outstanding work,
+  which is what keeps the loop running until the plan is finished rather than
+  until one batch of steps exits 0.
 - **Usage meter** (`internal/ai/meter.go`): per-purpose call counts, failures,
   latency, and *estimated* tokens behind `/cost`. Exact counts are unavailable
   because no provider returns a usage block on the streaming path Helix uses;
@@ -619,7 +706,7 @@ provider and model, in-progress task texts, a one-line summary of the work, and
   the latest binaries?" is asked AFTER the restart, and the only thing that
   could answer it was the model's guess at what the program had done — which it
   answered plausibly, correctly, and without evidence. `Update` holds a sentence
-  ("already on the newest release (1.5.0)", "not checked — update.check is off",
+  ("already on the newest release (1.5.0-dev)", "not checked — update.check is off",
   "found 1.6.0 but could not install it"), the restart panel prints it, and the
   synthetic turn appended on resume repeats it so the model reports rather than
   infers. Recorded on every path including the ones that decline to look,

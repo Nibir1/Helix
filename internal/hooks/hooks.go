@@ -50,6 +50,18 @@ const (
 	PreGit  Event = "pre-git"
 	PostGit Event = "post-git"
 
+	// PreFile / PostFile wrap a planner `file` step — read, list, glob, grep,
+	// edit or write. They fire for READS as well as writes, because "which
+	// files may this agent look at" is exactly the kind of policy a machine or
+	// a repository has and Helix cannot know: a hook that refuses any path
+	// under secrets/ is only useful if it sees the read.
+	//
+	// The subject a `match` regexp is tested against is "<action> <path>", so
+	// a rule can key on either — `^write ` gates every write, `\.env$` gates
+	// one file whatever is done to it.
+	PreFile  Event = "pre-file"
+	PostFile Event = "post-file"
+
 	// SessionStart / SessionEnd wrap the interactive shell's lifetime.
 	SessionStart Event = "session-start"
 	SessionEnd   Event = "session-end"
@@ -57,7 +69,7 @@ const (
 
 // Events lists every valid event, in the order /hooks prints them.
 func Events() []Event {
-	return []Event{PreShell, PostShell, PreGit, PostGit, SessionStart, SessionEnd}
+	return []Event{PreShell, PostShell, PreGit, PostGit, PreFile, PostFile, SessionStart, SessionEnd}
 }
 
 // ValidEvent reports whether name is a real event, returning the canonical form.
@@ -329,7 +341,15 @@ func (s *Set) Run(ctx context.Context, ev Event, c Context) []Result {
 
 // hookSubject is what Match is tested against: the command for shell hooks,
 // the action for tools whose step carries no command line.
+// hookSubject is the text a hook's `match` regexp is tested against.
+//
+// For a file step both halves matter — a rule wants to key on the action
+// ("every write"), the path (".env, whatever is done to it"), or both — so the
+// subject is "<action> <path>" rather than either alone.
 func hookSubject(c Context) string {
+	if c.Tool == "file" && c.Action != "" && c.Command != "" {
+		return c.Action + " " + c.Command
+	}
 	if c.Command != "" {
 		return c.Command
 	}
@@ -368,8 +388,16 @@ func runHook(ctx context.Context, h Hook, ev Event, c Context) Result {
 	return res
 }
 
+// isPreEvent reports whether a blocking hook on this event may DENY the step.
+//
+// Every pre-* event must be listed. A pre-event missing from here still runs
+// its hooks and still reports a non-zero exit — and then proceeds anyway, which
+// is the worst possible failure: the user has a rule they can see firing, the
+// output says it refused, and the step happens regardless. The test below this
+// derives the list from Events() rather than repeating it, so adding an event
+// cannot quietly produce a hook that cannot block.
 func isPreEvent(ev Event) bool {
-	return ev == PreShell || ev == PreGit
+	return ev == PreShell || ev == PreGit || ev == PreFile
 }
 
 // hookShell picks the interpreter. Hooks are shell one-liners by design, so

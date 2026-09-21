@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"helix/internal/audio"
+	"helix/internal/shell"
 	"helix/internal/utils"
 
 	"github.com/fatih/color"
@@ -181,6 +182,30 @@ func (ux *UX) Typewriter(text string) {
 type AIStreamWriter struct {
 	ux      *UX
 	started bool
+	held    bool // a SuspendLine is outstanding and Close must release it
+	band    *shell.BandWriter
+}
+
+// ReplyMeta names the model that produced the reply, for the band header.
+//
+// A HOOK rather than a parameter, because the alternative was widening
+// agent.Renderer's StreamAIMessage/PrintAIMessage signatures and every
+// implementation of them — including the headless one, which has no band and no
+// use for the value. It is read at RENDER time, not turn start, so a mid-turn
+// failover to the local model is named correctly rather than reporting whatever
+// was selected when the turn began.
+//
+// nil is the honest default: a caller that has not wired it gets a band with no
+// model in the rule, which is what a caller that does not know the model should
+// produce.
+var ReplyMeta func() string
+
+// replyMeta reads the hook safely.
+func replyMeta() string {
+	if ReplyMeta == nil {
+		return ""
+	}
+	return ReplyMeta()
 }
 
 // StreamAIMessage begins an incrementally rendered AI response. The caller
@@ -199,12 +224,19 @@ func (w *AIStreamWriter) Chunk(text string) {
 	}
 	if !w.started {
 		// Models commonly open with a newline or spaces; leading whitespace
-		// would push the answer off the prefix line.
+		// would push the answer off the first rail line.
 		text = strings.TrimLeft(text, " \t\r\n")
 		if text == "" {
 			return
 		}
-		fmt.Print(w.ux.scifiPrefix("[NEURAL_NET]", w.ux.colors.Primary))
+		// Taken on FIRST CONTENT and released in Close, so the hold spans the
+		// whole stream rather than each chunk. Per-chunk would let the HUD
+		// repaint in the gaps between tokens, which is the same bug arriving
+		// one token at a time.
+		SuspendLine()
+		w.held = true
+		fmt.Println(shell.BandHeader("HELIX", replyMeta(), shell.HexPrimary))
+		w.band = shell.NewBandWriter()
 		w.started = true
 	}
 
@@ -214,7 +246,7 @@ func (w *AIStreamWriter) Chunk(text string) {
 	if strings.TrimSpace(text) != "" {
 		audio.PlayType()
 	}
-	fmt.Print(text)
+	w.band.WriteString(text)
 }
 
 // Started reports whether any content was rendered, so callers can fall back
@@ -224,7 +256,13 @@ func (w *AIStreamWriter) Started() bool { return w.started }
 // Close terminates the streamed line.
 func (w *AIStreamWriter) Close() {
 	if w.started {
-		fmt.Println()
+		w.band.Close()
+	}
+	// Released here and not in a defer on Chunk: the hold has to outlive every
+	// chunk, and a stream that produced no content never took one.
+	if w.held {
+		w.held = false
+		ResumeLine()
 	}
 }
 
@@ -240,19 +278,60 @@ func (ux *UX) PrintSystemMessage(text string) {
 }
 
 // PrintAIMessage prints an AI response.
+// PrintAIMessage prints an AI response as a band.
+//
+// THIS IS THE NON-STREAMING PATH — a vision answer, a fast-path reply, anything
+// the agent has in hand before it prints. The streaming path deliberately does
+// NOT animate (see AIStreamWriter: real arrival timing replaces the
+// simulation), but here there is no arrival timing to replace, so the typing
+// effect still has a job and `/config typing-effect` still governs it.
+//
+// It feeds the BAND rather than printing the text, because the rail is emitted
+// per line: animating the finished string would type over the frame. The first
+// version of this dropped the parameter entirely, which quietly turned a
+// documented setting — "Animate AI replies" — into one that did nothing.
 func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
-	prefix := ux.scifiPrefix("[NEURAL_NET]", ux.colors.Primary)
-	if ux.typewriteAll {
-		// Phase 15: Typewrite the prefix and text together
-		ux.Typewriter(prefix + text)
-	} else {
-		fmt.Print(prefix)
-		if useTypingEffect {
-			ux.Typewriter(text)
-		} else {
-			fmt.Println(text)
-		}
+	if strings.TrimSpace(text) == "" {
+		return
 	}
+	// The reply owns the line while it writes. Without this an animated HUD —
+	// the duplex SPEAKING waveform, say — repaints over the band ten times a
+	// second and the answer is wiped as fast as it is drawn.
+	SuspendLine()
+	defer ResumeLine()
+
+	fmt.Println(shell.BandHeader("HELIX", replyMeta(), shell.HexPrimary))
+
+	if !useTypingEffect && !ux.typewriteAll {
+		for _, line := range shell.BandLines(text) {
+			fmt.Println(line)
+		}
+		return
+	}
+	ux.typeIntoBand(text)
+}
+
+// typeIntoBand animates a finished reply through the band writer.
+//
+// Fed rune by rune so the WRITER decides every line break — the alternative is
+// animating pre-wrapped lines, which types the rail glyph as though it were
+// content and puts the frame inside the animation.
+func (ux *UX) typeIntoBand(text string) {
+	band := shell.NewBandWriter()
+	delay := ux.typingSpeed
+	if n := len([]rune(text)); n > 400 {
+		delay = 8 * time.Millisecond
+	} else if n > 200 {
+		delay = 15 * time.Millisecond
+	}
+	for _, r := range text {
+		if r != ' ' && r != '\n' && r != '\r' && r != '\t' {
+			audio.PlayType()
+		}
+		band.WriteString(string(r))
+		time.Sleep(delay)
+	}
+	band.Close()
 }
 
 // PrintCommand prints a command execution header.
@@ -263,7 +342,14 @@ func (ux *UX) PrintAIMessage(text string, useTypingEffect bool) {
 // Returns: none.
 // Complexity: O(1).
 func (ux *UX) PrintCommand(command string) {
-	ux.scifiPrint("EXEC", command, ux.colors.Secondary)
+	// `[EXEC] glob **/*.md` was the last of the bracketed labels left in a
+	// live trace, and it sat at column ZERO while the step markers, the prompt
+	// and the reply band all start at column two — so the left edge of a
+	// running session broke in and out by two cells, line by line.
+	//
+	// A tool step is the same family as `┄ step 1 of 2`: a record of what
+	// happened, not something Helix is saying. It reads as one now.
+	ux.PrintChrome("  " + shell.Fg(shell.HexSubtle, "▸ ") + shell.Fg(shell.HexAmber, command))
 }
 
 // PrintData prints structured data output.
@@ -329,6 +415,19 @@ func (ux *UX) PrintInfo(message string) {
 //
 // Returns: none.
 // Complexity: O(1).
+// PrintChrome writes an already-formatted line with no label and no typewriter.
+//
+// Chrome is structure, not speech: a step marker animated character by
+// character is the frame pretending to be content.
+func (ux *UX) PrintChrome(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	SuspendLine()
+	defer ResumeLine()
+	fmt.Println(text)
+}
+
 func (ux *UX) PrintDebug(message string) {
 	if !utils.IsDebugMode() {
 		return
@@ -412,7 +511,25 @@ func BuildShellCommand(command string, shellName string) *exec.Cmd {
 
 // scifiPrint prints a labeled message using the Helix UX style.
 func (ux *UX) scifiPrint(label, text string, colorFunc func(...interface{}) string) {
-	msg := fmt.Sprintf("%s %s", ux.scifiLabel(label), colorFunc(text))
+	// EVERY print yields the animated line, not just the reply.
+	//
+	// SuspendLine started life around PrintAIMessage, because a reply being
+	// wiped by the speaking HUD was the visible half of the problem. It is not
+	// the whole of it: a live session prints step markers, EXEC lines, warnings
+	// and info between HUD frames, and each one lands on the row the HUD is
+	// repainting ten times a second. Reported as "the progress bar glitches
+	// when it starts to speak OR ANYTHING ELSE PRINTS ON THE SCREEN" — the
+	// second half of that sentence is the general case, and this is the one
+	// place all of it funnels through.
+	SuspendLine()
+	defer ResumeLine()
+
+	// INDENTED TO COLUMN TWO, like everything else. The prompt, the reply band,
+	// the step markers and the tool steps all start there; these were the last
+	// lines starting at column zero, so a live session's left edge stepped in
+	// and out depending on which kind of line came next. A warning that breaks
+	// the margin does not read as more urgent, it reads as a different program.
+	msg := "  " + fmt.Sprintf("%s %s", ux.scifiLabel(label), colorFunc(text))
 	if ux.typewriteAll {
 		// Route all system messages through the typewriter engine
 		ux.Typewriter(msg)
@@ -421,17 +538,11 @@ func (ux *UX) scifiPrint(label, text string, colorFunc func(...interface{}) stri
 	}
 }
 
-// scifiPrefix creates a colored prefix for inline messages.
-//
-// Args:
-//   - label: log label.
-//   - colorFunc: colorizer.
-//
-// Returns: string.
-// Complexity: O(1).
-func (ux *UX) scifiPrefix(label string, colorFunc func(...interface{}) string) string {
-	return fmt.Sprintf("%s → ", colorFunc(label))
-}
+// scifiPrefix is GONE. It built the `[NEURAL_NET] →` inline prefix, and the
+// band layout replaced that with a labelled rule — the prefix could not say
+// which model produced the turn and could not hold the prose to a measure, and
+// both were the reported complaint. scifiPrint keeps its own inline form for
+// SYSTEM and WARNING lines, which are single-line notices rather than turns.
 
 // scifiLabel creates a neutral bracketed label.
 //

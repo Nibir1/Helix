@@ -41,6 +41,20 @@ var (
 	sudoShellRe    = regexp.MustCompile(`(?i)sudo\s+(?:/[a-z0-9_./-]+/)?(bash|sh|zsh|dash|ksh|ash|fish)\b`)
 	shellFromTmpRe = regexp.MustCompile(`(?i)(bash|sh|zsh|dash|ksh|ash|fish)\s+(/tmp/|/var/tmp/|/dev/shm/)`)
 
+	// machineHaltRe matches a command that ends the machine.
+	//
+	// Anchored at a word boundary so `git reboot-branch` or a path containing
+	// "halt" is not swallowed, and it deliberately accepts the bare forms as
+	// well as the sudo ones: on a single-user Mac `shutdown -r now` often needs
+	// no sudo at all, and classifying only the sudo spelling would be a rule
+	// that protects the harder case and misses the easy one.
+	//
+	// `osascript ... restart` is included because it is the spelling a model
+	// reaches for on macOS when sudo looks unavailable.
+	machineHaltRe = regexp.MustCompile(
+		`(?i)(^|[;&|]\s*|\bsudo\s+)(shutdown|reboot|halt|poweroff)\b|` +
+			`(?i)osascript\b.*\b(restart|shut ?down)\b`)
+
 	// redirectToFileRe finds a redirection that writes somewhere.
 	//
 	// This replaces `strings.Contains(lc, " > ") || strings.Contains(lc, ">>")`,
@@ -105,6 +119,24 @@ func AnalyzeShellRisk(cmd string) (ShellRiskLevel, []string) {
 
 	if strings.Contains(lc, "eval ") {
 		reasons = append(reasons, "uses 'eval' to execute dynamic shell code")
+	}
+
+	// Ending the machine. HIGH, and it took a live session to notice it was not.
+	//
+	// `sudo shutdown -r now` analysed as LOW, which under the default `ask`
+	// posture means it RUNS WITHOUT ASKING — and voice-originated plans are
+	// capped at Medium, so the cap did not stop it either. A user asked their
+	// shell to "reboot yourself" and the planner offered to reboot the Mac
+	// instead; had they agreed, nothing in the pipeline would have paused.
+	//
+	// It is HIGH rather than Medium on ADR-005's own criterion: the question is
+	// not how alarming the command sounds but whether its effect is
+	// recoverable. `/reboot` restarts the SHELL, destroys nothing, writes a
+	// continuity record first, and is deliberately voice-reachable. Ending the
+	// machine discards unsaved work in every other application on it, and
+	// nothing Helix wrote can bring that back.
+	if machineHaltRe.MatchString(lc) {
+		reasons = append(reasons, "shuts down or reboots the machine, discarding unsaved work everywhere")
 	}
 
 	if len(reasons) > 0 {

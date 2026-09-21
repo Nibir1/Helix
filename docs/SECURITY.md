@@ -94,6 +94,39 @@ version resolving every absolute-looking word in *every* command — including
 read-only ones, which discarded the answer — at a cost that grew without limit
 alongside the input.
 
+### 5b2. The `file` Tool Has No Path Check Of Its Own
+
+The harness gained a `file` tool (read, list, glob, grep, edit, write). It does
+**not** carry its own confinement. Every path goes through the same
+`DirectorySandbox.ValidateSafePath` that shell commands get, passed in as a
+resolver, and the tool package refuses to run at all when no resolver is
+configured rather than defaulting to "anywhere".
+
+That is deliberate and is the main security decision in the port. The upstream
+implementation this came from confines paths with its own prefix check against
+the working directory. Helix already has a stronger one — it resolves symlinks
+on *both* sides, folds case for macOS and Windows, handles a target that does not
+exist yet by validating its parent, and rejects a sibling whose name merely
+extends the root (`/tmp/jail-x` against root `/tmp/jail`). A second, weaker copy
+of a confinement rule is how a jail grows a door, so there is one copy and the
+file tool consults it.
+
+Two further properties:
+
+- **Writes are atomic and preserve the existing mode.** A temp file in the same
+  directory and one rename. A 0600 file does not become 0644 because something
+  rewrote it, and an interrupted write leaves the original intact.
+- **Content a file tool returns is data, never instruction.** It reaches the
+  planner through the same `authority="data-only"` execution report as command
+  output. A file in a repository was written by whoever wrote that repository —
+  precisely the provenance the Instruction Firewall exists for — so a `read` of
+  an attacker-authored source file cannot direct the next plan.
+
+Local policy hooks see file steps too, on the `pre-file` / `post-file` events,
+with the match subject `"<action> <path>"` so a rule can gate an action, a path,
+or both. A blocking `pre-file` hook denies the step, and it runs *after* the risk
+tiers have already approved it — hooks subtract permission, never grant it.
+
 ### 5c. What the Setup Wizard May Install
 Two install policies exist deliberately, and the boundary between them is the
 moment of consent.
@@ -195,8 +228,18 @@ structural rather than advisory:
   whatever the phrasing, and the refusal is spoken as well as printed.
 - **Typed confirmations stay typed.** Force push, hard reset, worktree clean,
   deleting a main branch: the voice prompter refuses these outright, so voice
-  cannot satisfy them even with a perfect impersonation.
-- **Voice may restart the shell, and nothing else in the danger category.**
+  cannot satisfy them even with a perfect impersonation. In a full-duplex
+  session Helix goes further and **deafens the session** for the duration —
+  `session.input_audio.mute`, verified to stop transcription and turn-taking
+  outright — so nothing in the room can speak the phrase while you read the
+  prompt. If that mute is refused, the confirmation is refused with it.
+- **Ending the machine is High risk.** `shutdown`, `reboot`, `halt`, `poweroff`
+  and the macOS `osascript` spelling are unreachable from voice and blocked at
+  the default posture. They analysed as **Low** until 2026-09-13 — which under
+  `ask` means they run with no confirmation — and the Medium voice cap does not
+  reach a Low command either, so neither guard applied. Found when a planner
+  offered to reboot the machine in answer to "reboot yourself".
+- **Voice may restart the SHELL, and nothing else in the danger category.**
   `/reboot` is reachable by voice because it destroys nothing: the continuity
   record is written before the process ends, so the worst a misheard "reboot"
   costs is a few seconds, after which the same mode, directory and conversation
@@ -362,6 +405,61 @@ plainly because an updater is the highest-consequence code in the project:
   mistake otherwise surfaces later as an auth failure on every transcription.
   The check is negative-only: it never asserts what a valid key looks like, since
   vendors change formats and a positive rule would start rejecting good keys.
+
+### Entering them
+
+A key is read **without echo**. `commands.AskSecret` reads the terminal in raw
+mode and prints nothing back, so the value does not reach the screen, the
+scrollback or a screenshot.
+
+This was not always true, and the gap was not theoretical. Every key prompt used
+`AskLine` — the same reader that asks which provider you want, which echoes by
+design — so a pasted key was printed in full. It was found when a user sent a
+screenshot of the Windows setup wizard with a live `sk-proj-…` key visible in
+it; the key had to be revoked. Nothing about the bug was Windows-specific. It
+had echoed on every platform since keys were first asked for, and Windows was
+simply the first time anyone photographed it.
+
+The prompt itself says what it is about to do with the value. Before anything is
+typed it names the provider, the page that issues its keys, the file the key
+lands in with its mode, and the environment variable that avoids the disk
+entirely:
+
+```
+   API KEY
+  ────────────────────────────────────────────────────────────────
+  │ PROVIDER  openai
+  │ GET ONE   https://platform.openai.com/api-keys
+  │ STORED    ~/.helix/secrets.json  (0600, this machine only)
+  │ OR SET    $OPENAI_API_KEY  (never written to disk)
+  │
+  │ Nothing is echoed as you type. The key is never logged, never
+  │ passed as a command-line argument, and goes nowhere but openai.
+```
+
+**On a terminal that cannot suppress echo the last paragraph is replaced, not
+softened.** It says plainly that the key will be visible on screen and in the
+scrollback, and suggests pasting it elsewhere. Promising hiding that will not
+happen is worse than saying nothing, because the reader pastes a credential on
+the strength of it — which is how a live key ended up in a screenshot.
+
+A provider with no single key-issuing page (`custom`) gets no URL rather than a
+plausible one. A wrong link in a security prompt is worse than no link: the
+reader follows it and then has to work out that Helix, not their memory, was
+wrong.
+
+Two further properties are worth stating because they are deliberate:
+
+- **Not routed through `Prompter`.** ADR-005 puts `/setup` on the voice-denied
+  list precisely because it "would have you dictate API keys aloud". A secret
+  that travelled through the same abstraction as an ordinary question would be
+  one refactor away from reaching the voice prompter, so `AskSecret` reads the
+  terminal directly and there is no channel to misroute.
+- **A terminal that cannot hide input says so.** Some emulators — MSYS2's
+  MINGW64 among them — hand a Go binary a pipe rather than a console, and echo
+  there belongs to the emulator, not to Helix. Rather than reading silently and
+  looking fixed, the prompt states that input is **not** hidden, so the choice
+  to paste a key is an informed one.
 
 ### Removing them
 `make delete-secrets` removes every credential Helix stores and nothing else:

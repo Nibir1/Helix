@@ -410,7 +410,32 @@ func isVoiceRebootPhrase(text string) bool {
 	t := strings.ToLower(strings.TrimSpace(text))
 	t = strings.TrimRight(t, " .!?,")
 
+	// TWO candidates, for the reason matchModePhrase already documents and this
+	// matcher did not inherit: a suffix match cannot see a phrase that has a
+	// politeness marker after it. "Reboot yourself, please" ends on "please",
+	// so nothing matched, and a documented voice instruction went to the
+	// planner instead — which answered conversationally and offered to reboot
+	// the Mac.
+	//
+	// BOTH forms are tried rather than only the trimmed one, because some
+	// phrases end in a word the trimmer removes; matchModePhrase records
+	// "you can stop now" becoming "you can stop" as exactly that trap.
+	candidates := []string{t}
+	if trimmed := trimTrailingCourtesy(t); trimmed != t && trimmed != "" {
+		candidates = append(candidates, trimmed)
+	}
+
 	for _, p := range rebootPhrases {
+		if matchesRebootPhrase(candidates, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesRebootPhrase tests one phrase against every candidate form.
+func matchesRebootPhrase(candidates []string, p string) bool {
+	for _, t := range candidates {
 		if t == p {
 			return true // the bare instruction
 		}

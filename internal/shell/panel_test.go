@@ -115,7 +115,7 @@ func TestKVAlignsOnTheWidestLabel(t *testing.T) {
 // The rule width has to survive a hostile terminal size rather than emit a
 // negative repeat count (a panic) or a 200-column horizon.
 func TestPanelWidthIsClamped(t *testing.T) {
-	if w := panelWidth(); w < 52 || w > 92 {
+	if w := panelWidth(); w < 52 {
 		t.Errorf("panel width %d escaped its clamp", w)
 	}
 }
@@ -445,5 +445,89 @@ func TestTableStaysAlignedWithWideRunes(t *testing.T) {
 			t.Errorf("row %d's final column starts at column %d, others at %d: %q",
 				i, at, col, plain)
 		}
+	}
+}
+
+// TruncateTail budgets COLUMNS, not runes — the same mistake truncateANSI was
+// fixed for, in its counterpart.
+func TestTruncateTailBudgetsColumnsNotRunes(t *testing.T) {
+	// Every rune two cells wide. A rune count would come back double.
+	const cjk = "日本語のテキストがここにあります"
+	for _, width := range []int{4, 7, 10, 15, 20} {
+		got := TruncateTail(cjk, width)
+		if w := runeLen(got); w > width {
+			t.Errorf("TruncateTail(cjk, %d) is %d columns: %q", width, w, got)
+		}
+	}
+}
+
+// It keeps the END, which is the whole reason it exists beside Truncate.
+func TestTruncateTailKeepsTheEnd(t *testing.T) {
+	const s = "alpha bravo charlie delta echo foxtrot"
+	got := TruncateTail(s, 20)
+	if !strings.HasSuffix(got, "foxtrot") {
+		t.Errorf("TruncateTail dropped the end: %q", got)
+	}
+	if !strings.HasPrefix(got, "…") {
+		t.Errorf("TruncateTail does not mark the cut: %q", got)
+	}
+	if runeLen(got) > 20 {
+		t.Errorf("TruncateTail(%q, 20) is %d columns", s, runeLen(got))
+	}
+}
+
+// Short input is returned untouched, with no ellipsis.
+func TestTruncateTailLeavesShortInputAlone(t *testing.T) {
+	const s = "short enough"
+	if got := TruncateTail(s, 40); got != s {
+		t.Errorf("TruncateTail(%q, 40) = %q", s, got)
+	}
+}
+
+// A budget too small for even the ellipsis must still not overflow.
+func TestTruncateTailSurvivesAnAbsurdBudget(t *testing.T) {
+	for _, width := range []int{-1, 0, 1, 2} {
+		if got := TruncateTail("a long string", width); runeLen(got) > max(width, 1) {
+			t.Errorf("TruncateTail(_, %d) = %q (%d columns)", width, got, runeLen(got))
+		}
+	}
+}
+
+// The panel uses the WHOLE terminal. The 92 cap was removed by owner decision
+// (2026-09-13) after a 125-column window showed 33 dead columns on the right —
+// the frame read as misplaced long before it read as a horizon.
+//
+// Asserted on panelWidthFor rather than panelWidth because TerminalWidth
+// returns 0 under `go test`: reinstating the cap passed the entire suite until
+// this arithmetic was separated from the measurement.
+func TestPanelUsesTheWholeTerminal(t *testing.T) {
+	for terminal, want := range map[int]int{
+		125: 121, // the reported window
+		200: 196,
+		96:  92, // just past the old cap
+		60:  56,
+	} {
+		if got := panelWidthFor(terminal); got != want {
+			t.Errorf("panelWidthFor(%d) = %d, want %d — a capped panel leaves dead columns "+
+				"on the right", terminal, got, want)
+		}
+	}
+}
+
+// The LOWER clamp is not taste and stays: below ~52 the KV label column and its
+// value collide, and Table has nothing left to shave.
+func TestPanelStillRefusesToCollapse(t *testing.T) {
+	for _, terminal := range []int{1, 20, 40, 51} {
+		if got := panelWidthFor(terminal); got != 52 {
+			t.Errorf("panelWidthFor(%d) = %d, want the 52 floor", terminal, got)
+		}
+	}
+}
+
+// No terminal to measure — a pipe, a CI log — gets a readable default rather
+// than the floor.
+func TestPanelHasAReadableDefaultWithNoTerminal(t *testing.T) {
+	if got := panelWidthFor(0); got != 72 {
+		t.Errorf("panelWidthFor(0) = %d, want 72", got)
 	}
 }

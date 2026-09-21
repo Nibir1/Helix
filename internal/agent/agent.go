@@ -122,6 +122,17 @@ type Agent struct {
 	// never gain authority from them.
 	Todos *session.TodoList
 
+	// todoTouched is the set of task ids THIS turn acted on. Unexported and
+	// reset per turn: it is what lets the harness tell "a task I am working
+	// on" from "a task sitting on the user's list", which is the difference
+	// between a loop that finishes the job and one that stops halfway and
+	// says nothing.
+	todoTouched map[int]bool
+
+	// planAnnounced stops the spoken plan being read out more than once per
+	// turn. Reset with todoTouched, since a new turn is a new plan.
+	planAnnounced bool
+
 	// ProjectContext, when set, returns the repository's own instructions for
 	// an assistant (HELIX.md and friends), the path it came from, and whether
 	// one was found. Wired by the shell, which owns filesystem discovery; nil =
@@ -268,6 +279,9 @@ func (a *Agent) HandleInput(userInput string) {
 		return
 	}
 
+	// A new turn owns none of the previous turn's tasks.
+	a.beginTodoTurn()
+
 	// --- Slash-command interception ---
 	if strings.HasPrefix(userInput, "/") && a.Slash != nil {
 		if a.Slash.Dispatch(userInput) {
@@ -358,7 +372,7 @@ func (a *Agent) HandleInput(userInput string) {
 	case planned && a.Agentic:
 		a.agenticFollowUp(userInput, envDesc, ragContext, obs, 0)
 	case planned && needsAnswer(obs):
-		a.agenticFollowUp(userInput, envDesc, ragContext, obs, retrievalFollowUpBudget)
+		a.agenticFollowUp(userInput, envDesc, ragContext, obs, retrievalBudget(obs))
 	}
 }
 
@@ -366,6 +380,34 @@ func (a *Agent) HandleInput(userInput string) {
 // retrieved something. One iteration: enough to answer from the results, and not
 // enough to become the self-correction loop the user did not enable.
 const retrievalFollowUpBudget = 1
+
+// fileRetrievalBudget is the allowance for a turn whose retrieval touched the
+// filesystem.
+//
+// A web lookup is one hop: search, then answer from the results. A file
+// question is routinely three — find the file, read it, answer — because the
+// model does not know the layout of a repository it has never seen. With the
+// web's single follow-up, "read me the parser file and tell me what it does"
+// spent its one iteration on a glob and stopped, having read nothing:
+//
+//	[EXEC] glob **/parser.go
+//	HELIX :: ANSWERING :: reading retrieved results (1/1)
+//
+// Three is that chain plus one correction, and no more. This is NOT the
+// agentic loop arriving by the back door: it still cannot self-correct a
+// failing command, and /agentic off still means Helix plans once and executes.
+// It means a question the user asked gets read before it is answered.
+const fileRetrievalBudget = 3
+
+// retrievalBudget picks the allowance from what was actually retrieved.
+func retrievalBudget(obs []StepObservation) int {
+	for _, o := range obs {
+		if o.NeedsAnswer && o.OK && o.Tool == "file" {
+			return fileRetrievalBudget
+		}
+	}
+	return retrievalFollowUpBudget
+}
 
 // planFirewallExecute runs one plan→firewall→execute cycle. It returns the
 // per-step observation trace and whether a plan actually executed (false when
@@ -524,7 +566,7 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 	obs := make([]StepObservation, 0, len(plan.Steps))
 	for i, step := range plan.Steps {
 		if len(plan.Steps) > 1 {
-			a.render.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
+			a.render.PrintChrome(stepLine(i+1, len(plan.Steps)))
 		}
 
 		// CRITICAL FIX: Trust AI-generated steps to stop nagging the user with
@@ -588,6 +630,65 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 			out, err := a.handleVisionStep(step)
 			if err != nil {
 				a.render.PrintError(fmt.Sprintf("Vision step failed: %v", err))
+				o.OK, o.Err = false, err.Error()
+				obs = append(obs, o)
+				return obs
+			}
+			o.Output = out
+
+		case "file":
+			// A file step's output is the point of the step — a read, a glob or
+			// a grep exists to hand the planner text it did not have — so it is
+			// captured unconditionally and marked NeedsAnswer, exactly as a web
+			// retrieval is. The execution report fences it as data-only, which
+			// is what makes replaying a file's contents to the planner safe: a
+			// file in a repository is content written by whoever wrote that
+			// repository, which is precisely the provenance the Instruction
+			// Firewall exists for.
+			out, err := a.handleFileStep(step)
+			if err != nil {
+				o.OK, o.Err = false, err.Error()
+				// A READ THAT FINDS NOTHING IS AN ANSWER, NOT A FAILURE.
+				//
+				// Every other tool aborts the plan on error because later steps
+				// usually depend on the earlier one. A read is different: the
+				// model asked precisely because it did not know, and "no such
+				// file" is the thing it wanted to learn. Aborting spent a whole
+				// planner round trip on that discovery — a real run went
+				//
+				//   TASK #1 in_progress → glob **/parser.go → read package.json
+				//
+				// and the failed read cancelled the rest of a five-step plan,
+				// which is two thirds of a four-iteration budget gone before any
+				// work happened.
+				//
+				// Mutations still abort. An edit or a write that failed may have
+				// left the tree in a state the following steps assumed away, and
+				// carrying on from there is how a half-applied change gets
+				// reported as finished.
+				if fileMutates(step.Action) {
+					a.render.PrintError(fmt.Sprintf("File step failed: %v", err))
+					obs = append(obs, o)
+					return obs
+				}
+				a.render.PrintWarning(fmt.Sprintf("%s: %v", fileSubject(step.Action, step.Args), err))
+				o.NeedsAnswer = true // the planner has to read what it found out
+				obs = append(obs, o)
+				continue
+			}
+			o.Output = out
+			o.NeedsAnswer = !fileMutates(step.Action)
+
+		case "todo":
+			// The result is the receipt PLUS the whole current list, and
+			// NeedsAnswer is deliberately false: editing a plan is not
+			// retrieval, so this must not on its own earn an extra planner
+			// round. What it does is make the list the next round sees
+			// correct — which is the entire point of letting the agent write
+			// to it.
+			out, err := a.handleTodoStep(step)
+			if err != nil {
+				a.render.PrintError(fmt.Sprintf("Task list step failed: %v", err))
 				o.OK, o.Err = false, err.Error()
 				obs = append(obs, o)
 				return obs
@@ -1347,9 +1448,15 @@ func (a *Agent) installPackage(pkg string) error {
 		return fmt.Errorf("no supported package manager found")
 	}
 	installCmd := pm.InstallCommand(pkg)
-	a.render.PrintInfo(fmt.Sprintf("Running: %s", installCmd))
+	// The package manager's output lands on the terminal unframed otherwise —
+	// the same handover problem the sidecar installs had, in a path nobody had
+	// looked at because it usually succeeds quietly.
+	source := shell.SourceOf(installCmd)
+	a.render.PrintCommand(installCmd)
+	a.render.PrintSystemMessage(shell.ForeignOpen(source))
 
 	err := a.sandbox.WrapCommand(installCmd, a.execConfig, a.env)
+	a.render.PrintSystemMessage(shell.ForeignClose(source, err == nil))
 	if err != nil {
 		// Post-install verification. Some package managers (like brew)
 		// exit non-zero if a dependency fails to link or cleanup fails, even if the

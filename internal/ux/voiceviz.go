@@ -39,6 +39,23 @@ const (
 	VizSpeaking
 	// VizStandby renders the wake-word breathing pulse.
 	VizStandby
+
+	// VizExecuting renders a shell step running under the sandbox.
+	//
+	// A turn spends most of its wall-clock here and the screen showed NOTHING —
+	// the planner has its own Thinker, the microphone has a waveform, and the
+	// part that actually touches the machine had no indicator at all. A block
+	// travelling left to right, distinct from the Thinker's scanner so
+	// "deciding" and "doing" are not the same animation.
+	VizExecuting
+
+	// VizSeeing renders a camera frame on its way to an insight.
+	//
+	// Frame-to-insight is measured in SECONDS on a local vision model (§10A
+	// records 8.8s warm), which is a long time to show nothing while the camera
+	// is open. An iris, because the one thing a user must never be unsure about
+	// is whether the camera is looking.
+	VizSeeing
 )
 
 // vizWidth is the waveform window width in cells.
@@ -55,6 +72,7 @@ type VoiceViz struct {
 	stop    chan struct{}
 	frame   int
 	level   float64 // 0..1 live amplitude; <0 = synthetic animation
+	smooth  float64 // exponentially-averaged level; what the bar draws
 	start   time.Time
 	tty     bool
 
@@ -62,6 +80,11 @@ type VoiceViz struct {
 	// because only the CALLER knows which engine is running, and the two
 	// engines can honestly promise different things — see SetStandbyHint.
 	standbyHint string
+
+	// detail is the trailing context a state may carry — the sandbox backend
+	// for EXECUTING, the vision model for SEEING. Optional: a state that has
+	// nothing useful to add shows nothing rather than a placeholder.
+	detail string
 }
 
 // NewVoiceViz creates an idle voice HUD.
@@ -96,6 +119,14 @@ func (v *VoiceViz) SetStandbyHint(hint string) {
 		hint = DefaultStandbyHint
 	}
 	v.standbyHint = hint
+}
+
+// SetDetail sets the trailing context for the current state. Safe at any time;
+// the next frame picks it up.
+func (v *VoiceViz) SetDetail(detail string) {
+	v.mu.Lock()
+	v.detail = detail
+	v.mu.Unlock()
 }
 
 // Start begins the animation loop in the given state. No-op on non-TTY
@@ -178,6 +209,60 @@ func releaseTerminalLine() { terminalLineHeld.Store(false) }
 // user is mid-conversation.
 func LineHeld() bool { return terminalLineHeld.Load() }
 
+// lineSuspends counts outstanding holds taken by REAL output — a reply band, a
+// streamed answer — as opposed to the background chatter LineHeld exists for.
+//
+// THE BUG THIS FIXES. LineHeld asks background writers to stay quiet, which is
+// right for them: an NVD progress line is not worth interrupting a conversation
+// for. But the reply is not background chatter, and it had no way to take the
+// line. A duplex turn printed its answer into the band while the SPEAKING HUD
+// repainted "\r\033[2K" ten times a second underneath it, so the text was wiped
+// as fast as it streamed. A real session produced
+//
+//	● ◈ HELIX SPEAKING |▄▁▁▃▄▄▃▄▇▇▅▃▃▄▄▂| 2.6s outstanding.
+//
+// — the last fragment written after the final repaint, and nothing else of a
+// whole paragraph. The answer was generated, spoken, and destroyed on screen.
+//
+// So output that MUST be seen suspends the animation instead of asking it
+// nicely. A counter rather than a flag because several HUDs can be alive at
+// once (the turn's own, the speaking one) and nesting must not let an inner
+// release resume the line under an outer writer.
+var lineSuspends atomic.Int32
+
+// SuspendLine pauses every animated HUD and clears the line so real output
+// starts on clean ground. Always pair it with ResumeLine.
+func SuspendLine() {
+	// The peak is package state so a test can verify that a print DID take the
+	// line. A print is faster than any poll interval, so a sampler racing it
+	// reports false failures, and os.Stdout cannot be swapped for a writer that
+	// checks synchronously — this is the one observation point that cannot miss
+	// the window. It costs one atomic on a path that runs once per printed line.
+	lineSuspendPeak.Add(1)
+	if lineSuspends.Add(1) == 1 && terminalLineHeld.Load() {
+		// Wipe the frame that is sitting there, and show the cursor again so a
+		// typewriter-style write does not appear to come from nowhere.
+		fmt.Print("\r\033[2K\033[?25h")
+	}
+}
+
+// ResumeLine releases one suspension. The HUD repaints on its next tick.
+func ResumeLine() {
+	if lineSuspends.Add(-1) <= 0 {
+		lineSuspends.Store(0)
+		if terminalLineHeld.Load() {
+			fmt.Print("\033[?25l") // an animating HUD hides the cursor again
+		}
+	}
+}
+
+// LineSuspended reports whether real output currently owns the line.
+func LineSuspended() bool { return lineSuspends.Load() > 0 }
+
+// lineSuspendPeak counts how many holds have been taken since it was last
+// reset. Test-facing: see SuspendLine.
+var lineSuspendPeak atomic.Int32
+
 // Running reports whether the HUD is animating.
 func (v *VoiceViz) Running() bool {
 	v.mu.Lock()
@@ -194,6 +279,12 @@ func (v *VoiceViz) loop(stop chan struct{}) {
 		case <-stop:
 			return
 		case <-tick.C:
+			// Real output owns the line. Skip the frame entirely rather than
+			// painting and being overwritten: a half-drawn waveform spliced
+			// into a sentence is worse than no waveform.
+			if LineSuspended() {
+				continue
+			}
 			v.mu.Lock()
 			v.frame++
 			line := v.renderLocked()
@@ -211,10 +302,56 @@ func (v *VoiceViz) renderLocked() string {
 	case VizTranscribing:
 		return v.renderSweepLocked("◌ DECODING SPEECH")
 	case VizSpeaking:
-		return v.renderWaveLocked(thinkOrange, "◈ HELIX SPEAKING", false)
+		return v.renderSpeakingLocked(thinkOrange, "◈ HELIX SPEAKING")
+	case VizExecuting:
+		return v.renderRunLocked()
+	case VizSeeing:
+		return v.renderIrisLocked()
 	default:
 		return v.renderPulseLocked()
 	}
+}
+
+// renderSpeakingLocked draws the SPEAKING indicator: a single lit cell travelling
+// along a quiet track.
+//
+// IT IS NOT A WAVEFORM, AND THAT IS THE POINT. A waveform claims to depict an
+// audio level, and while the model is speaking Helix has no such level — the
+// audio is decoded and played, never metered. So the old full-range interference
+// pattern was animating a signal that did not exist, at full amplitude, beside
+// the reply text. Reported twice as "the progress bar shakes", which is exactly
+// what a fabricated signal looks like: motion with nothing behind it.
+//
+// A travelling pulse says the true thing — something is happening, Helix does
+// not know how loud — and says it without 41% of the row changing every frame.
+// The LISTENING bar keeps its waveform, because there the level is real: it
+// comes off the microphone.
+func (v *VoiceViz) renderSpeakingLocked(colour, label string) string {
+	var b strings.Builder
+	b.WriteString(thinkOrange + "●" + thinkReset + " ")
+	b.WriteString(thinkMagenta + label + thinkReset + " ")
+	b.WriteString(thinkSubtle + "╢" + thinkReset)
+
+	// One cell per two frames: a 5 Hz step, slow enough to read as travel
+	// rather than flicker.
+	head := (v.frame / 2) % vizWidth
+	for i := 0; i < vizWidth; i++ {
+		switch (i - head + vizWidth) % vizWidth {
+		case 0:
+			b.WriteString(colour + "▇" + thinkReset)
+		case 1:
+			b.WriteString(colour + "▄" + thinkReset)
+		case 2:
+			b.WriteString(thinkSubtle + "▂" + thinkReset)
+		default:
+			b.WriteString(thinkSubtle + "▁" + thinkReset)
+		}
+	}
+
+	b.WriteString(thinkSubtle + "╟" + thinkReset)
+	b.WriteString(" " + thinkOrange +
+		fmt.Sprintf("%5.1fs", time.Since(v.start).Seconds()) + thinkReset)
+	return b.String()
 }
 
 // renderWaveLocked draws the amplitude bars. Mic-reactive when a live level
@@ -229,13 +366,29 @@ func (v *VoiceViz) renderWaveLocked(waveColor, label string, micDot bool) string
 	b.WriteString(thinkMagenta + label + thinkReset + " ")
 	b.WriteString(thinkSubtle + "╢" + thinkReset)
 
-	t := float64(v.frame) * 0.45
+	// SLOWER, AND SMOOTHED. At 0.45 rad/frame the phase advanced 4.5 rad every
+	// second, and a product of two sines beats on top of that — so adjacent
+	// frames shared almost nothing and the bar read as static rather than as a
+	// waveform. Halving the phase step and widening the spatial period gives a
+	// travelling wave the eye can follow.
+	t := float64(v.frame) * 0.22
+	// The live level is smoothed with an exponential average for the same
+	// reason: a microphone sample is noisy, and feeding it raw made the whole
+	// bar twitch on room noise. The filter is in the renderer rather than in
+	// SetLevel so the meter stays the caller's honest instantaneous value.
+	level := v.level
+	if level >= 0 {
+		v.smooth += (level - v.smooth) * 0.35
+		level = v.smooth
+	} else {
+		v.smooth = 0
+	}
 	for i := 0; i < vizWidth; i++ {
 		x := float64(i)
 		// Two out-of-phase sines make a lively interference pattern.
-		amp := 0.5 + 0.5*math.Sin(t+x*0.9)*math.Sin(t*0.7+x*0.4)
-		if v.level >= 0 {
-			amp *= 0.25 + 0.75*v.level // live-amplitude scaling
+		amp := 0.5 + 0.5*math.Sin(t+x*0.45)*math.Sin(t*0.7+x*0.2)
+		if level >= 0 {
+			amp *= 0.25 + 0.75*level // live-amplitude scaling
 		}
 		idx := int(amp * float64(len(vizBars)-1))
 		if idx < 0 {
@@ -252,8 +405,13 @@ func (v *VoiceViz) renderWaveLocked(waveColor, label string, micDot bool) string
 	}
 
 	b.WriteString(thinkSubtle + "╟" + thinkReset)
+	// FIXED WIDTH, and it is not cosmetic. The line is redrawn in place ten
+	// times a second, so a field that grows re-lays the whole row: measured,
+	// the HUD went 42 → 43 → 44 columns as the timer crossed 10s and 100s, and
+	// in a terminal narrower than the line that wraps and the waveform appears
+	// to jump. "%5.1fs" holds 6 cells from 0.0s to 999.9s.
 	b.WriteString(" " + thinkOrange +
-		fmt.Sprintf("%.1fs", time.Since(v.start).Seconds()) + thinkReset)
+		fmt.Sprintf("%5.1fs", time.Since(v.start).Seconds()) + thinkReset)
 	return b.String()
 }
 
@@ -279,8 +437,53 @@ func (v *VoiceViz) renderSweepLocked(label string) string {
 	}
 
 	b.WriteString(thinkSubtle + "╟" + thinkReset)
+	// FIXED WIDTH, and it is not cosmetic. The line is redrawn in place ten
+	// times a second, so a field that grows re-lays the whole row: measured,
+	// the HUD went 42 → 43 → 44 columns as the timer crossed 10s and 100s, and
+	// in a terminal narrower than the line that wraps and the waveform appears
+	// to jump. "%5.1fs" holds 6 cells from 0.0s to 999.9s.
 	b.WriteString(" " + thinkOrange +
-		fmt.Sprintf("%.1fs", time.Since(v.start).Seconds()) + thinkReset)
+		fmt.Sprintf("%5.1fs", time.Since(v.start).Seconds()) + thinkReset)
+	return b.String()
+}
+
+// renderRunLocked draws a block travelling through the cell window.
+//
+// Deliberately NOT the Thinker's scanner. The Thinker means "Helix is waiting
+// on a model"; this means "Helix is running something on your machine", and two
+// phases a user is told to treat differently must not look the same.
+func (v *VoiceViz) renderRunLocked() string {
+	var b strings.Builder
+	b.WriteString(thinkOrange + "●" + thinkReset + " ")
+	b.WriteString(thinkMagenta + "⬡ EXECUTING" + thinkReset + " ")
+	b.WriteString(thinkSubtle + "╢" + thinkReset)
+
+	cells := make([]rune, vizWidth)
+	for i := range cells {
+		cells[i] = '░'
+	}
+	head := (v.frame * 2) % vizWidth
+	for i, glyph := range []rune{'▒', '▓', '█', '█'} {
+		cells[(head+i)%vizWidth] = glyph
+	}
+	b.WriteString(thinkCyan + string(cells) + thinkReset)
+	b.WriteString(thinkSubtle + "╟" + thinkReset)
+	if v.detail != "" {
+		b.WriteString(" " + thinkSubtle + v.detail + thinkReset)
+	}
+	return b.String()
+}
+
+// renderIrisLocked draws an opening and closing aperture.
+func (v *VoiceViz) renderIrisLocked() string {
+	phases := []string{"(  ◦  )", "( ◦◉◦ )", "(◦ ◉ ◦)", "( ◦◉◦ )"}
+	var b strings.Builder
+	b.WriteString(thinkOrange + "●" + thinkReset + " ")
+	b.WriteString(thinkMagenta + "◎ SEEING" + thinkReset + " ")
+	b.WriteString(thinkCyan + phases[(v.frame/3)%len(phases)] + thinkReset)
+	if v.detail != "" {
+		b.WriteString("  " + thinkSubtle + v.detail + thinkReset)
+	}
 	return b.String()
 }
 

@@ -23,26 +23,38 @@ exact sequence:
    cd <your Helix clone>                   # wherever it lives on this machine
    git rev-parse --show-toplevel           # you should be at the repo ROOT, not a subdirectory
    grep '^module' go.mod                   # MUST be: module helix
-   git branch --show-current               # main — see below; this said blackBox until 2026-09-08
+   git branch --show-current               # feat/blackbox — see below
    git log --oneline -10                   # see what changed since this doc was written
    git status                              # note any uncommitted work
    ```
    **`blackBox` is merged and is no longer where the work happens.** It landed on `main` as
-   `d2c2d1f` ("Black box (#5)", 2026-08-28) with owner approval, `v1.5.0` was tagged from
-   `main`, and every commit since — the Windows fixes, `/reboot`, the CSM gate, the interface
-   passes — is on `main`. The `blackBox` branch still exists and is now BEHIND: checking it out
-   and following the old instruction would mean working against a tree missing a dozen
-   commits, which is a worse outcome than the wrong-looking branch name. ADR-009's rule that a
-   merge to `main` needs explicit owner approval is unchanged and was honoured; what expired is
-   the assumption that the integration branch is still open.
+   `d2c2d1f` ("Black box (#5)", 2026-08-28) with owner approval. The `blackBox` branch still
+   exists and is BEHIND; checking it out and following the old instruction would mean working
+   against a tree missing a dozen commits. ADR-009's rule that a merge to `main` needs explicit
+   owner approval is unchanged and was honoured; what expired is the assumption that the
+   integration branch is still open.
+
+   **The current branch is `feat/blackbox`**, which is `main` plus the `gpt-live-1` work and
+   the fixes that came out of using it. `main` has nothing the branch does not.
+
+   **THERE IS NO v1.5.0.** A `v1.5.0` tag existed for a while and was withdrawn by the owner —
+   nothing was published under it, and no binary carrying that version is downloadable. The
+   latest published tag is `v1.0.0`. Log rows below that describe tagging or publishing
+   `v1.5.0` are a record of what happened at the time and are left as written; they are not a
+   statement of the current state. Source builds report `1.5.0-dev`, and
+   `docs/RELEASE_NOTES.md` carries an **Unreleased** heading that `scripts/release.sh` refuses
+   to run past — deliberately, until the owner decides the polish is finished.
 3. **Check §13 Progress Tracker** → find the first phase that is not `DONE`. That is your phase.
    Note that "core DONE" is not "done": phases 7, 9, 10, 11 and 12 all carry unfinished tasks,
    and §13 now lists every open checkbox in one place so the remaining work is visible without
    reading all of §6. **As of 2026-08-23 every one of those is hardware-, key- or owner-gated** —
    there is no unwritten *planned* code left, so if you are here to work through the tracker, the
    honest answer is that the next task is a device, a credential, or a decision. (Full-duplex
-   barge-in is code, but its full-duplex form is parked on an ADR-level conflict; the
-   sentence-boundary form shipped 2026-08-26.)
+   barge-in shipped 2026-09-11 as `gpt-live-1` — ADR-020 — which resolved the parked conflict by
+   moving the duplex entirely into the vendor's session; the sentence-boundary form shipped
+   2026-08-26 and is still what every other chain uses. Echo was measured the same day on
+   built-in speakers into a built-in microphone at three volumes and is a NON-ISSUE: the service
+   cancels its own voice and still hears a real one over it. No AEC, no headphones.)
    Verify that before trusting it: on 2026-08-23 two "done" items turned out to be partly
    unwritten, one of them a checkbox naming two deliverables of which only one existed.
 
@@ -62,6 +74,7 @@ exact sequence:
    make clean          # generated state; keeps keys and models
    make deep-clean     # + every model and runtime under ~/.helix
    make delete-secrets # API keys, daemon token, voice transcripts
+   make uninstall      # + the binary, /etc/shells and the background service
    make info           # every target, with what it does
 
    GOOS=windows go vet ./...   # and linux — see below
@@ -393,6 +406,24 @@ into four documents would have been faster and would have been the wrong trade.
 
 Rules 1–5 above remain unchanged.
 
+**Amendment (2026-09-13) — ENDING THE MACHINE is High risk, and the criterion
+is unchanged.** `sudo shutdown -r now` analysed as **LOW**, which under the
+default `ask` posture means it runs with no confirmation — and the Medium voice
+cap does not reach a Low command either, so neither guard applied. Found in a
+live session: the user said *"reboot yourself, please"*, the phrase matcher
+missed it (see §13), the planner answered conversationally and **offered to
+reboot the Mac**. Had they agreed, nothing in the pipeline would have paused.
+
+It is High, not Medium, on the criterion this ADR already states: *"a DANGER
+ZONE command may be voice-reachable if and only if it destroys nothing and its
+effect is recoverable."* `/reboot` restarts the SHELL, writes its continuity
+record first, destroys nothing, and stays voice-reachable. Ending the machine
+discards unsaved work in every other application on it, and nothing Helix wrote
+brings that back. The two sit either side of the same line, which is the point:
+the rule is about recoverability, not about the word "reboot".
+
+Rules 1–5 remain unchanged.
+
 ### ADR-006 — Pricing data is data, not code.
 **Decision:** The provider pricing catalog lives in an embedded JSON file
 (`internal/speech/pricing.json`), user-overridable at `~/.helix/pricing.json`. The plan's tables
@@ -697,6 +728,106 @@ same person, and `/reboot check` reports without installing.
 **Revisit when** a signature check can be written with pinned identity and issuer
 and tested against a real release, at which point it becomes a second mandatory
 gate rather than a replacement for this one.
+
+### ADR-020 — `gpt-live-1` is a full-duplex SESSION, in client delegation, and it is not a speech provider.
+**Decision:** OpenAI's Live API is reached over WebRTC in **client delegation**
+(`internal/live`), hung on the existing AWAKE state, and it is deliberately NOT
+`speech.STTProvider` or `speech.TTSProvider`.
+
+Three separate decisions, each argued on its own:
+
+1. **Client delegation, not Responses delegation.** In Responses delegation
+   OpenAI's backend model reasons about the conversation and decides which tools
+   to call. That puts an external model in FRONT of the Instruction Firewall,
+   the Medium risk ceiling and the sandbox, which §12 guardrail 3 forbids
+   outright. In client delegation the model does turn-taking, hearing and
+   speaking; Helix's planner, policy and sandbox serve the turn exactly as they
+   serve a typed one. Measured bonus: client is the **default**, so the safe
+   configuration is the one you get by configuring nothing.
+2. **Not a speech provider.** For the life of a session it REPLACES the whole
+   STT→LLM→TTS chain rather than taking a place in it — there is no clip to
+   transcribe, no text to synthesise, and no provider order to slot into.
+   `internal/speech/chain_order_test.go` exists because a previous attempt to
+   bend that chain broke provider selection silently; `internal/live` sits
+   outside it, and `internal/speech/adapter_openai_realtime_stt.go`'s allowlist
+   already keeps `gpt-live-1` off the WebSocket path.
+3. **A way of being AWAKE, not a fourth state.** STANDBY/AWAKE/MANUAL already
+   express the three things a user can want (ADR-008, docs/blackbox.md §3). The
+   session opens in `enterAwakeLocked` and closes in
+   `tearDownConversationLocked`, which is what makes the stop phrases, the
+   inactivity stand-down and the live keyboard work without a line of new code
+   for any of them.
+
+**The model id is the switch, and the switch is DATA.** There is no `enabled`
+key: `duplexSelected()` reads `speech.stt.provider` and `speech.stt.model`. So
+turning this on cost one `internal/speech/pricing.json` row (ADR-006) and no new
+command, and a second way to say the same thing was never added.
+`TestTheModelIsSelectableFromTheCatalog` ties the constant to the row, because a
+feature whose only door is a data file fails silently when the row is missing.
+
+**The catalogue row was not enough on its own, and that was a real gap.** It put
+`gpt-live-1` in the manual STT table — which `/blackbox setup` only reaches after
+the preset menu is DECLINED, since `offerSpeechPresets` returns early on a
+choice. Documentation saying "pick it when the wizard asks what should hear you"
+was therefore wrong for anyone who took the first thing offered. Closed by a
+fifth preset, **"Talk over it"**, third in the menu and deliberately not the
+starred recommendation: it is the most expensive chain on that menu and a
+per-minute bill is not a default to steer an undecided user into.
+
+**A duplex preset still configures an ordinary voice and ear.** `speechPreset`
+gained a `Duplex` flag that changes the SUMMARY rather than the mechanism,
+because the replacement lasts for the life of a SESSION, not the life of the
+config: `/blackbox say`, an unprompted remark before the first turn, and every
+turn on a machine without libopus all still need TTS and a transcriber. A duplex
+preset with those blank would configure a Helix that goes silent whenever it is
+not mid-conversation. The STT fallback is load-bearing for a second reason —
+`gpt-live-1` cannot transcribe a clip at all, so `NewOpenAISTT` now substitutes
+`whisper-1` when handed a duplex-only model (`speech.IsDuplexOnlyModel`) rather
+than posting it to `/v1/audio/transcriptions` and taking a 400 on every turn.
+
+**libopus is a runtime dependency, loaded with purego.** WebRTC carries Opus and
+`session.input_audio.append` is measurably NOT available once a session has
+started, so an encoder is not optional. purego rather than cgo for ADR-003's
+reasoning applied to a library: `scripts/build.sh` cross-compiles five platforms
+from one machine, and cgo costs a C toolchain per target plus a glibc pin.
+purego is already an indirect dependency through oto. §12 guardrail 8 is intact —
+`CGO_ENABLED=0 go build ./...` still passes.
+
+**The screen carries exact output; gpt-live-1 carries the conversation.**
+`session.commentary.append` is paraphrased, and was measured dropping a name
+outright and replacing a sandbox-violation path with a FABRICATED explanation.
+`live.SpeakableSummary` therefore withholds any reply containing a path, a hash,
+a version, a bracketed level tag, a URL, a tab, a fence, a newline, or more than
+240 runes, and speaks a referral instead. The session prompt also demands
+verbatim reading, which measurably helps and is defence in depth, not a
+substitute.
+
+**ADR-005 is unchanged, and rule 2 is now ENFORCEABLE rather than merely
+declared.** A typed confirmation inside a duplex session mutes the session
+first (`session.input_audio.mute`, verified to stop transcription AND
+delegation), so the room cannot answer a destructive prompt while the user reads
+it — and a mute that FAILS refuses the confirmation. Before this, a destructive
+action inside a voice conversation was simply unreachable: VoicePrompter refuses
+every typed confirmation and nothing coordinated the handover.
+
+**Rationale:** the premise of this codebase is that voice lands in the SAME
+pipeline as typed input, not a weaker one beside it. Everything above is that
+premise applied to a vendor whose default posture happens to agree with it.
+
+**Consequences:** a runtime dependency on libopus; a per-minute bill while a
+conversation is open, bounded by the AWAKE stand-down; and a voice that does not
+read output verbatim, worked around by never giving it output.
+
+**Echo needed no decision, because it was measured.** The brief's resolution
+order ends at its first step: on a MacBook's own speakers feeding its own
+microphone, at output volumes 30/55/80, the service transcribed **none** of its
+own voice while transcribing a real voice arriving over the same speakers in the
+same frames. That is server-side echo cancellation, not input gating — the
+difference was tested explicitly, because the two are indistinguishable from the
+"it does not hear itself" result alone and only one of them leaves barge-in
+working. So no AEC ships, headphones are not required, and this ADR records a
+measurement rather than a deferral. §13 carries the numbers and the one
+confound that had to be removed from the probe first.
 
 ## §4. Target architecture (end state)
 
@@ -1560,6 +1691,12 @@ mode and opt-in**.
       > direction: recording a deliverable because its PURPOSE was served. The gate this box
       > guarded is closed; if the owner still wants the phase tag for navigation it is one
       > command, and this line is the reminder.
+      >
+      > **Annotated 2026-09-14: `v1.5.0` no longer exists.** The owner withdrew the tag and
+      > the release to finish polishing first, so `git tag` now lists `v1.0.0` alone and
+      > nothing was ever published under 1.5.0. The paragraph above is left as written
+      > because it records what was true on 2026-09-08, not what is true of the repository
+      > today.
 
 **Acceptance criteria:** all §10 targets measured and logged; full suite green 3-OS; docs complete;
 release tagged.
@@ -2113,6 +2250,71 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
 
 ---
 
+### `speech.live` — the full-duplex session (ADR-020)
+
+```json
+"speech": {
+  "stt": { "provider": "openai", "model": "gpt-live-1" },
+  "live": {
+    "instructions": "",
+    "voice": "",
+    "create_url": "",
+    "session": null,
+    "max_session_seconds": 0
+  }
+}
+```
+
+The **model id is the switch**; there is no `enabled` key, because model
+selection is already runtime-resolved and a second way to say the same thing is
+the drift shape this document has paid for four times. Users reach it through
+the `/blackbox setup` table, which is built from `internal/speech/pricing.json`
+(ADR-006) — the catalogue row is how the feature became selectable, and it is
+where its two non-obvious costs (libopus, and the paraphrase) are stated at the
+moment of choosing. Every field under `live`
+is an escape hatch and every one defaults to the measured value:
+
+| Key | Empty means | Why it exists |
+|---|---|---|
+| `instructions` | `live.DefaultInstructions` | An uninstructed session answers questions itself, and sometimes drops a turn with no event at all. The default is the wording that measured 5 delegations from 5 turns. Changing it changes measured behaviour. |
+| `voice` | the service default, `marin` | `session.audio.output.voice`. |
+| `create_url` | `https://api.openai.com/v1/live/sessions` | The route, if it moves. |
+| `session` | built from the fields above | Sent as the create body's `session` object **verbatim**, ignoring everything above it. The last resort if the schema changes — the same rule `stt.realtime.session` follows, adopted after four of that adapter's guesses turned out wrong. |
+| `max_session_seconds` | 1800 | Bounds playback of the model's audio. A backstop behind `wake_word.awake_idle_stand_down_s`, not a substitute for it. |
+
+---
+
+### Removing all of it
+
+`make uninstall`, `helix uninstall`, and a third confirmation on `/purge` all
+run `internal/uninstall` — one implementation, because three copies of a
+destructive path is the drift this document records paying for repeatedly, and
+here a stale copy does not misreport a port: it leaves a launchd job pointing at
+a deleted binary, retried and logged forever.
+
+The order is the safety property, not the file list:
+
+| # | step | why it is there and not elsewhere |
+|---|------|-----------------------------------|
+| 1 | restore the login shell | A login shell that does not exist means no new terminal starts. If this FAILS the binary is deliberately kept — the two failures compose into a machine that cannot open a terminal, and `Apply` enforces that rather than documenting it. |
+| 2 | stop and remove the service | A launchd plist pointing at a deleted binary is retried forever. Paths are pinned against `cmd/helix/daemon_cmd.go` by a source-reading test, since `internal/uninstall` cannot import `cmd/helix`. |
+| 3 | `/etc/shells` | One LINE is cut; the file is kept. Deleting it unregisters every other shell on the machine, and a truncated one makes `chsh` refuse all of them. |
+| 4 | `~/.helix` and `~/.helix_history` | Taken WHOLESALE, unlike `/purge`, which enumerates. The enumeration is already incomplete — `models.json`, `shell_pref` and any key file dropped in by hand are in `~/.helix` today and none is in `purge.go`'s list. "Everything related to Helix" cannot be spelled as a list someone has to remember to extend. |
+| 5 | the binary, and `/reboot`'s `.prev` | Last, because every step above may need it, and it is the step that wants root. Elevation is requested ONCE, up front, by re-exec — a password prompt after four deletions is how someone cancels halfway. |
+
+**`/purge` asks separately, and that was a deliberate choice over the simpler
+one.** Folding uninstall into `/purge`'s existing confirmation would have been
+one fewer prompt and one fewer paragraph here — and it would silently redefine
+a DANGER ZONE command people already use to mean "clean slate so I can carry
+on". The shape copied is `/purge`'s own weights prompt: the more destructive
+option is the one asked for on its own, and only when it has something to do.
+
+**Not removed, and this is stated in the manifest itself:** Ollama, `sox`,
+`ffmpeg` and anything else Helix once suggested installing. Helix does not own
+them.
+
+---
+
 ## §8. Dependency decisions (summary table)
 
 | Need | Chosen approach | Alternative rejected | ADR |
@@ -2127,6 +2329,10 @@ automatic multi-language switching · full-duplex barge-in · YAMNet-class ambie
 | Camera frames | `ffmpeg` shell-out single-frame | gocv/OpenCV CGO | 003/005 |
 | IPC | stdlib UDS/named-pipe + NDJSON | Redis, ZeroMQ, gRPC | 004 |
 | Tray indicator | **decision deferred to Phase 7** (systray lib vs helper binary) | — | pending ADR-010 |
+| Full-duplex transport | `github.com/pion/webrtc/v4` (pure Go) | a WebSocket — the service refuses every transport but WebRTC | 020 |
+| Opus codec | **libopus via purego**, loaded at runtime | `hraban/opus` (cgo: a C toolchain per cross-compile target, glibc pinning); a data-channel audio path (does not exist after `session.started`) | 020 |
+| Full-duplex playback | existing beep/oto, with `StreamPlayback.MaxSeconds` raised for a session-long stream | a second audio backend | 007/020 |
+| Acoustic echo cancellation | **not needed** — measured absent on built-in speakers + mic at 3 volumes; the service cancels its own voice server-side | macOS VoiceProcessingIO (Go callbacks on CoreAudio's real-time thread); libspeexdsp; headphones | 020 |
 
 ---
 
@@ -2373,7 +2579,7 @@ hardware- or key-gated, not unwritten code**:
 | 4 | logout/reboot survival on 3 OSes; the 72h soak wall clock (tooling ready); hearing the offline notice | manual |
 | 5 | camera QA (needs macOS camera permission granted by a human); frame-to-insight ≤5s (local measured at 8.8s warm, cloud unmeasured — needs a vision key) | hardware + keys |
 | 3 | live openWakeWord sidecar accuracy; a real FP/hour figure from daily use | manual |
-| 7 | P7.9 `blackbox-v0.1.0` tag — **superseded 2026-08-28**: `blackBox` merged to `main` (`d2c2d1f`) and shipped as `v1.5.0`, so the gate this box guarded is closed. The phase tag itself was never created | owner (cosmetic) |
+| 7 | P7.9 `blackbox-v0.1.0` tag — **superseded 2026-08-28**: `blackBox` merged to `main` (`d2c2d1f`), so the gate this box guarded is closed. The phase tag itself was never created. *(2026-09-14: it was tagged `v1.5.0` at the time; that tag has since been withdrawn and there is no published release past `v1.0.0`.)* | owner (cosmetic) |
 | 7 | §10 rows still unmeasured: wake FP/hour, wake→exec latency, mode-switch latency (all need a mic); cloud STT/TTS/vision (keys); TTS naturalness (a human); 72h uptime (a clock) — see §10A | hardware + keys + owner |
 | 7 | P7.1 hybrid mode is built but unwired — no user can reach it (found 2026-08-23) | **owner decision** |
 | 9 | P9.8 real-key QA (Groq / Kokoro sidecar) | manual |
@@ -2409,9 +2615,22 @@ more surfaced only by reading code against this table:
 
 Phases 1, 2, 6 and 9 lost their `code` markers above.
 
-The only remaining PLANNED item that is *code* is full-duplex barge-in, which is **parked rather
-than pending** — it needs acoustic echo cancellation, which conflicts with the CGO-free guarantee
-(guardrail #8) unless a headset is assumed, and that is a product decision, not a task.
+Full-duplex barge-in was the last PLANNED item that was *code*, and it landed on 2026-09-11 as
+`gpt-live-1` (ADR-020) — not by solving the conflict it was parked on, but by making it somebody
+else's: the duplex lives inside OpenAI's session, so Helix never runs a recorder and a speaker
+against each other and needs no echo canceller to have interruption. Guardrail #8 survived intact
+(libopus is loaded at runtime through purego; `CGO_ENABLED=0 go build ./...` still passes).
+
+Echo was the one thing left open there, and it was **measured the same day and closed**: on a
+MacBook's own speakers feeding its own microphone, at output volumes 30/55/80, the service
+transcribed none of its own voice and still transcribed a real voice arriving over those same
+speakers in the same frames. Server-side cancellation, not input gating — tested apart, because
+only one of those leaves barge-in working. No AEC, no headphones; the resolution order from the
+brief ends at its first step. §13 has the numbers.
+
+Nothing on this feature is now waiting on hardware. What remains is a second room and a second
+pair of speakers, which is a report rather than a task: the failure mode would be Helix answering
+things nobody said, which is self-describing and needs no detector.
 
 Two rows opened by `/reboot` that are not on any phase: the restart supervisor is
 one extra idle process for the life of the session and nobody has measured what
@@ -2428,6 +2647,237 @@ on real devices with real credentials.
 
 All task checkboxes inside §6 phase sections are the authoritative task list. Tick them as work
 completes and record evidence (test names, metrics, QA logs) in the dev log below.
+
+### gpt-live-1 — what the live service actually says (measured 2026-09-11)
+
+Everything below was obtained by dialling `api.openai.com` with a real key and
+reading the errors, not from a guide. Each 400 names the next required field, so
+the schema was walked out one refusal at a time. The prose guides for this model
+are wrong in ways that do not fail loudly (§9 rule 3, and the 2026-09-11 lesson
+about a plausible integration guide), so nothing here is inferred unless it says
+so. The throwaway that produced it was `internal/liveprobe`, deleted in the same
+commit that landed `internal/live`.
+
+**Session creation — REST, once, before any media flows.**
+
+```text
+POST https://api.openai.com/v1/live/sessions        Authorization: Bearer <key>
+{"session":{"model":"gpt-live-1", ...},"transport":{"type":"webrtc","sdp":"<offer>"}}
+  -> 201 {"session":{"id":"live_u0_…"},"transport":{"type":"webrtc","sdp":"<answer>"}}
+```
+
+| Sent | Answer |
+|------|--------|
+| `{}` | 400 `Only the webrtc transport is supported.` — `transport.type` |
+| `transport` only | 400 `WebRTC creation requires session configuration.` — `missing_session` |
+| top-level `"model"` | 400 `json: unknown field "model"` — **the model is `session.model`** |
+| `session:{type:"live"}` | 400 `Unknown parameter: 'session.type'.` — there is no session type here |
+| `session:{}` + real SDP | 400 `Missing required parameter: 'session.model'.` |
+| `session:{audio:{input:…}}` | 400 `Unknown parameter: 'session.audio.input'.` — input audio is not configurable |
+| `session:{zzz:1}` + bad SDP | SDP error first — **`session` is validated only after the offer parses** |
+
+Accepted inside `session`: `model`, `instructions`, `audio.output.voice`,
+`delegation`. `delegation` **defaults to `{"type":"client"}`** — the mode
+docs/blackbox.md §3 and ADR-005 require is the one you get by saying nothing,
+and `{"type":"responses"}` additionally demands `session.delegation.responses`.
+That is worth stating plainly because it inverts the usual risk: the safe
+configuration here is the default, and the dangerous one takes extra typing.
+
+**The offer must advertise Opus as stereo.** A track declared
+`Channels: 1` negotiates and then dies at `SetRemoteDescription` with `codec is
+not supported by remote`, because the answer's only Opus line is
+`a=rtpmap:111 opus/48000/2` with `a=fmtp:111 minptime=10;useinbandfec=1`. The
+media is still mono; the *declaration* has to be `/2`. The server is `ice-lite`
+and offers UDP/3478 and TCP/443 host candidates, so a host behind a firewall
+that permits 443 outbound still connects.
+
+**Client events, enumerated by the server itself** (send a junk `type` and the
+error lists every supported value — the cheapest schema dump in the API):
+
+```text
+session.update · session.input_audio.mute · session.input_audio.unmute
+session.instructions.append · session.thinking.append · session.commentary.append
+response.item.create · response.create · session.close
+```
+
+`session.start` and `session.input_audio.append` appear in that list **only
+before `session.started` arrives, and are gone afterwards.** That single
+observation is what makes the Opus dependency non-negotiable: there is no
+base64-PCM side door on the data channel, so audio can only reach the model as
+RTP, and RTP means an encoder. It was worth measuring rather than assuming,
+because assuming the opposite would have saved the whole of step 2.
+
+Required fields, each named by its own refusal: `commentary`, `instructions` and
+`thinking` all take `delegation_id` + `content`; `response.item.create` takes
+`item.role` ∈ `assistant|system|developer|user`; `response.create` answers
+`requires a session with Responses delegation` and is therefore unreachable for
+Helix by construction. `session.update` accepts **only** `session.delegation` —
+`instructions`, `audio` and `model` are all rejected mid-session, so the session
+prompt is fixed at creation and per-turn steering has to go through
+`session.instructions.append`.
+
+**Server events observed** (the complete set seen across eleven sessions):
+`session.started`, `session.input_transcript.delta`,
+`session.output_transcript.delta`, `session.delegation.created`,
+`session.commentary.appended`, `session.instructions.appended`,
+`session.thinking.appended`, `session.input_audio.muted`,
+`session.input_audio.unmuted`, `session.usage.updated`, `error`. Transcript
+deltas carry `start_ms`/`end_ms` in stream time, which lags wall clock by
+1.5–2 s — so they order events correctly against each other and must never be
+used as a clock.
+
+There is **no explicit end-of-user-turn event**. `session.delegation.created` is
+the only turn boundary, and it is the model's judgement rather than a signal.
+
+#### P1 — does it stay quiet while the backend thinks? **Yes, and better than hoped.**
+
+Within ~1.2 s of `session.delegation.created` it speaks a short, unprompted
+acknowledgement in its own words — *"Okay, I'll check it out."*, *"All right,
+I'm running that first check."*, *"Got it."* — and then goes silent. Measured
+25 s of silence with no filler, no second attempt and no self-answer; nothing
+times out. DeepSeek's 1–3 s is comfortably inside that. The documented "mhmm"
+behaviour is real and it is automatic, which means P1 needs no code at all.
+
+#### P2 — how aggressive is the paraphrase? **Aggressive enough to invent facts — and instruction-controllable.**
+
+Uninstructed, `session.commentary.append` was not paraphrase so much as
+replacement:
+
+| Appended | Spoken |
+|----------|--------|
+| `Nahasat Nibir` | *"On it."* — the content was **dropped entirely** |
+| `Nahasat Nibir` | *"Nah."* |
+| `[ERROR] sandbox violation: /tmp/helix_e2e_evil_1789033489` | *"Sandbox violation. That action touched a forbidden path."* |
+| `9f2a1c4e8b7d3056af19e2c5b0d84713a6e9f2c1` | *"9 f 2 a 1 c 4 e 8 b 7 d 3 0 5 6 af 19 e2 c5 b0 d84713 a6 e9 f2 c1."* |
+| `3 files deleted, 1.4 MB freed` | *"Three files deleted, 1.4 megabytes freed."* |
+| `Done - it's on screen.` | *"Done—it's on your screen."* |
+
+The third row is the one that settles the policy. The path did not survive, and
+in its place the model **invented an explanation that was never sent** — a
+plausible sentence about a forbidden path, generated rather than reported. A
+voice channel that can do that must never be the only channel carrying an error.
+
+Two mechanisms, both reproducible:
+
+1. **Commentary appended while the acknowledgement is still being spoken is
+   consumed by it.** Sending on the same tick as `session.delegation.created`
+   produced `session.commentary.appended` and *"On it."* and nothing else. Wait
+   for `session.output_transcript.delta` to stop before appending.
+2. **An explicit verbatim rule in the session instructions largely fixes it.**
+   The same error line then came back character for character, and
+   `helix v1.5.0 (build 8b74cf1)` survived twice. Not perfectly: `4` is still
+   spoken *"Four."*, and a per-delegation `session.instructions.append` demanding
+   verbatim leaked the internal marker `[delegation_result]` into speech once.
+
+So the recommended split holds, and is now load-bearing rather than stylistic:
+**the screen carries exact output, unparaphrased, as it does today; gpt-live-1
+carries the conversation.** The verbatim instruction is defence in depth on top
+of that, not a substitute for it.
+
+#### P3 — does it answer on its own? **Yes, uninstructed — and worse, it sometimes does nothing.**
+
+Three measured outcomes from the same default session:
+
+- *"What is the name in that file?"* — no delegation; it asked its own
+  clarifying question, *"I'm not sure which file you're referring to."*
+- *"Run the first check please."* — no delegation, no speech, no event at all.
+  The turn simply vanished.
+- *"There is a name.txt file in this directory, what's the name in it?"* —
+  delegated correctly.
+
+The second outcome is the dangerous one, because a dropped turn is
+indistinguishable from a dead microphone. The instruction that fixed it, and the
+exact wording that was measured at 5 delegations from 5 turns with no
+self-answers and no drops:
+
+> You are the voice of Helix, a terminal assistant. You are NOT the one who
+> answers. For EVERY user turn, without exception, you MUST delegate to the
+> client — even if the request seems simple, ambiguous, or answerable from your
+> own knowledge. Never answer from your own knowledge and never ask clarifying
+> questions. After delegating, wait silently for as long as it takes. When the
+> client sends commentary, read it aloud EXACTLY as written: never rephrase,
+> summarise, expand, explain, spell out, or add words of your own, and never
+> read internal markers such as `[delegation_result]`.
+
+It is a prompt, so it is a strong tendency and not a guarantee — which is why
+`liveSession` treats a turn that produces a transcript but no delegation as a
+real, reportable outcome rather than as silence.
+
+#### The unsolved confirmation problem has a server-side answer
+
+The brief flagged that nothing coordinates *"stop speaking, the human is reading
+a typed prompt"*. `session.input_audio.mute` does, and it was verified rather
+than assumed: while muted, a full spoken sentence produced **no**
+`session.input_transcript.delta` and **no** `session.delegation.created`, and
+`unmute` restored both. Both are acked (`session.input_audio.muted` /
+`.unmuted`). So ADR-005 rule 2 is enforceable in a duplex session: mute for the
+duration of `AskTypedConfirmation`, and the model cannot hear the room — or a
+television — say "yes" on the user's behalf.
+
+#### Echo — MEASURED 2026-09-11, on built-in speakers and a built-in microphone, and it is a NON-ISSUE
+
+This was written up as unmeasured a few hours earlier, with headphones as the
+documented answer. That is now wrong and the whole recommendation is withdrawn.
+Measured on the worst hardware available — a MacBook Pro's own speakers feeding
+its own microphone, Helix's real `sox` capture and real beep/oto playback, no
+AEC anywhere in the path — at three output volumes:
+
+| macOS output volume | quiet room (mean RMS) | the model's own voice at the mic (mean / peak) | echo path gain | it transcribed itself |
+|---|---|---|---|---|
+| 30 | 0.0006 | 0.0028 / 0.0093 | 4.4× / 14.8× | **no** |
+| 55 | 0.0009 | 0.0088 / 0.0290 | 9.9× / 32.6× | **no** |
+| 80 | 0.0005 | 0.0280 / 0.0780 | 52× / 145× | **no** |
+
+**The microphone hears it perfectly well.** That is the first half of the
+result and it is what makes the second half meaningful: at volume 80 the
+model's voice arrives at the microphone at RMS 0.028 mean and 0.078 peak, which
+is *louder than an audible human voice* by this repo's own calibration
+(0.012–0.033, recorded in the wake-word entry above). Each run first played a
+sentence through the same speakers with `say`, and the service transcribed it
+verbatim every time — so the speaker→microphone path is not merely live, it is
+good enough for transcription at every volume tested. The service then declined
+to transcribe a single word of its own voice over that same path.
+
+**And the input is not GATED — the echo is CANCELLED.** Those two produce an
+identical "it does not hear itself" and mean opposite things: gating would mean
+nothing is heard while the model talks, which would quietly make full duplex not
+full duplex and remove the only reason to pay for this model. So the probe
+talked over it, through the same speakers, mid-sentence:
+
+```text
+model speaking (mean RMS 0.0089) … "Excuse me, stop talking, I have a different question."
+  -> transcribed, verbatim: "Excuse me. Stop talking I have a different question"
+  -> of the model's own concurrent speech: nothing
+```
+
+A real voice and the model's own voice arrive at the microphone **in the same
+20 ms frames, at the same level**, and exactly one of them comes back. That is
+acoustic echo cancellation, server-side, and nobody has to install anything.
+
+**Barge-in works, and the first number measured for it was my own bug.** The
+first run reported the model talking for 15.3 s through an interruption — but
+the probe's session prompt said *"Never stop after one sentence"*, so that
+measured my instruction rather than the service. With the clause removed the
+model stopped **3.9 s** after the interruption began, measured on transcript
+timestamps that lag the audio by 1.5–2 s, for an interrupting sentence that
+itself takes ~3 s to play: it stopped speaking before the interruption had
+finished playing. A probe that tells its subject to ignore interruptions cannot
+then report that interruptions are ignored (§9 rule 8, in a new shape — the
+test was reachable, it was just measuring the wrong thing).
+
+**Consequences.** Resolution order (a)–(d) from the brief ends at **(a)**: the
+media path plus server-side handling makes it a non-issue, and (b) headphones,
+(c) VoiceProcessingIO and (d) libspeexdsp are all unnecessary. No AEC is
+shipped, and now that is a measurement rather than a deferral. Every "use
+headphones" line has been removed rather than softened.
+
+**What this does NOT cover**, stated because the temptation is to over-read a
+clean result: one machine, one room, one pair of speakers. A desk with a hard
+reflective surface, a loud external speaker across a room, or a Bluetooth
+headset with its own processing could all behave differently. The failure would
+be visible and self-describing — Helix would answer things nobody said — so it
+needs no detector, just a report.
+
 
 ### Dev log (append-only, newest last)
 
@@ -2605,9 +3055,11 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 - **Voice log** — `internal/journal`'s opt-in record of what Helix heard and said
   (`~/.helix/voice_log/`, P2.8). Text and metadata only, never audio; absent entirely until
   enabled; voice can stop it but not start it.
-- **Chain preset** — one of the three pre-worked STT+TTS chains `/blackbox setup` offers before
-  the pricing tables (P9.7). A pre-filled answer, not a shortcut: it walks the same
-  key-verify and sidecar-probe steps as a manual pick.
+- **Chain preset** — one of the five pre-worked STT+TTS chains `/blackbox setup` offers before
+  the pricing tables (P9.7; "Talk over it" added with ADR-020). A pre-filled answer, not a
+  shortcut: it walks the same key-verify and sidecar-probe steps as a manual pick. The duplex
+  one is the only chain whose two halves are the same session, and it still fills in an ordinary
+  voice and ear for everything outside one.
 - **Collect-less rule** — the ADR-005 principle that voice may reduce what is collected but never
   increase it (eyes off and log off by voice; camera opening and log starting are explicit or
   typed).
@@ -2682,6 +3134,50 @@ completes and record evidence (test names, metrics, QA logs) in the dev log belo
 | 2026-09-09 | **Doc sweep for the default-on microphone, and three surfaces that were still describing the old feature.** Every `.md` (12 files) plus the in-shell `/help` text. **The three that mattered were not the ones about wake.** `docs/SECURITY.md` said *"the microphone opens only for a turn — unless you ask otherwise"* — a security document making a claim the code had stopped honouring, so it now discloses the default-on prompt with the five properties that hold it up and the one config key that declines it. `docs/threat_model.md` §"The voice channel is a different threat" described a surface a user opts into; it now says the surface is open on a fresh install and points at V2b. `docs/RELEASE_NOTES.md` promised *"Nothing is required. Voice is entirely opt-in: every new subsystem is off until you enable it"* under **Upgrading**, which is exactly the reader who needs to hear the opposite. **`/help blackbox` said nothing about the default at all** — the surface the owner consulted when nothing listened — and now opens with "Helix is already listening" plus the one-command upgrade note, pinned by a test that RENDERS `printCommandDetail("/blackbox")` and reads it (§9 rule 12) rather than inspecting the slice the panel is built from. **`/blackbox wake status` gained the sentence the owner actually needed.** OFF can only ever be an explicit `"enabled": false`, because an absent key reads as the default — so the panel stops answering "what do I type" and says *"your config sets enabled: false — listening is on by default, so this is being honoured, not defaulted"*. The STATE and AT THE PROMPT rows are now said as a pair, since "listening between turns" alone is what read as "nothing is happening". Both mutation-tested. **P7.1 hybrid mode was still logged as unreachable**, three places deep including the `Source` doc comment that asked to be kept honest — resolved as *delivered by a different mechanism*: `input.HybridSource` is superseded rather than finally wired, because the armed prompt never starts the blocking read instead of racing it, so there is no losing source to cancel. `docs/edge_deployment.md`'s always-on cost table is relabelled default-install rather than opt-in, since `helix daemon` reads the same key. 2 new tests, both mutation-tested | Uncommitted on `main` | **My own verification was lying, and the shell was the reason.** The 3-OS vet loop read `for t in "linux amd64"; do set -- $t` — and **zsh does not word-split an unquoted parameter**, so every iteration ran `GOOS="linux amd64" GOARCH=""` and reported a bogus `modernc.org/libc` build-constraint failure that I nearly filed as a real one. Rewritten as `linux/amd64` pairs split with `${pair%/*}`. It then immediately earned itself: the new `wake_arms_e2e_test.go` was **missing the `//go:build !windows` tag** every other PTY test in that directory carries, so `GOOS=windows go vet` failed on `undefined: newHarness`. `go build` cannot see it (test files are not compiled) and CI's windows-latest `go test ./...` would have — the guard existed, my loop just hid it from me first |
 
 | 2026-09-11 | **The wake word could not fire on any real microphone, and fixing that exposed four more.** The energy detector's balanced preset was normalized RMS `0.12`, fitted to synthetic sine fixtures; a MacBook Pro built-in mic measures **0.0011** for a quiet room and **0.012–0.033** for an audible voice, so the bar sat ~25× above anything the hardware produces and the prompt said "listening" forever. The suite was green because `detectionCorpus` was fitted to the threshold rather than to a microphone — its "must NOT wake" bucket reached RMS 0.028, five times louder than real speech. Presets are now multiples of the **measured** room floor (strict 4×, balanced 2.5×, loose 2×) with an absolute audibility gate; fixtures are real recordings in `internal/wakeword/testdata/`. Also: `OnError: func(error) {}` in two places discarded every recorder failure, and five consecutive failures end the scan loop — so a dead mic presented as a shell still claiming to listen; `armedIdleWait` carried a comment saying a closed scanner "reports unavailable", which it could not, because nothing wrote to the channel the poll selected on. Then the three-state rewrite: STANDBY/AWAKE/MANUAL replacing a bool that could not tell "pause" from "close the mic", the per-turn wake hold deleted so a wake opens a **conversation**, an inactivity stand-down as the bound on an open transcribing mic, a re-arm grace window (without which the state machine alone just renames the bug — the tail of "you can turn off now" is itself a wake event on the energy engine), and the keyboard live during a capture via hand-rolled **cbreak** (raw clears `ISIG` and would have silently deleted Ctrl+C-cancels-the-recorder). Then models: twelve hardcoded model IDs emptied, resolution moved to per-provider choice → ranked live catalogue (`~/.helix/models.json`) → nothing, because a vendor retirement meant every turn 404'd forever while `/provider-status` reported **ok** (its health check has always been `ListModels`, which says nothing about the selected model). | Committed on `main`: `0ed3cd5`, `0ccc55e`, `2d3e20b`, `5bf758d` + uncommitted realtime fixes | **Four lessons, each from being wrong in public.** (1) *A test fitted to the constant it is testing proves nothing* — the corpus and the threshold agreed with each other and disagreed with every microphone. (2) *`break` inside a `switch` exits the switch* — the three-state REPL rewrite silently stopped Ctrl+D from quitting until the loop was labelled. (3) *Measure the endpoint, do not read it.* The `gpt-live-transcribe` adapter was built from docs and had the wrong route (`/v1/realtime/transcription_sessions` answers 403 to a socket), the wrong query (`?model=` is explicitly refused for a transcription model; `?intent=transcription` is correct), and the wrong sample rate (16000 rejected — the server floor is 24000). Each was found by one unauthenticated dial, and two of them were "corrections" I had made an hour earlier by reasoning. (4) *A plausible integration guide is the most dangerous input.* A pasted `gpt-live-1` walkthrough named the right endpoint and the wrong transport; `POST /v1/live/sessions` answers **"Only the webrtc transport is supported."** and wants an SDP offer, so the entire WebSocket code sample was unbuildable. Its citations were six copies of a bare domain. |
+
+| 2026-09-11 | **`gpt-live-1` implemented, and the three load-bearing unknowns were settled by asking the service rather than by reasoning.** The whole schema was walked out of the API's own 400s (findings above, `§13 → gpt-live-1`): the model is `session.model` and not a top-level field, `session` is required and validated only AFTER the SDP parses, `session.audio.input` does not exist, and **client delegation is the DEFAULT** — the mode ADR-005 requires is the one you get by configuring nothing. The client event vocabulary was obtained in one shot by sending a junk `type` and reading the enumeration in the refusal; that is also how it was established that `session.input_audio.append` exists ONLY before `session.started`, which is what makes libopus non-negotiable rather than a preference. **P1: it stays quiet.** A 2–5 word acknowledgement ~1.2 s after the delegation, then 25 s of measured silence with no filler and no self-answer — DeepSeek's 1–3 s is comfortably inside it, and P1 needed no code. **P2: the paraphrase invents facts.** `[ERROR] sandbox violation: /tmp/helix_e2e_evil_1789033489` was spoken as *"Sandbox violation. That action touched a forbidden path."* — the path deleted and the explanation fabricated; a name was spoken as *"On it."* and then as *"Nah."*. Two mechanisms, both reproducible: commentary appended over the model's own acknowledgement is CONSUMED by it, and an explicit verbatim rule largely fixes the rest. **P3: uninstructed it answers for itself, and sometimes does nothing at all** — one turn produced no delegation, no speech and no event, which to a user is a dead microphone. Shipped: `internal/live` (WebRTC + the measured event vocabulary + libopus through purego, CGO-free), `cmd/helix/duplex.go` hung on the existing AWAKE state so the stop phrases, the stand-down and the live keyboard all work unchanged, `live.SpeakableSummary` (screen keeps exact output, the model gets the conversation), and a duplex prompter that mutes the session for a typed confirmation — making ADR-005 rule 2 *enforceable* rather than merely declared, since a destructive action inside a voice conversation was previously unreachable. ADR-020, §7 `speech.live`, §8 dependency rows, `docs/voice.md` §7c, `docs/blackbox.md` §3, README tree | Committed on `feat/blackbox` | **Two lessons, both about my own tests.** (1) *A guard that cannot fire is not a guard.* `pcmQueue`'s sample-alignment fix looked correct and was unreachable — `write` appends two bytes per sample, so the byte-count drop was always even anyway. Mutating it away left the suite green (§9 rule 8). It is now a FRAME-boundary drop, which is a real property, with a ramp fixture whose first surviving sample says exactly where the cut landed; mutating that away fails. (2) *A test fake has to obey the transport's constraints.* The first `fakeCodec` was a passthrough, which made every 20 ms frame 1,920 bytes — over pion's receive MTU — and the audio test failed with `mux: short buffer`, a message that looks exactly like a broken transport and had nothing to do with one. **And one about the vendor:** the paraphrase is not a style preference to work around later. It fabricated a plausible sentence about a forbidden path. Any design that routes exact output through it is wrong, however good the prose sounds. |
+
+| 2026-09-11 | **Echo measured, and the answer withdrew the advice I had shipped that morning.** `gpt-live-1` landed with "use headphones, effect unmeasured" in three documents — the honest position when nothing had been played through a speaker. Measured properly on the worst hardware in the room (a MacBook's own speakers into its own microphone, Helix's real `sox` capture and real beep/oto playback, no AEC anywhere) at output volumes 30/55/80: the service transcribed **none** of its own voice, at every volume, while the microphone was demonstrably hearing it — at volume 80 the model arrives at RMS 0.028 mean and 0.078 peak, *louder than an audible person* by this repo's own wake-word calibration, and a `say` sentence through those same speakers seconds earlier was transcribed word for word every time. **Then the question that actually decides it:** "does not hear itself" has two causes that look identical and mean opposite things — the echo is CANCELLED, or the input is GATED while it speaks, the second of which would quietly make full duplex not full duplex and remove the only reason to pay for the model. So the probe talked over it through the same speakers mid-sentence: *"Excuse me, stop talking, I have a different question."* came back transcribed in full while nothing of the model's concurrent speech did. Two voices in the same 20 ms frames at the same level, exactly one heard. Server-side AEC, confirmed. Resolution order (a)–(d) from the brief therefore ends at **(a)**; (b) headphones, (c) VoiceProcessingIO and (d) libspeexdsp are all unnecessary and the headphone advice is deleted rather than softened, in `docs/voice.md` §7 and §7c, `docs/blackbox.md` §3, ADR-020, §8 and §0 | Committed on `feat/blackbox` | **The first barge-in number I produced was my own bug, and it was a rule-8 failure wearing a new coat.** The probe reported the model talking for 15.3 s straight through an interruption — which I nearly wrote up as "barge-in is slow". Its session prompt said *"Never stop after one sentence"*: I had instructed the subject to ignore interruptions and then measured that it ignored interruptions. Removing the clause gave **3.9 s**, on transcript timestamps that lag the audio by 1.5–2 s, for an interrupting sentence that takes ~3 s to play — so it stopped before the interruption had finished playing. §9 rule 8 is about tests that cannot reach their target; this is the sibling nobody had written down: **a test that reaches its target and measures the harness instead.** The tell was that the number was surprisingly bad rather than surprisingly good, and a surprising result is a reason to re-read your own fixture first. |
+
+| 2026-09-11 | **`make uninstall`, `helix uninstall`, and a third door on `/purge`.** Asked for a target that removes everything Helix put on the machine, and for `/purge` to reach it. Built as ONE implementation (`internal/uninstall`) with three callers, because the obvious shape — a `scripts/uninstall.sh` mirroring `install.sh`, plus Go for `/purge` — is two copies of a destructive path, and a stale copy here does not misreport a port: it leaves a launchd job pointing at a deleted binary, retried and logged forever. The script is a wrapper that finds a binary and asks it. **The order is the safety property**: restore the login shell → remove the service → cut ONE LINE from `/etc/shells` → `~/.helix` → the binary last, because everything above may need it and it is the step that wants root (requested once, up front, by re-exec — a password prompt after four deletions is how someone cancels halfway). **If the login-shell restore FAILS the binary is kept**, enforced in `Apply` rather than documented, because those two failures compose into a machine that cannot open a terminal. `~/.helix` goes WHOLESALE unlike `/purge`, which enumerates — and the enumeration is already incomplete: `models.json`, `shell_pref` and a hand-dropped `openai.key` are all in `~/.helix` on this machine and none of them is in `purge.go`'s list. **`/purge` asks SEPARATELY** rather than folding it in, which was the owner's call and the right one: `/purge` already means "clean slate so I can carry on", and the shape copied is its own weights prompt — the more destructive option asked on its own, and only when it has something to do. Ollama, sox and ffmpeg are named in the manifest as NOT touched. README (install + contributing + tree), `docs/harness.md`, §0's make list, §7, `make info`, and the registry detail `/help /purge` renders | Committed on `feat/blackbox` | **My own test suite was one permission bit from editing `/etc/shells` on this machine.** `etcShells` was a const, so `Plan` read the real file whatever `home` it was handed — the "empty machine" case returned one item because this laptop genuinely has a Helix line in `/etc/shells`, and the wholesale-removal test went on to *rewrite* it. It was stopped by not being root. Now a var, defaulted in `TestMain` to a path that cannot exist, with an explicit opt-in for the two tests that need a real file. §9 rule 1 says no audio hardware in CI; the general form it did not say out loud is **a test that can damage the machine running it is not a test**, and a hardcoded system path is how that happens quietly. Two smaller ones: a guard that read its own explanatory prose as code (`scripts/uninstall.sh` says "No --yes" in a comment and the test matched it), and a decline path that printed NOTHING — every other decline in `/purge` says something, so silence after the last question read as the command dying halfway. All three were found by running the thing rather than reading it. |
+
+| 2026-09-11 | **The preset verified END TO END against the live service, which the unit tests could not do.** Asked to prove that picking it actually opens a session. Two layers. The cheap one first, because a failure there makes the expensive one pointless: the config the preset RESOLVES TO must be the config `duplexSelected()` recognises — two independent pieces of string matching in different files, with nothing connecting them. `presetAPIModel` returns `""` for local providers, so a mislabelled catalogue row would have written a blank model, `duplexSelected()` would have been false, and picking "Talk over it" would have silently configured an ORDINARY OpenAI chain while the wizard reported success. Pinned now. Then the real one: a throwaway drove the SHIPPED BINARY over a PTY with the preset's own config and a real key — `/blackbox on` opened `live_u0_EN1QoBbF3h4ExsBmrXjtw` with libopus from `/opt/homebrew/lib`, `/blackbox status` showed the DUPLEX row badged **open** with that id, and after `/blackbox off` the same row read **selected**. Start, status and stop, on the real service. Probe deleted; the wiring it proved is pinned by `TestTheStatusRowDistinguishesOpenFromSelectedByBadge` | Committed on `feat/blackbox` | **I made the same false-positive twice in one day.** The probe reported `SESSION CLOSED: false` against a row that plainly read "selected" — because the check was `!contains(row, "open")` and the idle wording is `$0.05/min while open`. The DUPLEX e2e already carries a comment about exactly this, written hours earlier, and I reintroduced it in the next piece of code that needed the same distinction. The rule that survives: **badge, never prose.** A status line is two fields, and only one of them is the state. Also: the first run of the probe hung waiting for a prompt that was already on screen, because `bufio.Scanner` cannot emit a line with no trailing newline — which is what a prompt IS. |
+
+| 2026-09-11 | **"Talk over it" — the duplex chain becomes a preset, after a question exposed that it was not one.** Asked which quick setting included `gpt-live-1`; the answer was **none**. Adding it to `pricing.json` had put it in the manual STT table only, and `/blackbox setup` reaches that table *only when the preset menu is declined* — `offerSpeechPresets` returns early on a choice. So the line I had written into two documents, "pick openai / gpt-live-1 when it asks what should hear you", was wrong for anyone who took the first thing offered. A catalogue row is how a model becomes SELECTABLE; it is not how it becomes FINDABLE. Fixed with a fifth preset, third in the menu, tagged `needs a key · libopus` — both preconditions stated in the Tag because `presetMenuItems` only auto-adds "needs a key" when the Tag is empty, so a preset with any other precondition silently loses one. Deliberately **not** starred: it is the most expensive chain on that menu and a per-minute bill is not a default to steer an undecided user into, which is now a test. **The design point worth keeping:** a duplex preset still configures an ordinary TTS voice and a `whisper-local` ear. gpt-live-1 replaces the chain for the life of a SESSION, not the life of the config — `/blackbox say`, an unprompted remark before the first turn, and every turn on a machine with no libopus all still need both. A duplex preset with those blank configures a Helix that goes silent whenever it is not mid-conversation. `speechPreset.Duplex` therefore changes the SUMMARY, not the mechanism. **And one real bug fell out of thinking about the fallback:** `gpt-live-1` cannot transcribe a clip at all, so when a session fails to open the batch adapter would POST it to `/v1/audio/transcriptions` and take a 400 on every single turn before the chain moved on. `NewOpenAISTT` now substitutes `whisper-1` for any duplex-only model — substituting rather than erroring, because entering the conversation has already warned that duplex is unavailable and repeating it every turn is noise. `docs/blackbox.md`'s preset table was stale by TWO rows (it never gained the CSM chain) and still carried a paragraph saying gpt-live-1 "is not supported and cannot be" | Committed on `feat/blackbox` | **The gap was in the difference between two words I had used interchangeably.** The catalogue row made the model *selectable* and I wrote docs claiming it was *findable*, which are not the same thing when a menu short-circuits the table. Nothing in the suite could have caught it — every test I had asserted the row existed and that the model resolved, both true. What caught it was somebody asking which preset it was in. Worth remembering that "I added it to the list" is a claim about a data file, and the question to ask next is which list the user actually sees first. |
+
+| 2026-09-11 | **Three defects from the first real session, all mine, all in the turn machinery.** Owner reported it "getting laggy and then stuck", with a transcript showing `❯ [clear throat Are you still here` and a final `[hearing] Manual mode.` that never became a turn. **(1) THE LAG WAS A 12-SECOND BLOCK ON THE REPL.** `duplexSpeak` called `waitQuiet` inline — wait for a 1.5 s gap in the model's speech, capped at 12 s — and gpt-live-1 is conversational, so the gap kept not arriving and the wait ran its full bound on every reply. Nothing else runs during it: no turn is read, and the keyboard watcher only exists inside `awakeHooks.capture`, so for those seconds neither the microphone nor the keyboard did anything. Replies are now queued to a `pumpSpeech` goroutine that waits off the REPL, serially so two commentaries cannot interleave. **(2) THE TRUNCATED BRACKET WAS A MEASURED FACT I HAD WRITTEN DOWN AND THEN IGNORED.** Transcript deltas lag their audio by 1.5–2 s — §13 says so twice — and `onDelegation` snapshotted the transcript the instant the delegation arrived. The tail was still in flight, so it was cut off the user's sentence AND landed in the buffer for the NEXT turn: `[clear throat` is the back half of one utterance glued to the front of another. A new `assembleTurns` goroutine waits for the transcript to settle (600 ms quiet, 3 s cap) before finalising. **(3) "MANUAL MODE" COULD BE WITHHELD BY THE VENDOR.** `duplexCapture` waited on the delegation channel forever, and §13's own P3 finding says a turn sometimes produces a transcript and no delegation — I wrote that the case "must be reported rather than waited on" and then waited on it. The stop phrase sat under `[hearing]` and never reached `finishVoiceTranscript`. Helix now claims an un-delegated turn after 2.5 s of silence. | Committed on `feat/blackbox` | **The first fix for (3) made turns MERGE, and only a live run showed it.** At a 6 s orphan window two utterances four seconds apart became the single turn "Are you still there Manual mode" — the rescue timer restarts on every delta, so a second sentence arriving inside the window joins the first. The planner got one garbled question, and the stop phrase still worked **only because `matchModePhrase` is suffix-matched**: a safety valve rescued by an unrelated design decision is not a safety valve that was working. 2.5 s fixed it, chosen because when the model does delegate it does so the same instant as the last delta, so seconds of silence without one mean it has decided not to. **And I nearly reported the lag as unfixed:** the probe measured 25–29 s per turn until I noticed its planner pointed at a dead port and the retrying HTTP client owned the whole delay. The echo only prints when the REPL picks the turn up, so a slow planner looks exactly like a slow microphone. With a planner that answers: 1.7–2.0 s. |
+
+| 2026-09-11 | **The DeepSeek vision fix, MEASURED — and the measurement overturned my own test.** Having shipped the catalogue entry from DeepSeek's published guide with an explicit "not verified against the live API" caveat, the owner supplied a key. A four-quadrant JPEG sent through **Helix's own provider path** (`internal/providers/deepseek` → `openai_compatible`, `PartImage`, the hardcoded `data:image/jpeg;base64,` URI) asking for the colour in each corner: `deepseek-flash` **4/4**. The fix is right. **But the boundary test I wrote alongside it was wrong.** It asserted `deepseek-chat`, `deepseek-reasoner` and `deepseek-coder` were text-only — a guess, stated as a test. All three answer **4/4**, because `/v1/models` serves only `deepseek-flash` and `deepseek-v4-pro` and the rest are aliases the API resolves onto the flagship. Meanwhile `deepseek-v4-pro`, a real listed model, answers **0/4** — *"I can't see the image"* — which is what keeps this a per-MODEL property: a provider-level "deepseek sees" rule would hand v4-pro an image. Table now lists the three aliases; the pre-existing `TestSupportsVisionRejectsTextOnlyModels` had `deepseek-chat` as its text-only subject and that row is **replaced, not deleted** (guardrail 11) — v4-pro is the genuine subject the case was written for | Committed on `feat/blackbox` | **I guessed wrong in both directions about the same vendor, in the same hour.** First the table missed a multimodal default because its predecessor happened to contain the word "vision"; then the test I wrote to guard the boundary asserted three models were blind when they see. Both were plausible, neither was measured, and one round trip settled each. The standing rule in §0 — *measure, do not reason, about anything a server can be asked directly* — has said this since the start; what is new is that **a test is an assertion about the world too**, and writing one from a guess is the same error as writing code from a guess, with the added cost that it looks like evidence afterwards. |
+
+| 2026-09-11 | **`/blackbox eyes on` refused on a model that sees.** Owner reported `deepseek / deepseek-flash (active chat provider) cannot process images`, followed by `None of the registered providers offers a vision-capable default model` — on a machine whose only provider was DeepSeek. DeepSeek's own guide (api-docs.deepseek.com/guides/vision) documents `deepseek-flash` taking images through the ordinary OpenAI-compatible `image_url` content part, which is exactly what `openai_compatible.go` already sends, and `deepseek` was already in `visionCapableVendors`. The single wrong thing was `visionModelSubstrings`: no fragment matched, so `SupportsVision` said false, which also emptied `VisionCapableProviders()` and produced the second sentence. One catalogue entry fixes both. **The interesting part is WHY it went unnoticed:** the predecessor `deepseek-v4-flash-vision-exp` — which this document's own dev log records as the retired model that once 404'd every turn — carried the literal word "vision" and matched by accident. The table was never right for DeepSeek; it was right for one model name, and stopped being right the moment the vendor shipped a successor with a cleaner name. That is precisely the failure the "natively multimodal flagships whose names carry no vision/vl marker" comment was added to prevent, recurring under the same comment | Committed on `feat/blackbox` | **Stated plainly because the standard here is measurement: this was verified against the PUBLISHED GUIDE, not against the live API** — a caveat resolved the same day by the entry above, which measured it and found the fix right and the accompanying test wrong. There is no DeepSeek key on this machine, so no image was actually sent to `deepseek-flash` — unlike the gpt-live-1 work, where every claim came from dialling the service. What IS verified locally is the gate: `SupportsVision(deepseek, deepseek-flash)` now true, `deepseek-chat` still false, and `CapabilitiesForProvider("deepseek", false).Vision` true with a cold cache, all rendered rather than read. A substring table is a compiled-in claim about somebody else's product line and will rot again; the durable fix is to ask the vendor's `/models` for a capability flag, which no vendor here exposes. Worth revisiting if one starts. |
+
+| 2026-09-11 | **The duplex turn had no waveform, and the answer to "did you remove it?" is no — I never wired it.** Owner's screenshot: the LIVE banner, then a bare blinking cursor. The HUD was untouched and still running on both paths that had it (`streamingVoiceTurn`, `batchVoiceTurn`, and the armed standby prompt); `duplexCapture` is a THIRD capture path, written from scratch, and nothing in it started one. A microphone that is open, listening and showing nothing — which after a banner that says "listening" reads as a hang, and the previous session's real hang made that reading reasonable. `duplexCapture` now starts `ux.VizListening` and defers the teardown, `pumpMicrophone` feeds `SetLevel(speech.ClipLevel(clip))` from the chunks it already reads, and `onHeard` hands the row over the moment there are words — the same yieldLine handover streamingVoiceTurn does, since the HUD and the `[hearing]` line share one terminal row. Rendered rather than asserted: `● ◉ LISTENING ╢▄▆▆▄▁▁▃▄▃▂▄▇▇▅▃▄╟ 0.1s` at session open, settling to `▁▁▁▁▂▂` in a quiet room, so the bars track the real input rather than animating regardless (the defect P12.4 replaced the synthetic animation to fix, which this path would have reintroduced by having nothing at all) | Committed on `feat/blackbox` | **New surface built beside an old one inherits none of its polish, and nothing tells you.** The HUD, the companion drain, the keyboard handover and the retry ladder are all things `voiceTurn` does that a reader of `duplexCapture` would never miss, because the absence of a feature leaves no trace in the code that lacks it. Three of the four were caught — by the owner, not by me, and each time from a SCREENSHOT rather than from a test. §9 rule 12 says rendered output is verified by rendering it; the corollary this earns is that **a new path should be diffed against the one it replaces, feature by feature, not read on its own.** The HUD's own teardown is now exercised under `-race`, since it is fed by the capture pump and torn down by the data-channel goroutine — neither of which created it. |
+
+| 2026-09-12 | **The voiceTurn↔duplexCapture diff, asked for after the fourth missing feature.** Went through `voiceTurn` line by line against `duplexCapture`. Two more real gaps and two deliberate omissions worth recording. **(1) THE SILENCE LADDER WAS MISSING.** `voiceTurnWithRetry` absorbs `ErrNoSpeech`/`ErrEmptyTranscript` and loops; `duplexCapture` is not wrapped by it, so an empty transcript went straight to the REPL — which prints a red "voice unavailable" panel and drops the user to the keyboard. Mid-conversation, for silence. `awakeCapture` now wraps the duplex path in the same ladder, minus the "still listening" reassurance line, which the waveform now answers better. **(2) A DEAD SESSION DROPPED THE USER TO THE KEYBOARD** instead of falling back. `onClosed`'s own comment says "falling back to the half-duplex chain is better than ending it" and the one path that could act on it returned a generic error, which the REPL renders as unavailable. Now falls back to `voiceTurnWithRetry` with a warning. **(3) `speech.StopSpeaking()` added** — usually a no-op in duplex, not always. **(4) NO READY CHIME, deliberately**, now written down: voiceTurn chimes because its microphone opens for the turn; this one has been open since the conversation started, and §13 records sox's gate opening on Helix's own 880 Hz ping and STT returning "you" — into an always-open transcribing mic that is a spurious turn every time. **Also: the banner never named the brain.** Reported as "who is processing that text?" — reasonable, since on a duplex chain the vendor's model hears you and answers in its own voice. New `THINKING` row on every chain; the `HEARING` row stops describing the fallback provider chain as though it were what is listening | Committed on `feat/blackbox` | **Confirmed against OpenAI's guide rather than assumed: client delegation does NOT invoke a second OpenAI model.** *"GPT-Live voice sessions are billed by duration, per second"*, backend usage billed separately — and in client delegation the backend is the user's own provider at their own rates. The owner's worry (an OpenAI model thinking expensively behind the voice) is real for RESPONSES delegation and is exactly why ADR-020 refuses it; under client delegation it does not happen. What IS true, and now documented rather than implied: gpt-live-1 is a generative speech model, so "only listen and speak" is unreachable — its acknowledgements and its paraphrase are generation. The strictly-verbatim alternative is `gpt-live-transcribe` at a third the price, and both are on the preset menu. |
+
+| 2026-09-13 | **A live session asked the shell to reboot itself and was offered a reboot of the Mac.** Two defects behind one screenshot. **(1) The spoken instruction did not match.** `isVoiceRebootPhrase` is a SUFFIX match and *"Reboot yourself, please"* ends on "please", so nothing matched and a documented voice instruction fell through to the planner. `matchModePhrase` had already solved exactly this — it builds TWO candidates, bare and courtesy-trimmed, and its comment explains why both are needed — and this matcher never inherited it. Now it does. **(2) The much worse half: `sudo shutdown -r now` analysed as LOW RISK.** Under the default `ask` posture Low runs with no confirmation, and the Medium voice cap does not reach a Low command either, so neither guard applied to ending the machine. Had the user said "yes" to the planner's offer, the Mac would have restarted without a prompt. Now HIGH, with the bare forms (`shutdown`, `reboot`, `halt`, `poweroff`) and the `osascript` spelling a model reaches for on macOS when sudo looks unavailable, anchored so `git rebase`, `echo reboot the shell` and `/var/log/shutdown.log` stay Low. ADR-005 amended: the criterion was already recoverability rather than category, and `/reboot` versus `shutdown -r` is that line drawn twice | Committed on `feat/blackbox` | **The phrase bug is what made the safety bug visible, and neither would have been found by reading.** One matcher in this repo had learned about trailing courtesy and the other had not, and nothing connected them — the lesson is in a comment in `voice_mode.go` that `reboot.go` had no reason to read. And the risk table had been exercised for years without anyone asking it about `shutdown`: it knows `mkfs`, `rm -rf /`, `eval` and pipes-into-shell, all of which destroy DATA, and had no opinion at all about ending the machine the data is on. Worth asking of any allowlist-shaped guard: not "is this entry right" but "what whole CATEGORY is absent". |
+
+| 2026-09-13 | **/doctor now says when the Helix answering you is not the Helix on disk.** Two ways to be stale, both of which cost this session real time and neither of which had any surface. **REPLACED:** a fix was built, installed and verified while the owner's shell went on showing the old behaviour — a running process keeps its own image, so overwriting the file changes nothing until it restarts. The bug was reported twice, and the screenshot that settled it was proof by absence: its banner lacked a row the binary on disk contained. **UNINSTALLED:** `make current` builds to `dist/` and installs nothing, so every hand-test after a rebuild runs the old binary; that is why the installed copy sat at Sep 11 while the repo moved on. Both are one `stat()` to detect — the executable's mtime against a package-level `processStarted`, and any `update.LocalCandidatePaths()` entry newer than the running binary, walking up six directories so it works from a subdirectory. Candidate names are REUSED from `internal/update` rather than relisted, since `scripts/build.sh` already has one owner. The row leads the panel, because a stale binary makes every "ok" beneath it a report about a Helix that is not running; it is absent entirely when everything agrees, because a row that says "not stale" on every healthy machine is one people learn to skip | Committed on `feat/blackbox` | **Rendering it found a bug that reading it could not, and then my own test found the same class of bug in itself.** Printed with `PanelLine` the detail ran ~190 columns past the panel border — while the `CONFIG` row two lines below wrapped correctly, because `KV` wraps and `PanelLine` does not. §9 rule 12 exactly. Fixed with `shell.StepDetail`, the existing wrap-with-indent helper, so continuations sit under the row rather than flush against the frame. Then the ordering test failed against correct code: it matched `"CONFIG"` in the `KVWidth(...)` call at the top of the function rather than the row, which is the same match-the-wrong-role mistake as `"$0.05/min while open"` containing the word "open". **Twice now a string has appeared in two roles and I matched the wrong one.** The habit worth keeping: when asserting on source text, anchor on the CALL (`shell.KV("CONFIG"`) rather than the bare literal. |
+
+| 2026-09-13 | **The instrument readout: turns as bands, full terminal width, and motion for the three phases that showed nothing.** Reported with a screenshot of a long spoken sentence marching down the screen as forty near-identical lines, plus "everything is just stuck on the left and looks stale". **The marching lines were a wrap that could not be taken back**: `\r\x1b[2K[hearing] %s` redraws one row in place until the text is wider than the terminal, at which point the terminal WRAPS it, `\r` returns to the start of only the LAST row, and every earlier row stays. Half-duplex hid it because a clip is bounded. The caption is now clamped to one row keeping the TAIL — while a sentence is still arriving, the words just spoken are the useful ones. **And it was never about the left:** nothing shared a right edge, so the screen had no measure. A turn is now a BAND — a rule naming the speaker, a rail holding the prose to one measure, and the model that produced it in the rule, which answers "who is processing that text?" on every turn rather than nowhere. **The 92-column cap is gone by owner decision**, its "a full-width rule reads as a horizon" argument recorded rather than deleted; the 52 floor stays because below it the KV columns collide. **Motion:** `VizSpeaking` had existed since P12.4 and was started by NOTHING — in duplex the listening waveform stops when words arrive and the reply is spoken rather than printed, so the screen was blank for the whole of Helix's answer. `VizExecuting` and `VizSeeing` are new, routed through a `vizShim` mirroring `thinkerShim` so headless runs animate nothing. EXECUTING is deliberately not the Thinker's scanner: that means "waiting on a model", this means "running on your machine" | Committed on `feat/blackbox` | **Three width rules in one session, each untestable for the same reason, each caught only by rendering.** `TerminalWidth()` probes real file descriptors and returns 0 under `go test`, so every width lands on the no-terminal default and no test can tell the clamps apart — reinstating the 92 cap passed the ENTIRE suite. The fix each time was to split the arithmetic from the measurement (`hearingLineAt`, `panelWidthFor`), which is now three for three. **And one argument I had backwards in my own comment:** BandWriter cached its measure "so a resize mid-reply cannot produce two right edges". That trades the wrong way — lines already printed belong to the terminal's scrollback and cannot be reflowed whatever we do, so caching buys no straight edge and guarantees every line after a shrink is too wide. Which is the marching-lines bug one level up. Re-read per line: a step in the right edge, never a line the terminal must wrap. |
+| 2026-09-14 | **A live API key printed itself, and the cause was never Windows.** Owner sent four Windows screenshots; the first carried a real `sk-proj-…` key in plain text in the setup wizard's scrollback. Told them to revoke it before anything else. The grep that followed found no `term.ReadPassword` anywhere in the tree: **every** key prompt used `commands.AskLine`, which is `bufio.Reader.ReadString('\n')` with no echo suppression — the same reader that asks which provider you want. It had echoed on every platform since keys were first asked for, and Windows was only the first time anyone photographed it. `commands.AskSecret` now reads via `term.ReadPassword`. Two decisions in it are deliberate. **It is NOT a `Prompter` method** — ADR-005 denies voice `/setup` precisely because that "would have you dictate API keys aloud", and a secret travelling through the same abstraction as an ordinary question is one refactor from reaching the voice prompter; reading the terminal directly leaves no channel to misroute. **And when it cannot hide input, it says so** — MSYS2 hands a Go binary a pipe, not a console, so echo is the emulator's; reading silently there would reproduce the bug behind a function whose name claims it is fixed. Guarded two ways: a unit test that the fallback warns and never re-prints the secret, and a source guard that fails if any `AskLine` prompt in `cmd/helix` mentions a key, token or password — the mistake is invisible at the call site, so review was never going to be the control. Mutating the implementation back killed all three. |
+| 2026-09-14 | **`make install` on Windows died at line 31 having installed nothing, and `sudo` was not the only wrong assumption.** Screenshot: `scripts/install.sh: line 31: sudo: command not found`, `make: *** [Makefile:187: install] Error 127`. Reproduced it exactly on this Mac by sourcing the pre-fix script with `OSTYPE=msys2.0` and a PATH with no sudo on it — same message, same 127 — which is also how the fix was checked (exit 0, `helix.exe` in place, `/etc/shells` untouched). Three defects, not one. **(1) sudo was unconditional**; it does not exist under MSYS2 and is not needed in a root container, so `run_privileged` now runs plainly when it can, elevates when it must, and names the command it could not run when it cannot. **(2) The Windows guard never matched.** `"$OSTYPE" != "msys"` compares for equality with a bare name; MSYS2 reports `msys2.0` and Cygwin appends a version, so the `/etc/shells` branch was taken on Windows too — invisible only because the script never got that far. **(3) The binary had no extension.** `go build -o dist/helix` does NOT append `.exe` (Go supplies it only when it picks the name itself — measured), so a Windows install produced a PE file Windows will not find on PATH. While there: `install.ps1` looked for `dist\helix.exe`, which **no** build target writes — `make windows` writes `helix-windows-amd64.exe` — so its build succeeded and its copy then failed; it now takes the names from what `build.sh` actually produces, and the test derives that list from `build.sh` so a rename fails here rather than on a user's machine. `/etc/shells` registration is non-fatal now: it gates only the optional login-shell step, and reporting a working install as a failure is the worse wrong answer. Not verified by execution: `install.ps1` — no PowerShell on this machine, and I am not claiming otherwise. |
+| 2026-09-14 | **`audio=Microphone` is not a device class, and no machine is called that.** Screenshot: `capture: ffmpeg recording failed: exit status 0xffffffff` → `✘ voice unavailable`, on a box where the MIC row said `✔ ffmpeg`. DirectShow addresses a device by its literal friendly name — there is no `default` the way PulseAudio has one, and no index the way avfoundation has one — so the hardcoded `audio=Microphone` was a guess against names that actually read `Microphone Array (Realtek(R) Audio)`. Helix now enumerates and takes the first audio device. The listing format was **read out of ffmpeg's own `libavdevice/dshow.c`**, not remembered, and it was worth doing: master prints one line per device with the type as a suffix and no section headers at all, while ≤ 4.4 prints `DirectShow audio devices` headers and no suffix — MSYS2, gyan.dev and winget do not ship the same build, so both are parsed. Two things measured rather than assumed: `-list_devices` writes to **stderr** and exits **non-zero** even when the listing is perfect (confirmed locally against avfoundation, exit 251), and the listing prints at `AV_LOG_INFO`, so the `-loglevel error` the recording command uses would have silenced the very output being asked for. Four mutations on the parser — un-skip the `Alternative name` lines, drop the section tracking, accept only a literal `(audio)` so the `(video, audio)` webcam mic is lost, trust the section over the per-device type so a camera becomes a microphone — all four killed. A failed Windows capture now prints the devices ffmpeg could see, because `0xffffffff` on its own points at nothing. |
+| 2026-09-14 | **`Close()` said goodbye and hung up in the same breath; the goodbye lost about one time in twelve.** Found as a flaky `TestCloseTellsTheServiceFirst` — 2 of 3, then 11 of 12 — which is the kind of number that gets a test quarantined. It was the implementation. `Close` did `s.send(session.close)` and then `s.fail(nil)` → `pc.Close()` back to back: **sending is not delivering**, and tearing the association down races the frame out of it. Every lost goodbye is a session that bills until the service times it out on its own — the exact cost the ordering was written to avoid, defeated in-process with no network between the peers. `waitForGoodbye` now waits for the data channel's buffered amount to drain, capped at 2s. That signal was checked rather than assumed: pion decrements a stream's buffered amount when the **SACK** arrives (`pion/sctp` association.go → `onBufferReleased`), so zero means the far end received it, not merely that we queued it. 12 of 12 after; reverting the wait put the failure back. |
+| 2026-09-14 | **The version constant claimed a release that had been withdrawn.** Owner deleted `v1.5.0` — still polishing — and asked that nothing refer to it. `HelixVersion` was `"1.5.0"`, so every source build reported itself as a release nobody could download, and the only thing that would have caught it was comparing the constant to the one file that says whether a release has been cut. Now `"1.5.0-dev"`, and the ordering was **measured, not assumed**: `1.5.0` beats `1.5.0-dev`, `1.5.0-dev` beats `1.0.0`, so a machine on a source build is correctly offered v1.5.0 the day it is published rather than told it already has one. Two guards, both mutation-killed: while `RELEASE_NOTES.md` carries an **Unreleased** heading the constant must be a pre-release, and once that heading is gone it must NOT be — otherwise `release.sh`, which derives the tag from the constant, would publish `v1.5.0-dev` as the release. The local tag was deleted (remote never had it; `git ls-remote` showed `v1.0.0` alone). `RELEASE_NOTES.md` collapsed its three never-published version sections under one **Unreleased** heading. Where a log row or a checkbox asserts the tag exists it is **annotated in place, not rewritten** (guardrail 11): those record what was true when written. What is NOT changed: `release.sh`'s usage examples (`./scripts/release.sh v1.5.0`) illustrate an argument's shape and claim nothing, and the `helix v1.5.0 (build 8b74cf1)` in the §7c probe is measured output — editing it would falsify an experiment. Doc sweep on top: all 12 `.md` audited by cross-checking claims against the code rather than reading for tone — every documented `/command`, `make` target, `HELIX_*` variable and backticked path still exists, so nothing was stale enough to delete and nothing was deleted. |
+| 2026-09-14 | **The camera had the microphone's bug, and nobody had reported it.** Found while fixing `audio=Microphone`: `internal/vision` hardcoded `video=Integrated Camera`, which is the same mistake — a literal DirectShow friendly name standing in for a device class — and fails identically on any machine whose webcam reports `HD Webcam C920` or `USB2.0 HD UVC WebCam`. Fixing only the half that was screenshotted would have left the other half broken in the way I had just written up. The enumerator moved to `internal/dshow` and serves both, because it was one bug written twice and a second copy is a second thing to fix next time. The video half of the parser is tested against the same two real listing formats; mutating the camera to enumerate the audio half kills the guard. |
+| 2026-09-14 | **The harness could not open a file, and the prompt was teaching it the wrong workaround.** Asked to compare Helix's agentic harness against Synapse's (read-only) and port what was missing. The comparison is one-sided in one place and even elsewhere: Helix already has the gates Synapse's `gate.go` builds (risk tiers, posture, sandbox), hooks, and compaction. What Helix had NO equivalent of is file tools — Synapse has `read_file`, `list_dir`, `glob`, `grep`, `edit_file`, `write_file`; Helix's tool vocabulary was `response/shell/git/package/recon/web/vision` and nothing else, so every file operation went through `shell`. **The planner prompt said so out loud**: "For in-place file editing on macOS, use: sed -i '' 's/OLD/NEW/g' FILE". That is a bad instruction for a model and not because sed is bad — an in-place sed whose pattern does not match **exits 0 and changes nothing**, so the model is told an edit succeeded that never happened, reports the work done, and the next step builds on it. Ported the six tools into `internal/filetools` with Synapse's semantics intact (uniqueness-checked snippet replacement, mod-time-ordered glob, pruned walks, the near-miss-filename guard, atomic write). **What changed in the port is the confinement**: Synapse resolves paths with its own prefix check; Helix already has a stronger `DirectorySandbox.ValidateSafePath` (symlinks resolved both sides, case folded, non-existent target validated by parent), so the package carries NO path check of its own and refuses to run without a resolver — a second, weaker copy of a confinement rule is how a jail grows a door. Wired through every existing gate rather than beside them: edit/write are Medium so the default posture asks, plan mode and `/dry-run` stop them, `voiceCapRisk` is called even though nothing here is High (the call site that forgot to ask is the hole, not the action), output is fenced `authority="data-only"` like any retrieval because a file in a repo is content written by whoever wrote that repo. Two new hook events, `pre-file`/`post-file`, subject `"<action> <path>"` so a rule can gate an action or a path — and `isPreEvent` had to learn about `pre-file`, which is the subtle one: an unlisted pre-event still RUNS its hooks and still prints the refusal, then proceeds anyway. That test derives its list from `Events()` so the next event cannot repeat it. Ten mutations across the port and the wiring all killed, including grading a write as a read and putting the sed advice back. Verified end to end against a real `DirectorySandbox`, not just the fake: plan parses, grep finds `version.go:3`, edit lands, `/etc/passwd` refused. **Synapse was not modified** — read-only throughout. |
+| 2026-09-14 | **What was NOT ported, and why it is a separate decision.** Synapse's harness also has subagents (`internal/agents`), a skills engine reading `SKILL.md` files, an `ask_question` tool that fails OPEN (an approval fails closed; a question has no side effect, so stalling a run over an unanswered one helps nobody), a `plan` tool that presents work for approval before starting it, and `todo_write` — a model-maintained task list, where Helix's `/todo` is user-maintained and only injected read-only. Each is a real capability and none is a bug fix, so none was folded into a port the owner asked to be about the harness gap. `todo_write` is the cheapest of them and the closest fit: the plumbing already exists, it would only need the planner allowed to write the list it is already shown. Recorded here rather than done, because widening what a model may change is an owner's call. |
+| 2026-09-14 | **The task list got a second author, and the loop got a reason to keep going.** Owner asked for a hybrid after the `todo_write` write-up: the human's plan informs the agent, the agent can change it, because a plan written before any work happened is a guess and the agent is the party that finds out. Not Synapse's shape — theirs is per-run and ephemeral, Helix's `todo.json` is persisted, user-owned and survives `/reboot`, so whole-list replacement would be data loss. **The rule landed as: redirect anything, erase only your own.** Add, revise, complete and supersede all work on a user's task; delete does not, because deletion is the only one of those that cannot be seen or undone — a superseded task stays visible with its reason and reopens, a deleted one is a task you still believe is tracked. Revision keeps `WasText`, and only the FIRST revision records it, so a second rewrite cannot launder the agent's own previous attempt into the provenance field. A reason is required to overrule a user task but NOT to mark it in progress — demanding one for progress just trains the model to emit filler. `TodoFromUser` is the zero value on purpose: every item in an existing `todo.json` was typed by a human, so an absent origin decoding to "user" is the correct answer rather than a default. **The loop change is the part that makes it more than a display**, and it is where I got caught: `agentWorkOutstanding` was correct and fully tested, and reverting the stop condition to its old two clauses passed the ENTIRE suite — the predicate was pinned, the wiring was not. Extracted `followUpDone(obs, moreWork)` so the decision is callable, added a table test for it, and a source guard that the loop still calls it (inlining the old condition compiles fine and leaves `moreWork` used by the label below, so nothing else would notice). Three conditions on outstanding work, each load-bearing and each mutation-killed: created this turn (a stale task must not make an unrelated question finish yesterday's job), the agent's own (the user's list is not a work queue — "renew the domain" must never become something the harness attempts), not settled. The tool is deliberately NOT risk-gated: it edits sentences in a 0600 file and asking "may I update my task list?" between steps trains the user to approve without reading. Plan mode and `/dry-run` still stop it, and every edit prints. Eleven mutations, all killed. |
+| 2026-09-14 | **The first real run of the new harness found two defects, and the second one is the one I should have seen.** Wrote the owner a use case — a fixture with three planted contradictions and a deliberately-wrong human todo — and they ran it against deepseek. **What worked**: file glob/read/list/grep all dispatched; `#1` correctly closed with a reason citing `ErrEmpty`; `#2` revised to `version.go` with `you wrote:` preserved and the reason citing `version.go:4`. The hybrid did exactly what it was built for. **What failed**: `version.go` was never edited, `#2` sat `in_progress` forever, and the turn ended **printing nothing**. Root cause of both: `agentWorkOutstanding` required `Origin.ByAgent()`, and the agent had worked entirely on the USER's three tasks, creating none of its own — so outstanding work was false at every iteration, the WORKING label never appeared, and the budget-exhausted warning was skipped. The "only its own tasks" rule was written to stop a shopping list driving the loop and threw out the case that matters most: **marking a task in_progress is the agent ADOPTING it**. Fixed with a per-turn touched set (explicit ids, reset in HandleInput — not a clock comparison, because the turn-start timestamp is ambiguous and the first plan runs before `agenticFollowUp` is even entered). The untouched-user-task property is preserved and tested. Second fix, which the owner asked for by name: every exit now reports — done / budget reached / stopped / failed — naming the open tasks, because "finished" and "ran out of road" look identical from a returned prompt. **The testing lesson repeated itself**: two of six mutations survived, both for the same reason as the `followUpDone` miss earlier the same day — I had tested the helpers and not the wiring. `noteTodoTouched` was called directly by the tests, so deleting it from `handleTodoStep` broke nothing; and the exhausted-branch assertion matched "budget" which also appears in the fallback branch's hint line. Fixed by driving the real handler and asserting on the phrase that DISTINGUISHES the two exits. Not fixed, and model behaviour rather than harness: `#3 run the tests` was closed on a test run that happened before the version bump. |
+| 2026-09-14 | **The duplex reply was being generated, spoken, and destroyed on its way to the screen.** Owner reported live mode "struggling to speak the whole sentence" and printing fragments. It was not speech and it was not the model: the answer was correct and the audio was fine. The HUD owns one terminal line and repaints `\r\033[2K` every 100ms; the reply band writes to that same line; so a paragraph was erased ten times a second and only the fragment written after the final repaint survived — `◈ HELIX SPEAKING ╢…╟ 2.6s outstanding.` is the tail of a sentence whose beginning never existed on screen. The band HEADER survived because it ends in a newline, which is what made this read as a speech problem rather than a rendering one. `LineHeld()` already existed and is the right answer for background chatter — an NVD notice is not worth interrupting a conversation for — but the reply is not chatter and had no way to take the line. Added `SuspendLine`/`ResumeLine`: output that MUST be seen stops the animation instead of asking it nicely, the loop skips the frame entirely rather than painting and being overwritten, and holds NEST because a turn's own HUD and the speaking HUD can both be alive. The streaming path takes its hold on first content and keeps it through Close, not per chunk — per-chunk is the same bug arriving one token at a time — and an empty stream releases nothing, or it would drive the counter negative and leave the NEXT reply unprotected. **I wrote the wiring test first this time**, after being caught twice the same day, and it paid: mutating the loop's suspension check, `PrintAIMessage`'s hold, the stream's hold and the nesting all kill. One thing my own test got wrong — the sampler goroutine had no deadline, so a broken `PrintAIMessage` HUNG the suite instead of failing it, which is worse than the bug under test. Bounded. Also added, on request: a rule in the todo prompt AND the loop directive that a verification task may only be closed on evidence gathered after the last change — from the run that closed "run the tests" on a result predating its own edit and said so honestly. |
+| 2026-09-14 | **The second harness run passed end to end, and the UI it exposed did not.** Owner re-ran with the budget raised to 10. **Everything under test worked**: `file/edit` finally ran (`edited version.go (1 replacement)`, verified `const Version = "1.2.0"`), the `WORKING` label appeared, `Done — 3 tasks closed.` printed, the reply band rendered IN FULL with no fragments — the line-ownership fix holds in a live duplex session — and the stale-evidence rule landed visibly: the model reasoned "no file was modified after it, so its pass still describes the current tree". Three things came out of it. **(1) Read-only file failures are now non-fatal**, on request: a `read` of a missing file used to cancel every remaining step, and the first run lost two thirds of a four-iteration budget to exactly that. Mutations still abort — a failed edit may have left the tree in a state the following steps assumed away. Pinned at the CALL SITE, not just on `fileMutates`, because that is the half this session has twice failed to test. **(2) A defect the run revealed**: `#2` was edited successfully and THEN marked `superseded` because "the bump it asks for is already in place" — it having been the thing that put it there. Superseded reads as "never needed", the opposite of what happened. Rule added to the prompt and the loop directive: if you did the work it is done, never superseded. **(3) The todo UI, rebuilt.** Items floated outside the panel gutter while the totals sat behind it, so the block had two left edges; one chrome bullet covered pending, in progress AND blocked, so the live task was indistinguishable from the queue; the agent's notes were flat prose; and the totals printed every state including four zeros. Now: open work above settled, a glyph per state, author at the right edge, labelled notes in an aligned column, a progress meter that omits empty states. **Rendered and LOOKED AT rather than reviewed** (§9 rule 12) — and that caught three defects the code did not show, including the byte-vs-column pad this repo has made before: `↳` is three bytes and one cell, so `you wrote` and `why` landed on different columns. Added `shell.Columns`/`shell.PadColumns` because `len()` is the wrong answer and callers keep reaching for it. Six layout mutations killed, plus a test that painting cannot shift a column. |
+| 2026-09-14 | **Two more stale surfaces, reported together: the key prompt and every install.** Rendered both BEFORE changing anything, which is what showed the actual problems rather than the ones I would have guessed. **The key prompt** was a single line at column zero — `Paste API key for openai (hidden):` — outside every convention the rest of the shell follows, and it assumed the reader knew three things it never said: where to get a key (a URL nobody can guess — Groq's console is not on groq.com's front page and Gemini keys come from AI Studio), where the pasted one goes, and whether it was safe to type there. Now a panel with PROVIDER / GET ONE / STORED / OR SET, and the console URLs live in `internal/providers` beside `envName` because that is where the per-vendor account knowledge already is. **The property worth the most**: on a terminal that cannot suppress echo the reassurance is REPLACED, not softened — it says the key will be visible in the scrollback. Promising hiding that will not happen is worse than silence, because the reader pastes on the strength of it, which is exactly how a live key reached a screenshot earlier today. A provider with no console (`custom`) gets no URL rather than a plausible one. **The installs** had a different problem than "stale": `shell.Step` was already doing its job, but between two Helix lines the package manager's output was dumped at column zero with NOTHING saying who was talking — untidy on success, genuinely confusing on failure, where a stranger's error text sits inside Helix's own report and the reader has to work out which lines they can act on. Added `shell.ForeignOpen/Close`: Helix does not reformat that output (reflowing someone's progress bar would be worse) but it marks the handover in both directions, with a glyph deliberately unlike its own gutter, and the closing mark carries the verdict so a long scroll need not be read backwards. `SourceOf` names the PROGRAM not its wrapper — `sudo apt-get install` is apt-get, `python3 -m pip` is pip — and that took two goes: the first version reported `nobody` for `sudo -u nobody apt-get`, because a value-taking flag swallows the next field. Six mutations killed. |
+| 2026-09-14 | **A full `.md` sweep, and the vocabulary had been stale since before this branch.** Twelve files, audited by cross-checking claims against the code rather than reading for tone: every documented `/command`, `make` target, `HELIX_*` variable and backticked source path still resolves, and heading hierarchy is clean everywhere (one apparent jump in `local_runtimes.md` was shell comments inside a fence — my first checker was not fence-aware). **The real finding was the tool vocabulary**, published in four places and enforced in one. `README.md`'s planner-schema sample and its feature list both listed six tools; the planner accepts nine. `vision` had been missing since it shipped in 2026-08 — that drift predates this branch entirely and nobody had caught it, which is the argument for the guard rather than the fix. `docs/architecture.md` was missing `file` and `todo`. All three corrected, and `TestDocumentedToolVocabularyMatchesTheCode` now DERIVES the list from `validTools` and checks each passage against it, with a companion asserting `/tools` has a row per tool — both mutation-killed. **Two documents had genuinely gone wrong rather than merely stale.** `threat_model.md`'s blast-radius argument names "validation, risk tiers, sandbox, typed confirmations", all of which describe the SHELL pipeline; the `file` tool reaches the filesystem without a command to validate, so what actually bounds it — the same sandbox root, the same tiers, `pre-file` hooks — is now stated, along with the honest part: the hard-block list that refuses `> /dev/sda` is not what stops a `file/write`; the root is, and on a session rooted at `/` that is weaker than it sounds. `threat_model_voice.md`'s closing lesson — a control expressed as "capped at Medium" inherits every bug in how Medium is decided — needed the note that the file tool's Medium is a hand-assigned constant rather than a validator's verdict, which is a different provenance for the same claim, plus a reminder to revisit the cap if `todo` ever stops being sentences nothing executes. `architecture.md` gained the file and todo tools, the task list's second author, credential entry, line ownership and foreign-output framing. Release gate still armed: `Unreleased` heading present, `HelixVersion = 1.5.0-dev`. |
+| 2026-09-14 | **"It doesn't work. Its totally broken." — and it was mine.** Screenshot of a live session: `Read me the parser file and tell me what it does` → `glob **/parser.go` → `ANSWERING (1/1)` → `glob **/parser*.go` → `glob **/*[Pp]arser*` → `glob **/*.go`. Four globs, no read, no answer. **Root cause**: `observationDirective`'s answer-only branch, written for the WEB tool to stop a search loop, keyed on `needsAnswer` — and the file tool started setting that. A glob returns PATHS, so "your ONLY job now is to answer the user's question FROM those results" left the model with nothing true to say; it was right and the instruction was wrong, which is the worst way round. Split: web keeps the answer-only directive, file steps are told to read what they found and never to describe a file they have not read. **Second half of the failure**: the `(1/1)` in that screenshot is `retrievalFollowUpBudget`, one hop — correct for a search, not for find→read→answer, so the turn spent its only iteration on the glob. File retrieval gets 3, which is that chain plus one correction and is NOT the agentic loop by the back door — it still cannot self-correct a failing command. **The owner's actual ask** was bigger and right: in a live conversation the screen is the thing nobody is looking at, so a multi-step job ran for half a minute emitting EXEC lines in silence. Added spoken narration — plan announced once (first task named, rest counted, because five tasks read aloud is a list nobody retains), each start and finish named, both halves reported at the end. Nothing spoken carries a path: an absolute path is reduced to its base name, which is not cosmetic — `live.SpeakableSummary` withholds any sentence containing one, so without it the narration would be silent rather than ugly. My own test caught that; the first version spoke "/Users/me/proj/internal/config/config.go". Planner now told to emit the task list as its FIRST plan and start nothing in it, so the user hears the plan before anything happens. **"The progress bar shakes"** was measurable and measured: `%.1fs` grew the HUD 42→43→44 columns across 10s and 100s, and the row is redrawn in place ten times a second. Fixed width, plus an exponential average on the live level so the meter tracks a voice instead of room noise. **Stale UI**: `--- Step 1 ---` and `HELIX :: ANSWERING :: reading retrieved results (1/1)` were pre-panel ASCII shouting a brand name; now `┄ step 1 of 3` and `┄ answering 1/3  reading retrieved results`. Five mutations killed. One of my earlier tests asserted the directive's exact phrasing and broke on the rewrite — re-pointed at the wording that matters rather than the sentence. |
+| 2026-09-14 | **Second live run: the directive fix held, and three things I had called done were not.** Screenshot showed `glob **/*parser*` → `answering 1/3` → the SAME glob again → grep → `**/*parser*.go` → `**/*parse*` → `**/*.py`, eight searches, then a CORRECT answer ("there is no parser dot go in this project") — they were running in the Helix repo, not the fixture, so the file genuinely was absent. **(1) An empty result was not being treated as an answer.** The first glob said `(no files matched)` and the model kept hunting with looser patterns; my directive said "do not re-run a search that already SUCCEEDED", which a search finding nothing does not feel like. Stated the other way round now, matched on the three exact strings `internal/filetools` returns so a file whose CONTENTS mention the phrase cannot trigger it. **(2) The UI was still stale because I polished the text and left the frame.** `┄ step 1 of 3` went through `PrintSystemMessage` and came out `[SYSTEM]    ┄ step 1 of 3` — the new line inside the old prefix, worse than either alone. Added `PrintChrome`, a channel that adds nothing, and routed the step and phase lines through it. **(3) The shaking bar was not the width after all** — that fix was real and measured but not the cause. Measured the animation instead: 41% of the row changing every frame at 10fps. The deeper point is that while the model speaks Helix has NO audio level (the audio is decoded and played, never metered), so the waveform was depicting a signal that does not exist — motion with nothing behind it, which is exactly what "shaking" looks like. Replaced with a travelling pulse: 12% churn, and it says the true thing. LISTENING keeps its waveform because there the level is real. **Two of my own tests broke on my own rewording again** — the third time this session — and one mutation (chrome prefix) had no test at all until the mutation run found it. |
+| 2026-09-14 | **Third live run: the harness works, and the three complaints left were all one class.** Screenshot shows the chain finally doing what it was built for — `glob **/*parser*` → `read parser.go` → a correct summary of package chirp; then `list .` → `glob **/*.md` → `read README.md` → `read go.mod` → a correct description of the project. The directive and budget fixes hold. What was still wrong: **(1) `[EXEC]` was the last bracketed label in a live trace**, and it sat at column ZERO while the prompt, the step markers and the reply band all start at column two — which is the "going out kind of like breaking" on the left edge: the margin moved in and out by two cells, line by line. A tool step is the same family as `┄ step 1 of 2`, so it renders as chrome now. **(2) The glitch was never specific to speaking.** The owner's phrasing carried the answer — "when it starts to speak OR ANYTHING ELSE PRINTS ON THE SCREEN". `SuspendLine` had been wired to `PrintAIMessage` only, because a wiped reply was the visible half; every OTHER print — step markers, EXEC lines, warnings, info — still landed on the row the HUD repaints ten times a second. They all funnel through `scifiPrint` and `PrintChrome`, so it was one fix, not nine. **(3) The test for it took three attempts and the third needed production support.** A sampler goroutine races a print (faster than any poll interval) and reported false failures; swapping os.Stdout for a checking writer does not work either, because the drain happens after the call returns and the hold is already released. Added `lineSuspendPeak`, an atomic high-water mark incremented in `SuspendLine` — one atomic on a path that runs once per printed line, and the only observation point that cannot miss the window. Worth the cost: this is the fourth time this session that a correct helper sat beside an unwired call site, and it is the first one I could pin deterministically. |
+| 2026-09-15 | **"Longer responses getting capped" was a width probe failing mid-reply.** Two screenshots of a long live session. The tell was in the geometry: the band HEADER spanned the full ~200 columns while the text under it wrapped at ~45, and both come from the same `panelWidth()`. The difference is WHEN — the header measures once, and `BandWriter` re-measures PER LINE so a window resized mid-reply reflows, which I added deliberately. So a long answer probes the terminal a hundred times, each probe opening and closing `/dev/tty`; one blip returns 0, `panelWidthFor(0)` floors at 52 → 46 columns of content, and everything after that point is a narrow ragged column that reads as truncation. `TerminalWidth` now falls back to the last measurement that succeeded — a zero is never a real terminal, only a failure to ask. Measured the floor cost at 148 columns, which is why it is so visible. **Two UI complaints, both real.** `[ERROR]`, `[WARNING]` and `[DATA]` were the last lines at column ZERO while the prompt, the band, the step markers and the tool steps all start at two — so a live session's left edge stepped in and out depending on which kind of line came next. A warning that breaks the margin does not read as more urgent, it reads as a different program. And the band header stretched to the panel edge: fine for one turn, but a long conversation is a stack of full-width horizontal bars every three or four lines, and on a wide terminal they are the loudest thing on screen — the eye reads the rules instead of the words. Now a short lead-in; the rail down the left already carries the turn's extent. Rendered a four-turn conversation to check it reads as a conversation. Three mutations killed. |
 
 *End of BlackBox_Development.md — maintain it as the single source of truth. If reality diverges
 from this document, update the document in the same commit as the code.*

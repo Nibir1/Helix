@@ -114,6 +114,25 @@ var realtimeSTTModels = map[string]bool{
 	"gpt-realtime-2.1":     true,
 }
 
+// duplexOnlyModels are models that are NOT transcription models at all: they
+// are full-duplex sessions over WebRTC (internal/live, ADR-020). They are valid
+// values of speech.stt.model — that is how full duplex is chosen — and they
+// must never be sent to a transcription endpoint, which answers 400.
+var duplexOnlyModels = map[string]bool{
+	"gpt-live-1": true,
+}
+
+// IsDuplexOnlyModel reports whether a model names a full-duplex session rather
+// than something that can transcribe a clip.
+//
+// An allowlist rather than a prefix match, for the same reason
+// realtimeSTTModels is one: `gpt-live-transcribe` starts with the same four
+// characters and IS a transcription model, so a prefix would disable the
+// realtime STT path by accident.
+func IsDuplexOnlyModel(model string) bool {
+	return duplexOnlyModels[strings.ToLower(strings.TrimSpace(model))]
+}
+
 // IsRealtimeSTTModel reports whether a model should use the WebSocket path.
 func IsRealtimeSTTModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))

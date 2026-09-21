@@ -262,7 +262,29 @@ var visionModelSubstrings = []string{
 	// Natively multimodal flagships whose names carry no "vision"/"vl" marker
 	// at all. Each is somebody's DEFAULT model, so missing one here is the
 	// difference between /eyes working and refusing on a stock install.
+	//
+	// The DeepSeek entries were MEASURED, by sending a four-quadrant JPEG
+	// through Helix's own provider path and asking for the colours. Reported
+	// from a real session where /blackbox eyes on refused on a model that sees.
+	//
+	//	deepseek-flash      4/4   the current default
+	//	deepseek-chat       4/4   alias
+	//	deepseek-reasoner   4/4   alias
+	//	deepseek-coder      4/4   alias
+	//	deepseek-v4-pro     0/4   "I can't see the image" — and it is NOT here
+	//
+	// /v1/models serves only `deepseek-flash` and `deepseek-v4-pro`; the other
+	// three names are aliases the API resolves onto the flagship, which is why
+	// they see. That is also why this is NOT a provider-level rule: v4-pro is a
+	// real, listed, text-only model, so "deepseek sees" would send it an image.
+	//
+	// Guessing got this wrong in BOTH directions. The retired
+	// `deepseek-v4-flash-vision-exp` carried the literal word "vision" and
+	// matched by accident, so the table looked right until the vendor shipped a
+	// successor with a cleaner name; and the first fix shipped a test asserting
+	// the three aliases were text-only, which the measurement disproved.
 	"glm-5.3-flash", "muse-spark",
+	"deepseek-flash", "deepseek-chat", "deepseek-reasoner", "deepseek-coder",
 	"kimi-k3", "kimi-k2.6", "kimi-k2.5",
 }
 

@@ -24,6 +24,7 @@ import (
 
 	"helix/internal/ollama"
 	"helix/internal/shell"
+	"helix/internal/uninstall"
 )
 
 // purgeGroup orders and titles a section of the manifest.
@@ -138,6 +139,53 @@ func handlePurgeCommand() {
 
 	deleted, failures := runPurge(present)
 	printPurgeResult(deleted, failures)
+
+	// THIRD confirmation: remove Helix itself.
+	//
+	// A separate prompt rather than part of the first, because /purge already
+	// means something and people rely on it: "wipe my data for a fresh start"
+	// is a thing you do in order to KEEP using Helix, and silently folding a
+	// full uninstall into it would take the shell away from someone halfway
+	// through re-configuring it. Same shape as the weights prompt above — the
+	// more destructive option is the one that is asked for separately, and
+	// keepData is set because everything under ~/.helix has just been removed
+	// item by item with its own manifest.
+	if !uninstallOffered() {
+		return
+	}
+	fmt.Println()
+	if wizConfirmDanger("also remove Helix itself — the binary, its shell registration and any background service") {
+		handleUninstall(uninstallOptions{keepData: true})
+		return
+	}
+	// Said out loud, because every other decline in this flow says something
+	// and silence here reads as the command having ended in the middle. It
+	// also states the state the user is actually in, which is the useful half:
+	// the data is gone AND the shell is still there, which is the whole point
+	// of asking separately.
+	fmt.Println(shell.Step(shell.StateIdle, "Helix is still installed",
+		"your data is gone; the shell is not"))
+}
+
+// uninstallOffered reports whether there is anything left for the uninstall
+// step to do.
+//
+// Asked before the prompt, not after, for the reason purgeWeightTargets
+// documents at length: /purge already shipped a confirmation whose yes deleted
+// nothing, and a prompt that cannot act is worse than no prompt — it teaches
+// people that saying yes here does not matter.
+func uninstallOffered() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	items := uninstall.Plan(home, installedBinaryPath())
+	for _, it := range items {
+		if it.Kind != uninstall.KindData {
+			return true
+		}
+	}
+	return false
 }
 
 // weightTarget is a downloaded artifact, carried with its size.

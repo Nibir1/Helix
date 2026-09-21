@@ -272,9 +272,41 @@ func main() {
 	// initVoiceMode is deliberately NOT here — it prints the live banner for a
 	// restored voice session, and that banner reports the camera. See its call
 	// site below the vision seams.
+	// The band header names the model that produced each reply. Wired here
+	// because internal/ux must not import internal/ai, and read at render time
+	// so a mid-turn failover to the local model is named correctly.
+	ux.ReplyMeta = func() string {
+		provider, model := ai.ActiveProviderName(), ai.ActiveModel()
+		switch {
+		case provider == "":
+			return ""
+		case model == "":
+			return provider
+		default:
+			return provider + " / " + model
+		}
+	}
+
 	initVoiceLog()
 	agentCore.OnSpeak = func(text string) {
 		if !speech.TTSEnabled() {
+			return
+		}
+		// A full-duplex session IS the voice, so the TTS chain must not also
+		// speak — two voices saying the same reply half a second apart was the
+		// first thing this got wrong.
+		//
+		// What is LOGGED is what was handed to the model, not the reply: those
+		// differ, because live.SpeakableSummary withholds exact content and
+		// sends "it's on screen" instead. Logging the reply would make the
+		// voice log claim Helix said a path aloud when it deliberately did not,
+		// and the whole point of that log is that it records what was said.
+		// It is still not a transcript of the AUDIO — gpt-live-1 paraphrases
+		// what it is given — and no client-side log can be.
+		if spoken, ok := duplexSpeak(text); ok {
+			if spoken != "" {
+				logSpoke(spoken)
+			}
 			return
 		}
 		// Recorded here rather than at each caller: this is the one seam every

@@ -409,11 +409,12 @@ here would be a privacy surface with no control attached.
 Worth stating plainly, because "realtime voice AI" implies things this does not
 yet do:
 
-- **Capture is half-duplex, and voice interruption works at sentence
-  boundaries.** The recorder does not run while the speaker does, so you cannot
-  talk *over* a reply. What you can do — after `/config barge-in on` — is
-  speak in the pause **between sentences**: Helix listens in that gap, where the
-  speaker is idle and there is no echo to cancel, and stops if it hears you.
+- **Capture is half-duplex on every chain except `gpt-live-1`, and voice
+  interruption works at sentence boundaries.** The recorder does not run while
+  the speaker does, so you cannot talk *over* a reply. What you can do — after
+  `/config barge-in on` — is speak in the pause **between sentences**: Helix
+  listens in that gap, where the speaker is idle and there is no echo to cancel,
+  and stops if it hears you.
 
   That is interruption at the pace of punctuation, not full duplex. A long
   sentence plays to its end before Helix can notice you, and the probe adds
@@ -423,9 +424,16 @@ yet do:
   probe, so a false positive silences Helix with no way to tell it was wrong.
 
   **Off by default**, and `Ctrl+C` stops a reply instantly with no microphone
-  involved. True talk-over barge-in still needs concurrent capture plus acoustic
-  echo cancellation, which is not implemented — without AEC the microphone would
-  hear Helix's own voice and transcribe it as your input.
+  involved. Talking over a reply on these chains would need concurrent capture
+  plus acoustic echo cancellation, and Helix implements neither: the microphone
+  would hear Helix's own voice and transcribe it as your input.
+
+  **`gpt-live-1` is the exception, and everything above stops applying to it.**
+  The microphone stays open for the whole conversation, the model decides many
+  times a second whether you are still talking, and you can cut in mid-sentence.
+  Helix still writes no echo canceller — it does not need one, because the
+  service removes its own voice from the microphone and was measured doing so
+  (§7c).
 - **"Stop talking" only lands between turns**, for the same reason.
 - **The companion waits for a closed microphone.** An unprompted remark is
   queued, not spoken on the spot: it lands at the start of the next turn, before
@@ -435,15 +443,18 @@ yet do:
 - **Typing during a capture kills the clip**, and speaking mid-typed-line is not
   heard. Both directions of the same limit: one input channel has the terminal
   at a time, and the handover is clean rather than concurrent.
-- **`gpt-live-1` is not supported, and cannot be with a WebSocket.** OpenAI's
-  full-duplex model is WebRTC-only — the session endpoint answers `"Only the
-  webrtc transport is supported."` and wants an SDP offer — so reaching it means
-  ICE, DTLS-SRTP and Opus rather than the WebSocket client the other streaming
-  providers use. It is selectable by typed model id, and selecting it produces a
-  session nothing here can talk to. What *is* supported is
-  `gpt-live-transcribe`, OpenAI's realtime transcription model, over
-  `wss://api.openai.com/v1/realtime?intent=transcription` at $0.017/min — one
-  direction only, which is all the STT chain needs.
+- **`gpt-live-1` is supported, over WebRTC, and it was never going to work over
+  a WebSocket.** The session endpoint answers `"Only the webrtc transport is
+  supported."` and wants an SDP offer, so reaching it means ICE, DTLS-SRTP and
+  Opus rather than the WebSocket client the other streaming providers use. That
+  is now built (§7c). If you are holding a guide that tells you to open
+  `wss://api.openai.com/v1/live/sessions` and send `session.start`, throw it
+  away: that socket upgrades and is then dropped without a frame.
+
+  `gpt-live-transcribe` is still there and still the cheaper option — OpenAI's
+  realtime transcription model over
+  `wss://api.openai.com/v1/realtime?intent=transcription` at $0.017/min, one
+  direction only, feeding the ordinary STT chain.
 - **Latency depends entirely on the providers.** Streaming STT plus streaming TTS
   puts first-audio in the low hundreds of milliseconds on a good cloud chain, and
   seconds on a CPU-bound local chain. `/blackbox status` reports the measured
@@ -457,6 +468,254 @@ yet do:
   predictable and costs no tokens, but it only knows the phrases in the table.
   Anything else goes to the planner — which is the correct fallback, not a
   failure.
+- **The microphone is chosen for you, and on Windows that took measuring.**
+  avfoundation takes an index and PulseAudio takes the word `default`, but
+  DirectShow has no such thing: it addresses a device by its literal friendly
+  name. Helix used to pass `audio=Microphone`, which reads like a device class
+  and is in fact a name almost no machine has — real ones are
+  `Microphone Array (Realtek(R) Audio)` or `Microphone (2- USB Audio Device)`.
+  ffmpeg could not resolve it, exited `0xffffffff`, and voice was reported
+  unavailable on a machine whose microphone worked.
+
+  Helix now enumerates (`ffmpeg -list_devices true -f dshow -i dummy`, once per
+  run) and uses the first audio device. Override with `HELIX_AUDIO_DEVICE`, which
+  takes the whole `-i` argument on every platform. A capture that fails on
+  Windows prints the devices ffmpeg could see, because the exit status alone
+  names nothing.
+
+  **The camera had the identical defect** and was found while fixing the
+  microphone: `video=Integrated Camera`, equally a guess, equally unresolvable
+  on a machine whose webcam reports `HD Webcam C920`. Same listing, same fix,
+  and it is one shared enumerator (`internal/dshow`) rather than two copies —
+  it was one bug written twice, and a second copy is a second thing to fix.
+
+---
+
+### The reply and the waveform cannot both own the line
+
+The HUD — `◉ LISTENING`, `◈ HELIX SPEAKING` — owns one terminal line and repaints
+it in place ten times a second. Background chatter checks `LineHeld()` and stays
+quiet, which is right for a database-sync notice nobody needs mid-conversation.
+
+The reply is not background chatter, and for a while it had no way to say so. A
+duplex turn printed its answer into the band while the speaking HUD repainted
+underneath it, and the text was wiped as fast as it streamed:
+
+```
+  ┏━ HELIX ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ deepseek / deepseek-flash ━
+● ◈ HELIX SPEAKING ╢▄▁▁▃▄▄▃▄▇▇▅▃▃▄▄▂╟ 2.6s outstanding.
+```
+
+The header survived because it ends in a newline. The paragraph after it did
+not — only the fragment written after the final repaint reached the screen. The
+answer was generated, spoken aloud correctly, and destroyed on its way to the
+terminal, which is why it read as the model "not finishing its sentences".
+
+Output that must be seen now **suspends** the animation rather than asking it
+nicely: the HUD skips its frame entirely while a reply is being written, and
+resumes when the band closes. Holds nest, because a turn's own HUD and the
+speaking HUD can be alive at once.
+
+### Every print yields the animated line
+
+`SuspendLine` began around the reply, because a wiped answer was the visible
+half of the problem. It was not the whole of it. A live session prints step
+markers, tool steps, warnings and info **between HUD frames**, and each one
+lands on the row the animation is repainting ten times a second — so the bar
+glitched whenever anything at all appeared, not only when Helix spoke.
+
+Every print path in `internal/ux` takes the hold now. They all funnel through
+two functions, which is what made it one fix rather than nine.
+
+### The speaking indicator is not a waveform
+
+While the model speaks, Helix has **no audio level** — the audio is decoded and
+played, never metered. So the full-range interference pattern that used to sit
+beside `◈ HELIX SPEAKING` was animating a signal that did not exist, and that is
+what a fabricated signal looks like: motion with nothing behind it. Reported
+twice as "the progress bar shakes".
+
+It is a travelling pulse now — one lit cell moving along a quiet track, which
+says the true thing (something is happening; Helix does not know how loud).
+Measured: the old pattern changed 41% of the row every frame at 10fps, the pulse
+changes 12%. `◉ LISTENING` keeps its waveform, because there the level is real —
+it comes off the microphone.
+
+### The HUD holds its width
+
+The waveform is redrawn in place ten times a second, so any field that grows
+re-lays the whole row. The elapsed timer was `%.1fs`: measured, the line went
+42 → 43 → 44 columns as it crossed 10s and 100s, and in a terminal narrower than
+the line that wraps and the bar appears to jump. It is a fixed six cells now, and
+the live level is smoothed with an exponential average so the meter tracks your
+voice instead of twitching on room noise.
+
+---
+
+## 7c. Full duplex (`gpt-live-1`)
+
+Pick **"Talk over it"** from the recommended chains in `/blackbox setup` and a
+conversation opens a **full-duplex session** instead of taking turns: the
+microphone stays open the whole time, the model hears you while it is speaking,
+and it decides when you have finished talking rather than waiting for a silence
+timer. You can interrupt it mid-sentence. Nothing else in Helix changes.
+
+```text
+/blackbox setup          # third entry: "Talk over it"  [needs a key · libopus]
+/blackbox status         # the DUPLEX row confirms it
+```
+
+The **model id is the switch**; there is no separate on/off. The preset sets
+`speech.stt.provider: "openai"` and `speech.stt.model: "gpt-live-1"`, which you
+can equally write into `~/.helix/config.json` yourself, or pick from the full
+STT table after declining the recommended chains.
+
+**The preset also configures an ordinary TTS voice and a `whisper-local`
+fallback, and that is not redundant.** `gpt-live-1` replaces the chain for the
+life of a *session*, not the life of the config: `/blackbox say`, an unprompted
+remark before the first turn, and every turn on a machine where the session
+cannot open all still need a voice and a transcriber. A duplex chain with those
+left blank goes silent the moment it is not mid-conversation.
+
+**It costs money while it is open.** $0.05 a minute, billed per second, *plus*
+the planner's own model — so an idle session is not free the way an idle
+microphone is. The ten-minute AWAKE stand-down is what bounds that, and
+`/blackbox status` grows a `DUPLEX` row saying whether a session is open.
+
+**It needs libopus**, because WebRTC carries Opus and there is no other way in —
+the data channel refuses audio once a session has started. `brew install opus`,
+or `apt install libopus0`. Helix loads it at runtime through purego, so the
+build is still CGO-free and the binary still cross-compiles; this is the same
+posture as already needing `sox` or `ffmpeg` to record. Without it,
+`/blackbox status` says so and conversations quietly use the ordinary chain.
+
+### Who is actually doing what
+
+This is the question the design most often gets asked, and the answer is not
+what the screen used to suggest:
+
+| | |
+|---|---|
+| **hears you** | `gpt-live-1` |
+| **decides your turn ended** | `gpt-live-1` |
+| **works out what you meant, plans it, runs it** | **your own model** — DeepSeek, Claude, a local Ollama, whatever `/provider` says |
+| **speaks the answer** | `gpt-live-1` |
+
+`gpt-live-1` is the ear and the mouth. It has **no tools**, it never sees your
+files, and it decides nothing about what Helix does. That is *client
+delegation*: when you stop talking it hands the turn back and waits. The
+alternative — letting OpenAI's backend reason and call tools — is refused
+outright, because it would put an external model in front of the Instruction
+Firewall.
+
+**On cost**, which is the usual reason people ask. OpenAI's guide: *"GPT-Live
+voice sessions are billed by duration, per second"*, and backend model usage is
+billed separately. In client delegation **your** backend is the one doing the
+reasoning, so that half of the bill is your existing provider's, at your
+existing rates — there is no second OpenAI model quietly thinking behind the
+voice. You pay $0.05/min for the voice layer and whatever DeepSeek (or
+whoever) already charges you for the thinking.
+
+What you **cannot** get from `gpt-live-1` is a pure listen-and-speak pipe. It is
+a generative speech model: it writes its own acknowledgements and it paraphrases
+whatever you hand it (see below). If you want strictly verbatim speech with a
+brain of your choosing, that is `gpt-live-transcribe` at $0.017/min plus the
+ordinary TTS chain — one third the price, no interruption, no paraphrase.
+`/blackbox setup` offers both.
+
+The `LIVE` banner now names the thinker on its own `THINKING` row, on every
+chain rather than only this one.
+
+### What it does not change
+
+**The pipeline.** A spoken turn reaches the planner through exactly the funnel a
+half-duplex one does — stop phrases, the reboot phrase, the eyes-off switch, the
+spoken-command allowlist, then `Channel=voice` with the Medium risk ceiling and
+the sandbox. gpt-live-1 is the ear and the mouth; it decides nothing and it has
+no tools. That is a deliberate configuration called *client delegation*, and the
+alternative — letting OpenAI's model decide which tools to call — would put an
+external model in front of the Instruction Firewall and is refused.
+
+**Who may confirm a destructive action.** Still nobody, by voice. What is new is
+that typing one now works properly: Helix tells the session to **stop
+listening** for the duration, so nothing in the room — a television, a
+colleague — can say the confirmation phrase while you are reading the prompt. If
+that mute is refused, so is the confirmation.
+
+### The one thing you should know about its voice
+
+**gpt-live-1 does not read your output; it paraphrases it.** That is the model's
+documented behaviour and it is stronger than it sounds. Measured against the
+live service:
+
+| Helix sent | gpt-live-1 said |
+|---|---|
+| `[ERROR] sandbox violation: /tmp/helix_e2e_evil_1789033489` | *"Sandbox violation. That action touched a forbidden path."* |
+| `Nahasat Nibir` | *"On it."* |
+| `3 files deleted, 1.4 MB freed` | *"Three files deleted, 1.4 megabytes freed."* |
+
+The first row is why the rule below exists: the path was dropped and the
+explanation was **invented**. So Helix does not hand it exact content. **The
+screen carries exact output — printed, unparaphrased, exactly as it does
+today — and gpt-live-1 carries the conversation.** A one-line answer is spoken
+as written; anything containing a path, a hash, a version, a bracketed error tag
+or more than one line is left on screen and summarised aloud as *"done — it's on
+screen"* or *"that didn't go through — the details are on screen"*.
+
+### Speakers are fine — measured, not assumed
+
+**You do not need headphones.** The obvious worry is that the microphone hears
+the model and transcribes it back as your input. It does hear it; it does not
+transcribe it.
+
+Measured on a MacBook's own speakers feeding its own microphone — the worst case
+available — at three output volumes:
+
+| output volume | quiet room | the model's voice, at the mic | transcribed itself? |
+|---|---|---|---|
+| 30 | 0.0006 RMS | 0.0028 mean, 0.0093 peak | no |
+| 55 | 0.0009 RMS | 0.0088 mean, 0.0290 peak | no |
+| 80 | 0.0005 RMS | 0.0280 mean, 0.0780 peak | no |
+
+At volume 80 the model's own voice reaches the microphone **louder than an
+audible person does**, and a sentence played through those same speakers a few
+seconds earlier was transcribed word for word. So the path is live and good
+enough to transcribe; the service simply removes its own voice from it.
+
+**And it removes only its own.** Talking over the model, through the same
+speakers, mid-sentence: *"Excuse me, stop talking, I have a different
+question."* came back transcribed in full, while nothing of the model's
+concurrent speech did — and it stopped talking before the interruption had
+finished playing. Two voices in the same 20 ms frames at the same level, exactly
+one of them heard. That is why interruption works at all, and it is why there is
+no echo canceller in Helix to configure.
+
+One honest limit: this was one machine and one room. A hard reflective desk, a
+loud speaker across a room, or a Bluetooth headset doing its own processing
+might behave differently. You would know — Helix would start answering things
+nobody said.
+
+### Other limits
+
+- **The model sometimes never hands a turn over, and Helix takes it anyway.**
+  It decides when your turn ended, and occasionally it decides never — the words
+  are transcribed and then nothing happens. After 2.5 seconds of silence with no
+  hand-over, Helix finalises the turn itself. That matters most for the way out:
+  **"manual mode" must never depend on the vendor's turn detection**, or the
+  phrase that closes an open microphone could be withheld by a third party.
+- **Numbers are still spoken as words.** `4` comes out as *"Four."* even under
+  an explicit verbatim instruction.
+- **The session prompt cannot be changed once a session is open.** The service
+  rejects it; leave a conversation and start another.
+- **The companion goes quiet before the first turn.** In client delegation the
+  model can only speak in answer to a turn it handed you, so an unprompted
+  remark with no conversation yet under way is printed and not spoken. Once a
+  conversation is running they are spoken normally.
+- **`/audio off` blocks it.** A duplex session that cannot play is a microphone
+  that appears to do nothing while billing by the second, so Helix refuses to
+  open one and says why.
+- **Windows is untested.** It compiles and the libopus lookup is written; nobody
+  has run it.
 
 ---
 
@@ -586,11 +845,12 @@ most one voice change per answer, and none in the normal case. It is also
 faster when degraded — nothing waits on a provider already known to be down
 once per sentence.
 
-`/blackbox setup` opens with three **recommended chains** — cheapest cloud
-(Groq + gpt-4o-mini-tts), lowest latency (Deepgram Nova-3 + Aura-2), and fully
-local/private (whisper.cpp + Piper) — so the common case is one keystroke.
-Each cloud chain pre-fills a local fallback; the local one deliberately has
-none. Picking a preset still requests and verifies keys, still assigns and
+`/blackbox setup` opens with five **recommended chains** — cheapest cloud
+(Groq + gpt-4o-mini-tts), lowest latency (Deepgram Nova-3 + Aura-2), "Talk over
+it" (full duplex on `gpt-live-1`, §7c), most natural local (whisper.cpp + CSM-1B)
+and fully local/private (whisper.cpp + Piper) — so the common case is one
+keystroke. Each cloud chain pre-fills a local fallback; the fully-local one
+deliberately has none. Picking a preset still requests and verifies keys, still assigns and
 probes sidecar ports, and still verifies the chain: it fills in answers rather
 than skipping steps. "Choose manually" shows the full pricing tables.
 

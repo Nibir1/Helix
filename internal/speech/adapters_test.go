@@ -323,3 +323,56 @@ func TestKnownRecordersMatchRecordClip(t *testing.T) {
 		t.Error("unknown binaries must not be accepted as recorders")
 	}
 }
+
+// A full-duplex model is not a transcription model, and sending one to
+// /v1/audio/transcriptions fails on every turn.
+//
+// gpt-live-1 is a legitimate speech.stt.model — it is how full duplex is
+// selected — so this adapter WILL be handed it whenever a duplex session cannot
+// open and the turn falls back. Substituting is correct rather than erroring:
+// entering the conversation has already warned that duplex is unavailable, and
+// failing every subsequent turn to say it again is noise.
+func TestBatchSTTNeverSendsADuplexOnlyModel(t *testing.T) {
+	p := NewOpenAISTT("gpt-live-1", "")
+	impl, ok := p.(*openaiSTT)
+	if !ok {
+		t.Fatalf("NewOpenAISTT returned %T", p)
+	}
+	if IsDuplexOnlyModel(impl.model) {
+		t.Errorf("the adapter kept model %q; every transcription request would 400 "+
+			"before the chain could fall back", impl.model)
+	}
+	if impl.model != openaiDefaultSTTModel {
+		t.Errorf("model = %q, want the default transcription model %q",
+			impl.model, openaiDefaultSTTModel)
+	}
+}
+
+// The substitution must be narrow. gpt-live-transcribe shares a prefix and IS a
+// transcription model; a prefix match would silently disable the realtime path.
+func TestDuplexOnlyIsAnAllowlistNotAPrefix(t *testing.T) {
+	for model, want := range map[string]bool{
+		"gpt-live-1":          true,
+		"GPT-Live-1":          true,
+		"  gpt-live-1  ":      true,
+		"gpt-live-transcribe": false,
+		"gpt-live-1-mini":     false,
+		"whisper-1":           false,
+		"":                    false,
+	} {
+		if got := IsDuplexOnlyModel(model); got != want {
+			t.Errorf("IsDuplexOnlyModel(%q) = %v, want %v", model, got, want)
+		}
+	}
+	// And the two classifications must not overlap: a model cannot be both a
+	// realtime transcription session and a duplex one.
+	if IsDuplexOnlyModel("gpt-live-transcribe") && IsRealtimeSTTModel("gpt-live-transcribe") {
+		t.Error("gpt-live-transcribe is classified as both")
+	}
+	if !IsRealtimeSTTModel("gpt-live-transcribe") {
+		t.Error("gpt-live-transcribe stopped being a realtime STT model")
+	}
+	if IsRealtimeSTTModel("gpt-live-1") {
+		t.Error("gpt-live-1 leaked into the realtime STT allowlist; it is a different endpoint")
+	}
+}

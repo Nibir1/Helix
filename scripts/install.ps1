@@ -13,17 +13,45 @@ Write-Host "⚡ Helix Shell Installer (Windows)" -ForegroundColor Cyan
 Write-Host "────────────────────────────────────────"
 
 # 1. Build or locate binary
-if (-Not (Test-Path ".\dist\$BinaryName")) {
+#
+# THE NAMES DO NOT MATCH, AND NEVER DID. This script looked for dist\helix.exe,
+# but `make windows` writes dist\helix-windows-amd64.exe and `make current`
+# writes dist\helix with no extension at all (go build only supplies .exe when
+# it picks the output name itself, not when -o gives one). On a fresh checkout
+# the build therefore succeeded and the copy that followed it failed.
+#
+# So look for what the build scripts actually produce, and if none of it is
+# there, build directly with go — which is present on any machine that could
+# have built Helix, whereas make is not.
+$Candidates = @(
+    ".\dist\helix.exe",
+    ".\dist\helix-windows-amd64.exe",
+    ".\dist\helix"
+)
+$Source = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-Not $Source) {
     Write-Host "Building Helix from source..."
-    make windows
+    if (Get-Command go -ErrorAction SilentlyContinue) {
+        & go build -o ".\dist\helix.exe" ./cmd/helix
+        if ($LASTEXITCODE -ne 0) { throw "go build failed with exit code $LASTEXITCODE" }
+    } elseif (Get-Command make -ErrorAction SilentlyContinue) {
+        & make windows
+        if ($LASTEXITCODE -ne 0) { throw "make windows failed with exit code $LASTEXITCODE" }
+    } else {
+        throw "Neither go nor make is on PATH; cannot build Helix. Install Go from https://go.dev/dl/."
+    }
+    $Source = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-Not $Source) { throw "Build reported success but produced no binary in .\dist" }
 }
+Write-Host "Using binary: $Source"
 
 # 2. Install binary
 Write-Host "Installing binary to $TargetBinary..."
 if (-Not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 }
-Copy-Item ".\dist\$BinaryName" -Destination $TargetBinary -Force
+Copy-Item $Source -Destination $TargetBinary -Force
 
 # 3. Create config directories
 Write-Host "Initializing Helix home at $HelixHome..."

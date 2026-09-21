@@ -142,10 +142,17 @@ func newHarness(t *testing.T, chatResponse string) *harness {
 			sp = map[string]interface{}{}
 			cfg["speech"] = sp
 		}
-		sp["stt"] = map[string]interface{}{
+		stt := map[string]interface{}{
 			"provider": "openai",
 			"base_url": srv.URL + "/v1",
 		}
+		// The MODEL is what selects full duplex — there is no enabled flag, by
+		// design (ADR-020) — so it has to be settable from here for any e2e to
+		// reach that surface at all.
+		if m := os.Getenv("HELIX_E2E_STT_MODEL"); m != "" {
+			stt["model"] = m
+		}
+		sp["stt"] = stt
 	}
 	if wake := os.Getenv("HELIX_E2E_WAKE_JSON"); wake != "" {
 		sp, ok := cfg["speech"].(map[string]interface{})

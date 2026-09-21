@@ -444,7 +444,7 @@ func fastRunCommand(filename string) string {
 func (a *Agent) runFastPlan(plan *ai.Plan) {
 	for i, step := range plan.Steps {
 		if len(plan.Steps) > 1 {
-			a.render.PrintSystemMessage(fmt.Sprintf("--- Step %d ---", i+1))
+			a.render.PrintChrome(stepLine(i+1, len(plan.Steps)))
 		}
 
 		if step.Tool != "shell" {

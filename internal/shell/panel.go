@@ -42,20 +42,39 @@ const (
 	glyphArrow   = "→"
 )
 
-// panelWidth is the rule width, adapted to the terminal and clamped.
+// panelWidth is the rule width, adapted to the terminal.
 //
-// Clamped at both ends deliberately: below ~52 the columns collide, and above
-// ~92 a full-width rule stops reading as a frame and starts reading as a
-// horizon.
-func panelWidth() int {
-	w := TerminalWidth()
+// THE UPPER CLAMP IS GONE, by owner decision (2026-09-13). It was 92, on the
+// argument that "above ~92 a full-width rule stops reading as a frame and
+// starts reading as a horizon" — a real typographic concern, and the owner
+// overruled it after seeing a 125-column terminal with 33 dead columns on the
+// right: the frame read as *misplaced* long before it read as a horizon. That
+// argument is recorded rather than deleted, because it is the thing to weigh
+// again if this is ever revisited.
+//
+// The LOWER clamp stays and is not a matter of taste: below ~52 the KV label
+// column and its value collide, and Table's shaving has nothing left to shave.
+//
+// Recomputed on every call, never cached. That is what makes a resize work for
+// everything drawn after it — see BandWriter for the one place that used to
+// cache it and the step in the right edge that caused.
+func panelWidth() int { return panelWidthFor(TerminalWidth()) }
+
+// panelWidthFor is the arithmetic, with the measurement passed in.
+//
+// Separated because TerminalWidth probes real file descriptors and returns 0
+// under `go test`, so every width lands on the no-terminal default and a test
+// of panelWidth() cannot tell the clamps apart. Reinstating the 92 cap passed
+// the whole suite until this split existed — the third time in this session a
+// width rule has been untestable for exactly this reason.
+func panelWidthFor(w int) int {
 	switch {
 	case w <= 0:
+		// No measurable terminal: a pipe, a test binary, a CI log. 72 is a
+		// readable default and the one this package has always used.
 		return 72
 	case w < 52:
 		return 52
-	case w > 92:
-		return 92
 	default:
 		return w - 4
 	}
@@ -345,6 +364,24 @@ func Badge(s State, text string) string {
 // fmt's %-9s counts the ANSI escape bytes, so padding a coloured cell that way
 // pads to nothing at all — the alignment bug this whole file exists to stop
 // re-inventing.
+// Columns reports how many terminal cells a string occupies, ignoring ANSI
+// escapes and counting wide runes correctly.
+//
+// Exported because len() is the wrong answer and callers keep reaching for it.
+// "↳" is three bytes and one column; a len()-based pad aligns two labels to
+// different left edges and quietly destroys a column the layout depends on.
+func Columns(s string) int { return visibleWidth(s) }
+
+// PadColumns right-pads a string to a COLUMN width. One space is always added
+// when the string already fills the field, so adjacent values never touch.
+func PadColumns(s string, width int) string {
+	w := visibleWidth(s)
+	if w >= width {
+		return s + " "
+	}
+	return s + strings.Repeat(" ", width-w)
+}
+
 func PadVisible(s string, width int) string {
 	if pad := width - runeLen(s); pad > 0 {
 		return s + strings.Repeat(" ", pad)
@@ -577,6 +614,43 @@ func truncateANSI(s string, width int) string {
 // every category keeps the descriptions on one axis, which per-category
 // auto-sizing cannot do.
 func Truncate(s string, width int) string { return truncateANSI(s, width) }
+
+// TruncateTail keeps the END of a string, dropping the front to an ellipsis.
+//
+// The counterpart to Truncate, and the right one for a LIVE CAPTION: while
+// somebody is still speaking, the words that matter are the ones they just
+// said, not the ones a minute ago. Truncate would pin the opening of the
+// sentence and hide everything arriving.
+//
+// PLAIN TEXT ONLY. Slicing from the tail through ANSI would cut a sequence in
+// half and leave the terminal in whatever colour the fragment set; the callers
+// here are transcripts, which carry no escapes. Columns are measured with
+// runewidth for the reason truncateANSI documents at length — a CJK rune is two
+// cells and a rune count is not a width.
+func TruncateTail(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if visibleWidth(s) <= width {
+		return s
+	}
+	const ellipsis = '…'
+	budget := width - runewidth.RuneWidth(ellipsis)
+	if budget <= 0 {
+		return string(ellipsis)
+	}
+	runes := []rune(s)
+	used, cut := 0, len(runes)
+	for i := len(runes) - 1; i >= 0; i-- {
+		w := runewidth.RuneWidth(runes[i])
+		if used+w > budget {
+			break
+		}
+		used += w
+		cut = i
+	}
+	return string(ellipsis) + string(runes[cut:])
+}
 
 // Hint renders an actionable suggestion — the thing to type next.
 //

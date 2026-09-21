@@ -23,6 +23,15 @@ type Renderer interface {
 	PrintInfo(message string)
 	PrintDebug(message string)
 
+	// PrintChrome writes a line that is ALREADY fully formatted — a step
+	// marker, a phase line — with no label prefix.
+	//
+	// Every other method here stamps a bracketed label, which is right for a
+	// message and wrong for chrome. `┄ step 1 of 3` was polished and still came
+	// out as `[SYSTEM]    ┄ step 1 of 3`: the new line inside the old frame,
+	// which reads worse than either alone.
+	PrintChrome(text string)
+
 	// Interactive reports whether terminal animations (spinners) should
 	// run. Headless renderers return false.
 	Interactive() bool
@@ -69,6 +78,7 @@ func (r TTYRenderer) PrintError(m string)                  { r.UX.PrintError(m) 
 func (r TTYRenderer) PrintWarning(m string)                { r.UX.PrintWarning(m) }
 func (r TTYRenderer) PrintInfo(m string)                   { r.UX.PrintInfo(m) }
 func (r TTYRenderer) PrintDebug(m string)                  { r.UX.PrintDebug(m) }
+func (r TTYRenderer) PrintChrome(m string)                 { r.UX.PrintChrome(m) }
 func (r TTYRenderer) Interactive() bool                    { return true }
 
 // HeadlessRenderer swallows output for the daemon path. Debug lines can be
@@ -88,6 +98,7 @@ func (r HeadlessRenderer) PrintError(string)               {}
 func (r HeadlessRenderer) PrintWarning(string)             {}
 func (r HeadlessRenderer) PrintInfo(string)                {}
 func (r HeadlessRenderer) PrintDebug(m string)             { r.note(m) }
+func (r HeadlessRenderer) PrintChrome(m string)            { r.note(m) }
 func (r HeadlessRenderer) Interactive() bool               { return false }
 
 func (r HeadlessRenderer) note(text string) {
@@ -119,4 +130,34 @@ func newThinkerFor(r Renderer, label string) thinkerShim {
 		return thinkerShim{real: ux.NewThinker(label)}
 	}
 	return thinkerShim{}
+}
+
+// vizShim is thinkerShim's counterpart for the voice HUD, so a headless run
+// never animates and no call site needs a guard. Same reasoning, same shape.
+type vizShim struct{ real *ux.VoiceViz }
+
+func (v vizShim) Start(state ux.VizState, detail string) {
+	if v.real != nil {
+		v.real.SetDetail(detail)
+		v.real.Start(state)
+	}
+}
+
+func (v vizShim) Stop() {
+	if v.real != nil {
+		v.real.Stop()
+	}
+}
+
+// newVizFor returns the HUD for interactive renderers and a no-op otherwise.
+//
+// EXECUTING and SEEING exist because a turn spends most of its wall clock in
+// those two phases and the screen showed nothing for either: the planner has
+// the Thinker and the microphone has a waveform, while the parts that touch the
+// machine and the camera had no indicator at all.
+func newVizFor(r Renderer) vizShim {
+	if r.Interactive() {
+		return vizShim{real: ux.NewVoiceViz()}
+	}
+	return vizShim{}
 }

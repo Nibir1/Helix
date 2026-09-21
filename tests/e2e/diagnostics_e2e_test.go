@@ -115,6 +115,27 @@ func TestE2E_DoctorListsAndPurgeRemovesCrashReports(t *testing.T) {
 	if _, err := os.Stat(weightFile); err != nil {
 		t.Fatal("declining the downloads prompt must leave the weights on disk")
 	}
+
+	// THE THIRD PROMPT: removing Helix itself, asked on its own.
+	//
+	// This is the property that keeps /purge meaning what it has always meant.
+	// Someone who runs it to get a clean slate and carry on must not lose the
+	// binary because they said yes to "delete my data" — so the uninstall is a
+	// separate question, after the wipe has already been reported.
+	if err := h.Expect("remove Helix itself", 10*time.Second); err != nil {
+		t.Fatal("a purge must offer the uninstall separately, after the data is gone")
+	}
+	binary := binPath
+	h.WriteLine("n")
+	// Declining must SAY so. Every other decline in this flow does, and
+	// silence after the last question reads as the command dying halfway.
+	if err := h.Expect("Helix is still installed", 10*time.Second); err != nil {
+		t.Fatal("declining the uninstall says nothing at all")
+	}
+	// Declining has to leave the shell you are standing in.
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatalf("declining the uninstall deleted the binary anyway: %v", err)
+	}
 }
 
 // TestE2E_DoctorAppliancePanelStaysInsideItsFrame pins the conversion.

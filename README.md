@@ -46,6 +46,36 @@ Open PowerShell as Administrator and run the automated Windows setup script. Thi
 git clone https://github.com/Nibir1/Helix.git; cd Helix; .\scripts\install.ps1
 ```
 
+Installs to `C:\Program Files\Helix` and puts it on the machine `PATH`, so
+`helix` works from cmd, PowerShell and Windows Terminal. It needs elevation for
+both of those.
+
+### Option 2b: Windows under MSYS2 / MINGW64 / Git Bash
+`make install` works from a POSIX shell on Windows and needs no administrator
+rights. It installs into that environment's `/usr/local/bin` under the name
+`helix.exe` and skips the `/etc/shells` and `chsh` steps, which have no meaning
+there.
+
+```bash
+make install
+```
+
+The trade-off is reach: the binary is on `PATH` inside that shell only. The
+installer prints the Windows path at the end so you can add the folder to your
+Windows `PATH`, or run `install.ps1` for a system-wide install instead. Point
+it somewhere else with `HELIX_INSTALL_DIR=/some/dir make install`.
+
+**Windows prerequisites for voice.** `ffmpeg` (microphone capture) and, for
+`gpt-live-1` only, `libopus`:
+
+```bash
+pacman -S mingw-w64-x86_64-ffmpeg mingw-w64-x86_64-opus
+```
+
+Helix names the missing library and this command if it starts a live session
+without it. Microphone selection is automatic — see
+[Picking a microphone on Windows](#picking-a-microphone-on-windows).
+
 ### Option 3: Go Install (Cross-Platform)
 If you already have Go 1.25+ installed and just want the binary in your `$GOPATH/bin`:
 
@@ -60,6 +90,59 @@ git clone https://github.com/Nibir1/Helix.git && cd Helix && go install ./cmd/he
 
 ### Option 4: Pre-compiled Binaries (No Build Required)
 Don't want to build from source? Download the latest pre-compiled binary, checksums, and archives for your OS directly from the **[Releases Page](https://github.com/Nibir1/Helix/releases)**. All official releases are cryptographically signed and include a Software Bill of Materials (SBOM). *(See "Verifying Releases" below).*
+
+### Removing Helix
+
+```bash
+make uninstall
+```
+
+Or, from anywhere, using the installed binary — no checkout required:
+
+```bash
+helix uninstall
+```
+
+Either one prints a **manifest of exactly what it will remove** and asks before
+it touches anything: the binary and any `.prev` left behind by `/reboot`, the
+`/etc/shells` registration, the launchd or systemd background service, and
+`~/.helix` with everything in it. It asks for `sudo` once, up front, only if
+something is root-owned.
+
+**If Helix is your login shell it is set back first**, to the shell the
+installer recorded in `~/.helix/shell_pref`, and if that step fails the binary
+is deliberately *kept* — the two failures together are a machine that cannot
+open a terminal.
+
+**Ollama, `sox` and `ffmpeg` are left alone.** Helix may have suggested
+installing them; it does not own them, and you may be using them for something
+else.
+
+### Picking a microphone on Windows
+
+DirectShow addresses a microphone by its literal friendly name — there is no
+`default` — so Helix asks ffmpeg what exists and uses the first audio device it
+reports. You can see the same list yourself:
+
+```bash
+ffmpeg -list_devices true -f dshow -i dummy
+```
+
+To choose a different one, set `HELIX_AUDIO_DEVICE` to the full `-i` argument:
+
+```bash
+set HELIX_AUDIO_DEVICE=audio=Microphone (2- USB Audio Device)
+```
+
+The same variable overrides the device on macOS (`:0`, an avfoundation index)
+and Linux (`default`, a PulseAudio sink). If a recording fails on Windows,
+Helix prints the devices ffmpeg could see alongside the error, because
+`exit status 0xffffffff` on its own says nothing.
+
+Inside a running session, `/purge` offers the same thing as a **separate, third**
+confirmation after it has wiped your data — so a data wipe never takes the shell
+away by surprise. Say no and you keep Helix with a clean slate; say yes and
+nothing is left.
 
 ---
 
@@ -227,11 +310,24 @@ Nothing here destroys a transcript. `/clear`, `/compact`, `/memory clear`, and `
 | `/agentic [on\|off\|steps <n>]` | Iterative harness: observe step results and self-correct |
 | `/plan <request>` | Show the plan for a request without executing anything |
 | `/permissions [mode]` | Approval posture: plan, cautious, ask, or auto |
-| `/todo [add\|start\|done\|rm\|...]` | Task list the planner can see |
+| `/todo [add\|start\|done\|rm\|...]` | Task list the planner can see **and edit** |
 | `/tools` | The harness tool vocabulary and each tool's gate |
 | `/hooks [list\|add\|rm\|test\|...]` | Run your own commands around tool execution |
 | `/undo` | Reverse the most recent journalled action |
 | `/dry-run` | Toggle command execution preview mode |
+
+The planner reaches files through a `file` tool — `read`, `list`, `glob`, `grep`,
+`edit`, `write` — rather than shelling out to `cat` and `sed`. `edit` replaces an
+exact snippet and **fails** when the snippet is absent or ambiguous, where an
+in-place `sed` that matches nothing exits 0 and reports success. Every path goes
+through the same sandbox check a shell command gets; `edit` and `write` are
+medium risk, so the default posture asks first.
+
+`/todo` has two authors. The agent can add work it discovered is needed, rewrite
+a task that is wrong in detail, and supersede one that should not happen — each
+with a reason, each announced on screen. It can delete only its own: a task you
+wrote can be set aside but never erased, and a rewrite keeps your original
+wording. See [docs/harness.md](docs/harness.md) §4.
 
 **Approval posture** (`/permissions`) layers on top of the risk tiers and never replaces them:
 
@@ -336,7 +432,11 @@ Helix has a **persona**, not a default assistant register: it answers first, kee
 
 **Sesame CSM-1B** is the quality local voice: the speech model from Sesame's "uncanny valley" demo, run through a Rust sidecar with **no Python and no Docker**, and — uniquely among Helix's voices — conditioned on the last few turns of the conversation rather than synthesizing each sentence cold. Helix builds it for you: `/blackbox setup` detects the compute backend (CUDA if `nvidia-smi` answers, Metal on Apple Silicon, otherwise a tuned CPU build), installs `git` and `cargo` if the host lacks them, and compiles it — printing the evidence for its choice before it starts, because a detected backend you can see is not a choice made on your behalf. The one step left to you is accepting Sesame's licence, which needs your own account. It wants a discrete GPU (~8 GB VRAM); pair it with `piper-local` as the fallback so a machine that cannot keep up simply uses the fast voice. Context retention is opt-in, memory-only and bounded, and `/blackbox status` reports whether the sidecar is *actually* conditioning on it rather than assuming so — an unpatched server accepts the context field and silently discards it. See [docs/local_runtimes.md](docs/local_runtimes.md) §3.5.
 
-See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits. Capture is half-duplex: the mic is muted while Helix speaks, so you cannot talk *over* a reply. `Ctrl+C` stops one instantly, and `/config barge-in on` lets you stop it by speaking in the pause **between sentences** — the speaker is idle there, so no echo cancellation is needed. That is interruption at the pace of punctuation, not full duplex: a long sentence plays to its end.
+See [docs/voice.md](docs/voice.md) for the spoken-command vocabulary, what voice deliberately cannot reach, and the honest limits.
+
+On most chains capture is half-duplex: the mic is muted while Helix speaks, so you cannot talk *over* a reply. `Ctrl+C` stops one instantly, and `/config barge-in on` lets you stop it by speaking in the pause **between sentences** — the speaker is idle there, so no echo cancellation is needed. That is interruption at the pace of punctuation, not full duplex: a long sentence plays to its end.
+
+**`gpt-live-1` is the exception and lifts all of that.** Pick "Talk over it" in `/blackbox setup` and the microphone stays open for the whole conversation: you can cut in mid-sentence, and the model decides when your turn ended rather than a silence timer. It costs $0.05/min while open (plus your own planner) and needs libopus. Your own model still does every bit of the reasoning — `gpt-live-1` only hears and speaks, which the `THINKING` row in the live banner states on every turn. Speakers are fine; the service cancels its own voice out of the microphone, measured at three volumes. See [docs/voice.md §7c](docs/voice.md).
 
 | Command | Description |
 | :--- | :--- |
@@ -401,7 +501,7 @@ The planner always returns a JSON `Plan`:
   "intent": "chat" | "shell" | "git" | "package" | "multi_step",
   "steps": [
     {
-      "tool": "response" | "shell" | "git" | "package" | "recon" | "web",
+      "tool": "response" | "shell" | "git" | "package" | "recon" | "web" | "vision" | "file" | "todo",
       "message": "...",
       "command": "...",
       "action": "...",
@@ -535,7 +635,7 @@ Helix includes a built-in multi-tool recon orchestrator (`nmap`, `masscan`, `ffu
 
 ### Synthetic Tonal Audio (`internal/audio/`)
 A custom `beep`/`oto` synthesizer generates Tron-style audio feedback:
-- **350Hz percussive data-tap** synchronized perfectly with the AI typewriter effect.
+- **350Hz percussive data-tap**, one per streamed token as a reply arrives, and per character when `/config typing-effect` animates a non-streamed one.
 - **880Hz high-tech alert ping** for modals and confirmations.
 - **110Hz sawtooth buzz** for errors.
 - 50ms buffer latency for tight rhythm sync.
@@ -601,10 +701,13 @@ Helix/
 │   ├── daemon/            # Headless service + IPC (Unix socket; loopback TCP on Windows)
 │   ├── deps/              # System package catalogue (sox, ffmpeg) and verified install commands
 │   ├── diagnostics/       # Telemetry-free, redacted crash reporting
+│   ├── dshow/             # Windows DirectShow device enumeration (mic and camera)
 │   ├── edge/              # Edge-appliance diagnostics and deployment checks
+│   ├── filetools/         # The file tool — read, list, glob, grep, exact-snippet edit, atomic write
 │   ├── hooks/             # User policy hooks — the escape hatch Helix cannot know about
 │   ├── input/             # HybridSource: keyboard and microphone multiplexed into one stream
 │   ├── journal/           # The one append-only NDJSON writer behind every local log
+│   ├── live/              # gpt-live-1 full duplex — WebRTC, Opus via purego, client delegation
 │   ├── metrics/           # Local metrics journal and its reader
 │   ├── ollama/            # Ollama integration and GGUF discovery for llama.cpp reuse
 │   ├── providers/         # Per-provider adapters, capability flags, context limits, keystore
@@ -615,9 +718,10 @@ Helix/
 │   ├── sidecar/           # Local sidecar process lifecycle (detach, health, ports)
 │   ├── speech/            # STT/TTS chain — cloud providers, whisper, piper, CSM-1B
 │   ├── stealth/           # Memory-only private history execution
+│   ├── uninstall/         # Removing Helix: binary, shell registration, service, data
 │   ├── update/            # Self-update: fetch, checksum, atomic install, rollback
 │   ├── utils/             # Quote/brace validation, syntax highlighting, history, interrupts
-│   ├── ux/                # Terminal UX (typewriter, prompts, colors)
+│   ├── ux/                # Terminal UX (reply bands, voice HUD, prompts, colors)
 │   ├── vision/            # Single-frame camera capture via ffmpeg
 │   └── wakeword/          # Hands-free wake detection
 ├── tests/                 # Cross-cutting checks (portability guards)
@@ -653,7 +757,7 @@ Two sources, and by default whichever is newer wins:
   meant to run.
 
 **The restart says what the check found.** The panel carries an `UPDATE` row —
-`already on the newest release (1.5.0)`, `not checked — update.check is off`, or
+`already on the newest release (1.5.0-dev)`, `not checked — update.check is off`, or
 `found 1.6.0 but could not install it` — and that sentence crosses the restart,
 so asking afterwards gets a report rather than a guess. Every path records one,
 including the ones that decline to look: "did not check" and "checked and found
@@ -717,7 +821,7 @@ Ranking is **vision first, then fast/flash**, then tool use, then context size; 
 * **Instruction Firewall** with canary honeypots and fail-closed critic passes
 
 ### Planner, Agent System & Tool Protocol
-* Unified multi-tool agent system: response, shell, git, package, recon, web
+* Unified multi-tool agent system: response, shell, git, package, recon, web, vision, file, todo
 * Ultra-strict JSON planner protocol with schema enforcement and truncation-resistance
 * Dual-provider inference: local Ollama + remote APIs
 * Argument normalization (array flattening, trimming, synonym resolution)
@@ -755,7 +859,7 @@ Ranking is **vision first, then fast/flash**, then tool use, then context size; 
 * SYNAPSE TrueColor animated prompt with glitch effects and transient history
 * Semantic syntax highlighting (10+ token types) in real-time
 * Synthetic tonal audio feedback (350Hz tap, 880Hz alert, 110Hz error)
-* Animated typewriter effects synchronized with audio
+* Conversation rendered as labelled bands, each naming the model that answered
 * In-place terminal resize healing (no duplicate prompt lines)
 
 ---
@@ -805,6 +909,12 @@ the daemon's auth token, and any voice transcripts — for handing a machine on 
 after a key leaks. It names the Hugging Face token rather than deleting it,
 since that lives in a shared cache with its own `hf auth logout`, and says
 plainly that keys set in the environment are not files and survive it.
+
+`make uninstall` is the end of that scale: the binary, the `/etc/shells` entry,
+the background service and `~/.helix` entire. It shows a manifest and asks
+first, restores your login shell before removing the binary it points at, and
+does not need a working build — which is one of the likelier reasons to be
+running it. See **Removing Helix** above.
 
 `make info` lists every target with what it does.
 

@@ -26,7 +26,44 @@ const (
 	TodoInProgress TodoState = "in_progress"
 	TodoDone       TodoState = "done"
 	TodoBlocked    TodoState = "blocked"
+
+	// TodoSuperseded is the state the agent reaches for when the work it has
+	// already done shows a task is no longer the right thing to do.
+	//
+	// It exists because neither of the alternatives is honest. Marking it
+	// "done" claims work that never happened. Deleting it destroys a task the
+	// user wrote and still believes is tracked. Superseded says what actually
+	// occurred — this was the plan, it stopped being the plan, and here is the
+	// reason — and it is reversible with `/todo open <id>`.
+	TodoSuperseded TodoState = "superseded"
 )
+
+// TodoOrigin records who put an item on the list.
+//
+// The field exists because the list has two authors now. Before the agent could
+// write to it, every item was the user's and provenance was implicit; an agent
+// that can revise and supersede makes "who wrote this" a question with
+// consequences, and the answer must not be a guess.
+type TodoOrigin string
+
+const (
+	// TodoFromUser is the ZERO VALUE on purpose. Every item in a todo.json
+	// written before this field existed was typed by a human, so an absent
+	// origin decoding to "user" is not a default — it is the correct answer.
+	TodoFromUser  TodoOrigin = ""
+	TodoFromAgent TodoOrigin = "agent"
+)
+
+// ByAgent reports whether the agent created this item.
+func (o TodoOrigin) ByAgent() bool { return o == TodoFromAgent }
+
+// Label renders the origin for a list the user is reading.
+func (o TodoOrigin) Label() string {
+	if o.ByAgent() {
+		return "helix"
+	}
+	return "you"
+}
 
 // ValidTodoState reports whether s names a real state, and returns the
 // canonical form. Callers use it to reject typos instead of silently writing a
@@ -41,6 +78,8 @@ func ValidTodoState(s string) (TodoState, bool) {
 		return TodoDone, true
 	case "blocked", "block", "stuck":
 		return TodoBlocked, true
+	case "superseded", "supersede", "obsolete", "dropped":
+		return TodoSuperseded, true
 	}
 	return "", false
 }
@@ -54,6 +93,8 @@ func (s TodoState) Symbol() string {
 		return "▸"
 	case TodoBlocked:
 		return "✖"
+	case TodoSuperseded:
+		return "⊘"
 	default:
 		return "·"
 	}
@@ -61,13 +102,30 @@ func (s TodoState) Symbol() string {
 
 // TodoItem is one task.
 type TodoItem struct {
-	ID        int       `json:"id"`
-	Text      string    `json:"text"`
-	State     TodoState `json:"state"`
-	Note      string    `json:"note,omitempty"`
+	ID     int        `json:"id"`
+	Text   string     `json:"text"`
+	State  TodoState  `json:"state"`
+	Note   string     `json:"note,omitempty"`
+	Origin TodoOrigin `json:"origin,omitempty"`
+
+	// WasText is the user's own wording, kept when the agent rewrites an item.
+	// The agent may redirect the plan — that is the point of letting it write
+	// here — but it may not quietly replace what you asked for with what it
+	// decided you meant. Empty unless a user-authored item was revised.
+	WasText string `json:"was_text,omitempty"`
+
+	// Reason is why the agent added, revised or superseded this item. Required
+	// of the agent for every change to a user-authored item: a plan that
+	// changed under you without saying why is indistinguishable from a plan
+	// that lost track of itself.
+	Reason string `json:"reason,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// Revised reports whether the agent rewrote text the user originally wrote.
+func (i TodoItem) Revised() bool { return i.WasText != "" }
 
 // TodoList is the persisted task list.
 type TodoList struct {
@@ -214,7 +272,10 @@ func (l *TodoList) Summary(max int) string {
 	defer l.mu.Unlock()
 	var open []TodoItem
 	for _, it := range l.items {
-		if it.State == TodoDone {
+		// Done and superseded are both settled. Presenting finished work as
+		// outstanding invites the planner to redo it; presenting a task the
+		// agent already set aside invites it to re-litigate its own decision.
+		if it.State == TodoDone || it.State == TodoSuperseded {
 			continue
 		}
 		open = append(open, it)
@@ -227,7 +288,11 @@ func (l *TodoList) Summary(max int) string {
 	}
 	var b strings.Builder
 	for _, it := range open {
-		fmt.Fprintf(&b, "- [%s] %s\n", it.State, it.Text)
+		// The ID is here so the planner can ADDRESS an item — without it the
+		// agent can read the list but has no way to say which task it means.
+		// The author is here so it knows whose plan it is revising: changing
+		// its own note is bookkeeping, changing the user's is an overrule.
+		fmt.Fprintf(&b, "- #%d [%s] (by %s) %s\n", it.ID, it.State, it.Origin.Label(), it.Text)
 	}
 	return b.String()
 }
