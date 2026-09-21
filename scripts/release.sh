@@ -71,6 +71,18 @@ repo_slug_from_url() {
 # you guessing which of forty commands exited non-zero.
 trap 'die "failed at line $LINENO: ${BASH_COMMAND}"' ERR
 
+# The platforms .goreleaser.yml builds: its goos x goarch matrix minus the one
+# pair it ignores (windows/arm64). One list, because the COUNT is derived from
+# it in two places rather than written out twice: the publish prompt said
+# "6 binaries" while the build step said "five", and the release that settled
+# the argument attached five archives.
+#
+# Defined up here rather than beside the loop that uses it so that a future
+# --skip-build cannot leave it unset at the publish prompt, where `set -u`
+# would abort one line before the irreversible step. This script has been
+# bitten by exactly that shape before.
+RELEASE_TARGETS=("darwin/amd64" "darwin/arm64" "linux/amd64" "linux/arm64" "windows/amd64")
+
 # ---------------------------------------------------------------------------
 # Arguments
 # ---------------------------------------------------------------------------
@@ -304,10 +316,10 @@ ok "gofmt clean"
 go build ./... && ok "builds"
 go vet ./... && ok "vet clean"
 
-for target in "darwin/amd64" "darwin/arm64" "linux/amd64" "linux/arm64" "windows/amd64"; do
+for target in "${RELEASE_TARGETS[@]}"; do
     GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null ./cmd/helix
 done
-ok "cross-compiles for all five release targets"
+ok "cross-compiles for all ${#RELEASE_TARGETS[@]} release targets"
 
 # The release pipeline's own config. It is read only by CI, AFTER the tag
 # exists — so a syntax or key error there is discovered on the wrong side of the
@@ -389,7 +401,7 @@ fi
 step "ready to publish"
 info "tag:     $TAG"
 info "commit:  $(git rev-parse --short HEAD)  $(git log -1 --pretty=%s | cut -c1-60)"
-info "trigger: .github/workflows/release.yml → goreleaser (6 binaries, SBOMs, cosign)"
+info "trigger: .github/workflows/release.yml → goreleaser (${#RELEASE_TARGETS[@]} archives, SBOMs, cosign)"
 printf '\n  %sPush %s? This is public and hard to undo.%s [y/N] ' "$C_WARN" "$TAG" "$C_OFF"
 read -r REPLY </dev/tty
 [[ "$REPLY" =~ ^[Yy]$ ]] || die "cancelled — nothing was pushed"
