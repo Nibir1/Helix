@@ -63,7 +63,6 @@ func TestNoBandLineExceedsTheMeasure(t *testing.T) {
 
 // Every body line must carry the rail, or the band has a hole in it.
 func TestEveryBandLineCarriesTheRail(t *testing.T) {
-	pinFlooredWidth(t)
 	long := strings.Repeat("alpha bravo charlie delta echo foxtrot golf hotel ", 6)
 	lines := BandLines(long)
 	if len(lines) < 3 {

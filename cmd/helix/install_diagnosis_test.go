@@ -87,7 +87,10 @@ func TestExternallyManagedEnvironmentIsRecognised(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatal("PEP 668 must be diagnosed — it is not a Helix failure")
 	}
-	if !strings.Contains(shell.Plain(strings.Join(lines, "\n")), "PEP 668") {
+	// Flattened: the diagnosis wraps to the terminal, and "PEP 668" is two
+	// words — a break landing between them hid the phrase from a substring
+	// search at one particular width, on output that plainly said it.
+	if !strings.Contains(flattenPanel(shell.Plain(strings.Join(lines, "\n"))), "PEP 668") {
 		t.Error("the diagnosis should name the rule that blocked it")
 	}
 }

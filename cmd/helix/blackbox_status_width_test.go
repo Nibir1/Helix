@@ -49,7 +49,6 @@ func statusLabelWidth() int {
 }
 
 func TestContextLineStaysReadable(t *testing.T) {
-	pinFlooredWidth(t)
 	budget := statusRowBudget(t)
 
 	// Values chosen to be the widest each branch can realistically render:

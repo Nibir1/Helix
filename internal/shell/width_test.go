@@ -36,11 +36,6 @@ func failProbe(t *testing.T) {
 // SUCCEEDS, nothing wraps, and six of them fail on correct code. They were
 // asserting a property of the window the suite happened to run in. Pinning
 // reproduces exactly the condition they were written for, on any host.
-func pinFlooredWidth(t *testing.T) {
-	t.Helper()
-	t.Cleanup(PinWidth(0))
-}
-
 func TestAFailedProbeFallsBackToTheLastRealWidth(t *testing.T) {
 	prev := lastGoodWidth.Load()
 	t.Cleanup(func() { lastGoodWidth.Store(prev) })
