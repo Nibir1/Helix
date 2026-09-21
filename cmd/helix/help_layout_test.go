@@ -161,24 +161,23 @@ func TestAllSuggestionsAreColoured(t *testing.T) {
 	// "/ra" matches the three rag-* commands.
 	out := captureStdout(t, func() { printUnknownCommand("/ra") })
 
-	var row string
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(helpANSI.ReplaceAllString(line, ""), "DID YOU MEAN") {
-			row = line
-			break
-		}
-	}
-	if row == "" {
+	if !strings.Contains(helpANSI.ReplaceAllString(out, ""), "DID YOU MEAN") {
 		t.Fatal("expected a suggestion row for /ra")
 	}
+	// Counted across the whole panel, not across the first line carrying the
+	// label. The row WRAPS: at 60 columns the third suggestion sits on the
+	// continuation line behind the gutter, so reading one line counted two of
+	// three and failed on correct output — the test was measuring the width of
+	// the window it ran in. Nothing else in this panel names a /rag- command,
+	// so the wider scan costs no precision.
 	names := 0
-	for _, seg := range strings.Split(row, "\x1b[0m") {
+	for _, seg := range strings.Split(out, "\x1b[0m") {
 		if strings.Contains(seg, "/rag-") && strings.Contains(seg, "\x1b[") {
 			names++
 		}
 	}
 	if names < 3 {
-		t.Errorf("only %d of 3 suggestions carry their own colour: %q", names, row)
+		t.Errorf("only %d of 3 suggestions carry their own colour:\n%s", names, out)
 	}
 }
 

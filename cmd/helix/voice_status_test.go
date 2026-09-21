@@ -28,6 +28,7 @@ func whisperDownRow() speech.ProviderStatusRow {
 }
 
 func TestStatusRowsStayAlignedWithLongErrors(t *testing.T) {
+	pinFlooredWidth(t)
 	rows := []speech.ProviderStatusRow{
 		{Name: "groq", Display: "Groq Whisper", RequiresKey: true, HasKey: true,
 			InChain: true, Healthy: true},

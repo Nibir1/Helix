@@ -295,6 +295,30 @@ func measureTerminalWidth() int {
 	return best
 }
 
+// PinWidth forces TerminalWidth to report cols until the returned restore is
+// called, and returns that restore.
+//
+// For tests in any package: measurement is the one thing about rendering that
+// comes from the machine rather than from the code, and a suite that leaves it
+// ambient is asserting the size of whatever window it happened to run in. Nine
+// tests here did exactly that — green in CI, which has no terminal at all, and
+// red at a release gate run from an 80-column one.
+//
+// cols <= 0 models a terminal that cannot be measured, which IS the CI case
+// and the condition every wrap assertion was written against.
+func PinWidth(cols int) (restore func()) {
+	prevProbe := probeTerminalWidth
+	prevWidth := lastGoodWidth.Load()
+	probeTerminalWidth = func() int { return cols }
+	if cols <= 0 {
+		lastGoodWidth.Store(0)
+	}
+	return func() {
+		probeTerminalWidth = prevProbe
+		lastGoodWidth.Store(prevWidth)
+	}
+}
+
 func TerminalWidth() int {
 	if best := probeTerminalWidth(); best > 0 {
 		lastGoodWidth.Store(int32(best))

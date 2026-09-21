@@ -408,6 +408,18 @@ func TestHelpBlackBoxStatesTheDefault(t *testing.T) {
 // The old text was "/blackbox wake on enables hands-free conversation", which
 // answers "what do I type" and not "why is an on-by-default feature off" — the
 // question the owner actually had, twice.
+// pinFlooredWidth makes every panel in a test render at the same measure.
+//
+// Panels wrap to the terminal, so a rendering assertion left to the ambient
+// width asserts the size of the window the suite ran in. Pinned to the
+// unmeasurable case, which is what CI has and what every one of these tests
+// was written against — three of them failed only at 40 or at 400 columns,
+// on output that was correct at both.
+func pinFlooredWidth(t *testing.T) {
+	t.Helper()
+	t.Cleanup(shell.PinWidth(0))
+}
+
 // flattenPanel collapses a rendered panel to one line of words.
 //
 // For assertions about what a panel SAYS rather than how it looks. The panel

@@ -25,9 +25,7 @@ import (
 // precondition of what is being asserted (§9 rule 8).
 func failProbe(t *testing.T) {
 	t.Helper()
-	restore := probeTerminalWidth
-	probeTerminalWidth = func() int { return 0 }
-	t.Cleanup(func() { probeTerminalWidth = restore })
+	t.Cleanup(PinWidth(0))
 }
 
 // pinFlooredWidth makes the measure deterministic at the floor.
@@ -40,10 +38,7 @@ func failProbe(t *testing.T) {
 // reproduces exactly the condition they were written for, on any host.
 func pinFlooredWidth(t *testing.T) {
 	t.Helper()
-	prev := lastGoodWidth.Load()
-	failProbe(t)
-	lastGoodWidth.Store(0)
-	t.Cleanup(func() { lastGoodWidth.Store(prev) })
+	t.Cleanup(PinWidth(0))
 }
 
 func TestAFailedProbeFallsBackToTheLastRealWidth(t *testing.T) {
@@ -68,13 +63,7 @@ func TestAFailedProbeFallsBackToTheLastRealWidth(t *testing.T) {
 // The other half of the contract, which nothing covered: a probe that WORKS
 // is what makes a later failure survivable, so it has to be recorded.
 func TestASuccessfulProbeBecomesTheRememberedWidth(t *testing.T) {
-	prev := lastGoodWidth.Load()
-	t.Cleanup(func() { lastGoodWidth.Store(prev) })
-
-	restore := probeTerminalWidth
-	probeTerminalWidth = func() int { return 173 }
-	t.Cleanup(func() { probeTerminalWidth = restore })
-
+	t.Cleanup(PinWidth(173))
 	lastGoodWidth.Store(0)
 	if got := TerminalWidth(); got != 173 {
 		t.Fatalf("TerminalWidth() = %d, want the measured 173", got)

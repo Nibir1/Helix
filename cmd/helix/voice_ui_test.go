@@ -64,6 +64,7 @@ func TestWizDetailKeepsACommandOnOneLine(t *testing.T) {
 // Prose, by contrast, SHOULD wrap — otherwise a long sentence runs past the
 // rule and its tail restarts at column zero.
 func TestWizDetailWrapsProse(t *testing.T) {
+	pinFlooredWidth(t)
 	long := strings.Repeat("something is listening on that port and refused the request ", 4)
 	out := capture(t, func() { wizDetail(long) })
 	if n := strings.Count(strings.TrimRight(out, "\n"), "\n") + 1; n < 2 {
