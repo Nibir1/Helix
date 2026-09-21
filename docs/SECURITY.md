@@ -514,6 +514,16 @@ syft helix_Linux_x86_64.tar.gz
 ### Continuous Security Scanning
 Every commit and pull request is automatically scanned for known vulnerabilities in Go dependencies using `govulncheck` and for static application security testing (SAST) using GitHub CodeQL. See `.github/workflows/security.yml` for details. You can run these checks locally via `make sec-scan`.
 
+**This gate has fired.** It held the v1.5.0 release for GO-2026-5942 — a panic
+parsing a malformed SVCB or HTTPS DNS record in `golang.org/x/net`, fixed by
+upgrading to v0.56.0. It is recorded here because a scanner that has never
+blocked anything is indistinguishable from one that is not running:
+`govulncheck` reports by *reachability*, and this one was reachable from
+Helix's own code rather than merely present in the module graph — through the
+full-duplex path, `live.Session.negotiate` → `SetLocalDescription` →
+`dnsmessage.Message.Unpack`. The same scan reported 25 other advisories in
+required modules that Helix does not call, and correctly did not fail on them.
+
 **One toolchain across all three workflows (Go 1.27).** `govulncheck` reports against the
 standard library of the Go it runs under, so scanning with an older toolchain than the one
 that builds the release answers a question nobody asked. CI, the release build and the

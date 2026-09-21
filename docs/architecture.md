@@ -706,7 +706,7 @@ provider and model, in-progress task texts, a one-line summary of the work, and
   the latest binaries?" is asked AFTER the restart, and the only thing that
   could answer it was the model's guess at what the program had done — which it
   answered plausibly, correctly, and without evidence. `Update` holds a sentence
-  ("already on the newest release (1.5.0-dev)", "not checked — update.check is off",
+  ("already on the newest release (1.5.0)", "not checked — update.check is off",
   "found 1.6.0 but could not install it"), the restart panel prints it, and the
   synthetic turn appended on resume repeats it so the model reports rather than
   infers. Recorded on every path including the ones that decline to look,
@@ -927,8 +927,9 @@ same way — remove the pattern match on English and let the model choose.
 ### 6. E2E TTY Harness (`tests/e2e/`)
 A pseudo-terminal (PTY) based end-to-end suite that boots the real `helix`
 binary against a mock OpenAI-compatible provider (in-process `httptest`
-server) with an isolated `$HOME` and a pre-seeded knowledge meta key (to keep
-the run fully offline). It proves, with zero real AI and zero network:
+server) with an isolated `$HOME`, a pre-seeded knowledge meta key and
+`update.check` off (to keep the run fully offline). It proves, with zero real
+AI and zero network:
 - High-confidence **typed** shell input bypasses the planner (voice never does — see 6a).
 - Natural language routes through the strict-JSON planner and executes.
 - Medium-risk commands require confirmation; declining skips execution.
@@ -952,11 +953,27 @@ The endpoint is never called for arming. Arming asks whether a transcriber is
 *configured*, not whether it answers — the honest question, since a transcriber
 that is merely unreachable should still let the prompt listen.
 
+**`update.check` is seeded off, and that is a correctness property rather than
+a speed one.** It defaults to ON, so `/reboot` called the GitHub API — a real
+HTTPS request with a 12-second timeout — before printing its panel. The suite
+therefore had one foot outside the sandbox it claims: on a developer machine
+the call resolves instantly, while from a rate-limited CI address it consumed
+`TestE2E_RebootRestartsAndResumes`'s entire budget and failed a tree that had
+passed every check minutes earlier. The seeded section also names `channel`,
+which is load-bearing: `mergeUpdate` cannot distinguish `check: false` from
+`check` absent, so a section naming `check` alone is discarded and the default
+survives.
+
+**Host-capability tests skip rather than assert.**
 `tests/e2e/wake_arms_e2e_test.go` **skips** when the host has no `sox`/`rec`
 rather than asserting nothing. That distinction is the reason it exists:
 `TestE2E_WakeIsOnByDefaultAndKeyboardStillWorks` asserts only that the status
 panel renders, because a CI host cannot arm whatever the config says — and it
-passed for a day while the on-by-default change was inert.
+passed for a day while the on-by-default change was inert. The full-duplex
+status row is the same shape: `duplexPreflight` requires a capture binary and
+a loadable libopus, neither of which a bare runner has, so the row correctly
+reads `unavailable` there and the test asks the same two helpers the preflight
+does before deciding it has anything to assert.
 
 Run with `make e2e` (Linux/macOS only).
 

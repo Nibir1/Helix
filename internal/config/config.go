@@ -953,7 +953,7 @@ const (
 	// Cutting a release means editing this to "1.5.0" AND renaming the
 	// "Unreleased" heading in docs/RELEASE_NOTES.md. scripts/release.sh
 	// refuses to run while that heading is there, so the two cannot drift.
-	HelixVersion  = "1.5.0-dev"
+	HelixVersion  = "1.5.0"
 	ModelName     = "TinyLlama-1.1B-Chat-v1.0-GGUF"
 	ModelURL      = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf"
 	ModelChecksum = "da3087fb14aede55fde6eb81a0e55e886810e43509ec82ecdc7aa5d62a03b556"

@@ -98,7 +98,17 @@ they change the machine, so under the default `ask` posture a write asks exactly
 as a medium-risk shell command does. Nothing here is high — a path that *would*
 be is refused by the sandbox before a tier is consulted.
 
-Four properties are worth stating because they are the difference between this
+**`*` stops at a path separator; `**` is what crosses one.** `internal/*.go`
+matches `internal/main.go` and not `internal/ai/planner.go`; `internal/**/*.go`
+matches both; and a pattern with no separator at all matches on the base name,
+so `*.go` finds every Go file under the search root. These are `path.Match`
+semantics against a forward-slash path, identically on every platform. Until
+v1.5.0 the matching used `filepath.Match`, which takes its separator from the
+host: on Windows `/` was therefore not a boundary and a single `*` matched
+straight through it, so a pattern written to scope a search to one directory
+searched the whole subtree instead.
+
+Five properties are worth stating because they are the difference between this
 and shelling out:
 
 1. **Confinement is the sandbox's, not the tool's.** Every path goes through

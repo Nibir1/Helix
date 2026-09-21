@@ -394,6 +394,49 @@ func (h *harness) SendExpect(line, substr string, timeout time.Duration) error {
 	return fmt.Errorf("timed out waiting for next %q\n----- captured output -----\n%s", substr, h.stripped())
 }
 
+// OutputLine reports whether any captured line is EXACTLY want.
+//
+// This exists because a substring search cannot tell a command's RESULT from
+// the prompt's echo of the command. The prompt re-renders the line being typed
+// one character at a time, so after `echo ok` the capture holds the token many
+// times over before the shell has run anything — `SendExpect("echo ok", "ok")`
+// is therefore satisfied by the terminal echoing, which is the opposite of
+// what a test asserting "the keyboard still works" means to prove.
+//
+// An exact line match separates them, measured rather than assumed: the echo
+// arrives as one blob carrying prompt fragments and carriage returns, the
+// submitted line is prefixed `❯ `, the exec step is prefixed `▸ `, and the
+// command's own output is alone on its line. Only the last matches exactly.
+func (h *harness) OutputLine(want string) bool {
+	for _, line := range strings.Split(h.stripped(), "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// SendForOutput sends a line, waits for the TURN to finish, and then requires
+// the command's own output rather than its echo.
+//
+// Two jobs that SendExpect conflates: the turn-end marker says the shell
+// processed the line and is ready for another, and the exact-line match says
+// the command produced what it should. Keeping them apart is what stops one
+// from standing in for the other.
+func (h *harness) SendForOutput(line, want string, timeout time.Duration) error {
+	base := h.turnsCompleted()
+	h.WriteLine(line)
+	if err := h.ExpectTurnAfter(base, timeout); err != nil {
+		return fmt.Errorf("%q never completed a turn: %w", line, err)
+	}
+	if !h.OutputLine(want) {
+		return fmt.Errorf("%q finished its turn but printed no line equal to %q "+
+			"— the prompt's echo of the command does not count"+
+			"\n----- captured output -----\n%s", line, want, h.stripped())
+	}
+	return nil
+}
+
 // ExpectFile polls until path exists, dumping the captured TUI transcript on
 // failure: under a PTY the transcript is the only way to see why a command
 // produced no file.

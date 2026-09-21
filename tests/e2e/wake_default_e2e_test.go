@@ -28,7 +28,7 @@ func TestE2E_WakeIsOnByDefaultAndKeyboardStillWorks(t *testing.T) {
 	}
 
 	// The half that must never regress: the keyboard.
-	if err := h.SendExpect("echo default-wake-ok", "default-wake-ok", 10*time.Second); err != nil {
+	if err := h.SendForOutput("echo default-wake-ok", "default-wake-ok", 10*time.Second); err != nil {
 		t.Fatalf("typing stopped working with wake on by default: %v", err)
 	}
 	// And the removed subcommand must not resurface as a usage line.

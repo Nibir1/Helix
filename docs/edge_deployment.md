@@ -27,8 +27,9 @@ The core is the easy part. Everything device-specific lives in §3–§4.
 
 ## §2. Build matrix (architecture → flags)
 
-The release binary is CGO-free. `scripts/build.sh linux` already emits `linux/amd64` and
-`linux/arm64`; other targets are a one-line cross-compile:
+Every Helix binary is CGO-free — the released artifacts, CI's build step, and `make current`
+alike. `scripts/build.sh linux` already emits `linux/amd64` and `linux/arm64`; other targets
+are a one-line cross-compile:
 
 | Device class | `GOARCH` | Build command |
 |--------------|----------|---------------|

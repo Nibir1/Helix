@@ -37,13 +37,15 @@ exact sequence:
    **The current branch is `feat/blackbox`**, which is `main` plus the `gpt-live-1` work and
    the fixes that came out of using it. `main` has nothing the branch does not.
 
-   **THERE IS NO v1.5.0.** A `v1.5.0` tag existed for a while and was withdrawn by the owner —
-   nothing was published under it, and no binary carrying that version is downloadable. The
-   latest published tag is `v1.0.0`. Log rows below that describe tagging or publishing
-   `v1.5.0` are a record of what happened at the time and are left as written; they are not a
-   statement of the current state. Source builds report `1.5.0-dev`, and
-   `docs/RELEASE_NOTES.md` carries an **Unreleased** heading that `scripts/release.sh` refuses
-   to run past — deliberately, until the owner decides the polish is finished.
+   **v1.5.0 is published.** It was cut on 2026-09-21 from `main`, after PR #6 (the full-duplex
+   branch) and PR #7 (the CI and cross-platform fixes) merged green. An earlier `v1.5.0` tag
+   existed briefly and was withdrawn before anything was published under it; log rows below
+   that describe that tag, or that describe there being no v1.5.0, are a record of what was
+   true when they were written and are left as written (guardrail 11). The state now is:
+   `HelixVersion = "1.5.0"`, `docs/RELEASE_NOTES.md` headed by `## Helix v1.5.0` with no
+   **Unreleased** heading, and the two guards in `internal/config/version_test.go` holding
+   those two facts to each other. New work goes under a fresh `## Unreleased` heading, and the
+   constant goes back to a `-dev` suffix the moment it does.
 3. **Check §13 Progress Tracker** → find the first phase that is not `DONE`. That is your phase.
    Note that "core DONE" is not "done": phases 7, 9, 10, 11 and 12 all carry unfinished tasks,
    and §13 now lists every open checkbox in one place so the remaining work is visible without
@@ -63,7 +65,7 @@ exact sequence:
    three panel-primitive width bugs — was work no checkbox asked for: a capability the owner
    requested, then defects found by auditing and by *rendering* what the code produced. None of it
    would have been visible from §13. If you are here to write Go and the tracker looks finished,
-   read §9's rules 8-12 and go looking at output rather than at checkboxes.
+   read §9's rules 8-14 and go looking at output rather than at checkboxes.
 4. **Read that phase's section in §6** and every file it lists under "Files touched".
 5. **Verify the baseline is green before changing anything:**
    ```bash
@@ -2401,6 +2403,26 @@ them.
    panel (or screenshot the PTY) and measure the visible width; and when the bug is about units,
    check the units of the ASSERTION too — two of the tests written for that batch had the same
    byte-vs-column confusion they were written to catch.
+13. **A test that reaches the network is measuring somebody else's uptime.** The e2e harness
+    promises "zero real AI and zero external network" and delivered that for every request but
+    one: `update.check` defaults to ON, so `/reboot` made a live GitHub API call with a
+    12-second timeout before the shell printed a word. It cost nothing on this machine and
+    failed `TestE2E_RebootRestartsAndResumes` from a rate-limited CI address — against a tree
+    that had gone green minutes earlier, which is the signature of a clock and not of a
+    regression. Two general forms, both wider than this bug. **A default that is right for a
+    user is not automatically right for a fixture**: nothing in the seeded config mentioned
+    updates, so the harness inherited an outbound call nobody chose, and "hermetic" described
+    the intent rather than the behaviour — audit what a fixture inherits, not only what it
+    sets. And **the seeding needs its own precondition checked**: `mergeUpdate` cannot tell
+    `check: false` from `check` absent, so a section naming `check` alone is discarded and the
+    default survives. A knob that is silently ignored looks exactly like a knob that worked.
+14. **Two tests either side of a failing one can be passing for the wrong reason.** The
+    staleness tests wrote `dist/helix` by hand where the code under test walks
+    `update.LocalCandidatePaths()` — `dist\helix.exe` on Windows. One failed there, which is
+    how it was found; the two beside it PASSED, because they assert that nothing is reported
+    and nothing could be. This is rule 8 with a wider blast radius: when one test in a family
+    cannot reach its subject, check whether its siblings ever could. Derive the fixture from
+    the same source of truth the code uses.
 
 ---
 
@@ -3178,6 +3200,7 @@ needs no detector, just a report.
 | 2026-09-14 | **Second live run: the directive fix held, and three things I had called done were not.** Screenshot showed `glob **/*parser*` → `answering 1/3` → the SAME glob again → grep → `**/*parser*.go` → `**/*parse*` → `**/*.py`, eight searches, then a CORRECT answer ("there is no parser dot go in this project") — they were running in the Helix repo, not the fixture, so the file genuinely was absent. **(1) An empty result was not being treated as an answer.** The first glob said `(no files matched)` and the model kept hunting with looser patterns; my directive said "do not re-run a search that already SUCCEEDED", which a search finding nothing does not feel like. Stated the other way round now, matched on the three exact strings `internal/filetools` returns so a file whose CONTENTS mention the phrase cannot trigger it. **(2) The UI was still stale because I polished the text and left the frame.** `┄ step 1 of 3` went through `PrintSystemMessage` and came out `[SYSTEM]    ┄ step 1 of 3` — the new line inside the old prefix, worse than either alone. Added `PrintChrome`, a channel that adds nothing, and routed the step and phase lines through it. **(3) The shaking bar was not the width after all** — that fix was real and measured but not the cause. Measured the animation instead: 41% of the row changing every frame at 10fps. The deeper point is that while the model speaks Helix has NO audio level (the audio is decoded and played, never metered), so the waveform was depicting a signal that does not exist — motion with nothing behind it, which is exactly what "shaking" looks like. Replaced with a travelling pulse: 12% churn, and it says the true thing. LISTENING keeps its waveform because there the level is real. **Two of my own tests broke on my own rewording again** — the third time this session — and one mutation (chrome prefix) had no test at all until the mutation run found it. |
 | 2026-09-14 | **Third live run: the harness works, and the three complaints left were all one class.** Screenshot shows the chain finally doing what it was built for — `glob **/*parser*` → `read parser.go` → a correct summary of package chirp; then `list .` → `glob **/*.md` → `read README.md` → `read go.mod` → a correct description of the project. The directive and budget fixes hold. What was still wrong: **(1) `[EXEC]` was the last bracketed label in a live trace**, and it sat at column ZERO while the prompt, the step markers and the reply band all start at column two — which is the "going out kind of like breaking" on the left edge: the margin moved in and out by two cells, line by line. A tool step is the same family as `┄ step 1 of 2`, so it renders as chrome now. **(2) The glitch was never specific to speaking.** The owner's phrasing carried the answer — "when it starts to speak OR ANYTHING ELSE PRINTS ON THE SCREEN". `SuspendLine` had been wired to `PrintAIMessage` only, because a wiped reply was the visible half; every OTHER print — step markers, EXEC lines, warnings, info — still landed on the row the HUD repaints ten times a second. They all funnel through `scifiPrint` and `PrintChrome`, so it was one fix, not nine. **(3) The test for it took three attempts and the third needed production support.** A sampler goroutine races a print (faster than any poll interval) and reported false failures; swapping os.Stdout for a checking writer does not work either, because the drain happens after the call returns and the hold is already released. Added `lineSuspendPeak`, an atomic high-water mark incremented in `SuspendLine` — one atomic on a path that runs once per printed line, and the only observation point that cannot miss the window. Worth the cost: this is the fourth time this session that a correct helper sat beside an unwired call site, and it is the first one I could pin deterministically. |
 | 2026-09-15 | **"Longer responses getting capped" was a width probe failing mid-reply.** Two screenshots of a long live session. The tell was in the geometry: the band HEADER spanned the full ~200 columns while the text under it wrapped at ~45, and both come from the same `panelWidth()`. The difference is WHEN — the header measures once, and `BandWriter` re-measures PER LINE so a window resized mid-reply reflows, which I added deliberately. So a long answer probes the terminal a hundred times, each probe opening and closing `/dev/tty`; one blip returns 0, `panelWidthFor(0)` floors at 52 → 46 columns of content, and everything after that point is a narrow ragged column that reads as truncation. `TerminalWidth` now falls back to the last measurement that succeeded — a zero is never a real terminal, only a failure to ask. Measured the floor cost at 148 columns, which is why it is so visible. **Two UI complaints, both real.** `[ERROR]`, `[WARNING]` and `[DATA]` were the last lines at column ZERO while the prompt, the band, the step markers and the tool steps all start at two — so a live session's left edge stepped in and out depending on which kind of line came next. A warning that breaks the margin does not read as more urgent, it reads as a different program. And the band header stretched to the panel edge: fine for one turn, but a long conversation is a stack of full-width horizontal bars every three or four lines, and on a wide terminal they are the loudest thing on screen — the eye reads the rules instead of the words. Now a short lead-in; the rail down the left already carries the turn's extent. Rendered a four-turn conversation to check it reads as a conversation. Three mutations killed. |
+| 2026-09-21 | **Six red checks on the full-duplex PR, and only one of them was a bug in Helix.** No CI log was readable at first (no `gh`, no token, the logs endpoint wants admin even on a public repo), so the six were reproduced locally against a clean worktree with an empty `HOME`: govulncheck reproduced immediately, everything else passed, which was itself the finding — the suite was green here and red there. Four causes. **(1) The one real defect: `MatchGlob` matched on the HOST separator.** It normalises both arguments with `filepath.ToSlash` and its doc comment promises a slash-separated path, then handed them to `filepath.Match`, whose separator is the platform's — so on Windows `/` was not a boundary and a single `*` matched through it, and `internal/*.go` also matched `internal/ai/x.go`. This is the planner's own `file` tool, so a pattern written to scope a search to one directory searched the whole subtree. `path.Match` now; identical on Unix, which is why no local run could see it. **(2) The duplex status row asserted a capability of the machine**: `duplexPreflight` wants a capture binary and a loadable libopus, a bare runner has neither, and it passed here only because `loginenv` unions Homebrew's PATH into the process and found `sox`. **(3) Two tests compared POSIX mode bits on Windows**, which reports 0666 for anything writable. **(4) The staleness tests spelled `dist/helix`** where the code walks `update.LocalCandidatePaths()`. Then main went red again on an **identical tree** — same tree SHA as the run that had just gone ten-for-ten — which is the whole diagnosis: a clock, not a regression. Two flakes, both deterministic once named. The harness promised "zero external network" and made a live GitHub call on every `/reboot`, because `update.check` defaults to on with a 12s timeout; and the appliance-panel test sliced up to a chip it never waited for. Also cut v1.5.0: constant to `1.5.0`, `RELEASE_NOTES.md` headed by the version, and a full `.md` sweep behind it. | v1.5.0 published from `main`; PRs #6 and #7 merged green | The `--force` re-tag path is now the documented one for a withdrawn tag; watch that `mode: replace` in `.goreleaser.yml` does what its comment claims on the first real re-tag |
 
 *End of BlackBox_Development.md — maintain it as the single source of truth. If reality diverges
 from this document, update the document in the same commit as the code.*

@@ -27,20 +27,40 @@ func TestE2E_RebootRestartsAndResumes(t *testing.T) {
 	defer h.Close()
 
 	// Something to be in the middle of, so the resume has a subject.
-	if err := h.SendExpect("/todo add wire up the parser", "wire up the parser",
-		20*time.Second); err != nil {
+	//
+	// SendTurn, not SendExpect, and the reason is visible in the transcript:
+	// the prompt re-echoes the line being typed a character at a time, so
+	// "wire up the parser" is in the buffer ten times over before the command
+	// has run — a count-based wait is satisfied by the ECHO of the command
+	// rather than by its output. Worse for what follows, an echo says nothing
+	// about whether the shell has finished the turn and is ready for another
+	// line, and the next thing this test does is type into it. The OSC 133;D
+	// turn-end marker is the semantic clock the harness provides for exactly
+	// this (see turnEndMarker), so the content is asserted separately from
+	// the synchronisation instead of one standing in for the other.
+	if err := h.SendTurn("/todo add wire up the parser", 20*time.Second); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(h.stripped(), "task 1") {
+		t.Fatalf("the task was never added:\n%s", h.stripped())
 	}
 	// Moving it to in-progress is what makes it "what I was doing" rather than
 	// just an item on a list — captureContinuity only carries in-progress tasks.
-	if err := h.SendExpect("/todo start 1", "wire up the parser", 20*time.Second); err != nil {
+	if err := h.SendTurn("/todo start 1", 20*time.Second); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(h.stripped(), "In progress") {
+		t.Fatalf("the task was never started, so the resume has no subject:\n%s", h.stripped())
 	}
 
 	h.WriteLine("/reboot")
 	// The old process announces the restart and what it is carrying.
 	if err := h.Expect("REBOOT", 20*time.Second); err != nil {
-		t.Fatal("the outgoing shell must say it is restarting")
+		// %v, not a bare sentence: Expect's error carries the whole captured
+		// transcript, and this test has now failed twice in CI reporting only
+		// that it was unhappy. A red test is a message (§9 rule 11) and this
+		// one was throwing the message away.
+		t.Fatalf("the outgoing shell must say it is restarting: %v", err)
 	}
 
 	// The banner belongs to a NEW process. Waiting for a second occurrence is

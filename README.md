@@ -198,6 +198,10 @@ make current   # Builds the optimized binary
 ./dist/helix   # Launches Helix
 ```
 
+`make current` builds **CGO-free**, which is the same way CI builds and the same way every
+released artifact is built (`.goreleaser.yml`), so the binary you compile here is built like
+the one you would download. It also means a local build needs no working system C linker.
+
 Building needs Go 1.25+ (the badge above, and `go.mod`). If you intend to run the fuzz
 targets, use Go 1.27+ — see the note under
 [Enterprise Hardening](#enterprise-hardening--supply-chain-security). `make info` lists every
@@ -757,7 +761,7 @@ Two sources, and by default whichever is newer wins:
   meant to run.
 
 **The restart says what the check found.** The panel carries an `UPDATE` row —
-`already on the newest release (1.5.0-dev)`, `not checked — update.check is off`, or
+`already on the newest release (1.5.0)`, `not checked — update.check is off`, or
 `found 1.6.0 but could not install it` — and that sentence crosses the restart,
 so asking afterwards gets a report rather than a guess. Every path records one,
 including the ones that decline to look: "did not check" and "checked and found
