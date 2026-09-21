@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -308,10 +309,17 @@ func isBinary(data []byte) bool {
 // MatchGlob matches a slash-separated path against a pattern, supporting `**`
 // for "any number of path segments".
 //
-// filepath.Match cannot express `**`, and `**/*.go` is the single most useful
+// path.Match cannot express `**`, and `**/*.go` is the single most useful
 // pattern an agent writes, so the doublestar case is handled explicitly rather
 // than pulling in a dependency — a self-updating shell is the wrong place to
 // widen the dependency surface for one wildcard.
+//
+// path, NOT filepath, for the matching itself. Both inputs are normalised to
+// forward slashes above, and filepath.Match takes the separator from the HOST:
+// on Windows that is `\`, so `/` stopped being a separator and a single `*`
+// matched straight through it — `internal/*.go` matched `internal/ai/x.go`
+// there and nowhere else. path.Match is always `/`-separated, which is what
+// this function's own contract says it takes.
 func MatchGlob(pattern, name string) bool {
 	pattern = strings.TrimPrefix(filepath.ToSlash(pattern), "./")
 	name = strings.TrimPrefix(filepath.ToSlash(name), "./")
@@ -320,10 +328,10 @@ func MatchGlob(pattern, name string) bool {
 		// A pattern with no separator matches on the base name, which is what
 		// someone writing `*.go` means.
 		if !strings.Contains(pattern, "/") {
-			ok, err := filepath.Match(pattern, filepath.Base(name))
+			ok, err := path.Match(pattern, path.Base(name))
 			return err == nil && ok
 		}
-		ok, err := filepath.Match(pattern, name)
+		ok, err := path.Match(pattern, name)
 		return err == nil && ok
 	}
 

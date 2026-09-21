@@ -13,7 +13,21 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"helix/internal/update"
 )
+
+// distBinary is the path a local build lands at under dir.
+//
+// Asked of internal/update rather than spelled "dist/helix" here, because
+// that is the list newerLocalBuild itself walks and on Windows it is
+// "dist\helix.exe". Hardcoding the Unix name made the newer-build test fail
+// on windows-latest and — worse — made the two tests either side of it pass
+// VACUOUSLY there: they assert that nothing is reported, and nothing was,
+// because the file they wrote was never a candidate (§9 rule 8).
+func distBinary(dir string) string {
+	return filepath.Join(dir, update.LocalCandidatePaths()[0])
+}
 
 // touch writes a file with a specific modification time.
 func touch(t *testing.T, path string, mod time.Time) {
@@ -80,7 +94,7 @@ func TestALocalBuildNewerThanTheRunningBinaryIsReported(t *testing.T) {
 	processStarted = time.Now()
 
 	// A dist/ build from the future relative to the running binary.
-	touch(t, filepath.Join(dir, "dist", "helix"), time.Now().Add(24*time.Hour))
+	touch(t, distBinary(dir), time.Now().Add(24*time.Hour))
 
 	report := checkStaleBinary()
 	if report.NewerBuild == "" {
@@ -105,7 +119,7 @@ func TestAnOlderLocalBuildIsNotReported(t *testing.T) {
 	t.Cleanup(func() { processStarted = saved })
 	processStarted = time.Now()
 
-	touch(t, filepath.Join(dir, "dist", "helix"), time.Now().Add(-48*time.Hour))
+	touch(t, distBinary(dir), time.Now().Add(-48*time.Hour))
 	if report := checkStaleBinary(); report.NewerBuild != "" {
 		t.Errorf("an older build is reported as newer: %q", report.NewerBuild)
 	}
@@ -123,7 +137,7 @@ func TestRunningTheLocalBuildItselfIsNotStale(t *testing.T) {
 
 	// Hard-link the running test binary in as dist/helix so os.SameFile sees
 	// one file under two names, which is what `./dist/helix` really is.
-	dst := filepath.Join(dir, "dist", "helix")
+	dst := distBinary(dir)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		t.Fatal(err)
 	}

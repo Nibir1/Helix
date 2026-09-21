@@ -170,6 +170,11 @@ func TestDropLineIsANoOpWhenTheLineIsAbsent(t *testing.T) {
 // dropLine must not preserve the file's mode by accident — /etc/shells is
 // world-readable and a 0600 rewrite would break every other shell's lookup.
 func TestDropLinePreservesPermissions(t *testing.T) {
+	// /etc/shells is a Unix file and its mode is a Unix property; Windows
+	// reports 0666 for anything writable whatever dropLine preserved.
+	if runtime.GOOS == "windows" {
+		t.Skip("no POSIX permission bits on windows: os.Chmod sets read-only only")
+	}
 	dir := t.TempDir()
 	shells := filepath.Join(dir, "shells")
 	write(t, shells, "/bin/sh\n/usr/local/bin/helix\n")

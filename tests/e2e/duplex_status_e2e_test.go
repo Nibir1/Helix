@@ -14,11 +14,39 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"helix/internal/live"
+	"helix/internal/speech"
 )
+
+// requireDuplexHost skips unless this host can actually SELECT full duplex.
+//
+// duplexPreflight gates the row on two things the host supplies rather than
+// the harness: a capture binary (rec/sox/ffmpeg) and a loadable libopus. A
+// bare CI runner has neither, so the row correctly renders
+// "unavailable: <reason>" there and the "selected" wording below has nothing
+// to assert against — this test failed on every Linux and macOS runner for
+// exactly that reason, while passing on any machine with sox installed.
+//
+// Skipping rather than faking, per §9 rule 6: the mock endpoints the harness
+// already stands up cannot stand in for these two, because the row's whole
+// job is to report whether THIS machine can open a session. Asked against
+// the same helpers the preflight uses, so a new recorder backend cannot be
+// detectable by one and not the other.
+func requireDuplexHost(t *testing.T) {
+	t.Helper()
+	if _, err := speech.DetectRecorder(); err != nil {
+		t.Skipf("no capture binary on this host: full duplex cannot be selected, nothing to assert (%v)", err)
+	}
+	if err := live.OpusAvailable(); err != nil {
+		t.Skipf("libopus is not loadable on this host: full duplex cannot be selected, nothing to assert (%v)", err)
+	}
+}
 
 // With gpt-live-1 chosen, the row must appear AND must not claim a session is
 // open, because none is: the session opens with the next conversation.
 func TestE2E_DuplexRowSaysSelectedNotOpen(t *testing.T) {
+	requireDuplexHost(t)
 	t.Setenv("HELIX_E2E_SPEECH", "1")
 	t.Setenv("HELIX_E2E_STT", "1")
 	t.Setenv("HELIX_E2E_STT_MODEL", "gpt-live-1")

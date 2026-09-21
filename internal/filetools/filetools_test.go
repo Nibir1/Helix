@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -191,6 +192,12 @@ func TestEditRefusesANoOp(t *testing.T) {
 // Permissions must survive an edit. A 0600 file silently relaxed to 0644 by a
 // tool call is a real change nobody asked for.
 func TestEditPreservesFilePermissions(t *testing.T) {
+	// Windows has no POSIX mode bits: os.Chmod there toggles only the
+	// read-only attribute, and Stat reports 0666 for any writable file. The
+	// assertion below would measure that, not Edit.
+	if runtime.GOOS == "windows" {
+		t.Skip("no POSIX permission bits on windows: os.Chmod sets read-only only")
+	}
 	j, root := newJail(t)
 	p := write(t, root, "secret.txt", "old\n")
 	if err := os.Chmod(p, 0o600); err != nil {
