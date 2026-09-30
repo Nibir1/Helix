@@ -317,6 +317,7 @@ Nothing here destroys a transcript. `/clear`, `/compact`, `/memory clear`, and `
 | `/todo [add\|start\|done\|rm\|...]` | Task list the planner can see **and edit** |
 | `/tools` | The harness tool vocabulary and each tool's gate |
 | `/hooks [list\|add\|rm\|test\|...]` | Run your own commands around tool execution |
+| `/metabolism [on\|off\|status]` | Record planner turns locally for the Metabolism engine |
 | `/undo` | Reverse the most recent journalled action |
 | `/dry-run` | Toggle command execution preview mode |
 
@@ -712,6 +713,7 @@ Helix/
 │   ├── input/             # HybridSource: keyboard and microphone multiplexed into one stream
 │   ├── journal/           # The one append-only NDJSON writer behind every local log
 │   ├── live/              # gpt-live-1 full duplex — WebRTC, Opus via purego, client delegation
+│   ├── metabolism/        # Opt-in local recording of planner turns for Metabolism
 │   ├── metrics/           # Local metrics journal and its reader
 │   ├── ollama/            # Ollama integration and GGUF discovery for llama.cpp reuse
 │   ├── providers/         # Per-provider adapters, capability flags, context limits, keystore

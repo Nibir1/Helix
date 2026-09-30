@@ -24,6 +24,7 @@ import (
 	"helix/internal/diagnostics"
 	"helix/internal/hooks"
 	"helix/internal/input"
+	"helix/internal/metabolism"
 	"helix/internal/rag"
 	"helix/internal/recon"
 	"helix/internal/session"
@@ -143,6 +144,23 @@ type Agent struct {
 	// which is exactly the provenance the Instruction Firewall exists for: it
 	// can inform the planner and can never command it.
 	ProjectContext func() (string, string, bool)
+
+	// Metabolism records each planner turn and how it turned out, for the
+	// Metabolism engine's baseline (internal/metabolism). Nil or disabled
+	// records nothing. It only writes: nothing it records is ever read back
+	// into a prompt, so it cannot change what Helix does.
+	Metabolism *metabolism.Recorder
+
+	// Per-turn recording state, reset by HandleInputEvent. episode is nil
+	// whenever recording is off. turnPlanned says the turn reached the
+	// planner: direct shell commands, the fast path and undo are the user's
+	// or Helix's own deterministic actions, not planner experience, and are
+	// not recorded. turnEnd is set by reportRunEnd when the agentic loop ran;
+	// lastObs is the final iteration's steps, for deriving the end otherwise.
+	episode     *metabolism.Turn
+	turnPlanned bool
+	turnEnd     string
+	lastObs     []StepObservation
 }
 
 // NewAgent creates a new Agent instance.
@@ -415,6 +433,7 @@ func retrievalBudget(obs []StepObservation) int {
 // answered instead). Extracted from HandleInput so the agentic harness can
 // re-run the full pipeline per iteration without duplicating any safety layer.
 func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary string, turn turnContext) ([]StepObservation, bool) {
+	a.turnPlanned = true
 	plannerPrompt := ai.BuildPlannerPromptFor(ai.PlannerPromptInput{
 		UserInput: userInput,
 		Env:       envDesc,
@@ -504,7 +523,9 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 		plan = safePlan
 	}
 
-	return a.executePlanSteps(plan, escalated), true
+	obs := a.executePlanSteps(plan, escalated)
+	a.recordSteps(obs)
+	return obs, true
 }
 
 // StepObservation records the outcome of one executed plan step. It is the
@@ -1515,6 +1536,7 @@ func (a *Agent) handleGitStep(step ai.PlanStep) error {
 			Description: fmt.Sprintf("git commit (%s)", msg),
 			Tool:        "git",
 			ReversalCmd: session.GitCommitReversal,
+			EpisodeID:   a.episode.ID(),
 		})
 	}
 	return err

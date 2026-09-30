@@ -126,6 +126,7 @@ func (a *Agent) agenticFollowUp(
 func (a *Agent) reportRunEnd(obs []StepObservation, baseline, budget int, exhausted bool) {
 	open := a.outstandingTasks(baseline)
 	failed := !allStepsOK(obs)
+	a.turnEnd = runEndFor(failed, len(open) > 0, exhausted)
 
 	switch {
 	case failed:

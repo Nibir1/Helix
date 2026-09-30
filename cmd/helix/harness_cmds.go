@@ -875,6 +875,18 @@ func configKeys() []configKey {
 			},
 		},
 		{
+			name: "metabolism", help: "Record planner turns locally for Metabolism", extra: "on | off",
+			get: func() string { return onOff(cfg.UserPrefs.MetabolismRecord) },
+			set: func(v string) error {
+				on, err := parseOnOff(v)
+				if err != nil {
+					return err
+				}
+				cfg.UserPrefs.MetabolismRecord = on
+				return metabolismRec.SetEnabled(on)
+			},
+		},
+		{
 			name: "agentic-steps", help: "Harness step budget", extra: "1 - 20",
 			get: func() string { return strconv.Itoa(agenticStepBudget()) },
 			set: func(v string) error {

@@ -22,6 +22,10 @@ type UndoEntry struct {
 	Description string    `json:"description"`
 	Tool        string    `json:"tool"`         // "git" (v1)
 	ReversalCmd string    `json:"reversal_cmd"` // executed ONLY through the safety pipeline
+	// EpisodeID names the Metabolism episode that made the change, so undoing
+	// it can be recorded as that episode's outcome. Empty when recording was
+	// off, and in entries written before the field existed.
+	EpisodeID string `json:"episode_id,omitempty"`
 }
 
 // UndoJournal is an append-only NDJSON journal at

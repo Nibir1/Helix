@@ -42,6 +42,10 @@ func (failClosedPrompter) AskYesNo(string) bool                     { return fal
 func (failClosedPrompter) AskLine(string) string                    { return "" }
 func (failClosedPrompter) AskTypedConfirmation(string, string) bool { return false }
 
+// Unattended marks these refusals as policy, so they are not counted as a
+// person declining (commands.DeclinedConfirmations).
+func (failClosedPrompter) Unattended() bool { return true }
+
 // daemonRenderer keeps the agent headless while capturing AI messages so
 // IPC submits can return the reply text.
 type daemonRenderer struct {

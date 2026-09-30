@@ -72,6 +72,10 @@ type UserPrefs struct {
 	// replaces DefaultMode, which was written to config from the start and
 	// never read by anything.
 	Permission string `json:"permission,omitempty"`
+
+	// MetabolismRecord turns on local recording of planner turns for the
+	// Metabolism engine (/metabolism). Off unless the user turns it on.
+	MetabolismRecord bool `json:"metabolism_record,omitempty"`
 }
 
 // SpeechSTTConfig selects the speech-to-text provider chain (BlackBox §7).

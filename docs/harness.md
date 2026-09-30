@@ -640,6 +640,7 @@ it keeps that path's confirmations, journalling, and hooks.
 | `~/.helix/exports/` | exported transcripts | 0600 |
 | `~/.helix/todo.json` | task list | 0600 |
 | `~/.helix/hooks.json` | local policy hooks | 0600 |
+| `~/.helix/metabolism/episodes.ndjson` | planner turns recorded for Metabolism (opt-in, §10) | 0600 |
 | `<repo>/HELIX.md` | project context | 0644 |
 
 `/doctor` opens with a **BINARY** row when the process answering you is older
@@ -681,3 +682,79 @@ reloaded like any other boot, and the continuity record separately carries the
 **in-progress** task texts so the resume can name what you were in the middle of.
 The resumed panel prints each task once — it deliberately does not also print the
 one-line summary when that summary is just the single task restated.
+
+---
+
+## 10. Recording for Metabolism — `/metabolism`
+
+[Metabolism](https://github.com/Nibir1/metabolism) is a Digestive AI engine: it
+learns from what an AI system did and how it turned out, and has to *prove* a
+lesson helped before keeping it. Its first host is Helix. Before it can prove
+anything it needs a baseline, meaning weeks of real use measured with learning
+off. `/metabolism on` records that baseline.
+
+```
+/metabolism          status: on or off, the file, how many records, how to ingest
+/metabolism on       start recording (persists; announced at startup)
+/metabolism off      stop; what was recorded is kept
+```
+
+**What is recorded.** One *episode* per turn that reached the planner:
+
+- the request (masked and bounded) and whether it was typed, spoken, or a
+  transcript below the voice confidence gate;
+- the steps that executed (tool, action, subject, ok, error);
+- model calls and characters spent during the turn;
+- how it ended, exactly as the run-end line on screen says it: done, failed,
+  budget reached with work open, or stopped with work open.
+
+**Outcomes** are recorded as they become known:
+
+| Signal | Outcome |
+|---|---|
+| the run's own end | success, or failure |
+| a yes/no confirmation you answered "no" during the turn | declined |
+| the same request asked again within 10 minutes | repeated, against the earlier turn |
+| `undo` of a commit the turn made | undone, against the turn that committed |
+
+Direct shell lines, the deterministic fast path, slash commands and undo
+itself are not recorded. They are your actions or Helix's fixed behaviour, not
+planner experience.
+
+**What it cannot do:**
+
+1. **It cannot change behaviour.** The recorder only writes. Nothing it records
+   is read back into a prompt, so a turn runs identically with recording on or
+   off. When learned lessons arrive in a later Metabolism phase, they will
+   have their own fenced `authority="data-only"` block, with the same limits as
+   every other injected context: they may inform the planner and can never
+   lower a risk tier, answer a confirmation or loosen the sandbox.
+2. **It sends nothing anywhere.** Recording is local-only, like the voice log.
+   The file stays on this machine until you run `metabolism ingest` yourself.
+3. **It is off by default.** An absent file is the privacy guarantee.
+
+**Masking.** Before anything is written, credentials that commonly appear in
+command lines are masked: `NAME=value` where the name looks like a token,
+secret, password or key; `--password`/`--token` flags; bearer tokens; URLs
+with embedded credentials; and well-known token shapes (`sk-…`, `ghp_…`,
+`AKIA…`, and so on). This is a floor, not a guarantee: no pattern list catches
+every secret. Requests are bounded at 500 bytes and subjects at 200. Command
+output is never recorded.
+
+**Pseudonymous scope.** A turn inside a repository is keyed by the
+repository's directory name plus a short hash of its path (`helix-1a2b3c4d`).
+Outside one, it is keyed by a short hash of the hostname. No home directory
+appears in a key.
+
+**The wire format is a contract.** Helix does not import the engine. The
+records are NDJSON (`internal/metabolism/wire.go`, version 1), pinned by
+`internal/metabolism/testdata/wire_v1.ndjson`. The engine's ingest test decodes
+the same file. A change that fails that test is a format change: bump
+`WireVersion` and update both copies.
+
+**Rotation.** 8 MiB per file, four older generations kept, so tens of
+thousands of turns fit before the oldest is dropped. Ingest reads rotated
+generations too, and re-ingesting is harmless.
+
+`/purge` removes the recording along with the rest of `~/.helix`.
+

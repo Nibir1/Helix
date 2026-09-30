@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Prompter is implemented by UX layers capable of asking the user questions.
@@ -100,9 +101,33 @@ func prompter() Prompter {
 	return activePrompter
 }
 
+// Unattended is implemented by a Prompter with no human behind it (the
+// daemon's fail-closed prompter). Its refusals are policy, not a person saying
+// no, so they are not counted as declines.
+type Unattended interface {
+	Unattended() bool
+}
+
+// declinedConfirmations counts yes/no questions a person answered "no".
+var declinedConfirmations atomic.Int64
+
+// DeclinedConfirmations is the running count of yes/no confirmations a person
+// declined. Metabolism's recorder takes the difference across a turn: a plan
+// the user refused a step of is a plan they disagreed with, which is an outcome
+// worth learning from. Typed confirmations are not counted, because the voice
+// channel refuses those by policy and that is not the user disagreeing.
+func DeclinedConfirmations() int64 { return declinedConfirmations.Load() }
+
 // AskForConfirmation routes yes/no prompts through the active prompter.
 func AskForConfirmation(prompt string) bool {
-	return prompter().AskYesNo(prompt)
+	p := prompter()
+	ok := p.AskYesNo(prompt)
+	if !ok {
+		if u, isU := p.(Unattended); !isU || !u.Unattended() {
+			declinedConfirmations.Add(1)
+		}
+	}
+	return ok
 }
 
 // AskLine routes line-input prompts through the active prompter.

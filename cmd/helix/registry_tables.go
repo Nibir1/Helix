@@ -313,6 +313,24 @@ func harnessCommands() []command {
 			Handler: handleHooksCommand,
 		},
 		{
+			Name: "/metabolism", Usage: "/metabolism [on|off|status]", Category: catHarness,
+			Summary: "Record planner turns locally for the Metabolism engine",
+			Detail: []string{
+				"Off by default. On, each planner turn is written to",
+				"~/.helix/metabolism/episodes.ndjson: the request, the steps it ran,",
+				"how the run ended, and later signals about it (an undo, a declined",
+				"confirmation, the same request asked again).",
+				"",
+				"Local only. Nothing is sent anywhere, and nothing recorded is read",
+				"back into a prompt, so recording never changes what Helix does.",
+				"Credentials in command lines are masked before anything is written.",
+				"",
+				"The Metabolism engine reads the file with `metabolism ingest` to",
+				"measure a baseline: is Helix getting better at your work?",
+			},
+			Handler: handleMetabolismCommand,
+		},
+		{
 			Name: "/undo", VoiceOK: true, Category: catHarness,
 			Summary: "Reverse the most recent journalled action",
 			Detail: []string{

@@ -431,6 +431,7 @@ func main() {
 		uiDetail("NO hooks are active this session. /hooks shows the config path.")
 	}
 	agentCore.ProjectContext = loadProjectContext
+	initMetabolism()
 	applyPersistedPermission()
 	if cfg.UserPrefs.AgenticSteps > 0 {
 		agentCore.MaxAgenticSteps = cfg.UserPrefs.AgenticSteps

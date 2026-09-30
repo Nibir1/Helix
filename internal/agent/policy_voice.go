@@ -23,6 +23,7 @@ import (
 	"helix/internal/ai"
 	"helix/internal/commands"
 	"helix/internal/input"
+	"helix/internal/metabolism"
 	"helix/internal/session"
 )
 
@@ -75,7 +76,9 @@ func (a *Agent) HandleInputEvent(ev input.InputEvent) {
 	a.lastResponse = ""
 	a.turnWasControl = false
 	a.turnUnreliable = false
+	a.beginEpisode()
 	defer func() {
+		a.finishEpisode(ev)
 		a.channel = input.ChannelText
 		a.turnMeta = nil
 		a.recordTurn(ev)
@@ -183,6 +186,10 @@ func (a *Agent) handleUndoRequest() {
 	if _, _, perr := a.Undo.Pop(); perr != nil {
 		a.render.PrintDebug(fmt.Sprintf("undo journal pop: %v", perr))
 	}
+	// The strongest negative signal Helix has: the user reversed what an
+	// earlier turn did.
+	a.Metabolism.Outcome(entry.EpisodeID, metabolism.OutcomeUndone, metabolism.SourceDerived,
+		"undo: "+entry.Description)
 	a.render.PrintSuccess(fmt.Sprintf("Undone: %s", entry.Description))
 	a.speak("Undone.")
 }
