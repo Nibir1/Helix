@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 
+	"helix/internal/ai"
 	"helix/internal/input"
 	"helix/internal/metabolism"
 )
@@ -12,6 +13,19 @@ import (
 // none of it can change what the turn does. Recording is best-effort and
 // nil-safe throughout, so a recorder that is off, missing or failing leaves
 // the turn exactly as it was.
+
+// MeterUsage adapts the model-usage meter to the recorder's counters. It lives
+// here, not in internal/metabolism, because the meter's package reaches the
+// network and the recorder's package must not (TestNoNetworkImports there).
+func MeterUsage() metabolism.UsageTotals {
+	rep := ai.Usage()
+	t := metabolism.UsageTotals{Calls: rep.Calls}
+	for _, row := range rep.Rows {
+		t.PromptChars += row.PromptChars
+		t.ResponseChars += row.ResponseChars
+	}
+	return t
+}
 
 // beginEpisode resets the per-turn recording state and starts an episode
 // (nil when recording is off).

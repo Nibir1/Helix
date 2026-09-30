@@ -9,7 +9,7 @@ import (
 	"os"
 	"strconv"
 
-	"helix/internal/ai"
+	"helix/internal/agent"
 	"helix/internal/commands"
 	"helix/internal/metabolism"
 	"helix/internal/shell"
@@ -25,7 +25,7 @@ var metabolismRec *metabolism.Recorder
 func initMetabolism() {
 	rec, err := metabolism.Open(metabolism.Options{
 		Enabled:  cfg.UserPrefs.MetabolismRecord,
-		Usage:    meterTotals,
+		Usage:    agent.MeterUsage,
 		Declines: commands.DeclinedConfirmations,
 	})
 	if err != nil {
@@ -39,17 +39,6 @@ func initMetabolism() {
 	if rec.Enabled() {
 		uiOK("metabolism", "recording planner turns locally · /metabolism off stops it")
 	}
-}
-
-// meterTotals adapts the usage meter to the recorder's counters.
-func meterTotals() metabolism.UsageTotals {
-	rep := ai.Usage()
-	t := metabolism.UsageTotals{Calls: rep.Calls}
-	for _, row := range rep.Rows {
-		t.PromptChars += row.PromptChars
-		t.ResponseChars += row.ResponseChars
-	}
-	return t
 }
 
 // handleMetabolismCommand implements /metabolism [on|off|status].

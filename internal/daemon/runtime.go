@@ -25,6 +25,7 @@ import (
 	"helix/internal/diagnostics"
 	"helix/internal/input"
 	"helix/internal/journal"
+	"helix/internal/metabolism"
 	"helix/internal/metrics"
 	"helix/internal/ollama"
 	"helix/internal/session"
@@ -194,6 +195,18 @@ func New() (*Daemon, error) {
 		commands.DefaultExecuteConfig(), false, nil, nil, nil, renderer)
 	ag.Session = sess
 	ag.Undo = undo
+	// Metabolism recording follows the same preference as the interactive
+	// shell. The daemon's prompter is unattended, so its automatic refusals
+	// are not recorded as the user declining.
+	if rec, merr := metabolism.Open(metabolism.Options{
+		Enabled:  cfg.UserPrefs.MetabolismRecord,
+		Usage:    agent.MeterUsage,
+		Declines: commands.DeclinedConfirmations,
+	}); merr == nil {
+		ag.Metabolism = rec
+	} else {
+		jrn.Record("lifecycle", "", "", "metabolism recording unavailable: "+merr.Error())
+	}
 	ag.OnSpeak = func(text string) {
 		if !speech.TTSEnabled() {
 			return

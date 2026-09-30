@@ -717,6 +717,10 @@ off. `/metabolism on` records that baseline.
 | the same request asked again within 10 minutes | repeated, against the earlier turn |
 | `undo` of a commit the turn made | undone, against the turn that committed |
 
+The interactive shell and the background daemon both record when the
+preference is on. The daemon's confirmations are refused automatically, and
+those refusals are not recorded as you declining.
+
 Direct shell lines, the deterministic fast path, slash commands and undo
 itself are not recorded. They are your actions or Helix's fixed behaviour, not
 planner experience.
