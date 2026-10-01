@@ -36,10 +36,12 @@ func TestPlanDispatcherAbortsOnMutationsOnly(t *testing.T) {
 			"round trip) or none does (a failed edit lets the plan continue as though " +
 			"it had worked)")
 	}
-	if !strings.Contains(block, "continue") {
+	// runStep reports (observation, abort): abort=false lets the plan
+	// continue to the next step, abort=true stops it.
+	if !strings.Contains(block, "return o, false") {
 		t.Error("a failed read does not continue to the next step")
 	}
-	if !strings.Contains(block, "return obs") {
+	if !strings.Contains(block, "return o, true") {
 		t.Error("a failed mutation does not abort the plan")
 	}
 }

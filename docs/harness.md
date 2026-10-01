@@ -391,7 +391,7 @@ steps, and narrating each is three interruptions for one decision.
 
 ### Every run says how it ended
 
-A run that stops prints why, in all four cases:
+A run that stops prints why, in all five cases:
 
 ```
 Done — 2 tasks closed.
@@ -408,12 +408,39 @@ Stopped with work still open.
 ```
 Stopped with an unresolved error after 4 follow-ups.
 ```
+```
+Stopped: a step needed confirmation and did not get it. Nothing more was attempted.
+```
 
 This is not decoration. The first real run ended by printing *nothing at all* —
 the last iteration executed, the budget ran out, the prompt came back, and the
 only way to discover that a task was left half-done was to type `/todo` and read
 it. "Finished" and "ran out of road" look identical from a returned prompt, and
 the open tasks are named because "some work is open" is not actionable.
+
+### "No" means the step did not happen
+
+A step whose confirmation was refused is reported as **declined**, never as
+OK, and the plan stops there. The handlers print "skipped" and return without
+an error, and for a long time the dispatcher read that as success. The planner
+was then told the file had been written, the next steps ran on top of a change
+that never happened, and the run reported "done". That is the `sed` no-op
+problem again: success reported for work not done.
+
+The dispatcher now decides this itself, for every tool. It compares the
+refusal counters in `internal/commands` across each step, so it also sees
+git and package prompts that refuse deep inside `commands` and return nil.
+A refusal:
+
+- marks the step not OK and `Declined`, with `declined:` (a person answered
+  no) or `refused:` (nobody could answer, as in the daemon, or a typed phrase
+  was not given) in its error;
+- stops the remaining steps, because they may depend on this one;
+- **ends the agentic loop.** Replanning after "no" is how a harness argues
+  with the user: the next plan proposes the same change another way, or asks
+  the same question again. The user can always ask again;
+- prints the fifth run-end line above, not "unresolved error", because
+  Helix did nothing wrong. It was told no.
 
 ### Why this tool is not gated
 
@@ -718,7 +745,7 @@ off. `/metabolism on` records that baseline.
 | Signal | Outcome |
 |---|---|
 | the run's own end | success, or failure |
-| a yes/no confirmation you answered "no" during the turn | declined |
+| a yes/no confirmation you answered "no" during the turn | declined (the step is recorded as not OK, and the turn as open work) |
 | the same request asked again within 10 minutes | repeated, against the earlier turn |
 | `undo` of a commit the turn made | undone, against the turn that committed |
 

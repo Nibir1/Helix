@@ -19,6 +19,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"helix/internal/metabolism"
 	"helix/internal/session"
 	"helix/internal/shell"
 )
@@ -125,6 +126,17 @@ func (a *Agent) agenticFollowUp(
 // from the loop deciding it was done.
 func (a *Agent) reportRunEnd(obs []StepObservation, baseline, budget int, exhausted bool) {
 	open := a.outstandingTasks(baseline)
+	if anyDeclined(obs) {
+		// Not a failure: Helix did nothing wrong, it was told no. Saying
+		// "unresolved error" here would misreport the user's own decision.
+		a.turnEnd = metabolism.EndOpenWork
+		a.render.PrintWarning("Stopped: a step needed confirmation and did not get it. Nothing more was attempted.")
+		for _, it := range open {
+			a.render.PrintInfo(fmt.Sprintf("      #%d [%s] %s", it.ID, it.State, it.Text))
+		}
+		a.speak("Okay, I've stopped there.")
+		return
+	}
 	failed := !allStepsOK(obs)
 	a.turnEnd = runEndFor(failed, len(open) > 0 || (exhausted && unanswered(obs)), exhausted)
 
@@ -227,7 +239,36 @@ func phaseLine(label, phase string, iter, budget int) string {
 //   - a retrieval succeeded and its results still have to become an answer;
 //   - the agent's own plan has work left on it.
 func followUpDone(obs []StepObservation, agentWorkOutstanding bool) bool {
+	// A refused step ends the run. Replanning after "no" is how a harness
+	// argues with the user: the next plan proposes the same change another
+	// way, or asks the same question again. The user can always ask again.
+	if anyDeclined(obs) {
+		return true
+	}
 	return allStepsOK(obs) && !needsAnswer(obs) && !agentWorkOutstanding
+}
+
+// anyDeclined reports whether a step in obs was refused confirmation.
+func anyDeclined(obs []StepObservation) bool {
+	for _, o := range obs {
+		if o.Declined {
+			return true
+		}
+	}
+	return false
+}
+
+// markRefused records that a step's confirmation was not given. byPerson
+// distinguishes the user answering no from a refusal nobody could answer
+// (the daemon's unattended prompter, a typed phrase the voice channel cannot
+// give).
+func markRefused(o *StepObservation, byPerson bool) {
+	o.OK, o.Declined = false, true
+	if byPerson {
+		o.Err = "declined: the user answered no to a confirmation, so this step did not run as planned"
+		return
+	}
+	o.Err = "refused: the confirmation this step needs was not given, so it did not run as planned"
 }
 
 // maxTodoID returns the highest task id currently on the list, or 0.

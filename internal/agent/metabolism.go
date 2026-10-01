@@ -133,6 +133,9 @@ func (a *Agent) derivedRunEnd() string {
 	if a.turnEnd != "" {
 		return a.turnEnd
 	}
+	if anyDeclined(a.lastObs) {
+		return metabolism.EndOpenWork
+	}
 	if len(a.lastObs) == 0 {
 		if a.lastResponse == "" {
 			return metabolism.EndFailed

@@ -540,6 +540,11 @@ type StepObservation struct {
 	OK      bool
 	Err     string
 
+	// Declined marks a step that asked for confirmation and did not get it,
+	// from the user or, unattended, by policy. It is never OK: whatever its
+	// handler returned, the step did not do what the plan said.
+	Declined bool
+
 	// Subject is what a non-shell step acted on ("list docs", "write
 	// notes.txt"), for the Metabolism record only. File and web steps carry
 	// their target in Args rather than Command, so without this an episode
@@ -602,155 +607,168 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 		// exception is if the firewall escalated the command due to provenance.
 		step.Trusted = !escalated[step.Command]
 
-		o := StepObservation{Index: i, Tool: step.Tool, Action: step.Action, Command: step.Command, OK: true,
-			Subject: stepSubject(step)}
-		switch step.Tool {
-		case "response":
-			a.handleResponseStep(step)
-
-		case "shell":
-			// P8.6: capture output only while the harness is running. On a
-			// normal turn nothing consumes the tail, and capturing would cost
-			// the child its TTY (see runArgvEnvCapture) for no benefit.
-			var capture *commands.OutputCapture
-			if a.Agentic {
-				capture = commands.NewOutputCapture()
-			}
-			err := a.handleShellStepWithEscalation(step, escalated[step.Command], capture)
-			if capture != nil {
-				o.Output, o.OutputTruncated = capture.Combined(), capture.Truncated()
-				o.ExitCode = capture.ExitCode
-			}
-			if err != nil {
-				a.render.PrintError(fmt.Sprintf("Shell step failed: %v", err))
-				o.OK, o.Err = false, err.Error()
-				obs = append(obs, o)
-				return obs
-			}
-
-		case "git":
-			if err := a.handleGitStep(step); err != nil {
-				a.render.PrintError(fmt.Sprintf("Git step failed: %v", err))
-				o.OK, o.Err = false, err.Error()
-				obs = append(obs, o)
-				return obs
-			}
-
-		case "package":
-			if err := a.handlePackageStep(step); err != nil {
-				a.render.PrintError(fmt.Sprintf("Package step failed: %v", err))
-				o.OK, o.Err = false, err.Error()
-				obs = append(obs, o)
-				return obs
-			}
-
-		case "recon":
-			if err := a.handleReconStep(step); err != nil {
-				a.render.PrintError(fmt.Sprintf("Recon step failed: %v", err))
-				o.OK, o.Err = false, err.Error()
-				obs = append(obs, o)
-				return obs
-			}
-
-		case "vision":
-			// One frame, memory only, and the answer is delivered by the step
-			// itself — so the output is recorded for a replan but not marked
-			// NeedsAnswer (see handleVisionStep).
-			out, err := a.handleVisionStep(step)
-			if err != nil {
-				a.render.PrintError(fmt.Sprintf("Vision step failed: %v", err))
-				o.OK, o.Err = false, err.Error()
-				obs = append(obs, o)
-				return obs
-			}
-			o.Output = out
-
-		case "file":
-			// A file step's output is the point of the step — a read, a glob or
-			// a grep exists to hand the planner text it did not have — so it is
-			// captured unconditionally and marked NeedsAnswer, exactly as a web
-			// retrieval is. The execution report fences it as data-only, which
-			// is what makes replaying a file's contents to the planner safe: a
-			// file in a repository is content written by whoever wrote that
-			// repository, which is precisely the provenance the Instruction
-			// Firewall exists for.
-			out, err := a.handleFileStep(step)
-			if err != nil {
-				o.OK, o.Err = false, err.Error()
-				// A READ THAT FINDS NOTHING IS AN ANSWER, NOT A FAILURE.
-				//
-				// Every other tool aborts the plan on error because later steps
-				// usually depend on the earlier one. A read is different: the
-				// model asked precisely because it did not know, and "no such
-				// file" is the thing it wanted to learn. Aborting spent a whole
-				// planner round trip on that discovery — a real run went
-				//
-				//   TASK #1 in_progress → glob **/parser.go → read package.json
-				//
-				// and the failed read cancelled the rest of a five-step plan,
-				// which is two thirds of a four-iteration budget gone before any
-				// work happened.
-				//
-				// Mutations still abort. An edit or a write that failed may have
-				// left the tree in a state the following steps assumed away, and
-				// carrying on from there is how a half-applied change gets
-				// reported as finished.
-				if fileMutates(step.Action) {
-					a.render.PrintError(fmt.Sprintf("File step failed: %v", err))
-					obs = append(obs, o)
-					return obs
-				}
-				a.render.PrintWarning(fmt.Sprintf("%s: %v", fileSubject(step.Action, step.Args), err))
-				o.NeedsAnswer = true // the planner has to read what it found out
-				obs = append(obs, o)
-				continue
-			}
-			o.Output = out
-			o.NeedsAnswer = !fileMutates(step.Action)
-
-		case "todo":
-			// The result is the receipt PLUS the whole current list, and
-			// NeedsAnswer is deliberately false: editing a plan is not
-			// retrieval, so this must not on its own earn an extra planner
-			// round. What it does is make the list the next round sees
-			// correct — which is the entire point of letting the agent write
-			// to it.
-			out, err := a.handleTodoStep(step)
-			if err != nil {
-				a.render.PrintError(fmt.Sprintf("Task list step failed: %v", err))
-				o.OK, o.Err = false, err.Error()
-				obs = append(obs, o)
-				return obs
-			}
-			o.Output = out
-
-		case "web":
-			// Provenance escalation keys web steps on their URL (firewall.go):
-			// a fetch target lifted out of retrieved context needs the same
-			// mandatory confirmation a shell command carrying that URL would.
-			out, err := a.handleWebStep(step, escalated[step.Args["url"]])
-			if err != nil {
-				a.render.PrintError(fmt.Sprintf("Web step failed: %v", err))
-				o.OK, o.Err = false, err.Error()
-				obs = append(obs, o)
-				return obs
-			}
-			// A web step's whole purpose is to hand the planner facts it did not
-			// have, so the retrieved text is captured unconditionally — unlike
-			// shell output, which is only captured on agentic turns because
-			// capturing costs the child its TTY. Retrieval has no such cost, and
-			// without the text the model would answer the very question it just
-			// searched from memory.
-			o.Output = out
-			o.NeedsAnswer = true
-
-		default:
-			a.render.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
-			o.OK, o.Err = false, "unknown tool"
+		// A step during which a confirmation was refused did not run as
+		// planned, whatever its handler returned: several print "skipped" and
+		// return nil, and git and package prompts deep in internal/commands do
+		// the same. Reporting such a step as OK told the planner (and the
+		// Metabolism record) that a change was made when the user had said no.
+		// The refusal counters see every prompt, so the decision is made here
+		// once, for every tool.
+		refused, declined := commands.RefusedConfirmations(), commands.DeclinedConfirmations()
+		o, abort := a.runStep(i, step, escalated)
+		if commands.RefusedConfirmations() > refused {
+			markRefused(&o, commands.DeclinedConfirmations() > declined)
+			abort = true
 		}
 		obs = append(obs, o)
+		if abort {
+			return obs
+		}
 	}
 	return obs
+}
+
+// runStep executes one step and reports it. abort says the remaining steps
+// must not run, because this one failed in a way later steps may depend on.
+func (a *Agent) runStep(i int, step ai.PlanStep, escalated map[string]bool) (StepObservation, bool) {
+	o := StepObservation{Index: i, Tool: step.Tool, Action: step.Action, Command: step.Command, OK: true,
+		Subject: stepSubject(step)}
+	switch step.Tool {
+	case "response":
+		a.handleResponseStep(step)
+
+	case "shell":
+		// P8.6: capture output only while the harness is running. On a
+		// normal turn nothing consumes the tail, and capturing would cost
+		// the child its TTY (see runArgvEnvCapture) for no benefit.
+		var capture *commands.OutputCapture
+		if a.Agentic {
+			capture = commands.NewOutputCapture()
+		}
+		err := a.handleShellStepWithEscalation(step, escalated[step.Command], capture)
+		if capture != nil {
+			o.Output, o.OutputTruncated = capture.Combined(), capture.Truncated()
+			o.ExitCode = capture.ExitCode
+		}
+		if err != nil {
+			a.render.PrintError(fmt.Sprintf("Shell step failed: %v", err))
+			o.OK, o.Err = false, err.Error()
+			return o, true
+		}
+
+	case "git":
+		if err := a.handleGitStep(step); err != nil {
+			a.render.PrintError(fmt.Sprintf("Git step failed: %v", err))
+			o.OK, o.Err = false, err.Error()
+			return o, true
+		}
+
+	case "package":
+		if err := a.handlePackageStep(step); err != nil {
+			a.render.PrintError(fmt.Sprintf("Package step failed: %v", err))
+			o.OK, o.Err = false, err.Error()
+			return o, true
+		}
+
+	case "recon":
+		if err := a.handleReconStep(step); err != nil {
+			a.render.PrintError(fmt.Sprintf("Recon step failed: %v", err))
+			o.OK, o.Err = false, err.Error()
+			return o, true
+		}
+
+	case "vision":
+		// One frame, memory only, and the answer is delivered by the step
+		// itself — so the output is recorded for a replan but not marked
+		// NeedsAnswer (see handleVisionStep).
+		out, err := a.handleVisionStep(step)
+		if err != nil {
+			a.render.PrintError(fmt.Sprintf("Vision step failed: %v", err))
+			o.OK, o.Err = false, err.Error()
+			return o, true
+		}
+		o.Output = out
+
+	case "file":
+		// A file step's output is the point of the step — a read, a glob or
+		// a grep exists to hand the planner text it did not have — so it is
+		// captured unconditionally and marked NeedsAnswer, exactly as a web
+		// retrieval is. The execution report fences it as data-only, which
+		// is what makes replaying a file's contents to the planner safe: a
+		// file in a repository is content written by whoever wrote that
+		// repository, which is precisely the provenance the Instruction
+		// Firewall exists for.
+		out, err := a.handleFileStep(step)
+		if err != nil {
+			o.OK, o.Err = false, err.Error()
+			// A READ THAT FINDS NOTHING IS AN ANSWER, NOT A FAILURE.
+			//
+			// Every other tool aborts the plan on error because later steps
+			// usually depend on the earlier one. A read is different: the
+			// model asked precisely because it did not know, and "no such
+			// file" is the thing it wanted to learn. Aborting spent a whole
+			// planner round trip on that discovery — a real run went
+			//
+			//   TASK #1 in_progress → glob **/parser.go → read package.json
+			//
+			// and the failed read cancelled the rest of a five-step plan,
+			// which is two thirds of a four-iteration budget gone before any
+			// work happened.
+			//
+			// Mutations still abort. An edit or a write that failed may have
+			// left the tree in a state the following steps assumed away, and
+			// carrying on from there is how a half-applied change gets
+			// reported as finished.
+			if fileMutates(step.Action) {
+				a.render.PrintError(fmt.Sprintf("File step failed: %v", err))
+				return o, true
+			}
+			a.render.PrintWarning(fmt.Sprintf("%s: %v", fileSubject(step.Action, step.Args), err))
+			o.NeedsAnswer = true // the planner has to read what it found out
+			return o, false
+		}
+		o.Output = out
+		o.NeedsAnswer = !fileMutates(step.Action)
+
+	case "todo":
+		// The result is the receipt PLUS the whole current list, and
+		// NeedsAnswer is deliberately false: editing a plan is not
+		// retrieval, so this must not on its own earn an extra planner
+		// round. What it does is make the list the next round sees
+		// correct — which is the entire point of letting the agent write
+		// to it.
+		out, err := a.handleTodoStep(step)
+		if err != nil {
+			a.render.PrintError(fmt.Sprintf("Task list step failed: %v", err))
+			o.OK, o.Err = false, err.Error()
+			return o, true
+		}
+		o.Output = out
+
+	case "web":
+		// Provenance escalation keys web steps on their URL (firewall.go):
+		// a fetch target lifted out of retrieved context needs the same
+		// mandatory confirmation a shell command carrying that URL would.
+		out, err := a.handleWebStep(step, escalated[step.Args["url"]])
+		if err != nil {
+			a.render.PrintError(fmt.Sprintf("Web step failed: %v", err))
+			o.OK, o.Err = false, err.Error()
+			return o, true
+		}
+		// A web step's whole purpose is to hand the planner facts it did not
+		// have, so the retrieved text is captured unconditionally — unlike
+		// shell output, which is only captured on agentic turns because
+		// capturing costs the child its TTY. Retrieval has no such cost, and
+		// without the text the model would answer the very question it just
+		// searched from memory.
+		o.Output = out
+		o.NeedsAnswer = true
+
+	default:
+		a.render.PrintWarning(fmt.Sprintf("Unknown tool: %s", step.Tool))
+		o.OK, o.Err = false, "unknown tool"
+	}
+	return o, false
 }
 
 // chatFallback answers with plain chat whenever planning did not produce an

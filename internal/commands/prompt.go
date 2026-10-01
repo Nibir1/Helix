@@ -111,6 +111,17 @@ type Unattended interface {
 // declinedConfirmations counts yes/no questions a person answered "no".
 var declinedConfirmations atomic.Int64
 
+// refusedConfirmations counts every confirmation that came back negative, from
+// anyone: a person's "no", a typed phrase not given, an unattended prompter's
+// policy refusal. A step during which this moved did not do what was planned.
+var refusedConfirmations atomic.Int64
+
+// RefusedConfirmations is the running count of confirmations that were not
+// given, by a person or by policy. The agent compares it across a step: a step
+// that asked and was refused did not run as planned, whatever its handler
+// returned (several return nil after printing "skipped").
+func RefusedConfirmations() int64 { return refusedConfirmations.Load() }
+
 // DeclinedConfirmations is the running count of yes/no confirmations a person
 // declined. Metabolism's recorder takes the difference across a turn: a plan
 // the user refused a step of is a plan they disagreed with, which is an outcome
@@ -123,6 +134,7 @@ func AskForConfirmation(prompt string) bool {
 	p := prompter()
 	ok := p.AskYesNo(prompt)
 	if !ok {
+		refusedConfirmations.Add(1)
 		if u, isU := p.(Unattended); !isU || !u.Unattended() {
 			declinedConfirmations.Add(1)
 		}
@@ -137,5 +149,9 @@ func AskLine(prompt string) string {
 
 // AskTypedConfirmation routes typed confirmations through the active prompter.
 func AskTypedConfirmation(label, requiredPhrase string) bool {
-	return prompter().AskTypedConfirmation(label, requiredPhrase)
+	ok := prompter().AskTypedConfirmation(label, requiredPhrase)
+	if !ok {
+		refusedConfirmations.Add(1)
+	}
+	return ok
 }
