@@ -705,8 +705,13 @@ off. `/metabolism on` records that baseline.
   transcript below the voice confidence gate;
 - the steps that executed (tool, action, subject, ok, error);
 - model calls and characters spent during the turn;
-- how it ended, exactly as the run-end line on screen says it: done, failed,
-  budget reached with work open, or stopped with work open.
+- how it ended, as the run-end line on screen says it: done, failed, budget
+  reached with work open, or stopped with work open. One addition: a lookup
+  that spent its whole budget searching and never answered is recorded as
+  budget reached, not done, even though no task was left open.
+- what each step acted on: the command for shell and git steps, `list docs`
+  or `write notes.txt` for file steps, the URL or query for web steps. A
+  written file's contents are not recorded.
 
 **Outcomes** are recorded as they become known:
 

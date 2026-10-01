@@ -51,14 +51,33 @@ func (a *Agent) finishEpisode(ev input.InputEvent) {
 func (a *Agent) recordSteps(obs []StepObservation) {
 	a.lastObs = obs
 	for _, o := range obs {
+		subject := o.Subject
+		if subject == "" {
+			subject = o.Command
+		}
 		a.episode.AddStep(metabolism.Step{
 			Tool:    o.Tool,
 			Action:  o.Action,
-			Subject: o.Command,
+			Subject: subject,
 			OK:      o.OK,
 			Err:     o.Err,
 		})
 	}
+}
+
+// stepSubject names what a step acted on, for the record. Shell and git
+// steps already carry it in Command; file and web steps keep it in Args.
+func stepSubject(step ai.PlanStep) string {
+	switch step.Tool {
+	case "file":
+		return fileSubject(step.Action, step.Args)
+	case "web":
+		if u := step.Args["url"]; u != "" {
+			return u
+		}
+		return step.Args["query"]
+	}
+	return step.Command
 }
 
 // turnProvenance labels where the request came from. A transcript below the
@@ -73,8 +92,13 @@ func (a *Agent) turnProvenance() string {
 	return metabolism.ProvUserTyped
 }
 
-// runEndFor maps reportRunEnd's four cases onto the engine's run ends. It is
-// the same decision reportRunEnd prints, so the record and the screen agree.
+// runEndFor maps reportRunEnd's cases onto the engine's run ends. open is
+// "work left undone": tasks still open, or, when the budget ran out, a
+// retrieval the model never got to answer. reportRunEnd only counts tasks, so
+// a lookup that searched until the budget was spent and then said nothing
+// printed no warning and was recorded as done. The first real recorded run
+// was exactly that: one glob four times, then an empty reply, labelled a
+// success.
 func runEndFor(failed, open, exhausted bool) string {
 	switch {
 	case failed:
@@ -85,6 +109,20 @@ func runEndFor(failed, open, exhausted bool) string {
 		return metabolism.EndOpenWork
 	}
 	return metabolism.EndDone
+}
+
+// unanswered reports whether the last iteration retrieved something and did
+// not answer from it in the same plan.
+func unanswered(obs []StepObservation) bool {
+	if !needsAnswer(obs) {
+		return false
+	}
+	for _, o := range obs {
+		if o.Tool == "response" && o.OK {
+			return false
+		}
+	}
+	return true
 }
 
 // derivedRunEnd is how the turn ended. The agentic loop says so itself

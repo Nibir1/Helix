@@ -540,6 +540,13 @@ type StepObservation struct {
 	OK      bool
 	Err     string
 
+	// Subject is what a non-shell step acted on ("list docs", "write
+	// notes.txt"), for the Metabolism record only. File and web steps carry
+	// their target in Args rather than Command, so without this an episode
+	// recorded "file list" with no idea of what was listed. It is not part of
+	// the report the planner reads.
+	Subject string
+
 	// Output is a bounded tail of what the command printed (P8.6), captured
 	// only on agentic turns. Exit status alone cannot distinguish "compile
 	// error on line 42" from "network unreachable"; this is what lets the
@@ -595,7 +602,8 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 		// exception is if the firewall escalated the command due to provenance.
 		step.Trusted = !escalated[step.Command]
 
-		o := StepObservation{Index: i, Tool: step.Tool, Action: step.Action, Command: step.Command, OK: true}
+		o := StepObservation{Index: i, Tool: step.Tool, Action: step.Action, Command: step.Command, OK: true,
+			Subject: stepSubject(step)}
 		switch step.Tool {
 		case "response":
 			a.handleResponseStep(step)

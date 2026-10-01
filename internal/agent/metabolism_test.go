@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"helix/internal/ai"
 	"helix/internal/commands"
 	"helix/internal/input"
 	"helix/internal/metabolism"
@@ -148,6 +149,23 @@ func TestOnlyPlannerTurnsAreRecorded(t *testing.T) {
 	}
 }
 
+// File steps keep their target in Args, not Command. Found in the first real
+// run: "file list" was recorded with no idea of what was listed.
+func TestFileStepsRecordWhatTheyTouched(t *testing.T) {
+	cases := map[string]ai.PlanStep{
+		"list docs":             {Tool: "file", Action: "list", Args: map[string]string{"path": "docs"}},
+		"write notes.txt":       {Tool: "file", Action: "write", Args: map[string]string{"path": "notes.txt", "content": "secret body"}},
+		"glob **/*.go":          {Tool: "file", Action: "glob", Args: map[string]string{"pattern": "**/*.go"}},
+		"https://example.com/a": {Tool: "web", Args: map[string]string{"url": "https://example.com/a"}},
+		"go test ./...":         {Tool: "shell", Command: "go test ./..."},
+	}
+	for want, step := range cases {
+		if got := stepSubject(step); got != want {
+			t.Errorf("stepSubject(%+v) = %q, want %q", step, got, want)
+		}
+	}
+}
+
 func TestRecordingOffLeavesNoTrace(t *testing.T) {
 	ag, _ := newTestAgent(t)
 	ag.beginEpisode()
@@ -175,7 +193,19 @@ func TestRunEnds(t *testing.T) {
 		}
 	}
 
+	// The budget ran out mid-retrieval: the question was never answered.
+	unanswered := []StepObservation{{Tool: "file", Action: "glob", OK: true, NeedsAnswer: true}}
 	ag, _ := newTestAgent(t)
+	ag.reportRunEnd(unanswered, 0, 3, true)
+	if ag.turnEnd != metabolism.EndBudgetExhausted {
+		t.Errorf("an unanswered retrieval at budget = %s, want budget-exhausted", ag.turnEnd)
+	}
+	answered := []StepObservation{{Tool: "file", Action: "read", OK: true, NeedsAnswer: true}, {Tool: "response", OK: true}}
+	ag.reportRunEnd(answered, 0, 3, true)
+	if ag.turnEnd != metabolism.EndDone {
+		t.Errorf("an answered turn that used its whole budget = %s, want done", ag.turnEnd)
+	}
+
 	ag.lastObs, ag.lastResponse, ag.turnEnd = nil, "", ""
 	if got := ag.derivedRunEnd(); got != metabolism.EndFailed {
 		t.Errorf("no steps and no reply = %s, want failed", got)
