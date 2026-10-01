@@ -602,10 +602,14 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 			a.render.PrintChrome(stepLine(i+1, len(plan.Steps)))
 		}
 
-		// CRITICAL FIX: Trust AI-generated steps to stop nagging the user with
-		// medium-risk confirmations for standard file creation/editing. The only
-		// exception is if the firewall escalated the command due to provenance.
-		step.Trusted = !escalated[step.Command]
+		// A planner step is NEVER trusted here. Trusted skips the medium-risk
+		// confirmation, and it is for plans Helix builds deterministically
+		// itself (fastpath.go), not for whatever a model proposed. From v1.0.0
+		// until this line changed, every planner step was marked trusted unless
+		// the firewall escalated it, so medium-risk writes and shell commands
+		// ran without asking under the default `ask` posture, contradicting
+		// docs/harness.md §2-§3. A posture that skips the question exists, and
+		// it is /permissions auto: chosen, persisted and announced.
 
 		// A step during which a confirmation was refused did not run as
 		// planned, whatever its handler returned: several print "skipped" and
