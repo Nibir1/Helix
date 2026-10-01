@@ -36,6 +36,18 @@ Helix treats AI-generated output as untrusted. To prevent catastrophic accidents
 > than by pattern text, including a test that the old expression really was inert, so a future
 > rewrite cannot make them ornamental again.
 
+> **The confirmation for medium risk was skipped for every planner step until 2026-10-01.**
+> From v1.0.0, `executePlanSteps` marked each step the planner proposed as `Trusted` unless the
+> Instruction Firewall had escalated it, and `Trusted` exists to skip the medium-risk question
+> for plans Helix builds deterministically itself (the fast path). So a model-proposed
+> `file write`, `file edit` or redirecting shell command ran **without asking** under the default
+> `ask` posture, and it ran through the daemon's always-decline prompter too. That is how it
+> was found: a recorded test turn created a file the prompter had no chance to refuse.
+> The tiers were right; the question was never put. Planner steps are now never trusted, and
+> `internal/agent/planner_trust_test.go` drives the real dispatcher under `ask` (asks, and a
+> refusal means nothing runs), `auto` (runs, announced) and the fast path (still trusted).
+> The tests fail against the old line.
+
 ### 2. Git & Package Safeguards
 - **Typed Confirmations**: Dangerous Git operations (`push --force`, `reset --hard`, `clean -fdx`) require the user to type an exact confirmation phrase.
 - **Critical Package Protection**: Helix blocks the removal of critical system packages (e.g., `libc6`, `systemd`, `bash`) to prevent OS corruption.
