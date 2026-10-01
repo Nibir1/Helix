@@ -83,6 +83,11 @@ func main() {
 		runKnowledgeUpdate()
 		return
 	}
+	// Metabolism: `helix replay` plans past requests again with lessons and
+	// executes nothing (replay_cmd.go).
+	if handled, code := runReplayCommand(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	// BlackBox Phase 4: `helix daemon` / `helix remote ...` /
 	// `helix daemon install|uninstall|status`.
 	if handled, code := runDaemonCommand(os.Args[1:]); handled {

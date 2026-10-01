@@ -28,6 +28,17 @@ import (
 // execution, and there is none here, so running it would only cost a model
 // call and hide the plan the user asked to see.
 func (a *Agent) PlanPreview(userInput string) (*ai.Plan, error) {
+	return a.planOnly(userInput, a.projectContextBlock()+a.sessionContextBlock()+a.todoContextBlock(), "HELIX :: PLANNING")
+}
+
+// runPlanner is the planner call behind the plan-only paths. A variable so
+// tests can plan without a model; the live turn path does not use it.
+var runPlanner = ai.RunPlannerWithRetry
+
+// planOnly is PlanPreview's pipeline with the context blocks supplied by the
+// caller. It plans, checks the canary, parses and applies the safety rewrite,
+// and executes nothing.
+func (a *Agent) planOnly(userInput, contextBlocks, thinking string) (*ai.Plan, error) {
 	userInput = strings.TrimSpace(normalizeUserInput(userInput))
 	if userInput == "" {
 		return nil, fmt.Errorf("nothing to plan")
@@ -39,9 +50,7 @@ func (a *Agent) PlanPreview(userInput string) (*ai.Plan, error) {
 			ragContext, canary = BuildFirewallContext(cmds)
 		}
 	}
-	ragContext += a.projectContextBlock()
-	ragContext += a.sessionContextBlock()
-	ragContext += a.todoContextBlock()
+	ragContext += contextBlocks
 
 	cwd := a.sandbox.GetCurrentDirectory()
 	if wd, err := os.Getwd(); err == nil && wd != "" {
@@ -49,9 +58,11 @@ func (a *Agent) PlanPreview(userInput string) (*ai.Plan, error) {
 	}
 	envDesc := fmt.Sprintf("OS: %s, Shell: %s, CWD: %s", a.env.OSName, a.env.Shell, cwd)
 
-	think := newThinkerFor(a.render, "HELIX :: PLANNING")
+	think := newThinkerFor(a.render, thinking)
 	think.Start()
-	raw, err := ai.RunPlannerWithRetry(ai.BuildPlannerPrompt(userInput, envDesc, ragContext))
+	raw, err := runPlanner(ai.BuildPlannerPromptFor(ai.PlannerPromptInput{
+		UserInput: userInput, Env: envDesc, RAG: ragContext, Persona: a.personaPreamble(),
+	}))
 	think.Stop()
 	if err != nil {
 		return nil, err

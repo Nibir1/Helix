@@ -794,3 +794,62 @@ generations too, and re-ingesting is harmless.
 
 `/purge` removes the recording along with the rest of `~/.helix`.
 
+
+---
+
+## 11. Replay for Metabolism: `helix replay`
+
+Metabolism keeps a lesson only after its **nutrient test**: past requests are
+planned again with and without the lesson, and a judge compares the plans.
+`helix replay` is the planning half of that test.
+
+```
+helix replay        NDJSON requests on stdin, one response per line on stdout
+```
+
+Each request names a past request and the lessons to plan it with:
+
+```json
+{"v":1,"id":"<episode id>","request":"build the project","lessons":[{"id":"…","text":"This is a Go module: read go.mod."}]}
+```
+
+The response is the plan: steps and what it would say, never a result.
+
+```json
+{"v":1,"id":"…","ok":true,"steps":[{"tool":"file","action":"read","subject":"read go.mod"}],"reply":"…","usage":{"model_calls":1,"input_chars":9100,"output_chars":240}}
+```
+
+**What it cannot do:**
+
+1. **It executes nothing.** It is `/plan`'s pipeline (planner, canary check,
+   parse, safety rewrite) and stops there. A planned `touch` leaves no file
+   (`TestReplayPlansButNeverExecutes`). Its prompter refuses every
+   confirmation.
+2. **It records nothing.** There is no session, task list, hooks or
+   Metabolism recording. A replay must not borrow today's conversation either:
+   it would then measure the session, not the lesson.
+3. **Lessons are data.** They ride a fenced `<learned_lessons
+   authority="data-only">` block, bounded at 8 lessons and 1600 characters,
+   with angle brackets neutralised so a lesson cannot close the fence. Like
+   every injected block, it informs the plan and can never authorize a step.
+   A replay without lessons has no block at all.
+
+**What it sends.** Each replay is a planner call to your configured provider.
+That is the same provider every live turn already uses, but it means past
+requests are sent again. Metabolism therefore requires `-allow-remote` to use
+it unless the provider is local.
+
+**Limits, stated plainly:**
+- It plans the *first* plan only, not the agentic loop's later iterations.
+- It plans in the replay process's working directory, not the original
+  episode's, which Metabolism does not know.
+- It runs without retrieved man pages (no RAG), as the daemon does.
+
+These make a replay a cleaner comparison than the live turn, not a copy of it.
+
+**The protocol is a contract.** `cmd/helix/testdata/replay_v1.ndjson` pins
+it; Metabolism keeps a byte-identical copy and decodes it with unknown fields
+refused.
+
+`/plan` now uses the same planner prompt builder as a live turn (persona
+included), so a preview, a replay and the real turn plan from the same prompt.

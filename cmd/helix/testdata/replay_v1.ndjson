@@ -1,0 +1,3 @@
+{"v":1,"id":"0199a1b2c3d4e5f6a7b8c9d0e1f2","request":"build the project","lessons":[{"id":"01a0f7afc76b7637f51421cbd985","text":"This is a Go module: read go.mod."}]}
+{"v":1,"id":"0199a1b2c3d4e5f6a7b8c9d0e1f2","ok":true,"steps":[{"tool":"file","action":"read","subject":"read go.mod"},{"tool":"shell","subject":"go build ./..."},{"tool":"response"}],"reply":"Built it.","usage":{"model_calls":1,"input_chars":9100,"output_chars":240}}
+{"v":1,"id":"0199a1b2c3d4e5f6a7b8c9d0e1f2","ok":false,"error":"planner unavailable","usage":{"model_calls":0,"input_chars":0,"output_chars":0}}
