@@ -282,19 +282,66 @@ func TestWriteOverwritesAnExistingFileWithoutComplaint(t *testing.T) {
 
 // ------------------------------------------------------------- read and list
 
+// A read is one window with a header that says which lines it holds; a long
+// file is read on from where the window stopped, and a range past the end is
+// an error rather than an empty answer. Found in a driven session: a read of
+// a 963-line document showed the planner lines 270 to 330 and nothing else.
+func TestReadWindowsAndRanges(t *testing.T) {
+	j, root := newJail(t)
+	var b strings.Builder
+	for i := 1; i <= 200; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	write(t, root, "doc.md", b.String())
+
+	out, err := Read(j, "doc.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "[doc.md: lines 1-80 of 200]\nline 1\n") || !strings.Contains(out, "line 80\n") ||
+		strings.Contains(out, "line 81\n") || !strings.HasSuffix(out, "start_line=81, or grep for what you need]") {
+		t.Fatalf("first window:\n%s", out)
+	}
+	out, err = ReadLines(j, "doc.md", 150, 0)
+	if err != nil || !strings.HasPrefix(out, "[doc.md: lines 150-200 of 200]\nline 150\n") || strings.Contains(out, "[more:") {
+		t.Fatalf("last window: %v\n%s", err, out)
+	}
+	out, _ = ReadLines(j, "doc.md", 10, 12)
+	if out != "[doc.md: lines 10-12 of 200]\nline 10\nline 11\nline 12\n[more: read again with start_line=13, or grep for what you need]" {
+		t.Fatalf("explicit range:\n%q", out)
+	}
+	if _, err := ReadLines(j, "doc.md", 201, 0); err == nil || !strings.Contains(err.Error(), "has 200 lines") {
+		t.Fatalf("past the end: %v", err)
+	}
+	if _, err := ReadLines(j, "doc.md", 20, 10); err == nil {
+		t.Fatal("end before start was accepted")
+	}
+
+	// Lines come back verbatim (no number prefixes), so an edit can quote them.
+	write(t, root, "code.go", "\tif x {\r\n\t\treturn\r\n\t}\r\n")
+	out, _ = Read(j, "code.go")
+	if !strings.Contains(out, "\n\tif x {\n\t\treturn\n\t}") {
+		t.Fatalf("verbatim lines:\n%q", out)
+	}
+	write(t, root, "empty.txt", "")
+	if out, _ := Read(j, "empty.txt"); out != "[empty.txt: empty file]" {
+		t.Fatalf("empty file: %q", out)
+	}
+}
+
 func TestReadTruncatesAndRefusesBinaryAndDirectories(t *testing.T) {
 	j, root := newJail(t)
 
-	write(t, root, "big.txt", strings.Repeat("a", MaxReadBytes+500))
+	write(t, root, "big.txt", strings.Repeat("a", ReadWindowBytes*3))
 	out, err := Read(j, "big.txt")
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if !strings.HasSuffix(out, "[truncated]") {
-		t.Error("an oversized file was not marked truncated")
+	if !strings.Contains(out, "[line truncated]") {
+		t.Error("an oversized line was not marked truncated")
 	}
-	if len(out) > MaxReadBytes+64 {
-		t.Errorf("truncation did not bound the result: %d bytes", len(out))
+	if len(out) > ReadWindowBytes+200 {
+		t.Errorf("the window did not bound the result: %d bytes", len(out))
 	}
 
 	if err := os.WriteFile(filepath.Join(root, "bin"), []byte{'a', 0, 'b'}, 0o644); err != nil {

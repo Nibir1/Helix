@@ -251,7 +251,9 @@ To ensure valid JSON and executable shell commands:
 
 - tool = "file"
 - action = "read" | "list" | "glob" | "grep" | "edit" | "write"
-- read  -> args.path                      (one file; the contents come back to you)
+- read  -> args.path, optional args.start_line, args.end_line
+                                          (one window of a file, at most 80 lines; it says
+                                          which lines you got and how long the file is)
 - list  -> args.path                      (a directory; omit for ".")
 - glob  -> args.pattern, args.path        (find files BY NAME; supports "**", e.g. "**/*_test.go")
 - grep  -> args.pattern, args.path        (find code BY CONTENT; case-insensitive)
@@ -261,6 +263,10 @@ To ensure valid JSON and executable shell commands:
 
 - Prefer glob to find files by name and grep to find code by content, BEFORE
   reading whole files. A read spends its whole length on your context.
+- A read returns at most 80 lines, headed "[path: lines A-B of N]". For a
+  part further in, grep for it (grep results carry line numbers) and read
+  with args.start_line set just above the match. Do not read the same window
+  again: you already have it.
 - To change existing code use "edit", not "write". Rewriting a whole file
   re-emits every line you did not intend to touch, and any line you misremember
   is silently overwritten. An exact-snippet replacement either matches what is

@@ -89,12 +89,22 @@ now told to use it and told why.
 
 | Action | Args | Tier |
 | :--- | :--- | :--- |
-| `read` | `path` | low — 20 KB cap, binaries and directories refused |
+| `read` | `path`, optional `start_line`, `end_line` | low — one window of at most 80 lines and 6 KB, headed `[path: lines A-B of N]`; binaries and directories refused |
 | `list` | `path` (default `.`) | low — 200 entries |
 | `glob` | `pattern`, `path` | low — 200 results, `**` supported, newest first |
 | `grep` | `pattern`, `path` | low — case-insensitive, 60 matches, `file:line:` |
 | `edit` | `path`, `old_string`, `new_string`, `replace_all` | **medium** |
 | `write` | `path`, `content` | **medium** |
+
+**A read is a window, and says so.** It returns at most 80 lines from
+`start_line` (default 1), under a header naming the lines and the file's
+length, and ends with where to read on. The execution report keeps a read
+from its start, labelled `file contents`; command output keeps its tail,
+where errors print. Lines come back verbatim, so an `edit` can quote them.
+Until 2026-10-02 a read returned the first 20 KB and the report kept the last
+60 lines of that, so on a long document the planner saw a slice from the
+middle it had not asked for, could not reach the part it needed, and reread
+until its budget ran out (Metabolism's driven sessions: 8 of 42 turns).
 
 Reads are low because they change nothing; edits and writes are medium because
 they change the machine, so under the default `ask` posture a write asks exactly

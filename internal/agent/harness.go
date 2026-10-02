@@ -501,12 +501,18 @@ func observationBlock(obs []StepObservation) string {
 			// set down to its first hit and the answer would be built on that.
 			lineCap, byteCap = retrievalOutputLines, retrievalOutputBytes
 		}
-		if out := sanitizeOutput(o.Output, lineCap, byteCap); out != "" {
+		out, label := "", "output tail"
+		if o.Tool == "file" && o.Action == "read" && o.OK {
+			out, label = sanitizeReadOutput(o.Output), "file contents"
+		} else {
+			out = sanitizeOutput(o.Output, lineCap, byteCap)
+		}
+		if out != "" {
 			note := ""
 			if o.OutputTruncated {
 				note = " (earlier output omitted)"
 			}
-			_, _ = fmt.Fprintf(&b, "  output tail%s:\n", note)
+			_, _ = fmt.Fprintf(&b, "  %s%s:\n", label, note)
 			for _, line := range strings.Split(out, "\n") {
 				b.WriteString("  | " + line + "\n")
 			}
@@ -615,6 +621,11 @@ const (
 	// this bound only has to avoid re-expanding it.
 	retrievalOutputLines = 60
 	retrievalOutputBytes = 4000
+
+	// A file read's budget: one filetools.ReadLines window (80 lines,
+	// 6000 bytes) plus its header and footer, kept from the start.
+	readOutputLines = 84
+	readOutputBytes = 6600
 )
 
 // ansiEscape matches ANSI/VT control sequences. Command output is full of
@@ -651,6 +662,21 @@ var authorityAttr = regexp.MustCompile(`(?i)authority\s*=`)
 // Returns: fence-safe text, or "" when there is nothing useful.
 // Complexity: O(len(s)).
 func sanitizeOutput(s string, maxLines, maxBytes int) string {
+	return sanitizeBounded(s, maxLines, maxBytes, false)
+}
+
+// sanitizeReadOutput is sanitizeOutput for a file read: same sanitizing, but
+// it keeps the START of the text and its blank lines. A read's header names
+// the lines it holds, and the window was sized to fit (filetools.ReadLines),
+// so keeping the tail would show the planner lines it was not told it had.
+// That is the bug this exists for: a read of a long document showed the
+// planner an arbitrary slice from its middle, and the planner reread and
+// re-grepped until its budget ran out.
+func sanitizeReadOutput(s string) string {
+	return sanitizeBounded(s, readOutputLines, readOutputBytes, true)
+}
+
+func sanitizeBounded(s string, maxLines, maxBytes int, keepHead bool) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
@@ -687,15 +713,20 @@ func sanitizeOutput(s string, maxLines, maxBytes int) string {
 		"<", "(", ">", ")", "`", "'", "{", "(", "}", ")",
 	).Replace(s)
 
-	// Keep the LAST maxLines: errors and summaries print at the end.
+	// Keep the LAST maxLines: errors and summaries print at the end. A read
+	// keeps the first ones, for the reason sanitizeReadOutput gives.
 	lines := strings.Split(s, "\n")
 	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
+		if keepHead {
+			lines = lines[:maxLines]
+		} else {
+			lines = lines[len(lines)-maxLines:]
+		}
 	}
 
 	cleaned := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
+		if strings.TrimSpace(line) == "" && !keepHead {
 			continue
 		}
 		cleaned = append(cleaned, strings.TrimRight(line, " "))
@@ -705,6 +736,13 @@ func sanitizeOutput(s string, maxLines, maxBytes int) string {
 	}
 
 	out := strings.Join(cleaned, "\n")
+	if keepHead && len(out) > maxBytes {
+		out = out[:maxBytes]
+		for len(out) > 0 && !utf8.ValidString(out) {
+			out = out[:len(out)-1]
+		}
+		return strings.TrimSpace(out) + "\n…[cut]"
+	}
 	if len(out) > maxBytes {
 		// Cut from the front — the tail is the informative end. Trim to a rune
 		// boundary so a multi-byte character is never split.

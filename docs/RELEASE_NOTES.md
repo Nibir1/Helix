@@ -18,6 +18,10 @@
   `/agentic` too, without capturing output, so the command keeps its terminal.
 - **Daemon:** commands never wait on a pager, and each request starts in the
   daemon's home directory instead of wherever the last `cd` left it.
+- **Reading long files works.** A read returns a window of up to 80 lines,
+  says which lines and how long the file is, and takes `start_line` /
+  `end_line`. It used to show the planner an arbitrary slice from the middle
+  of a long file, which ended in rereading until the budget ran out.
 
 ### New
 

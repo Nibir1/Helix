@@ -60,13 +60,28 @@ type Resolver interface {
 // context window: an unbounded read of a vendored bundle, or a grep for "e",
 // would push out the conversation that asked for it.
 const (
-	MaxReadBytes   = 20000 // one read_file result
-	MaxListEntries = 200   // one list_dir result
-	MaxGlobResults = 200   // one glob result
-	MaxGrepMatches = 60    // one grep result
-	maxGrepFiles   = 2000  // files visited per grep, matched or not
+	MaxListEntries = 200  // one list_dir result
+	MaxGlobResults = 200  // one glob result
+	MaxGrepMatches = 60   // one grep result
+	maxGrepFiles   = 2000 // files visited per grep, matched or not
 	maxGrepBytes   = 2 << 20
 	maxGrepLine    = 240
+)
+
+// A read returns one window of a file, sized to fit the execution report the
+// planner reads it from, plus a header saying which lines it holds and how
+// long the file is.
+//
+// It used to return the first 20,000 bytes, and the report then kept the LAST
+// 60 lines of that (the right rule for command output, where errors print
+// last). Asked about a section near the end of a 963-line document, the
+// planner was shown lines 270 to 330, could not answer, and reread and
+// re-grepped until its budget ran out: 8 of 42 turns in a driven session.
+// Now it sees exactly the lines it is told it has, and how to ask for others.
+const (
+	ReadWindowLines = 80
+	ReadWindowBytes = 6000
+	maxReadFileSize = 16 << 20
 )
 
 // resolve is the one place a path becomes an absolute path. A nil Resolver is
@@ -79,8 +94,17 @@ func resolve(r Resolver, path string) (string, error) {
 	return r.ValidateSafePath(path)
 }
 
-// Read returns the contents of one file, truncated to MaxReadBytes.
-func Read(r Resolver, path string) (string, error) {
+// Read returns the first window of one file (ReadLines from line 1).
+func Read(r Resolver, path string) (string, error) { return ReadLines(r, path, 0, 0) }
+
+// ReadLines returns lines start to end of one file (1-based, inclusive),
+// at most ReadWindowLines lines and ReadWindowBytes bytes of them, under a
+// header naming the range and the file's length, and with a pointer to the
+// next window when the file goes on. start <= 0 means line 1; end <= 0 means
+// as far as the window allows. Lines are returned verbatim, with no number
+// prefixes, so a snippet copied from a read still matches the file byte for
+// byte in an edit.
+func ReadLines(r Resolver, path string, start, end int) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("read_file requires a 'path' argument")
 	}
@@ -95,21 +119,59 @@ func Read(r Resolver, path string) (string, error) {
 	if info.IsDir() {
 		return "", fmt.Errorf("%s is a directory — use list_dir", filepath.ToSlash(path))
 	}
+	if info.Size() > maxReadFileSize {
+		return "", fmt.Errorf("%s is %d bytes, too large to read; grep it instead", filepath.ToSlash(path), info.Size())
+	}
 	data, err := os.ReadFile(p) //nolint:gosec // confined by the Resolver
 	if err != nil {
 		return "", err
 	}
-	// Binary content is refused rather than truncated. A 20KB prefix of a
-	// compiled object is not information, and it can carry byte sequences that
-	// break the enclosing report's framing.
+	// Binary content is refused rather than truncated. A prefix of a compiled
+	// object is not information, and it can carry byte sequences that break
+	// the enclosing report's framing.
 	if isBinary(data) {
 		return "", fmt.Errorf("%s looks like a binary file", filepath.ToSlash(path))
 	}
-	s := string(data)
-	if len(s) > MaxReadBytes {
-		s = s[:MaxReadBytes] + "\n...[truncated]"
+	name := filepath.ToSlash(path)
+	text := strings.TrimSuffix(string(data), "\n")
+	if text == "" {
+		return fmt.Sprintf("[%s: empty file]", name), nil
 	}
-	return s, nil
+	lines := strings.Split(text, "\n")
+	total := len(lines)
+	if start <= 0 {
+		start = 1
+	}
+	if start > total {
+		return "", fmt.Errorf("%s has %d lines; start_line %d is past the end", name, total, start)
+	}
+	if end <= 0 || end > total {
+		end = total
+	}
+	if end < start {
+		return "", fmt.Errorf("end_line %d is before start_line %d", end, start)
+	}
+
+	var body strings.Builder
+	last, used := start-1, 0
+	for i := start; i <= end && i-start < ReadWindowLines; i++ {
+		line := strings.TrimSuffix(lines[i-1], "\r")
+		if used+len(line)+1 > ReadWindowBytes {
+			if i > start {
+				break
+			}
+			// A single line longer than the window: show its start.
+			line = line[:ReadWindowBytes-40] + " …[line truncated]"
+		}
+		body.WriteString(line + "\n")
+		used += len(line) + 1
+		last = i
+	}
+	out := fmt.Sprintf("[%s: lines %d-%d of %d]\n%s", name, start, last, total, body.String())
+	if last < total {
+		out += fmt.Sprintf("[more: read again with start_line=%d, or grep for what you need]", last+1)
+	}
+	return strings.TrimSuffix(out, "\n"), nil
 }
 
 // List names the entries of one directory, directories marked with a slash.

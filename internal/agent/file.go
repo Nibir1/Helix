@@ -35,6 +35,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"helix/internal/ai"
@@ -168,7 +169,15 @@ func (a *Agent) runFileAction(action string, args map[string]string) (string, er
 	r := a.sandbox
 	switch action {
 	case "read":
-		return filetools.Read(r, args["path"])
+		start, err := lineArg(args, "start_line")
+		if err != nil {
+			return "", err
+		}
+		end, err := lineArg(args, "end_line")
+		if err != nil {
+			return "", err
+		}
+		return filetools.ReadLines(r, args["path"], start, end)
 	case "list":
 		return filetools.List(r, args["path"])
 	case "glob":
@@ -185,6 +194,19 @@ func (a *Agent) runFileAction(action string, args map[string]string) (string, er
 	// dispatch. Reported rather than ignored so a direct caller cannot get a
 	// silent no-op that looks like success.
 	return "", fmt.Errorf("unsupported file action: %s", action)
+}
+
+// lineArg reads an optional 1-based line number argument (0 when absent).
+func lineArg(args map[string]string, name string) (int, error) {
+	v := strings.TrimSpace(args[name])
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s must be a line number from 1, got %q", name, v)
+	}
+	return n, nil
 }
 
 // fileChangeReason explains, in one line, what a mutation is about to do.
@@ -226,6 +248,17 @@ func fileSubject(action string, args map[string]string) string {
 			where = "."
 		}
 		return "list " + where
+	case "read":
+		subject := "read " + args["path"]
+		switch start, end := args["start_line"], args["end_line"]; {
+		case start != "" && end != "":
+			subject += " (lines " + start + "-" + end + ")"
+		case start != "":
+			subject += " (from line " + start + ")"
+		case end != "":
+			subject += " (to line " + end + ")"
+		}
+		return subject
 	default:
 		return action + " " + args["path"]
 	}

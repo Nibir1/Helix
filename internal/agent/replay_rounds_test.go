@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,5 +150,64 @@ func TestReplayRoundsStopWhenTheFirstReadFails(t *testing.T) {
 	}
 	if res.Rounds != 1 || res.End != ReplayEndAnswered || res.Steps[0].OK || res.Steps[0].Err == "" {
 		t.Fatalf("result %+v", res)
+	}
+}
+
+// The bug multi-round replay surfaced: a read of a long document showed the
+// planner an arbitrary slice from its middle (the tail of the first 20 KB),
+// so it could never reach the section it was asked about and reread until
+// the budget ran out. Now the first read shows the start and says where the
+// file goes on, and a read with start_line shows the part asked for.
+func TestReadsShowThePlannerTheLinesItIsTold(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	var b strings.Builder
+	for i := 1; i <= 963; i++ {
+		switch i {
+		case 840:
+			b.WriteString("## 11. Replay: it plans past requests again and executes nothing.\n")
+		case 2:
+			b.WriteString("\n") // a blank line survives a read
+		default:
+			fmt.Fprintf(&b, "line %d of the harness doc\n", i)
+		}
+	}
+	_ = os.WriteFile(filepath.Join(dir, "harness.md"), []byte(b.String()), 0o600)
+
+	prompts := stubPlannerSequence(t,
+		`{"intent":"file","steps":[{"tool":"file","action":"read","args":{"path":"harness.md"}}]}`,
+		`{"intent":"file","steps":[{"tool":"file","action":"read","args":{"path":"harness.md","start_line":"835"}}]}`,
+		`{"intent":"chat","steps":[{"tool":"response","message":"It plans past requests again."}]}`)
+	ag, _ := newTestAgent(t)
+	res, err := ag.ReplayRounds("explain how replay works, from harness.md", nil, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rounds != 3 || res.End != ReplayEndAnswered {
+		t.Fatalf("rounds %d end %q", res.Rounds, res.End)
+	}
+	first, second := (*prompts)[1], (*prompts)[2]
+	if !strings.Contains(first, "file contents") || !strings.Contains(first, "[harness.md: lines 1-80 of 963]") ||
+		!strings.Contains(first, "line 1 of the harness doc\n  | \n  | line 3") || strings.Contains(first, "line 81 of") ||
+		!strings.Contains(first, "start_line=81") {
+		t.Fatalf("the first read's report:\n%s", first)
+	}
+	if !strings.Contains(second, "[harness.md: lines 835-914 of 963]") || !strings.Contains(second, "## 11. Replay") {
+		t.Fatalf("the ranged read's report:\n%s", second)
+	}
+	if got := StepSubject(res.Steps[1].Step); got != "read harness.md (from line 835)" {
+		t.Fatalf("subject %q", got)
+	}
+}
+
+// Command output keeps its tail: errors print last.
+func TestCommandOutputStillKeepsItsTail(t *testing.T) {
+	var b strings.Builder
+	for i := 1; i <= 100; i++ {
+		fmt.Fprintf(&b, "out %d\n", i)
+	}
+	got := sanitizeOutput(b.String(), 5, 1000)
+	if !strings.HasPrefix(got, "out 96") || !strings.HasSuffix(got, "out 100") {
+		t.Fatalf("tail: %q", got)
 	}
 }
