@@ -746,7 +746,7 @@ off. `/metabolism on` records that baseline.
 
 | Signal | Outcome |
 |---|---|
-| the run's own end | success, or failure |
+| the run's own end | success, or failure (a shell step that exits non-zero is a failed step, on every turn, agentic or not) |
 | a yes/no confirmation you answered "no" during the turn | declined (the step is recorded as not OK, and the turn as open work) |
 | the same request asked again within 10 minutes | repeated, against the earlier turn |
 | `undo` of a commit the turn made | undone, against the turn that committed |
@@ -754,6 +754,8 @@ off. `/metabolism on` records that baseline.
 The interactive shell and the background daemon both record when the
 preference is on. The daemon's confirmations are refused automatically, and
 those refusals are not recorded as you declining.
+Each daemon request starts in the daemon's home directory: a `cd` in one
+request does not move the next.
 
 Direct shell lines, the deterministic fast path, slash commands and undo
 itself are not recorded. They are your actions or Helix's fixed behaviour, not

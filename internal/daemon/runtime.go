@@ -100,6 +100,12 @@ type Daemon struct {
 	renderer *daemonRenderer
 	server   *Server
 
+	// home is the directory every request starts in. A `cd` in one request
+	// must not carry into the next: they are separate requests, often from
+	// different clients, and the interactive shell's "cd persists" makes no
+	// sense when nobody sees a prompt.
+	home string
+
 	mu        sync.Mutex // serializes submits (the agent turn loop is single-threaded)
 	startedAt time.Time
 	stopping  chan struct{}
@@ -189,6 +195,7 @@ func New() (*Daemon, error) {
 	if home, herr := os.UserHomeDir(); herr == nil {
 		_ = os.Chdir(home)
 	}
+	home, _ := os.Getwd()
 
 	env := shell.DetectEnvironment()
 	renderer := &daemonRenderer{}
@@ -229,7 +236,7 @@ func New() (*Daemon, error) {
 	d := &Daemon{
 		agent: ag, sess: sess, undo: undo, journal: jrn,
 		voiceLog: voiceLog,
-		renderer: renderer, server: server,
+		renderer: renderer, server: server, home: home,
 		startedAt: time.Now(), stopping: make(chan struct{}),
 		breakReminderMin: cfg.Daemon.BreakReminderMin,
 		sidecars:         make(map[string]string),
@@ -357,7 +364,7 @@ func (d *Daemon) Submit(req Request) Response {
 	defer d.mu.Unlock()
 
 	d.journal.Record("submit", string(channel), text, "")
-	d.agent.HandleInputEvent(input.InputEvent{Text: text, Channel: channel, Meta: req.Meta})
+	d.handle(input.InputEvent{Text: text, Channel: channel, Meta: req.Meta})
 	reply, errText := d.renderer.takeResult()
 	if errText != "" {
 		d.journal.Record("submit", string(channel), text, "error: "+errText)
@@ -365,6 +372,28 @@ func (d *Daemon) Submit(req Request) Response {
 			Meta: map[string]any{"reply": reply}}
 	}
 	return Response{Type: TypeResponse, OK: true, Meta: map[string]any{"reply": reply}}
+}
+
+// handle runs one input through the agent, starting from the daemon's home.
+// Callers hold d.mu.
+func (d *Daemon) handle(ev input.InputEvent) {
+	d.restoreHome()
+	d.agent.HandleInputEvent(ev)
+}
+
+// restoreHome undoes whatever directory the previous request moved to. Found
+// in a daemon-driven session: one request's `cd` changed where every later
+// request ran, so "list the files here" listed the last request's directory.
+func (d *Daemon) restoreHome() {
+	if d.home == "" {
+		return
+	}
+	if wd, err := os.Getwd(); err == nil && wd == d.home {
+		return
+	}
+	if err := os.Chdir(d.home); err != nil {
+		d.journal.Record("error", "", "", "restore working directory: "+err.Error())
+	}
 }
 
 // sayRequest speaks text via the TTS chain (the `helix remote say` verb).
@@ -914,7 +943,7 @@ func (d *Daemon) runVoiceTurn(ctx context.Context) bool {
 	d.journal.Record("submit", "voice", text, "hands-free")
 	d.voiceLog.Heard(text, transcript.Provider, transcript.Confidence, journal.OutcomePlanner)
 	d.mu.Lock()
-	d.agent.HandleInputEvent(input.InputEvent{
+	d.handle(input.InputEvent{
 		Text: text, Channel: input.ChannelVoice,
 		Meta: map[string]any{
 			"stt_provider":   transcript.Provider,
