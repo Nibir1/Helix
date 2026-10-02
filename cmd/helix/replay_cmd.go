@@ -16,6 +16,7 @@ import (
 	"helix/internal/ai"
 	"helix/internal/commands"
 	"helix/internal/config"
+	"helix/internal/daemon"
 	"helix/internal/shell"
 )
 
@@ -78,6 +79,9 @@ func runReplayCommand(args []string) (bool, int) {
 	// stderr instead, so a stray status line can never corrupt a response.
 	proto := os.Stdout
 	os.Stdout = os.Stderr
+	// Nothing runs during a replay, but nothing must ever wait on a pager
+	// with no one to answer it either.
+	daemon.DisablePagers()
 
 	planner, err := newReplayAgent()
 	if err != nil {

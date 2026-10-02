@@ -118,6 +118,7 @@ type Daemon struct {
 // failures are journaled and tolerated — an offline daemon still serves
 // text submits.
 func New() (*Daemon, error) {
+	DisablePagers()
 	cfg, err := config.DefaultConfig()
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -315,6 +316,21 @@ func (d *Daemon) modeRequest(req Request) Response {
 	voice := strings.EqualFold(req.Text, "voice") || strings.EqualFold(req.Text, "on")
 	return Response{Type: TypeResponse, OK: true,
 		Meta: map[string]any{"mode": map[bool]string{true: "voice", false: "manual"}[voice]}}
+}
+
+// pagerVars are the variables a command consults to decide whether to page
+// its output.
+var pagerVars = []string{"PAGER", "GIT_PAGER", "MANPAGER"}
+
+// DisablePagers makes every command this process starts print its output
+// instead of paging it. A daemon has no one at a keyboard: `git log` opened
+// less on the daemon's terminal and waited for a keypress that never came,
+// hanging every request behind it for over twenty minutes (found by
+// Metabolism's first daemon-driven recording session, 2026-10-02).
+func DisablePagers() {
+	for _, k := range pagerVars {
+		_ = os.Setenv(k, "cat")
+	}
 }
 
 // Submit runs one input event through the agent pipeline (serialized).
