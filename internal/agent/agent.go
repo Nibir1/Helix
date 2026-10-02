@@ -562,11 +562,11 @@ type StepObservation struct {
 	// can say so instead of presenting a fragment as the whole output.
 	OutputTruncated bool
 
-	// ExitCode is the command's true exit status, captured on agentic turns.
+	// ExitCode is the command's true exit status, kept on every shell step.
 	// Execution is intentionally lenient (a non-zero exit does not raise an
 	// error at the user), so OK alone cannot tell the planner that a build or
 	// test run actually failed — this can. Zero means success or "unknown"
-	// (non-shell tools, capture disabled).
+	// (non-shell tools, dry runs).
 	ExitCode int
 
 	// NeedsAnswer marks a step that SUCCEEDED but whose output is an input the
@@ -644,16 +644,16 @@ func (a *Agent) runStep(i int, step ai.PlanStep, escalated map[string]bool) (Ste
 	case "shell":
 		// P8.6: capture output only while the harness is running. On a
 		// normal turn nothing consumes the tail, and capturing would cost
-		// the child its TTY (see runArgvEnvCapture) for no benefit.
-		var capture *commands.OutputCapture
+		// the child its TTY (see runArgvEnvCapture) for no benefit. The exit
+		// status is always kept: it costs nothing, and without it a failing
+		// command on a normal turn was recorded as a success.
+		capture := commands.NewExitStatus()
 		if a.Agentic {
 			capture = commands.NewOutputCapture()
 		}
 		err := a.handleShellStepWithEscalation(step, escalated[step.Command], capture)
-		if capture != nil {
-			o.Output, o.OutputTruncated = capture.Combined(), capture.Truncated()
-			o.ExitCode = capture.ExitCode
-		}
+		o.Output, o.OutputTruncated = capture.Combined(), capture.Truncated()
+		o.ExitCode = capture.ExitCode
 		if err != nil {
 			a.render.PrintError(fmt.Sprintf("Shell step failed: %v", err))
 			o.OK, o.Err = false, err.Error()

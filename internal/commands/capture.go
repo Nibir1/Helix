@@ -120,6 +120,14 @@ type OutputCapture struct {
 	ExitCode int
 }
 
+// NewExitStatus records only the exit status. Output keeps the terminal's own
+// descriptors (no tee, so the child still sees a TTY); only the code is kept.
+// Non-agentic turns use it so a failing command is not recorded as a success.
+func NewExitStatus() *OutputCapture { return &OutputCapture{} }
+
+// tees reports whether output should be copied into the tail buffers.
+func (c *OutputCapture) tees() bool { return c != nil && c.Stdout != nil && c.Stderr != nil }
+
 // NewOutputCapture creates a capture with the default per-stream limit.
 func NewOutputCapture() *OutputCapture {
 	return &OutputCapture{
@@ -133,7 +141,7 @@ func NewOutputCapture() *OutputCapture {
 // The returned string is raw; the harness sanitizes it before it reaches a
 // prompt.
 func (c *OutputCapture) Combined() string {
-	if c == nil {
+	if !c.tees() {
 		return ""
 	}
 	out := strings.TrimSpace(c.Stdout.String())
@@ -153,7 +161,7 @@ func (c *OutputCapture) Combined() string {
 
 // Truncated reports whether either stream dropped bytes.
 func (c *OutputCapture) Truncated() bool {
-	if c == nil {
+	if !c.tees() {
 		return false
 	}
 	return c.Stdout.Truncated() || c.Stderr.Truncated()

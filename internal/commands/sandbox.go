@@ -436,7 +436,7 @@ func runArgvEnvCapture(
 	if len(extraEnv) > 0 {
 		c.Env = append(c.Env, extraEnv...)
 	}
-	if capture != nil {
+	if capture.tees() {
 		// Tee, never swallow: the user still sees the full live output.
 		c.Stdout = io.MultiWriter(os.Stdout, capture.Stdout)
 		c.Stderr = io.MultiWriter(os.Stderr, capture.Stderr)

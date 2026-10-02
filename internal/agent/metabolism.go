@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 
 	"helix/internal/ai"
@@ -55,12 +56,21 @@ func (a *Agent) recordSteps(obs []StepObservation) {
 		if subject == "" {
 			subject = o.Command
 		}
+		// A lenient non-zero exit ran without an error at the user, but it
+		// did not succeed, and the record must say so.
+		ok, errText := o.OK, o.Err
+		if o.ExitCode != 0 {
+			ok = false
+			if errText == "" {
+				errText = fmt.Sprintf("exit status %d", o.ExitCode)
+			}
+		}
 		a.episode.AddStep(metabolism.Step{
 			Tool:    o.Tool,
 			Action:  o.Action,
 			Subject: subject,
-			OK:      o.OK,
-			Err:     o.Err,
+			OK:      ok,
+			Err:     errText,
 		})
 	}
 }

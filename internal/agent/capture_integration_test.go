@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"helix/internal/ai"
+	"helix/internal/input"
+	"helix/internal/metabolism"
 )
 
 // runStepsQuietly executes a plan through the real pipeline with stdout/stderr
@@ -76,6 +78,41 @@ func TestNonAgenticModeCapturesNothing(t *testing.T) {
 	}
 	if obs[0].Output != "" {
 		t.Fatalf("non-agentic turns must not capture output, got %q", obs[0].Output)
+	}
+}
+
+// A normal turn still keeps the exit status, without capturing output. Found
+// in the daemon-driven session: a failing `go test` on a normal turn was
+// recorded as a success, because the code was kept only on agentic turns.
+func TestNonAgenticModeKeepsTheExitStatus(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skipf("no /bin/sh: %v", err)
+	}
+	ag, _ := newTestAgent(t)
+	ag.Agentic = false
+	rec := withRecorder(t, ag)
+	ag.beginEpisode()
+	ag.turnPlanned = true
+
+	obs := runStepsQuietly(t, ag, &ai.Plan{Steps: []ai.PlanStep{
+		{Tool: "shell", Command: "echo not-captured >&2; exit 2"},
+	}})
+	if len(obs) != 1 || obs[0].ExitCode != 2 || obs[0].Output != "" {
+		t.Fatalf("observation: %+v", obs)
+	}
+	// Leniency toward the user is unchanged: the step ran without an error.
+	if !obs[0].OK || obs[0].Err != "" {
+		t.Fatalf("a lenient non-zero exit must not become an error: %+v", obs[0])
+	}
+
+	ag.recordSteps(obs)
+	ag.finishEpisode(input.InputEvent{Text: "run the tests"})
+	eps := episodes(records(t, rec))
+	if len(eps) != 1 {
+		t.Fatalf("got %d episodes", len(eps))
+	}
+	if st := eps[0].Steps[0]; st.OK || st.Err != "exit status 2" || eps[0].End != metabolism.EndFailed {
+		t.Fatalf("a failing command was recorded as %+v, end %s", st, eps[0].End)
 	}
 }
 
