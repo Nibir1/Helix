@@ -43,6 +43,15 @@ was refused ends the loop instead of replanning around the refusal.
 That loop re-enters the whole pipeline on every iteration; it is bounded by the
 step budget (`/agentic steps <n>`, 1–20) and cannot skip a gate.
 
+Without `/agentic`, a turn whose file step found something gets follow-up
+rounds to read on and answer: 3, plus one for each round that reads a part of
+a file the turn had not read and repeats no step, up to 6. Searches alone earn
+nothing, so a search for a file that is not there cannot keep itself going.
+The last round is told so: answer now from what has been read, and say what
+could not be checked. Before 2026-10-02 the budget was a fixed 3 and the last
+round was not marked, so a turn still reading through a file ended with no
+reply at all. A web lookup gets one follow-up, to answer from its results.
+
 `/plan <request>` runs the left half only: planner, firewall canary check, parse,
 safety rewrite — then prints the steps and stops.
 
@@ -865,8 +874,8 @@ for those rounds:
 Helix then replays the turn the way a live non-agentic turn runs. If a
 round's steps are all read-only file steps (`list`, `glob`, `grep`, `read`),
 they run. Their results go to the next round in the same fenced execution
-report a live turn sends. The follow-up budget and stop rule are a live
-turn's (3 rounds after a file lookup). The response gives each step's
+report a live turn sends. The follow-up budget, stop rule and last-round
+notice are a live turn's (§1). The response gives each step's
 `round` and, for a step that ran, its `outcome` (`ok` or `failed`) and
 `err`, plus the replay's `rounds` and how it `end`ed: `answered`,
 `budget-exhausted`, `unexecuted-step` or `planned`. A version 1 request gets

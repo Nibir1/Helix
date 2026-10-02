@@ -28,7 +28,8 @@ import (
 const ReplayWireVersion = 2
 
 // maxReplayRounds caps what a request may ask for. The live follow-up budget
-// (3 for a file lookup) ends a replay well before this.
+// (3 after a file lookup, up to 6 when rounds read new parts of files) ends
+// a replay at 7 rounds at most.
 const maxReplayRounds = 8
 
 // replayRequest is one NDJSON line on stdin.

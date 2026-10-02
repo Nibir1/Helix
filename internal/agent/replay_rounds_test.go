@@ -211,3 +211,102 @@ func TestCommandOutputStillKeepsItsTail(t *testing.T) {
 		t.Fatalf("tail: %q", got)
 	}
 }
+
+// readWindow is a plan that reads one window of doc.md.
+func readWindow(start int) string {
+	return fmt.Sprintf(`{"intent":"file","steps":[{"tool":"file","action":"read","args":{"path":"doc.md","start_line":"%d"}}]}`, start)
+}
+
+func longDoc(t *testing.T) {
+	t.Helper()
+	var b strings.Builder
+	for i := 1; i <= 2000; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	if err := os.WriteFile("doc.md", []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Reading new parts of a file earns rounds, up to the cap; the last round
+// carries the notice, and only the last.
+func TestProgressEarnsRoundsUpToTheCap(t *testing.T) {
+	t.Chdir(t.TempDir())
+	longDoc(t)
+	var plans []string
+	for i := 0; i < 10; i++ {
+		plans = append(plans, readWindow(1+80*i))
+	}
+	prompts := stubPlannerSequence(t, plans...)
+	ag, _ := newTestAgent(t)
+	res, err := ag.ReplayRounds("what does doc.md say?", nil, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rounds != 1+maxFileRetrievalBudget || res.End != ReplayEndBudget {
+		t.Fatalf("rounds %d end %q, want %d budget-exhausted", res.Rounds, res.End, 1+maxFileRetrievalBudget)
+	}
+	for i, p := range *prompts {
+		last := i == len(*prompts)-1
+		if strings.Contains(p, "THIS IS THE LAST ROUND") != last {
+			t.Errorf("prompt %d of %d: last-round notice present = %v", i+1, len(*prompts), !last)
+		}
+	}
+}
+
+// Repeating a step, or only searching, earns nothing: the turn keeps the
+// base budget of 3 follow-ups.
+func TestRepeatsAndSearchesEarnNoRounds(t *testing.T) {
+	t.Chdir(t.TempDir())
+	longDoc(t)
+	cases := map[string][]string{
+		"repeat": {readWindow(1), readWindow(81), readWindow(81), readWindow(1), readWindow(81), readWindow(1)},
+		"search": {
+			`{"intent":"file","steps":[{"tool":"file","action":"glob","args":{"pattern":"**/*.py"}}]}`,
+			`{"intent":"file","steps":[{"tool":"file","action":"glob","args":{"pattern":"**/*config*"}}]}`,
+			`{"intent":"file","steps":[{"tool":"file","action":"grep","args":{"pattern":"load_config"}}]}`,
+			`{"intent":"file","steps":[{"tool":"file","action":"glob","args":{"pattern":"**/*.yaml"}}]}`,
+			`{"intent":"file","steps":[{"tool":"file","action":"glob","args":{"pattern":"**/*.toml"}}]}`,
+		},
+	}
+	for name, plans := range cases {
+		prompts := stubPlannerSequence(t, plans...)
+		ag, _ := newTestAgent(t)
+		res, err := ag.ReplayRounds("find it", nil, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// "repeat": the first follow-up (81) is new and earns one round; every
+		// round after it repeats a window and earns nothing.
+		want := 1 + fileRetrievalBudget
+		if name == "repeat" {
+			want++
+		}
+		if res.Rounds != want || res.End != ReplayEndBudget {
+			t.Errorf("%s: rounds %d end %q, want %d", name, res.Rounds, res.End, want)
+		}
+		if !strings.Contains((*prompts)[len(*prompts)-1], "THIS IS THE LAST ROUND") {
+			t.Errorf("%s: the last round had no notice", name)
+		}
+	}
+}
+
+// A turn told it is on its last round answers from what it has. The
+// replay records that as answered, not as running out.
+func TestLastRoundAnswerEndsAnswered(t *testing.T) {
+	t.Chdir(t.TempDir())
+	longDoc(t)
+	prompts := stubPlannerSequence(t, readWindow(1), readWindow(1), readWindow(1),
+		`{"intent":"chat","steps":[{"tool":"response","message":"From what I read: lines 1-80."}]}`)
+	ag, _ := newTestAgent(t)
+	res, err := ag.ReplayRounds("what does doc.md say?", nil, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rounds != 4 || res.End != ReplayEndAnswered || res.Reply == "" {
+		t.Fatalf("rounds %d end %q reply %q", res.Rounds, res.End, res.Reply)
+	}
+	if !strings.Contains((*prompts)[3], "THIS IS THE LAST ROUND") || strings.Contains((*prompts)[2], "THIS IS THE LAST ROUND") {
+		t.Fatal("the notice must be on round 4 and only there")
+	}
+}

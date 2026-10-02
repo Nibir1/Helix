@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os"
+	"strconv"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,5 +113,40 @@ func TestForgottenLessonsAndBrokenFiles(t *testing.T) {
 	ag.HandleInputEvent(input.InputEvent{Text: "explain how this project is built", Channel: input.ChannelText})
 	if *prompt == "" || strings.Contains(*prompt, "learned_lessons") {
 		t.Fatal("a broken delivery file should cost the lessons, not the turn")
+	}
+}
+
+// A live non-agentic turn follows the same budget rules as replay: reading
+// new parts of a file earns rounds up to the cap, and the last round is told
+// so. The episode records the turn as done when that round answers.
+func TestLiveFileLookupEarnsRoundsAndAnswersOnTheLast(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	var b strings.Builder
+	for i := 1; i <= 2000; i++ {
+		b.WriteString("line\n")
+	}
+	_ = os.WriteFile(filepath.Join(dir, "doc.md"), []byte(b.String()), 0o600)
+	var plans []string
+	for i := 0; i < 1+maxFileRetrievalBudget-1; i++ {
+		plans = append(plans, `{"intent":"file","steps":[{"tool":"file","action":"read","args":{"path":"doc.md","start_line":"`+
+			strconv.Itoa(1+80*i)+`"}}]}`)
+	}
+	plans = append(plans, `{"intent":"chat","steps":[{"tool":"response","message":"It is mostly the word line."}]}`)
+	prompts := stubPlannerSequence(t, plans...)
+	ag, _ := newTestAgent(t)
+	rec := withRecorder(t, ag)
+
+	ag.HandleInputEvent(input.InputEvent{Text: "what does doc.md say?", Channel: input.ChannelText})
+
+	if len(*prompts) != 1+maxFileRetrievalBudget {
+		t.Fatalf("planner rounds %d, want %d", len(*prompts), 1+maxFileRetrievalBudget)
+	}
+	if !strings.Contains((*prompts)[len(*prompts)-1], "THIS IS THE LAST ROUND") ||
+		strings.Contains((*prompts)[len(*prompts)-2], "THIS IS THE LAST ROUND") {
+		t.Fatal("the last-round notice must be on the final round only")
+	}
+	if ep := episodes(records(t, rec)); len(ep) != 1 || ep[0].End != metabolism.EndDone {
+		t.Fatalf("episode %+v", ep)
 	}
 }

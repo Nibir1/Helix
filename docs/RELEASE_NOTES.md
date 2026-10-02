@@ -21,6 +21,10 @@
 - **Search results can be read as reported.** `glob` and `grep` under a
   folder report paths with that folder in front, so reading a result works;
   a grep of one file names the file instead of `.`.
+- **File lookups that are getting somewhere get more rounds.** A round that
+  reads new parts of a file earns another, up to 6 (from 3); searching and
+  repeating earn nothing. The last round is told to answer from what it has,
+  so a lookup no longer ends with no reply.
 - **Reading long files works.** A read returns a window of up to 80 lines,
   says which lines and how long the file is, and takes `start_line` /
   `end_line`. It used to show the planner an arbitrary slice from the middle

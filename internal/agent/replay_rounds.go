@@ -19,8 +19,9 @@ import (
 //     Anything else ends the replay right there, unexecuted.
 //  3. If the reads found something to answer from (needsAnswer), plan again
 //     with their results in the same fenced execution report a live turn
-//     sends, for at most the live follow-up budget (retrievalBudget: 3 for a
-//     file lookup).
+//     sends, under the live follow-up budget: 3 rounds after a file lookup,
+//     one more for each round that reads new parts of files, up to 6, with
+//     the last-round notice on the final one (agenticFollowUp).
 //
 // Read-only means the file tool's list, glob, grep and read, nothing else. They
 // change nothing on disk; they go through the same sandbox resolver as a live
@@ -79,11 +80,17 @@ func (a *Agent) ReplayRounds(request string, lessons []LearnedLesson, maxRounds 
 	block := learnedLessonsBlock(lessons)
 	res := &ReplayResult{End: ReplayEndPlanned}
 	var obs []StepObservation
-	budget := 0 // follow-up rounds allowed, fixed after round 1 as a live turn does
+	// The follow-up budget is set after round 1 and grows with progress
+	// exactly as a live turn's does (agenticFollowUp).
+	budget, extendable := 0, false
+	var progress *progressTracker
 	for round := 1; ; round++ {
 		turn := turnContext{}
 		if round > 1 {
 			turn = turnContext{Report: observationBlock(obs), Directive: observationDirective(obs)}
+			if extendable && round-2 == budget-1 {
+				turn.Directive += lastRoundDirective
+			}
 		}
 		plan, err := a.planOnly(request, block, "HELIX :: REPLAYING", turn)
 		if err != nil {
@@ -150,6 +157,10 @@ func (a *Agent) ReplayRounds(request string, lessons []LearnedLesson, maxRounds 
 				return res, nil
 			}
 			budget = retrievalBudget(obs)
+			extendable = budget == fileRetrievalBudget
+			progress = newProgressTracker(obs)
+		} else if extendable && progress.earns(obs) && budget < maxFileRetrievalBudget {
+			budget++
 		}
 		if followUpDone(obs, false) {
 			res.End = ReplayEndAnswered

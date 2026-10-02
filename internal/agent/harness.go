@@ -56,6 +56,11 @@ func (a *Agent) agenticFollowUp(
 	// spending planner calls — see agentWorkOutstanding.
 	baseline := a.maxTodoID()
 
+	// A file lookup that keeps reading new parts of files earns more rounds,
+	// up to a cap; one that repeats itself or only searches does not.
+	extendable := budget == fileRetrievalBudget
+	progress := newProgressTracker(first)
+
 	obs := first
 	for iter := 0; iter < budget; iter++ {
 		// Stop when the last plan fully succeeded AND left nothing to answer
@@ -96,6 +101,9 @@ func (a *Agent) agenticFollowUp(
 			Report:    observationBlock(obs),
 			Directive: observationDirective(obs) + a.todoDirective(baseline),
 		}
+		if extendable && iter == budget-1 {
+			turn.Directive += lastRoundDirective
+		}
 
 		next, planned := a.planFirewallExecute(userInput, envDesc, ragContext, "", turn)
 		if !planned {
@@ -107,9 +115,68 @@ func (a *Agent) agenticFollowUp(
 			return
 		}
 		obs = next
+		if extendable && progress.earns(next) && budget < maxFileRetrievalBudget {
+			budget++
+		}
 	}
 
 	a.reportRunEnd(obs, baseline, budget, true)
+}
+
+// maxFileRetrievalBudget caps the follow-up rounds a file lookup can earn by
+// making progress (fileRetrievalBudget is where it starts).
+//
+// Three rounds were too few for an explanatory question about a real file:
+// one round to find it, then one per 80-line window, and reading and
+// answering are separate rounds. In a driven session, turns reading
+// steadily through new parts of a file ran out of rounds with no reply. A
+// flat increase would have paid for the looping turns too (the same grep
+// twice, or searching on for a file that does not exist), so extra rounds
+// are earned, one per round of new reading, and only up to this cap.
+const maxFileRetrievalBudget = 6
+
+// lastRoundDirective tells the planner it is planning the last round of a
+// file lookup. Without it, a turn still reading spent its final round on one
+// more read and ended with no reply at all, even when what it had read could
+// have answered most of the question.
+const lastRoundDirective = "\nTHIS IS THE LAST ROUND for this request. Answer now, in a single " +
+	"{\"tool\":\"response\"} step, from what the record above already shows. Say plainly what " +
+	"you could not check. Do not plan another read, search or list.\n"
+
+// progressTracker decides whether a follow-up round earned another one.
+type progressTracker struct{ seen map[string]bool }
+
+func newProgressTracker(first []StepObservation) *progressTracker {
+	p := &progressTracker{seen: map[string]bool{}}
+	for _, o := range first {
+		p.seen[stepKey(o)] = true
+	}
+	return p
+}
+
+func stepKey(o StepObservation) string { return o.Tool + "\x00" + o.Action + "\x00" + o.Subject }
+
+// earns reports whether a round read part of a file this turn had not read
+// and repeated no step this turn already ran. Searches alone earn nothing:
+// a search for something that is not there would otherwise keep earning.
+// It records the round's steps either way.
+func (p *progressTracker) earns(obs []StepObservation) bool {
+	newRead, repeat := false, false
+	for _, o := range obs {
+		if o.Tool == "response" {
+			continue
+		}
+		k := stepKey(o)
+		if p.seen[k] {
+			repeat = true
+		} else if o.Tool == "file" && o.Action == "read" && o.OK {
+			newRead = true
+		}
+	}
+	for _, o := range obs {
+		p.seen[stepKey(o)] = true
+	}
+	return newRead && !repeat
 }
 
 // reportRunEnd says how the run ended. Always — finished, stalled or out of
