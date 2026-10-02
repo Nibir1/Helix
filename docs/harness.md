@@ -836,12 +836,36 @@ The response is the plan: steps and what it would say, never a result.
 {"v":1,"id":"…","ok":true,"steps":[{"tool":"file","action":"read","subject":"read go.mod"}],"reply":"…","usage":{"model_calls":1,"input_chars":9100,"output_chars":240}}
 ```
 
+**Rounds (version 2).** A first plan is often not where a turn goes wrong: a
+turn that runs out of budget usually starts with a sensible glob and then
+rereads the same file in its follow-up rounds. A version 2 request can ask
+for those rounds:
+
+```json
+{"v":2,"id":"…","request":"what does the verify package do?","lessons":[…],"rounds":4}
+```
+
+Helix then replays the turn the way a live non-agentic turn runs. If a
+round's steps are all read-only file steps (`list`, `glob`, `grep`, `read`),
+they run. Their results go to the next round in the same fenced execution
+report a live turn sends. The follow-up budget and stop rule are a live
+turn's (3 rounds after a file lookup). The response gives each step's
+`round` and, for a step that ran, its `outcome` (`ok` or `failed`) and
+`err`, plus the replay's `rounds` and how it `end`ed: `answered`,
+`budget-exhausted`, `unexecuted-step` or `planned`. A version 1 request gets
+a version 1 response, exactly as before.
+
 **What it cannot do:**
 
-1. **It executes nothing.** It is `/plan`'s pipeline (planner, canary check,
-   parse, safety rewrite) and stops there. A planned `touch` leaves no file
-   (`TestReplayPlansButNeverExecutes`). Its prompter refuses every
-   confirmation.
+1. **It changes nothing.** Each round is `/plan`'s pipeline (planner, canary
+   check, parse, safety rewrite). The only steps that ever run are the file
+   tool's `list`, `glob`, `grep` and `read`, between rounds, through the same
+   sandbox resolver as a live turn. A round that plans anything else
+   (a shell command, git, a package manager, a file write or edit, a web
+   request, the task list) ends the replay before any of its steps run. A
+   planned `touch`, write or edit leaves no trace in any round
+   (`TestReplayPlansButNeverExecutes`, `TestReplayRoundsNeverRunsAnythingElse`).
+   Its prompter refuses every confirmation.
 2. **It records nothing.** There is no session, task list, hooks or
    Metabolism recording. A replay must not borrow today's conversation either:
    it would then measure the session, not the lesson.
@@ -851,13 +875,16 @@ The response is the plan: steps and what it would say, never a result.
    every injected block, it informs the plan and can never authorize a step.
    A replay without lessons has no block at all.
 
-**What it sends.** Each replay is a planner call to your configured provider.
+**What it sends.** Each round is a planner call to your configured provider.
 That is the same provider every live turn already uses, but it means past
-requests are sent again. Metabolism therefore requires `-allow-remote` for
+requests are sent again. With rounds, what the reads found (excerpts of files
+under the replay directory) goes too, as it did in the original turn. Metabolism therefore requires `-allow-remote` for
 every Helix replay: it cannot see which provider Helix is configured with.
 
 **Limits, stated plainly:**
-- It plans the *first* plan only, not the agentic loop's later iterations.
+- It plays a non-agentic turn's rounds, not the `/agentic` self-correction
+  loop, and it stops at the first step that would change something: what a
+  lesson does after a build or a write cannot be replayed this way.
 - It plans in the replay process's working directory, not the original
   episode's, which Metabolism does not know.
 - It runs without retrieved man pages (no RAG), as the daemon does.

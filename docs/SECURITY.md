@@ -224,8 +224,11 @@ inside a 0700 directory, size-rotated, and wiped by `/purge`.
 
 One related path does send data: `helix replay`, which the Metabolism engine
 runs to test a lesson, plans past requests again with your configured
-provider. It is the same provider a live turn uses, it executes nothing, and
-the engine runs it only with an explicit `-allow-remote` (harness.md §11).
+provider. It is the same provider a live turn uses, and the engine runs it
+only with an explicit `-allow-remote` (harness.md §11). Between planning
+rounds it runs only read-only file steps (list, glob, grep, read) and sends
+what they found to the provider, as the original turn did; it never runs a
+command or changes a file.
 
 With `/lessons on` (harness.md §12), lessons the engine tested enter live
 planner prompts, and so reach the provider with each turn. They are short

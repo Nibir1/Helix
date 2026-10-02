@@ -33,7 +33,7 @@ const (
 // authority channel as every other injected block: it may inform the plan and
 // can never instruct it, lower a risk tier, or answer a confirmation.
 func (a *Agent) PlanReplay(request string, lessons []LearnedLesson) (*ai.Plan, error) {
-	return a.planOnly(request, learnedLessonsBlock(lessons), "HELIX :: REPLAYING")
+	return a.planOnly(request, learnedLessonsBlock(lessons), "HELIX :: REPLAYING", turnContext{})
 }
 
 // learnedLessonsBlock renders lessons as a fenced, sanitized, bounded block.

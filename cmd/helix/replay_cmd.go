@@ -20,9 +20,16 @@ import (
 	"helix/internal/shell"
 )
 
-// ReplayWireVersion is the replay protocol version. Bump it on any change a
-// reader could misparse; the engine pins it with a golden file.
-const ReplayWireVersion = 1
+// ReplayWireVersion is the newest replay protocol version. Bump it on any
+// change a reader could misparse; the engine pins each version with a golden
+// file. Version 2 (D-021) adds rounds to the request and each step's round
+// and outcome to the response. A response has its request's version, so a
+// v1 engine still gets v1 bytes.
+const ReplayWireVersion = 2
+
+// maxReplayRounds caps what a request may ask for. The live follow-up budget
+// (3 for a file lookup) ends a replay well before this.
+const maxReplayRounds = 8
 
 // replayRequest is one NDJSON line on stdin.
 type replayRequest struct {
@@ -30,13 +37,22 @@ type replayRequest struct {
 	ID      string                `json:"id"`
 	Request string                `json:"request"`
 	Lessons []agent.LearnedLesson `json:"lessons,omitempty"`
+	// Rounds is how many planner rounds to replay (v2). 0 or 1 is a first
+	// plan that executes nothing; more runs read-only file steps between
+	// rounds (docs/harness.md §11).
+	Rounds int `json:"rounds,omitempty"`
 }
 
-// replayStep is one planned step. Nothing was run, so there is no outcome.
+// replayStep is one planned step. In v2 it says which round planned it and,
+// for a read-only file step that ran, how that went: Outcome is "" (planned,
+// not run), "ok" or "failed".
 type replayStep struct {
 	Tool    string `json:"tool"`
 	Action  string `json:"action,omitempty"`
 	Subject string `json:"subject,omitempty"`
+	Round   int    `json:"round,omitempty"`
+	Outcome string `json:"outcome,omitempty"`
+	Err     string `json:"err,omitempty"`
 }
 
 type replayUsage struct {
@@ -53,7 +69,11 @@ type replayResponse struct {
 	Error string       `json:"error,omitempty"`
 	Steps []replayStep `json:"steps,omitempty"`
 	Reply string       `json:"reply,omitempty"`
-	Usage replayUsage  `json:"usage"`
+	// Rounds and End (v2): how many rounds were planned and how the replay
+	// ended (agent.ReplayEnd*).
+	Rounds int         `json:"rounds,omitempty"`
+	End    string      `json:"end,omitempty"`
+	Usage  replayUsage `json:"usage"`
 }
 
 // replayPrompter refuses every confirmation. A replay plans and never runs,
@@ -122,7 +142,7 @@ func newReplayAgent() (*agent.Agent, error) {
 
 // replayPlanner is the slice of the agent serveReplays needs.
 type replayPlanner interface {
-	PlanReplay(request string, lessons []agent.LearnedLesson) (*ai.Plan, error)
+	ReplayRounds(request string, lessons []agent.LearnedLesson, maxRounds int) (*agent.ReplayResult, error)
 }
 
 // serveReplays answers each request line. A bad line gets an error response
@@ -150,13 +170,19 @@ func replayOne(line string, p replayPlanner) replayResponse {
 	if err := dec.Decode(&req); err != nil {
 		return replayResponse{V: ReplayWireVersion, Error: "malformed request: " + err.Error()}
 	}
-	resp := replayResponse{V: ReplayWireVersion, ID: req.ID}
-	if req.V != ReplayWireVersion {
-		resp.Error = fmt.Sprintf("replay wire version %d, this Helix speaks %d", req.V, ReplayWireVersion)
+	resp := replayResponse{V: req.V, ID: req.ID}
+	if req.V < 1 || req.V > ReplayWireVersion {
+		resp.V = ReplayWireVersion
+		resp.Error = fmt.Sprintf("replay wire version %d, this Helix speaks 1 to %d", req.V, ReplayWireVersion)
 		return resp
 	}
+	if req.V == 1 && req.Rounds != 0 {
+		resp.Error = "rounds needs replay wire version 2"
+		return resp
+	}
+	rounds := min(max(req.Rounds, 1), maxReplayRounds)
 	before := agent.MeterUsage()
-	plan, err := p.PlanReplay(req.Request, req.Lessons)
+	res, err := p.ReplayRounds(req.Request, req.Lessons, rounds)
 	after := agent.MeterUsage()
 	resp.Usage = replayUsage{
 		ModelCalls:  max(after.Calls-before.Calls, 0),
@@ -167,14 +193,23 @@ func replayOne(line string, p replayPlanner) replayResponse {
 		resp.Error = err.Error()
 		return resp
 	}
-	var reply []string
-	for _, st := range plan.Steps {
-		resp.Steps = append(resp.Steps, replayStep{Tool: st.Tool, Action: st.Action, Subject: agent.StepSubject(st)})
-		if st.Tool == "response" && strings.TrimSpace(st.Message) != "" {
-			reply = append(reply, strings.TrimSpace(st.Message))
+	for _, st := range res.Steps {
+		step := replayStep{Tool: st.Step.Tool, Action: st.Step.Action, Subject: agent.StepSubject(st.Step)}
+		if req.V >= 2 {
+			step.Round = st.Round
+			switch {
+			case st.Ran && st.OK:
+				step.Outcome = "ok"
+			case st.Ran:
+				step.Outcome, step.Err = "failed", st.Err
+			}
 		}
+		resp.Steps = append(resp.Steps, step)
 	}
-	resp.Reply = strings.Join(reply, "\n")
+	resp.Reply = res.Reply
+	if req.V >= 2 {
+		resp.Rounds, resp.End = res.Rounds, res.End
+	}
 	resp.OK = true
 	return resp
 }

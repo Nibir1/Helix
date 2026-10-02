@@ -24,9 +24,10 @@
 - **`/metabolism`**: opt-in, local-only recording of planner turns for the
   Metabolism engine (`~/.helix/metabolism/`, masked and bounded, wiped by
   `/purge`). harness.md §10.
-- **`helix replay`**: plans past requests again with learned lessons and
-  executes nothing; the engine's nutrient test drives it over NDJSON.
-  harness.md §11.
+- **`helix replay`**: plans past requests again with learned lessons; the
+  engine's nutrient test drives it over NDJSON. Version 2 replays a turn's
+  follow-up rounds too, running only read-only file steps between them, and
+  never a command or a change. harness.md §11.
 - **`/lessons`**: with recording on, delivers the lessons the engine tested
   into planner turns as fenced data, on a coin flip each turn records, so the
   engine can tell whether a lesson helps. `/lessons forget` stops one at

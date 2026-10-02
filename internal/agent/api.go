@@ -28,7 +28,7 @@ import (
 // execution, and there is none here, so running it would only cost a model
 // call and hide the plan the user asked to see.
 func (a *Agent) PlanPreview(userInput string) (*ai.Plan, error) {
-	return a.planOnly(userInput, a.projectContextBlock()+a.sessionContextBlock()+a.todoContextBlock(), "HELIX :: PLANNING")
+	return a.planOnly(userInput, a.projectContextBlock()+a.sessionContextBlock()+a.todoContextBlock(), "HELIX :: PLANNING", turnContext{})
 }
 
 // runPlanner is the planner call behind every plan: live turns, /plan and
@@ -38,8 +38,9 @@ var runPlanner = ai.RunPlannerWithRetry
 
 // planOnly is PlanPreview's pipeline with the context blocks supplied by the
 // caller. It plans, checks the canary, parses and applies the safety rewrite,
-// and executes nothing.
-func (a *Agent) planOnly(userInput, contextBlocks, thinking string) (*ai.Plan, error) {
+// and executes nothing. turn carries a follow-up round's report and
+// directive (multi-round replay); a first plan passes the zero value.
+func (a *Agent) planOnly(userInput, contextBlocks, thinking string, turn turnContext) (*ai.Plan, error) {
 	userInput = strings.TrimSpace(normalizeUserInput(userInput))
 	if userInput == "" {
 		return nil, fmt.Errorf("nothing to plan")
@@ -63,6 +64,7 @@ func (a *Agent) planOnly(userInput, contextBlocks, thinking string) (*ai.Plan, e
 	think.Start()
 	raw, err := runPlanner(ai.BuildPlannerPromptFor(ai.PlannerPromptInput{
 		UserInput: userInput, Env: envDesc, RAG: ragContext, Persona: a.personaPreamble(),
+		Report: turn.Report, Directive: turn.Directive,
 	}))
 	think.Stop()
 	if err != nil {
