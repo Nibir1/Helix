@@ -21,7 +21,7 @@ It combines:
 - **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more) — no model IDs compiled in; the model is discovered from the provider and ranked vision-first
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
-- **One visual language across all 58 commands** — panels, badges and aligned rows, never a flat stack of coloured lines. Colour honours `NO_COLOR` and switches itself off when the output is not a terminal, so piping Helix or running it as a service produces clean text
+- **One visual language across all 59 commands** — panels, badges and aligned rows, never a flat stack of coloured lines. Colour honours `NO_COLOR` and switches itself off when the output is not a terminal, so piping Helix or running it as a service produces clean text
 - **A Multi-Layer Safety & Sandbox Engine** around shell, git, packages, and recon
 - **Enterprise-Grade Hardening** (Kernel confinement, instruction firewalls, and signed supply chains)
 - **Synthetic Tonal Audio** for immersive, synchronized terminal feedback
@@ -320,6 +320,7 @@ Nothing here destroys a transcript. `/clear`, `/compact`, `/memory clear`, and `
 | `/tools` | The harness tool vocabulary and each tool's gate |
 | `/hooks [list\|add\|rm\|test\|...]` | Run your own commands around tool execution |
 | `/metabolism [on\|off\|status]` | Record planner turns locally for the Metabolism engine. The engine tests lessons by re-planning past requests through `helix replay`, which executes nothing ([docs/harness.md](docs/harness.md) §10–§11) |
+| `/lessons [on\|off\|why <id>\|forget <id> <reason>]` | Deliver the lessons Metabolism tested into planner turns, as fenced data, on a coin flip the turn records. Needs `/metabolism on`. A lesson can inform a plan, never approve a step ([docs/harness.md](docs/harness.md) §12) |
 | `/undo` | Reverse the most recent journalled action |
 | `/dry-run` | Toggle command execution preview mode |
 

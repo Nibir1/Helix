@@ -27,6 +27,10 @@
 - **`helix replay`**: plans past requests again with learned lessons and
   executes nothing; the engine's nutrient test drives it over NDJSON.
   harness.md §11.
+- **`/lessons`**: with recording on, delivers the lessons the engine tested
+  into planner turns as fenced data, on a coin flip each turn records, so the
+  engine can tell whether a lesson helps. `/lessons forget` stops one at
+  once. Off by default. harness.md §12.
 
 ## Helix v1.5.0: Voice & an Agent that can work
 

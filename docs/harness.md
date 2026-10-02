@@ -578,8 +578,10 @@ install` is **apt-get** talking, and `python3 -m pip` is **pip**.
 Four blocks ride into every planner prompt. All four are fenced as
 `authority="data-only"` and sanitized with the same routine as retrieved
 knowledge: no fences, no backticks, bounded length. They inform the planner; they
-can never instruct it. `helix replay` (§11) is the exception: it carries none
-of the four, only the learned-lessons block, fenced and sanitized the same way.
+can never instruct it. With `/lessons on` a fifth joins them on live turns:
+the learned-lessons block (§12). `helix replay` (§11) is the exception: it
+carries none of the four, only the learned-lessons block, fenced and
+sanitized the same way.
 
 | Block | Source | Bound |
 | :--- | :--- | :--- |
@@ -587,6 +589,7 @@ of the four, only the learned-lessons block, fenced and sanitized the same way.
 | Session history | recent conversation turns | 10 turns, 160 chars each |
 | Task list | open `/todo` items, with ids and author | 10 items |
 | Project context | `HELIX.md` / `AGENTS.md` / `CLAUDE.md` | 16 KB read, 6 KB injected |
+| Learned lessons (`/lessons on` only) | lessons the Metabolism engine tested (§12) | 8 lessons, 300 characters each, 1600 bytes |
 
 `/context` shows the live size of each, with estimated token counts. `/memory`
 shows the turns themselves, and says on the screen that they are replayed as
@@ -772,10 +775,10 @@ planner experience.
 
 1. **It cannot change behaviour.** The recorder only writes. Nothing it records
    is read back into a prompt, so a turn runs identically with recording on or
-   off. When learned lessons arrive in a later Metabolism phase, they will
-   have their own fenced `authority="data-only"` block, with the same limits as
-   every other injected context: they may inform the planner and can never
-   lower a risk tier, answer a confirmation or loosen the sandbox.
+   off. Learned lessons are a separate opt-in, `/lessons on` (§12), with their
+   own fenced `authority="data-only"` block and the same limits as every other
+   injected context: they may inform the planner and can never lower a risk
+   tier, answer a confirmation or loosen the sandbox.
 2. **It sends nothing anywhere.** Recording is local-only, like the voice log.
    The file stays on this machine until you run `metabolism ingest` yourself.
 3. **It is off by default.** An absent file is the privacy guarantee.
@@ -794,10 +797,11 @@ Outside one, it is keyed by a short hash of the hostname. No home directory
 appears in a key.
 
 **The wire format is a contract.** Helix does not import the engine. The
-records are NDJSON (`internal/metabolism/wire.go`, version 1), pinned by
-`internal/metabolism/testdata/wire_v1.ndjson`. The engine's ingest test decodes
-the same file. A change that fails that test is a format change: bump
-`WireVersion` and update both copies.
+records are NDJSON (`internal/metabolism/wire.go`, version 2 since §12),
+pinned by `internal/metabolism/testdata/wire_v2.ndjson`, with
+`wire_v1.ndjson` still pinned because the engine reads older files. The
+engine's ingest tests decode the same files. A change that fails those tests
+is a format change: bump `WireVersion` and update both copies.
 
 **Rotation.** 8 MiB per file, four older generations kept, so tens of
 thousands of turns fit before the oldest is dropped. Ingest reads rotated
@@ -869,3 +873,64 @@ would normally print goes to stderr, so stdout carries only responses.
 
 `/plan` now uses the same planner prompt builder as a live turn (persona
 included), so a preview, a replay and the real turn plan from the same prompt.
+A `/plan` preview carries no learned lessons: a preview must not flip coins or
+record what it delivered (§12).
+
+## 12. Learned lessons in live turns — `/lessons`
+
+Once the Metabolism engine has tested a lesson by replay (§11), it can deliver
+it into real turns. This is the first point at which Metabolism changes what
+Helix does, so it is a second opt-in on top of recording.
+
+```
+/lessons                         what is delivered, and what applies here
+/lessons on | off                deliver tested lessons into planner turns, or stop
+/lessons why <id>                a lesson's evidence and its live credit
+/lessons forget <id> <reason>    stop it now; the engine eliminates it
+```
+
+`/config lessons on|off` sets the same preference. `/lessons on` refuses while
+recording is off: a lesson delivered on an unrecorded turn could never be
+credited or eliminated, so delivery and measurement go together.
+
+**Where lessons come from.** `metabolism export` writes
+`~/.helix/metabolism/lessons.json` (0600): every lesson in trial (passed the
+replay test) or accepted (passed on live turns), each with the probability of
+delivering it. Helix reads the file strictly. An unknown field, another
+version, or a lesson in any other state makes the whole file unreadable, and
+then no lessons are delivered; the turn itself is never affected.
+
+**What a turn does with them.** Only on a turn that reaches the planner:
+1. Keep the lessons whose scope covers this turn (global; this machine; this
+   repository) and that you have not forgotten here.
+2. Fill the budget (8 lessons, 1600 bytes, measured as the block prints
+   them): accepted lessons first, then trial lessons in a random order.
+3. Flip a coin per lesson: trial lessons are delivered half the time,
+   accepted ones 90% of the time.
+4. Put the delivered ones in the fenced `<learned_lessons
+   authority="data-only">` block (§11's block, the same sanitizing), and
+   record on the episode which were delivered (`exposure`) and which the coin
+   held back (`withheld`).
+
+The coin is the point. A turn that got a lesson and a turn that did not
+differ only by the coin, so the engine (`metabolism credit`) can tell whether
+the lesson helps, instead of crediting it for turns that were going well
+anyway. Agentic follow-up iterations keep the turn's lessons. `/plan`
+previews get none.
+
+**What a lesson can never do.** A lesson is data in a fenced block, like
+retrieved knowledge. It can inform a plan. It cannot approve a step, lower a
+risk tier, answer a confirmation, change the permission posture, relax the
+sandbox or switch off a hook. The engine also screens lessons before they
+are ever tested, and Helix does not rely on that: angle brackets are
+neutralised so no lesson can close the fence.
+
+**Forgetting.** `/lessons forget <id> <reason>` stops the lesson at once, by
+writing it to `~/.helix/metabolism/forgotten.json` (0600), and records a
+`feedback` line in the episode file when recording is on. At the next
+`metabolism ingest` the engine eliminates the lesson, with your reason in its
+history. `/purge` removes both files with the rest of
+`~/.helix/metabolism/`.
+
+**Records.** Recording wire version 2 adds the episode's `withheld` list and
+the `feedback` record. The engine still reads version 1 files.

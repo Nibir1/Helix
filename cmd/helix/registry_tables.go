@@ -331,6 +331,25 @@ func harnessCommands() []command {
 			Handler: handleMetabolismCommand,
 		},
 		{
+			Name: "/lessons", Usage: "/lessons [on|off|why <id>|forget <id> <reason>]", Category: catHarness,
+			Summary: "Lessons Metabolism tested, delivered into planner turns",
+			Detail: []string{
+				"Off by default. On (and while /metabolism records), each planner",
+				"turn gets the lessons the engine tested that apply here, in a fenced",
+				"data-only block. A lesson informs a plan; it can never approve a",
+				"step, lower a risk tier or answer a confirmation.",
+				"",
+				"Each lesson is delivered on a coin flip and held back otherwise, and",
+				"the turn records which. The engine compares the two to decide whether",
+				"a lesson earns its place (metabolism credit).",
+				"",
+				"/lessons             what is delivered, and what applies here",
+				"/lessons why <id>    a lesson's evidence and live credit",
+				"/lessons forget <id> <reason>   stop it now; the engine eliminates it",
+			},
+			Handler: handleLessonsCommand,
+		},
+		{
 			Name: "/undo", VoiceOK: true, Category: catHarness,
 			Summary: "Reverse the most recent journalled action",
 			Detail: []string{

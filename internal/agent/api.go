@@ -31,8 +31,9 @@ func (a *Agent) PlanPreview(userInput string) (*ai.Plan, error) {
 	return a.planOnly(userInput, a.projectContextBlock()+a.sessionContextBlock()+a.todoContextBlock(), "HELIX :: PLANNING")
 }
 
-// runPlanner is the planner call behind the plan-only paths. A variable so
-// tests can plan without a model; the live turn path does not use it.
+// runPlanner is the planner call behind every plan: live turns, /plan and
+// helix replay. A variable so tests can plan without a model and see the
+// prompt the planner was given.
 var runPlanner = ai.RunPlannerWithRetry
 
 // planOnly is PlanPreview's pipeline with the context blocks supplied by the

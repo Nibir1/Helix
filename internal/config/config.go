@@ -76,6 +76,11 @@ type UserPrefs struct {
 	// MetabolismRecord turns on local recording of planner turns for the
 	// Metabolism engine (/metabolism). Off unless the user turns it on.
 	MetabolismRecord bool `json:"metabolism_record,omitempty"`
+
+	// MetabolismLessons delivers the lessons the Metabolism engine tested
+	// into planner turns (/lessons). Off unless the user turns it on, and
+	// effective only while recording is on.
+	MetabolismLessons bool `json:"metabolism_lessons,omitempty"`
 }
 
 // SpeechSTTConfig selects the speech-to-text provider chain (BlackBox §7).

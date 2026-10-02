@@ -151,6 +151,11 @@ type Agent struct {
 	// into a prompt, so it cannot change what Helix does.
 	Metabolism *metabolism.Recorder
 
+	// DeliverLessons is /lessons on: put the lessons the engine tested into
+	// live planner turns, in the fenced data-only learned-lessons block.
+	// It takes effect only on recorded turns (lessons.go).
+	DeliverLessons bool
+
 	// Per-turn recording state, reset by HandleInputEvent. episode is nil
 	// whenever recording is off. turnPlanned says the turn reached the
 	// planner: direct shell commands, the fast path and undo are the user's
@@ -359,6 +364,7 @@ func (a *Agent) HandleInput(userInput string) {
 	ragContext += a.projectContextBlock()
 	ragContext += a.sessionContextBlock()
 	ragContext += a.todoContextBlock()
+	ragContext += a.liveLessonsBlock()
 
 	// --- Standard planning ---
 	//
@@ -447,13 +453,13 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	think := newThinkerFor(a.render, "HELIX :: REASONING")
 	think.Start()
 
-	rawPlanOutput, err := ai.RunPlannerWithRetry(plannerPrompt)
+	rawPlanOutput, err := runPlanner(plannerPrompt)
 
 	// PROVIDER FLAKE RESILIENCE: reasoning-only models sometimes burn their
 	// budget and return empty output. One compact retry before chat fallback.
 	if err != nil && strings.Contains(err.Error(), "empty output") {
 		a.render.PrintDebug("planner returned empty output; retrying with compact prompt")
-		rawPlanOutput, err = ai.RunPlannerWithRetry(ai.BuildCompactPlannerPrompt(userInput, envDesc))
+		rawPlanOutput, err = runPlanner(ai.BuildCompactPlannerPrompt(userInput, envDesc))
 	}
 
 	// FIX (git-reliability): FINAL RESORT — minimal prompt with git-specific
@@ -461,7 +467,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	// this strips every rule except the bare schema and git action examples.
 	if err != nil && strings.Contains(err.Error(), "empty output") {
 		a.render.PrintDebug("compact prompt also returned empty; retrying with minimal prompt")
-		rawPlanOutput, err = ai.RunPlannerWithRetry(ai.BuildMinimalPlannerPrompt(userInput, envDesc))
+		rawPlanOutput, err = runPlanner(ai.BuildMinimalPlannerPrompt(userInput, envDesc))
 	}
 
 	think.Stop()

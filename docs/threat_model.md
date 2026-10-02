@@ -15,10 +15,11 @@ planner into executing attacker-chosen commands.
    block.* Four others now ride into planner prompts under the same fence and the
    same sanitizer — session history, the `/todo` list, project context
    (`HELIX.md`/`AGENTS.md`/`CLAUDE.md`), and, in agentic mode, the execution
-   report carrying a bounded tail of what each step printed. `helix replay`
-   (`docs/harness.md` §11) adds one more, used only there: the
-   `<learned_lessons>` block from the Metabolism engine, at most 8 lessons and
-   1600 bytes, with angle brackets neutralised. Every one is content
+   report carrying a bounded tail of what each step printed. A fifth comes
+   from the Metabolism engine: the `<learned_lessons>` block, at most 8
+   lessons and 1600 bytes, with angle brackets neutralised. `helix replay`
+   (`docs/harness.md` §11) always carries it when replaying a lesson; live
+   turns carry it only with `/lessons on` (§12). Every one is content
    Helix did not author: a committed project file is written by whoever wrote the
    repository, and command output is fully attacker-controllable through a
    crafted filename or a poisoned log line. `docs/harness.md` §6 lists them with

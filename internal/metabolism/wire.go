@@ -13,14 +13,16 @@
 //     anywhere; the file stays on this machine until the user ingests it.
 //   - It is not on by default. /metabolism on starts recording, like the voice
 //     log: an absent file is a privacy guarantee.
-//   - It cannot change what Helix does. Nothing here is read back into a
-//     prompt. Learned lessons, when they exist, arrive through their own
-//     fenced data-only block in a later phase.
+//   - Recording cannot change what Helix does. Nothing recorded is read back
+//     into a prompt. Learned lessons are a separate opt-in (/lessons on): the
+//     engine writes them to lessons.json (lessons.go), and they reach the
+//     planner only through the fenced data-only learned-lessons block.
 //
 // The records are a wire format, not a shared Go type: Helix does not import
 // the engine, so the engine can change without touching Helix's build. The JSON
 // shape matches the engine's types package field for field, and both
-// repositories test against the same golden file (testdata/wire_v1.ndjson).
+// repositories test against the same golden files (testdata/wire_v1.ndjson,
+// testdata/wire_v2.ndjson).
 package metabolism
 
 import (
@@ -32,32 +34,55 @@ import (
 
 // WireVersion is the record format version. Bump it on any change a reader
 // could misparse, and teach `metabolism ingest` the new version first.
-const WireVersion = 1
+//
+// Version 2 (Phase 3) adds an episode's withheld lessons and the feedback
+// record. A v1 file is still read by the engine.
+const WireVersion = 2
 
 // HostName is how Helix identifies itself in every episode.
 const HostName = "helix"
 
-// Record is one NDJSON line. Exactly one of Episode and Outcome is set.
+// Record is one NDJSON line. Exactly one of Episode, Outcome and Feedback is
+// set.
 type Record struct {
 	V       int      `json:"v"`
-	Kind    string   `json:"kind"` // "episode" | "outcome"
+	Kind    string   `json:"kind"` // "episode" | "outcome" | "feedback"
 	Episode *Episode `json:"episode,omitempty"`
 	Outcome *Outcome `json:"outcome,omitempty"`
+	// Feedback is what the user told Helix about a lesson (wire v2).
+	Feedback *Feedback `json:"feedback,omitempty"`
 }
+
+// Feedback mirrors the engine's ndjson.Feedback. The only action is
+// FeedbackForget: /lessons forget eliminated the lesson, with a reason.
+type Feedback struct {
+	ID       string    `json:"id"`
+	LessonID string    `json:"lesson_id"`
+	At       time.Time `json:"at"`
+	Action   string    `json:"action"`
+	Reason   string    `json:"reason"`
+}
+
+// FeedbackForget is the action /lessons forget records.
+const FeedbackForget = "forget"
 
 // Episode mirrors the engine's types.Episode.
 type Episode struct {
-	ID        string            `json:"id"`
-	Host      string            `json:"host"`
-	Scope     Scope             `json:"scope"`
-	StartedAt time.Time         `json:"started_at"`
-	EndedAt   time.Time         `json:"ended_at"`
-	Request   Request           `json:"request"`
-	Exposure  []string          `json:"exposure,omitempty"`
-	Steps     []Step            `json:"steps,omitempty"`
-	Usage     Usage             `json:"usage"`
-	End       string            `json:"end"`
-	Attrs     map[string]string `json:"attrs,omitempty"`
+	ID        string    `json:"id"`
+	Host      string    `json:"host"`
+	Scope     Scope     `json:"scope"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
+	Request   Request   `json:"request"`
+	Exposure  []string  `json:"exposure,omitempty"`
+	// Withheld lists lessons that applied and fitted the budget but lost the
+	// coin flip: the matched no-lesson turns the engine's credit ledger
+	// compares Exposure against (wire v2).
+	Withheld []string          `json:"withheld,omitempty"`
+	Steps    []Step            `json:"steps,omitempty"`
+	Usage    Usage             `json:"usage"`
+	End      string            `json:"end"`
+	Attrs    map[string]string `json:"attrs,omitempty"`
 }
 
 // Scope mirrors types.Scope.

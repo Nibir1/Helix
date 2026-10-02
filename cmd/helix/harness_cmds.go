@@ -887,6 +887,21 @@ func configKeys() []configKey {
 			},
 		},
 		{
+			name: "lessons", help: "Deliver Metabolism's tested lessons into planner turns", extra: "on | off",
+			get: func() string { return onOff(cfg.UserPrefs.MetabolismLessons) },
+			set: func(v string) error {
+				on, err := parseOnOff(v)
+				if err != nil {
+					return err
+				}
+				cfg.UserPrefs.MetabolismLessons = on
+				if agentCore != nil {
+					agentCore.DeliverLessons = on
+				}
+				return nil
+			},
+		},
+		{
 			name: "agentic-steps", help: "Harness step budget", extra: "1 - 20",
 			get: func() string { return strconv.Itoa(agenticStepBudget()) },
 			set: func(v string) error {

@@ -162,6 +162,8 @@ type Turn struct {
 	usage0    UsageTotals
 	declines0 int64
 	steps     []Step
+	exposure  []string // lessons delivered into the turn (SetLessons)
+	withheld  []string // lessons the coin held back
 }
 
 // ID is the episode ID this turn will be written under ("" for a nil turn).
@@ -172,6 +174,14 @@ func (t *Turn) ID() string {
 		return ""
 	}
 	return t.id
+}
+
+// Scope is where the turn happened (the zero Scope for a nil turn).
+func (t *Turn) Scope() Scope {
+	if t == nil {
+		return Scope{}
+	}
+	return t.scope
 }
 
 // AddStep appends one executed step. Subject and error are scrubbed here, so a
@@ -217,6 +227,8 @@ func (r *Recorder) Finish(t *Turn, text, provenance, end string) {
 		StartedAt: t.started.UTC(),
 		EndedAt:   now.UTC(),
 		Request:   Request{Text: cleanText(text), Provenance: provenance},
+		Exposure:  t.exposure,
+		Withheld:  t.withheld,
 		Steps:     t.steps,
 		Usage: Usage{
 			ModelCalls:  nonNeg(u.Calls - t.usage0.Calls),

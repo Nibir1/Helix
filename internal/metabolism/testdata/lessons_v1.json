@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "generated_at": "2026-10-03T09:00:00Z",
+  "lessons": [
+    {
+      "id": "0199a1b2c3d4e5f6a7b8c9d0e1f3",
+      "text": "Do not call todo add before a task list is loaded.",
+      "state": "accepted",
+      "kind": "pattern",
+      "scope": {
+        "level": "machine",
+        "key": "m-0a1b2c3d"
+      },
+      "p": 0.9,
+      "evidence": "credit 2026-10-03: credit: better when delivered: succeeded 90% of 40 turns delivered vs 50% of 20 withheld, P(better) 0.999",
+      "credit": "succeeded 90% of 40 turns delivered, 50% of 20 withheld (P(better) 1.00)"
+    },
+    {
+      "id": "0199a1b2c3d4e5f6a7b8c9d0e1f4",
+      "text": "This is a Go module: read go.mod, not package.json.",
+      "state": "trial",
+      "kind": "fact",
+      "scope": {
+        "level": "project",
+        "key": "helix-1a2b3c4d"
+      },
+      "p": 0.5,
+      "evidence": "nutrient-test 2026-10-02: 4 wins, 1 loss, 3 ties on relevant episodes",
+      "credit": "no live turns yet"
+    }
+  ]
+}

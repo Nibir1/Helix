@@ -53,16 +53,10 @@ func learnedLessonsBlock(lessons []LearnedLesson) string {
 		if i == MaxReplayLessons {
 			break
 		}
-		// Angle brackets are neutralised before anything else: the shared
-		// sanitizer strips fences but not tags, and a lesson reading
-		// "</learned_lessons>" would otherwise close the fence and put the
-		// rest of its text outside it. The engine screens for this too; the
-		// host does not rely on that.
-		text := rag.SanitizeRetrievedText(tagSafe.Replace(l.Text), MaxLessonChars)
-		if strings.TrimSpace(text) == "" {
+		line := lessonLine(l.Text)
+		if line == "" {
 			continue
 		}
-		line := fmt.Sprintf("- %s\n", text)
 		if used+len(line) > MaxLessonsBlockChars {
 			break
 		}
@@ -74,6 +68,22 @@ func learnedLessonsBlock(lessons []LearnedLesson) string {
 }
 
 var tagSafe = strings.NewReplacer("<", "‹", ">", "›")
+
+// lessonLine is one lesson as the block renders it, or "" for a lesson that
+// sanitizes to nothing. Live delivery measures lessons with it, so what the
+// selection counts against the budget is exactly what the block prints.
+func lessonLine(text string) string {
+	// Angle brackets are neutralised before anything else: the shared
+	// sanitizer strips fences but not tags, and a lesson reading
+	// "</learned_lessons>" would otherwise close the fence and put the rest
+	// of its text outside it. The engine screens for this too; the host does
+	// not rely on that.
+	clean := rag.SanitizeRetrievedText(tagSafe.Replace(text), MaxLessonChars)
+	if strings.TrimSpace(clean) == "" {
+		return ""
+	}
+	return fmt.Sprintf("- %s\n", clean)
+}
 
 // StepSubject names what a planned step acts on (exported for helix replay).
 func StepSubject(step ai.PlanStep) string { return stepSubject(step) }

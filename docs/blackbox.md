@@ -668,7 +668,9 @@ Samples live in `~/.helix/metrics/` (0600, local only, never transmitted) and
 - **Metabolism:** `~/.helix/metabolism/episodes.ndjson` — **absent unless you
   run `/metabolism on`**; each planner request as masked text of at most 500
   bytes, plus step subjects, never command output; 0600 in 0700, rotated at
-  8 MiB × 4; local only (`docs/harness.md` §10).
+  8 MiB × 4; local only (`docs/harness.md` §10). Beside it, `lessons.json`
+  (written by `metabolism export`, read only with `/lessons on`) and
+  `forgotten.json` (`/lessons forget`), both 0600 (§12).
 - **No telemetry:** nothing leaves the machine without a provider + key you
   entered (`helix replay`, run by the Metabolism engine, sends past requests to
   that same provider again); the pricing catalog is embedded data + a local override

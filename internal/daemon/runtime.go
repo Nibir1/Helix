@@ -212,6 +212,7 @@ func New() (*Daemon, error) {
 		Declines: commands.DeclinedConfirmations,
 	}); merr == nil {
 		ag.Metabolism = rec
+		ag.DeliverLessons = cfg.UserPrefs.MetabolismLessons
 	} else {
 		jrn.Record("lifecycle", "", "", "metabolism recording unavailable: "+merr.Error())
 	}

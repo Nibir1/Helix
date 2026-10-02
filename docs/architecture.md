@@ -601,7 +601,11 @@ command reference against the same table.
   an opt-in, write-only episode log of planner turns for the Metabolism engine.
   Nothing it writes is read back into a prompt, and it is network-free by test.
   `helix replay` (`cmd/helix/replay_cmd.go`) plans past requests with lessons
-  and executes nothing. See `docs/harness.md` §10–§11.
+  and executes nothing. With `/lessons on`, live planner turns read the
+  lessons the engine tested (`internal/metabolism/lessons.go`), get them in
+  the fenced learned-lessons block on a coin flip, and record what was
+  delivered and withheld (`internal/agent/lessons.go`). See
+  `docs/harness.md` §10–§12.
 
 ### 5d. Local Logs (`internal/journal/`)
 

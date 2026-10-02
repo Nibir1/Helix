@@ -227,6 +227,12 @@ runs to test a lesson, plans past requests again with your configured
 provider. It is the same provider a live turn uses, it executes nothing, and
 the engine runs it only with an explicit `-allow-remote` (harness.md §11).
 
+With `/lessons on` (harness.md §12), lessons the engine tested enter live
+planner prompts, and so reach the provider with each turn. They are short
+text derived from your own past turns, fenced as data-only like every other
+injected block, and can never authorize a step. Off by default, and only
+while recording is on.
+
 `/reboot` writes one short-lived file under the same contract, minus the
 rotation it does not need: `~/.helix/reboot.json` carries the state a restart
 needs — mode, working directory, provider and model, and in-progress tasks — plus,

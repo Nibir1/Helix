@@ -35,9 +35,17 @@ func initMetabolism() {
 	metabolismRec = rec
 	if agentCore != nil {
 		agentCore.Metabolism = rec
+		agentCore.DeliverLessons = cfg.UserPrefs.MetabolismLessons
 	}
 	if rec.Enabled() {
 		uiOK("metabolism", "recording planner turns locally · /metabolism off stops it")
+	}
+	if cfg.UserPrefs.MetabolismLessons {
+		if rec.Enabled() {
+			uiOK("lessons", "delivering tested lessons into planner turns · /lessons off stops it")
+		} else {
+			uiIdle("lessons", "on, but paused: lessons are delivered only while /metabolism records")
+		}
 	}
 }
 

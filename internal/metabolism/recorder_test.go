@@ -263,10 +263,14 @@ func TestScopeFor(t *testing.T) {
 // Metabolism repository (adapters/ndjson/testdata/helix_wire_v1.ndjson), whose
 // ingest test decodes it into the engine's own types. If this test fails, the
 // format changed: bump WireVersion and update both copies together.
+//
+// Version 1 records are still read by the engine, so this file stays pinned
+// after the bump to version 2: a v2 encoder writing a record with no v2
+// fields must produce exactly the v1 bytes, apart from the version number.
 func TestWireGolden(t *testing.T) {
 	at := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
 	recs := []Record{
-		{V: WireVersion, Kind: "episode", Episode: &Episode{
+		{V: 1, Kind: "episode", Episode: &Episode{
 			ID: "0199a1b2c3d4e5f6a7b8c9d0e1f2", Host: HostName,
 			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
 			StartedAt: at, EndedAt: at.Add(6 * time.Second),
@@ -279,11 +283,11 @@ func TestWireGolden(t *testing.T) {
 			End:   EndBudgetExhausted,
 			Attrs: map[string]string{"machine": "m-0a1b2c3d"},
 		}},
-		{V: WireVersion, Kind: "outcome", Outcome: &Outcome{
+		{V: 1, Kind: "outcome", Outcome: &Outcome{
 			ID: "0199a1b2c3d5f6a7b8c9d0e1f2a3", EpisodeID: "0199a1b2c3d4e5f6a7b8c9d0e1f2",
 			At: at.Add(6 * time.Second), Kind: OutcomeFailure, Source: SourceHost,
 		}},
-		{V: WireVersion, Kind: "outcome", Outcome: &Outcome{
+		{V: 1, Kind: "outcome", Outcome: &Outcome{
 			ID: "0199a1b2c3d6a7b8c9d0e1f2a3b4", EpisodeID: "0199a1b2c3d4e5f6a7b8c9d0e1f2",
 			At: at.Add(3 * time.Minute), Kind: OutcomeUndone, Source: SourceDerived, Note: "/undo",
 		}},
@@ -308,5 +312,52 @@ func TestWireGolden(t *testing.T) {
 	}
 	if !bytes.Equal(buf.Bytes(), want) {
 		t.Fatalf("wire format changed.\n got: %s\nwant: %s", buf.String(), want)
+	}
+}
+
+// TestWireGoldenV2 pins version 2: an episode with lessons delivered and
+// withheld, and a /lessons forget. The engine keeps a byte-identical copy
+// (adapters/ndjson/testdata/helix_wire_v2.ndjson).
+func TestWireGoldenV2(t *testing.T) {
+	at := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
+	recs := []Record{
+		{V: WireVersion, Kind: "episode", Episode: &Episode{
+			ID: "0199a1b2c3d4e5f6a7b8c9d0e1f5", Host: HostName,
+			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
+			StartedAt: at, EndedAt: at.Add(6 * time.Second),
+			Request:  Request{Text: "build the project", Provenance: ProvUserTyped},
+			Exposure: []string{"0199a1b2c3d4e5f6a7b8c9d0e1f3"},
+			Withheld: []string{"0199a1b2c3d4e5f6a7b8c9d0e1f4"},
+			Steps: []Step{
+				{Tool: "file", Action: "read", Subject: "go.mod", OK: true, Duration: 12 * time.Millisecond},
+				{Tool: "shell", Subject: "go build ./...", OK: true, Duration: time.Second},
+			},
+			Usage: Usage{ModelCalls: 1, InputChars: 8200, OutputChars: 640},
+			End:   EndDone,
+			Attrs: map[string]string{"machine": "m-0a1b2c3d"},
+		}},
+		{V: WireVersion, Kind: "outcome", Outcome: &Outcome{
+			ID: "0199a1b2c3d5f6a7b8c9d0e1f2a5", EpisodeID: "0199a1b2c3d4e5f6a7b8c9d0e1f5",
+			At: at.Add(6 * time.Second), Kind: OutcomeSuccess, Source: SourceHost,
+		}},
+		{V: WireVersion, Kind: "feedback", Feedback: &Feedback{
+			ID: "0199a1b2c3d6a7b8c9d0e1f2a3b6", LessonID: "0199a1b2c3d4e5f6a7b8c9d0e1f4",
+			At: at.Add(5 * time.Minute), Action: FeedbackForget, Reason: "this repo moved to Bazel",
+		}},
+	}
+	var buf bytes.Buffer
+	for _, r := range recs {
+		line, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf.Write(append(line, '\n'))
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "wire_v2.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("wire v2 changed.\n got: %s\nwant: %s", buf.String(), want)
 	}
 }
