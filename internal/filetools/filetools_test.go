@@ -517,3 +517,40 @@ func mustTime(t *testing.T, day string) time.Time {
 	}
 	return p
 }
+
+// Every path a glob or grep reports can be read as it stands. Found in
+// replays of real turns: a glob in Development/Personal/Metabolism reported
+// judge/pair.go, and reading that from the working directory failed.
+func TestSearchResultsAreReadableAsReported(t *testing.T) {
+	j, root := newJail(t)
+	write(t, root, "Development/Personal/Metabolism/judge/pair.go", "package judge\n\nfunc NewPair() {}\n")
+	write(t, root, "Development/Personal/Metabolism/docs/harness.md", "intro\nhow replay works\n")
+
+	out, err := Glob(j, "**/*.go", "Development/Personal/Metabolism")
+	if err != nil || out != "Development/Personal/Metabolism/judge/pair.go" {
+		t.Fatalf("glob reported %q (%v)", out, err)
+	}
+	if _, err := Read(j, out); err != nil {
+		t.Fatalf("reading the glob's result as reported: %v", err)
+	}
+
+	out, err = Grep(j, "NewPair", "Development/Personal/Metabolism")
+	if err != nil || !strings.HasPrefix(out, "Development/Personal/Metabolism/judge/pair.go:3: ") {
+		t.Fatalf("grep in a folder reported %q (%v)", out, err)
+	}
+	file := strings.SplitN(out, ":", 2)[0]
+	if _, err := Read(j, file); err != nil {
+		t.Fatalf("reading the grep's file as reported: %v", err)
+	}
+
+	// A grep of one file names that file, not ".".
+	out, _ = Grep(j, "replay", "Development/Personal/Metabolism/docs/harness.md")
+	if out != "Development/Personal/Metabolism/docs/harness.md:2: how replay works" {
+		t.Fatalf("grep of one file reported %q", out)
+	}
+
+	// A search from "." reports paths as before.
+	if out, _ := Glob(j, "**/pair.go", "."); out != "Development/Personal/Metabolism/judge/pair.go" {
+		t.Fatalf("glob from . reported %q", out)
+	}
+}

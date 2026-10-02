@@ -91,10 +91,17 @@ now told to use it and told why.
 | :--- | :--- | :--- |
 | `read` | `path`, optional `start_line`, `end_line` | low — one window of at most 80 lines and 6 KB, headed `[path: lines A-B of N]`; binaries and directories refused |
 | `list` | `path` (default `.`) | low — 200 entries |
-| `glob` | `pattern`, `path` | low — 200 results, `**` supported, newest first |
-| `grep` | `pattern`, `path` | low — case-insensitive, 60 matches, `file:line:` |
+| `glob` | `pattern`, `path` | low — 200 results, `**` supported, newest first; paths as they can be read |
+| `grep` | `pattern`, `path` | low — case-insensitive, 60 matches, `file:line:`; paths as they can be read |
 | `edit` | `path`, `old_string`, `new_string`, `replace_all` | **medium** |
 | `write` | `path`, `content` | **medium** |
+
+**Search results can be read as reported.** A glob or grep under a folder
+reports each path with that folder in front
+(`Development/Personal/Metabolism/judge/pair.go`), the way the planner wrote
+it, so the next read works. Until 2026-10-02 paths were relative to the
+searched folder alone (`judge/pair.go`), and reading one from the working
+directory failed; a grep of a single file reported its lines as `.:840:`.
 
 **A read is a window, and says so.** It returns at most 80 lines from
 `start_line` (default 1), under a header naming the lines and the file's

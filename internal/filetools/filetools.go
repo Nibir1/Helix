@@ -271,10 +271,25 @@ func Glob(r Resolver, pattern, root string) (string, error) {
 			fmt.Fprintf(&sb, "...[%d more matches; narrow the pattern]\n", len(hits)-i)
 			break
 		}
-		sb.WriteString(h.rel)
+		sb.WriteString(shown(root, h.rel))
 		sb.WriteString("\n")
 	}
 	return strings.TrimSuffix(sb.String(), "\n"), nil
+}
+
+// shown is a result path as the planner should use it: the search root as
+// the planner wrote it, joined with the path under it. Results used to be
+// relative to the search root alone, so a glob in
+// Development/Personal/Metabolism reported judge/pair.go, and the planner's
+// next read of that path, from the working directory, failed: a wasted round,
+// seen in several replays of real turns. A grep of one file reported its
+// lines as ".:840:" for the same reason.
+func shown(root, rel string) string {
+	root = filepath.ToSlash(strings.TrimSpace(root))
+	if root == "" || root == "." {
+		return rel
+	}
+	return path.Join(root, rel)
 }
 
 // Grep searches file contents, case-insensitively, and reports file:line:text.
@@ -326,7 +341,7 @@ func Grep(r Resolver, pattern, path string) (string, error) {
 				if len(trimmed) > maxGrepLine {
 					trimmed = trimmed[:maxGrepLine] + "…"
 				}
-				fmt.Fprintf(&sb, "%s:%d: %s\n", filepath.ToSlash(rel), n+1, trimmed)
+				fmt.Fprintf(&sb, "%s:%d: %s\n", shown(path, filepath.ToSlash(rel)), n+1, trimmed)
 				matches++
 			}
 		}
