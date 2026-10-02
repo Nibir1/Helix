@@ -381,6 +381,11 @@ record at `~/.helix/voice_log/` — transcripts, replies, the STT provider and i
 confidence, and what the pipeline did with each utterance (planner, spoken
 command, kill phrase, or refused). With it off there is no directory and no file.
 
+`/metabolism on` also stores text: each planner request, spoken ones included,
+masked and cut to 500 bytes, in `~/.helix/metabolism/`, labelled by how
+reliable the transcript was. It is typed-only (voice can neither start nor stop
+it) and local ([harness.md](harness.md) §10).
+
 It is **text only, never audio**: captured clips are deleted the moment they are
 read, so there is nothing to point at. The file is 0600 in a 0700 directory,
 rotates at 1 MiB keeping three generations, and `/purge` wipes it. `/blackbox

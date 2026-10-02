@@ -597,13 +597,19 @@ command reference against the same table.
 - **Project context** (`cmd/helix/dev_cmds.go`): `HELIX.md` / `AGENTS.md` /
   `CLAUDE.md`, discovered by walking up from the working directory and fenced as
   data-only — a committed file is content from whoever wrote the repository.
+- **Metabolism recorder** (`internal/metabolism/`, `internal/agent/metabolism.go`):
+  an opt-in, write-only episode log of planner turns for the Metabolism engine.
+  Nothing it writes is read back into a prompt, and it is network-free by test.
+  `helix replay` (`cmd/helix/replay_cmd.go`) plans past requests with lessons
+  and executes nothing. See `docs/harness.md` §10–§11.
 
 ### 5d. Local Logs (`internal/journal/`)
 
 One append-only NDJSON writer behind every ROTATING on-disk record Helix keeps:
-the daemon's interaction journal and the opt-in voice interaction log. Both
-wanted the same three properties, so they share one implementation rather than
-two that drift.
+the daemon's interaction journal, the opt-in voice interaction log, and the
+opt-in Metabolism episode log (`internal/metabolism/`). They wanted the same
+three properties, so they share one implementation rather than several that
+drift.
 
 It used to say "every on-disk record", which stopped being true when `/reboot`
 added `~/.helix/reboot.json` — a single-shot continuity record that is
@@ -612,7 +618,8 @@ correctly does not use it.
 
 - **Permissions and rotation are the package's job, schemas belong to callers.**
   Files are 0600 in a 0700 directory and rotate at 1 MiB keeping three
-  generations. Rotation happens *before* the write that would exceed the budget,
+  generations by default; the Metabolism log overrides this to 8 MiB × 4.
+  Rotation happens *before* the write that would exceed the budget,
   not after — checking afterwards leaves a file over its limit until the next
   append, which on a log that goes quiet is indefinitely. The journal had no
   rotation at all before this, despite the roadmap describing it as rotated
@@ -790,7 +797,9 @@ User Input → Classifier → [Shell Command] → Safety Pipeline → Sandbox �
                           ↓
                     Approval Posture → Sandbox → Pre-hook → exec → Post-hook
                           ↓
-                    Observations → [agentic] replan (bounded, same pipeline)
+                    Observations → [agentic] replan (bounded, same pipeline;
+                          ↓                a refused confirmation stops the run)
+                    Metabolism recorder (opt-in, write-only, local)
 ```
 
 See `docs/harness.md` for the harness layer in full: tool vocabulary, approval
@@ -864,7 +873,18 @@ Helix also runs headless. The daemon owns the same Agent the interactive shell
 does — the identical safety pipeline, sandbox and firewall — with a
 `failClosedPrompter` in place of a human: every confirmation declines, because
 approving something with nobody at the terminal is the one answer that can never
-be right (ADR-005).
+be right (ADR-005). Planner steps are never trusted, so a Medium-risk step
+proposed through the daemon is refused, not run; until 2026-10-01 it ran
+([SECURITY.md](SECURITY.md) §1).
+
+Three more things differ from the interactive shell, all because nobody is at
+the terminal:
+- `PAGER`, `GIT_PAGER` and `MANPAGER` are set to `cat` at startup
+  (`DisablePagers`), so `git log` cannot block every later request on `less`.
+- Each request starts in the daemon's home directory; a `cd` in one request
+  does not move the next.
+- With the `/metabolism` preference on (read when the daemon starts), daemon
+  turns are recorded; its automatic refusals are not counted as user declines.
 
 **Transport is platform-split** (ADR-004): a Unix domain socket on macOS and
 Linux, a loopback TCP listener plus a per-start token in

@@ -21,7 +21,7 @@ It combines:
 - **Multi-Provider AI** (OpenAI, Anthropic, Google Gemini, Meta, DeepSeek, Ollama and more) — no model IDs compiled in; the model is discovered from the provider and ranked vision-first
 - **Live Threat Intelligence** (NVD, CISA KEV, Exploit-DB, MITRE ATT&CK)
 - **RAG over System Docs** (900+ indexed MAN pages and CLI tools)
-- **One visual language across all 57 commands** — panels, badges and aligned rows, never a flat stack of coloured lines. Colour honours `NO_COLOR` and switches itself off when the output is not a terminal, so piping Helix or running it as a service produces clean text
+- **One visual language across all 58 commands** — panels, badges and aligned rows, never a flat stack of coloured lines. Colour honours `NO_COLOR` and switches itself off when the output is not a terminal, so piping Helix or running it as a service produces clean text
 - **A Multi-Layer Safety & Sandbox Engine** around shell, git, packages, and recon
 - **Enterprise-Grade Hardening** (Kernel confinement, instruction firewalls, and signed supply chains)
 - **Synthetic Tonal Audio** for immersive, synchronized terminal feedback
@@ -232,7 +232,9 @@ Using an advanced **Input Classification Engine** (`internal/shell/classify.go`)
 
 **The session persists the things a shell session should.** `cd` has always
 moved Helix itself rather than a child process; `export FOO=bar` and
-`unset FOO` now do the same, so a later command inherits them:
+`unset FOO` now do the same, so a later command inherits them. (The daemon is
+the exception: each `helix remote submit` and each hands-free turn starts in
+the daemon's home directory, so a `cd` does not carry into the next request.)
 
 ```bash
 export PATH="$HOME/go/bin:$PATH"
@@ -268,7 +270,7 @@ follows, which ADR-005 reserves for the keyboard.
 - `/sandbox strict` *(Enforces kernel-grade write confinement via Landlock/Seatbelt)*
 - `/doctor` *(Surfaces local, telemetry-free crash diagnostics and system health)*
 - `/reboot` *(Self-updates from GitHub releases or a local build — checksum-verified, atomically installed, automatically rolled back if the new binary cannot start — then restarts and resumes what it was doing)*
-- `/purge` *(Deletes all local Helix data — keys, databases, caches, transcripts and crash reports — after a grouped manifest and an explicit confirmation)*
+- `/purge` *(Deletes all local Helix data — keys, databases, caches, transcripts, the Metabolism recording and crash reports — after a grouped manifest and an explicit confirmation)*
 
 ---
 
@@ -317,7 +319,7 @@ Nothing here destroys a transcript. `/clear`, `/compact`, `/memory clear`, and `
 | `/todo [add\|start\|done\|rm\|...]` | Task list the planner can see **and edit** |
 | `/tools` | The harness tool vocabulary and each tool's gate |
 | `/hooks [list\|add\|rm\|test\|...]` | Run your own commands around tool execution |
-| `/metabolism [on\|off\|status]` | Record planner turns locally for the Metabolism engine |
+| `/metabolism [on\|off\|status]` | Record planner turns locally for the Metabolism engine. The engine tests lessons by re-planning past requests through `helix replay`, which executes nothing ([docs/harness.md](docs/harness.md) §10–§11) |
 | `/undo` | Reverse the most recent journalled action |
 | `/dry-run` | Toggle command execution preview mode |
 
@@ -462,7 +464,9 @@ Subcommands:
 - **log** `on|off|status|show` — keep a local text record of what was heard and said
 - **stats** — measured latencies and wake rate, judged against the §10 targets
 
-Nothing you say is stored unless you ask for it. `/blackbox log on` starts a
+Nothing you say is stored unless you ask for it. `/metabolism on` (typed only)
+records each planner request, spoken ones included, as masked, bounded text in
+`~/.helix/metabolism/` ([docs/harness.md](docs/harness.md) §10). `/blackbox log on` starts a
 transcript log at `~/.helix/voice_log/` (0600, rotated, wiped by `/purge`); with
 it off there is no directory and no file. It records **text only** — transcripts,
 replies, the STT provider and its confidence — never audio, because captured
@@ -487,7 +491,7 @@ hours old, and wiped by `/purge`.
 | Command | Description |
 | :--- | :--- |
 | `/reboot [now\|check]` | **Self-update and restart.** Checks GitHub releases and locally built binaries, installs automatically, and comes back in the same mode, directory, provider and conversation. A download is installed only if its SHA-256 matches the release's checksums file; the previous binary is kept and restored automatically if the new one cannot start. `now` skips the check, `check` only reports. Say **"reboot"** in live mode |
-| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, the piper runtime binary, the CSM source and build tree, **Ollama's model blobs**, and **the CSM weights in the Hugging Face cache**) with their sizes. The last two live outside `~/.helix` and are shared with anything else on the machine that uses them, so the manifest says so before you answer, and closes by pointing at `/reboot` — open database handles only release when the process exits |
+| `/purge` | Wipe ALL Helix data (keys, DBs, caches, tasks, hooks, archives, the Metabolism recording) for a fresh start. Shows a grouped manifest of exactly what exists and what each group costs you, then asks separately about large downloads (LLM weights, whisper models, piper voices, the piper runtime binary, the CSM source and build tree, **Ollama's model blobs**, and **the CSM weights in the Hugging Face cache**) with their sizes. The last two live outside `~/.helix` and are shared with anything else on the machine that uses them, so the manifest says so before you answer, and closes by pointing at `/reboot` — open database handles only release when the process exits |
 
 ### Aliases
 `/?` `/h` `/sos` → `/help` · `/v` → `/version` · `/reset` → `/clear` · `/usage` → `/cost` · `/mode` → `/permissions` · `/intel` → `/vuln`
@@ -555,6 +559,8 @@ Every shell step flows through `ValidateAndCleanShellCommand`:
 - **High** – catastrophic patterns (e.g. `rm -rf`, pipe‑into‑shell). Hard-blocked.
 
 > Those two lines describe a fix, not a design: until 2026-09-08 the Medium tier tested for `" > "` with a space on each side, so `echo x >f` — the same command, one space apart — was **Low**, the tier that runs without asking. The device-write hard block had a mis-escaped pattern and had never matched anything. Both are now asserted by behaviour, and the details are in [docs/SECURITY.md](docs/SECURITY.md) §1.
+>
+> Separately, until 2026-10-01 every step the planner proposed was marked trusted, so a Medium step it proposed ran without that question under the default posture. Planner steps are now never trusted: only Helix's own deterministic fast-path plans are, and `/permissions auto` is the only way to skip the question. See [docs/SECURITY.md](docs/SECURITY.md) §1.
 
 ### 3. Directory Sandbox (Advisory)
 All shell commands execute via a `DirectorySandbox`:

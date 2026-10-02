@@ -565,6 +565,10 @@ so command output can never become an instruction.
    stopped without replanning. `OK` keeps its meaning (the handler returned no error) and the
    captured `ExitCode` carries the truth; `allStepsOK` now judges on both. User-facing execution
    semantics are unchanged.
+**Amendment (2026-10-02):** the exit status is now kept on every shell step, non-agentic turns
+included (`commands.NewExitStatus`: no tee, so the child keeps its TTY); only the output tail stays
+gated on agentic mode. A step during which a confirmation was refused is `Declined`, not OK, and
+ends the loop rather than replanning around the refusal.
 
 ### ADR-014 — Sentence-pipelined TTS for time-to-first-audio.
 **Decision (2026-08-17):** Spoken replies play sentence-by-sentence with one-ahead synthesis

@@ -399,6 +399,13 @@ a connectivity monitor. On network loss it flips STT/TTS to local-first chains
 and speaks a notice; on restore it switches back. It refuses IPC `submit` while
 an interactive TTY session holds the active-session lock.
 
+Nobody is at the daemon's terminal, so it behaves accordingly. Each request
+starts in the daemon's home directory (a `cd` does not carry into the next
+request). Commands never page (`PAGER`, `GIT_PAGER` and `MANPAGER` are `cat`).
+Every confirmation is refused, so a Medium-risk planner step is declined rather
+than run. With `/metabolism on` (read when the daemon starts), its planner turns
+are recorded locally.
+
 - **Session memory** persists the last 20 turns (`~/.helix/session.json`, 0600)
   and injects them into the planner as *data-only* context. `/memory show|clear`.
 - **Undo:** after a `git commit`, say or type `"undo that"` — Helix offers
@@ -658,10 +665,15 @@ Samples live in `~/.helix/metrics/` (0600, local only, never transmitted) and
   text only, same permissions and rotation, `/purge` wipes it.
 - **Metrics:** `~/.helix/metrics/` — wake, voice, speech, vision, ambient and
   daemon-uptime samples; local only, read by `/blackbox stats` (§9).
+- **Metabolism:** `~/.helix/metabolism/episodes.ndjson` — **absent unless you
+  run `/metabolism on`**; each planner request as masked text of at most 500
+  bytes, plus step subjects, never command output; 0600 in 0700, rotated at
+  8 MiB × 4; local only (`docs/harness.md` §10).
 - **No telemetry:** nothing leaves the machine without a provider + key you
-  entered; the pricing catalog is embedded data + a local override
+  entered (`helix replay`, run by the Metabolism engine, sends past requests to
+  that same provider again); the pricing catalog is embedded data + a local override
   (`~/.helix/pricing.json`).
 
 `/purge` wipes keys, DBs, session memory, the reboot record and update marker,
-journals, the voice log, metrics, and the daemon socket for a clean slate — then `/reboot` finishes
+journals, the voice log, metrics, the Metabolism recording, and the daemon socket for a clean slate — then `/reboot` finishes
 the job, because open database handles only release when the process exits.

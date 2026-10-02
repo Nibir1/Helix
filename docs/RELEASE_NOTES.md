@@ -1,3 +1,33 @@
+## Next release (unreleased, on `feat/metabolism-integration`)
+
+### Security
+
+- **Planner steps ask again.** From v1.0.0 every step the planner proposed was
+  marked trusted, so a Medium-risk `file write`, `file edit` or redirecting
+  shell command ran without asking under the default `ask` posture, the daemon
+  included. Planner steps are now never trusted; only Helix's own fast-path
+  plans are, and `/permissions auto` is the only way to skip the question.
+  See SECURITY.md §1.
+
+### Fixes
+
+- **No means the step did not happen.** A step whose confirmation was refused
+  is reported as declined, not OK; the plan stops there, and the agentic loop
+  ends instead of replanning around the refusal.
+- **Exit codes on every turn.** A shell step keeps its exit status outside
+  `/agentic` too, without capturing output, so the command keeps its terminal.
+- **Daemon:** commands never wait on a pager, and each request starts in the
+  daemon's home directory instead of wherever the last `cd` left it.
+
+### New
+
+- **`/metabolism`**: opt-in, local-only recording of planner turns for the
+  Metabolism engine (`~/.helix/metabolism/`, masked and bounded, wiped by
+  `/purge`). harness.md §10.
+- **`helix replay`**: plans past requests again with learned lessons and
+  executes nothing; the engine's nutrient test drives it over NDJSON.
+  harness.md §11.
+
 ## Helix v1.5.0: Voice & an Agent that can work
 
 v1.0.0 taught the terminal to speak human. v1.5.0 lets you stop typing at it:

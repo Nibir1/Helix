@@ -215,10 +215,17 @@ package is provably network-free via a CI-enforced import grep test.
 
 The same contract now covers everything else Helix writes about a session:
 `internal/journal` (the daemon interaction journal and the opt-in voice
-transcript log) and `internal/metrics` (latency and liveness samples) each carry
+transcript log), `internal/metrics` (latency and liveness samples) and
+`internal/metabolism` (the opt-in `/metabolism` recording of planner turns,
+masked and bounded, rotated at 8 MiB with four older files kept) each carry
 their own CI-enforced grep test proving they import no networking. Code that
 writes down what you said or did cannot send it anywhere. All of it is 0600
 inside a 0700 directory, size-rotated, and wiped by `/purge`.
+
+One related path does send data: `helix replay`, which the Metabolism engine
+runs to test a lesson, plans past requests again with your configured
+provider. It is the same provider a live turn uses, it executes nothing, and
+the engine runs it only with an explicit `-allow-remote` (harness.md §11).
 
 `/reboot` writes one short-lived file under the same contract, minus the
 rotation it does not need: `~/.helix/reboot.json` carries the state a restart
@@ -389,7 +396,9 @@ plainly because an updater is the highest-consequence code in the project:
   `/blackbox status` will not claim the camera is working until a frame has
   actually arrived.
 - **Nothing you say is stored unless you ask.** `/blackbox log on` starts a local
-  transcript log; with it off there is no directory and no file. It records text
+  transcript log; with it off there is no directory and no file. `/metabolism on`
+  (typed only) also records each planner request, spoken ones included, as
+  masked text of at most 500 bytes. It records text
   and metadata only — never audio, because captured clips are deleted the moment
   they are read.
 - **Conversational context retention is opt-in and never reaches disk.** A

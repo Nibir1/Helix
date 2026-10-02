@@ -35,8 +35,11 @@ planner that would have produced `git checkout -b test`. Voice always goes down
 the right-hand path. The safety pipeline covered both branches throughout, so
 this is a routing correction rather than a closed hole.
 
-With `/agentic on`, a failing step feeds its **observed** outcome — exit status
-and a bounded, sanitized tail of its output — back to the planner, which replans.
+Every shell step keeps its exit status, so a non-zero exit is never reported
+as success. With `/agentic on`, a failing step feeds its **observed** outcome —
+exit status and a bounded, sanitized tail of its output (captured only on
+agentic turns) — back to the planner, which replans. A step whose confirmation
+was refused ends the loop instead of replanning around the refusal.
 That loop re-enters the whole pipeline on every iteration; it is bounded by the
 step budget (`/agentic steps <n>`, 1–20) and cannot skip a gate.
 
@@ -575,7 +578,8 @@ install` is **apt-get** talking, and `python3 -m pip` is **pip**.
 Four blocks ride into every planner prompt. All four are fenced as
 `authority="data-only"` and sanitized with the same routine as retrieved
 knowledge: no fences, no backticks, bounded length. They inform the planner; they
-can never instruct it.
+can never instruct it. `helix replay` (§11) is the exception: it carries none
+of the four, only the learned-lessons block, fenced and sanitized the same way.
 
 | Block | Source | Bound |
 | :--- | :--- | :--- |
@@ -728,6 +732,8 @@ off. `/metabolism on` records that baseline.
 /metabolism off      stop; what was recorded is kept
 ```
 
+`/config metabolism on|off` sets the same preference.
+
 **What is recorded.** One *episode* per turn that reached the planner:
 
 - the request (masked and bounded) and whether it was typed, spoken, or a
@@ -748,11 +754,12 @@ off. `/metabolism on` records that baseline.
 |---|---|
 | the run's own end | success, or failure (a shell step that exits non-zero is a failed step, on every turn, agentic or not) |
 | a yes/no confirmation you answered "no" during the turn | declined (the step is recorded as not OK, and the turn as open work) |
-| the same request asked again within 10 minutes | repeated, against the earlier turn |
+| the same request asked again as the very next turn, within 10 minutes | repeated, against the earlier turn |
 | `undo` of a commit the turn made | undone, against the turn that committed |
 
 The interactive shell and the background daemon both record when the
-preference is on. The daemon's confirmations are refused automatically, and
+preference is on. The daemon reads it when it starts, so restart the daemon
+after changing it. The daemon's confirmations are refused automatically, and
 those refusals are not recorded as you declining.
 Each daemon request starts in the daemon's home directory: a `cd` in one
 request does not move the next.
@@ -796,7 +803,9 @@ the same file. A change that fails that test is a format change: bump
 thousands of turns fit before the oldest is dropped. Ingest reads rotated
 generations too, and re-ingesting is harmless.
 
-`/purge` removes the recording along with the rest of `~/.helix`.
+`/purge` removes the recording (`~/.helix/metabolism/`) along with the rest of
+`~/.helix`, and so does `helix uninstall`. The engine's own journal
+(`~/.metabolism/`) belongs to Metabolism and is not touched.
 
 
 ---
@@ -833,15 +842,15 @@ The response is the plan: steps and what it would say, never a result.
    Metabolism recording. A replay must not borrow today's conversation either:
    it would then measure the session, not the lesson.
 3. **Lessons are data.** They ride a fenced `<learned_lessons
-   authority="data-only">` block, bounded at 8 lessons and 1600 characters,
+   authority="data-only">` block, bounded at 8 lessons of at most 300 characters and 1600 bytes in all,
    with angle brackets neutralised so a lesson cannot close the fence. Like
    every injected block, it informs the plan and can never authorize a step.
    A replay without lessons has no block at all.
 
 **What it sends.** Each replay is a planner call to your configured provider.
 That is the same provider every live turn already uses, but it means past
-requests are sent again. Metabolism therefore requires `-allow-remote` to use
-it unless the provider is local.
+requests are sent again. Metabolism therefore requires `-allow-remote` for
+every Helix replay: it cannot see which provider Helix is configured with.
 
 **Limits, stated plainly:**
 - It plans the *first* plan only, not the agentic loop's later iterations.
@@ -854,6 +863,9 @@ These make a replay a cleaner comparison than the live turn, not a copy of it.
 **The protocol is a contract.** `cmd/helix/testdata/replay_v1.ndjson` pins
 it; Metabolism keeps a byte-identical copy and decodes it with unknown fields
 refused.
+Helix refuses unknown request fields and any version other than 1, answering
+with an error line and carrying on with the next request. Everything Helix
+would normally print goes to stderr, so stdout carries only responses.
 
 `/plan` now uses the same planner prompt builder as a live turn (persona
 included), so a preview, a replay and the real turn plan from the same prompt.

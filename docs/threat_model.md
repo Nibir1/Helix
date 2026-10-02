@@ -15,7 +15,10 @@ planner into executing attacker-chosen commands.
    block.* Four others now ride into planner prompts under the same fence and the
    same sanitizer — session history, the `/todo` list, project context
    (`HELIX.md`/`AGENTS.md`/`CLAUDE.md`), and, in agentic mode, the execution
-   report carrying a bounded tail of what each step printed. Every one is content
+   report carrying a bounded tail of what each step printed. `helix replay`
+   (`docs/harness.md` §11) adds one more, used only there: the
+   `<learned_lessons>` block from the Metabolism engine, at most 8 lessons and
+   1600 bytes, with angle brackets neutralised. Every one is content
    Helix did not author: a committed project file is written by whoever wrote the
    repository, and command output is fully attacker-controllable through a
    crafted filename or a poisoned log line. `docs/harness.md` §6 lists them with
@@ -109,6 +112,15 @@ population. The lesson this file should carry is about the shape of the claim
 rather than the two rules: "limits blast radius via the safety pipeline" is a
 statement about code that must be tested by behaviour, and a layer nobody has
 watched fire is a layer nobody knows is there.
+
+**A third hole sat above the tiers, from v1.0.0 until 2026-10-01.** Every
+planner step was marked trusted unless the firewall escalated it, so Medium
+never asked for planner output under `ask` or `cautious`: redirecting shell
+commands and, once the tool arrived on 2026-09-14, `file/write` and
+`file/edit` ran without the question, including through the daemon. The
+"`edit` and `write` are Medium, so the default posture asks" line above was
+untrue until then. Planner steps are now never
+trusted; see `SECURITY.md` §1.
 
 **And on 2026-09-21 the file tool's own scoping was wrong on one platform.**
 `MatchGlob` normalises its arguments to forward slashes, then matched them with
