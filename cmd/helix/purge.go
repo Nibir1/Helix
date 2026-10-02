@@ -340,6 +340,7 @@ func purgeTargets(home, helixDir string) []purgeTarget {
 		// commands that still fire.
 		{in("sessions"), "archived conversations (/resume)", groupMemory},
 		{in("exports"), "exported transcripts (/export)", groupMemory},
+		{in("metabolism"), "planner turns recorded for Metabolism (/metabolism)", groupMemory},
 
 		{in("metrics"), "wake/latency metrics", groupRuntime},
 		{in("daemon.sock"), "daemon IPC socket", groupRuntime},

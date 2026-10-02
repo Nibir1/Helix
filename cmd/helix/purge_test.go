@@ -325,3 +325,20 @@ func TestDeleteSecretsCoversEveryCredentialStore(t *testing.T) {
 			"survive it")
 	}
 }
+
+// The Metabolism recording holds request text from past turns. A purge that
+// left it behind would not be the clean slate it promises (found by a doc
+// audit: harness.md said /purge removed it, and it did not).
+func TestPurgeRemovesTheMetabolismRecording(t *testing.T) {
+	helixDir := filepath.Join(t.TempDir(), ".helix")
+	want := filepath.Join(helixDir, "metabolism")
+	for _, tg := range purgeTargets(filepath.Dir(helixDir), helixDir) {
+		if tg.path == want {
+			if tg.group != groupMemory {
+				t.Fatalf("the recording is grouped as %v, want memory", tg.group)
+			}
+			return
+		}
+	}
+	t.Fatal("purge does not remove ~/.helix/metabolism")
+}
