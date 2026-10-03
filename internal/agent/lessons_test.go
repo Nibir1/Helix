@@ -2,8 +2,8 @@ package agent
 
 import (
 	"os"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 

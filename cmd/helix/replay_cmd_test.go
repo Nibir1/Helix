@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
+	"github.com/fatih/color"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,5 +218,31 @@ func TestReplayWireGoldenV2(t *testing.T) {
 	}
 	if !bytes.Equal(buf.Bytes(), want) {
 		t.Fatalf("replay wire v2 changed.\n got: %s\nwant: %s", buf.String(), want)
+	}
+}
+
+// Nothing Helix prints reaches the protocol stream: not fmt, and not the
+// colour library, whose writer was bound to stdout at startup. A coloured
+// "Dropping ..." warning on stdout broke a nutrient-test run.
+func TestProtocolStdoutCarriesNothingElse(t *testing.T) {
+	protoR, protoW, _ := os.Pipe()
+	errR, errW, _ := os.Pipe()
+	oldOut, oldErr, oldColor, oldColorErr := os.Stdout, os.Stderr, color.Output, color.Error
+	os.Stdout, os.Stderr, color.Output = protoW, errW, protoW
+	defer func() { os.Stdout, os.Stderr, color.Output, color.Error = oldOut, oldErr, oldColor, oldColorErr }()
+
+	proto := protocolStdout()
+	color.Yellow("Dropping file read step with no path")
+	fmt.Println("a status line")
+	_, _ = proto.WriteString(`{"v":2}` + "\n")
+	_ = protoW.Close()
+	_ = errW.Close()
+	got, _ := io.ReadAll(protoR)
+	rest, _ := io.ReadAll(errR)
+	if string(got) != `{"v":2}`+"\n" {
+		t.Fatalf("the protocol stream carried %q", got)
+	}
+	if !strings.Contains(string(rest), "Dropping") || !strings.Contains(string(rest), "a status line") {
+		t.Fatalf("stderr carried %q", rest)
 	}
 }

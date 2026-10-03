@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/fatih/color"
 	"io"
 	"os"
 	"strings"
@@ -86,6 +87,22 @@ func (replayPrompter) AskLine(string) string                    { return "" }
 func (replayPrompter) AskTypedConfirmation(string, string) bool { return false }
 func (replayPrompter) Unattended() bool                         { return true }
 
+// protocolStdout makes stdout the protocol's alone and returns it. Anything
+// Helix would normally print goes to stderr instead, so a stray status line
+// can never corrupt a response.
+//
+// Reassigning os.Stdout is not enough: the colour library bound its own
+// writer to the original stdout when the program started, so a coloured
+// warning ("Dropping file read step with no path") still reached the
+// protocol and broke a nutrient-test run on its first automated day.
+func protocolStdout() *os.File {
+	proto := os.Stdout
+	os.Stdout = os.Stderr
+	color.Output = os.Stderr
+	color.Error = os.Stderr
+	return proto
+}
+
 // runReplayCommand handles `helix replay`. It reads requests from stdin until
 // EOF and answers each on stdout.
 func runReplayCommand(args []string) (bool, int) {
@@ -96,10 +113,7 @@ func runReplayCommand(args []string) (bool, int) {
 		fmt.Fprintln(os.Stderr, "usage: helix replay   (NDJSON requests on stdin, responses on stdout)")
 		return true, 2
 	}
-	// Stdout is the protocol. Anything Helix would normally print goes to
-	// stderr instead, so a stray status line can never corrupt a response.
-	proto := os.Stdout
-	os.Stdout = os.Stderr
+	proto := protocolStdout()
 	// Nothing runs during a replay, but nothing must ever wait on a pager
 	// with no one to answer it either.
 	daemon.DisablePagers()
