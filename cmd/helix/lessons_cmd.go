@@ -13,7 +13,7 @@ import (
 	"helix/internal/shell"
 )
 
-// handleLessonsCommand implements /lessons [on|off|status|why <id>|forget <id> <reason>].
+// handleLessonsCommand implements /lessons [on|off|status|why <id>|forget [--hard] <id> <reason>].
 func handleLessonsCommand(c cmdArgs) {
 	if metabolismRec == nil {
 		uiFail("lessons", "Metabolism is not available in this session")
@@ -40,9 +40,13 @@ func handleLessonsCommand(c cmdArgs) {
 	case "why", "show":
 		explainLesson(c.Arg(1))
 	case "forget":
-		forgetLesson(c.Arg(1), c.From(2))
+		if c.Arg(1) == "--hard" {
+			forgetLesson(c.Arg(2), c.From(3), true)
+			return
+		}
+		forgetLesson(c.Arg(1), c.From(2), false)
 	default:
-		uiUsage("/lessons [on|off|why <id>|forget <id> <reason>]")
+		uiUsage("/lessons [on|off|why <id>|forget [--hard] <id> <reason>]")
 	}
 }
 
@@ -97,7 +101,7 @@ func printLessons() {
 			shell.Muted(fmt.Sprintf("delivered on %.0f%% of turns", 100*l.P)))
 		fmt.Printf("     %s\n", truncStr(l.Text, 100))
 	}
-	fmt.Println(shell.Hint("/lessons why <id> · /lessons forget <id> <reason>"))
+	fmt.Println(shell.Hint("/lessons why <id> · /lessons forget [--hard] <id> <reason>"))
 }
 
 // findLesson matches an ID or a unique prefix of at least six characters.
@@ -150,7 +154,7 @@ func explainLesson(id string) {
 	)
 }
 
-func forgetLesson(id, reason string) {
+func forgetLesson(id, reason string, hard bool) {
 	d, _, _, err := lessonsHere()
 	if err != nil {
 		uiFail("lessons", err.Error())
@@ -162,18 +166,30 @@ func forgetLesson(id, reason string) {
 		return
 	}
 	if strings.TrimSpace(reason) == "" {
-		uiUsage("/lessons forget <id> <reason>", "The reason is kept with the lesson's history, so \"why did it forget this?\" has an answer.")
+		uiUsage("/lessons forget [--hard] <id> <reason>", "The reason is kept with the lesson's history, so \"why did it forget this?\" has an answer.")
 		return
 	}
-	recorded, err := metabolismRec.Forget(l.ID, reason)
+	forget := metabolismRec.Forget
+	if hard {
+		forget = metabolismRec.ForgetHard
+	}
+	recorded, err := forget(l.ID, reason)
 	if err != nil {
 		uiFail("lessons", err.Error())
 		return
 	}
-	uiOK("lessons", "forgot "+shortID(l.ID)+": it is no longer delivered here")
-	if recorded {
-		uiDetail("The engine eliminates it, with your reason, at the next `metabolism ingest`.")
-	} else {
+	switch {
+	case hard && recorded:
+		uiOK("lessons", "deleted "+shortID(l.ID)+" from the delivery file: it is no longer delivered here")
+		uiDetail("The engine deletes it from its journal at the next `metabolism ingest`, keeping an audit record with a hash, never the text.")
+	case hard:
+		uiOK("lessons", "deleted "+shortID(l.ID)+" from the delivery file: it is no longer delivered here")
+		uiDetail("Recording is off, so the engine has not been told: run `metabolism forget -lesson " + l.ID + " -reason ... -apply` to delete it there.")
+	case recorded:
+		uiOK("lessons", "forgot "+shortID(l.ID)+": it is no longer delivered here")
+		uiDetail("The engine eliminates it, with your reason, at the next `metabolism ingest`. --hard deletes it instead.")
+	default:
+		uiOK("lessons", "forgot "+shortID(l.ID)+": it is no longer delivered here")
 		uiDetail("Recording is off, so the engine has not been told; it stays forgotten here regardless.")
 	}
 }

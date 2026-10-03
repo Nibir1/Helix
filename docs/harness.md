@@ -940,6 +940,7 @@ Helix does, so it is a second opt-in on top of recording.
 /lessons on | off                deliver tested lessons into planner turns, or stop
 /lessons why <id>                a lesson's evidence and its live credit
 /lessons forget <id> <reason>    stop it now; the engine eliminates it
+/lessons forget --hard <id> <r>  delete it: here now, in the engine at ingest
 ```
 
 `/config lessons on|off` sets the same preference. `/lessons on` refuses while
@@ -985,5 +986,14 @@ writing it to `~/.helix/metabolism/forgotten.json` (0600), and records a
 history. `/purge` removes both files with the rest of
 `~/.helix/metabolism/`.
 
+`/lessons forget --hard <id> <reason>` deletes instead. It also takes the
+lesson out of `lessons.json` at once, and records the action `forget-hard`.
+At the next ingest the engine deletes the lesson from its journal and keeps
+an audit record with a hash of each deleted record, never its content. It
+also removes those lines from the episode file, and refuses ever to learn
+the same text again (Metabolism D-028). The engine's own `metabolism
+forget` deletes episodes too, by ID or by any text they contain, and purges
+them from the episode file and its rotated generations.
+
 **Records.** Recording wire version 2 adds the episode's `withheld` list and
-the `feedback` record. The engine still reads version 1 files.
+the `feedback` record, whose action is `forget` or `forget-hard`. The engine still reads version 1 files.

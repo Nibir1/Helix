@@ -316,7 +316,7 @@ func TestWireGolden(t *testing.T) {
 }
 
 // TestWireGoldenV2 pins version 2: an episode with lessons delivered and
-// withheld, and a /lessons forget. The engine keeps a byte-identical copy
+// withheld, a /lessons forget and a /lessons forget --hard. The engine keeps a byte-identical copy
 // (adapters/ndjson/testdata/helix_wire_v2.ndjson).
 func TestWireGoldenV2(t *testing.T) {
 	at := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
@@ -343,6 +343,10 @@ func TestWireGoldenV2(t *testing.T) {
 		{V: WireVersion, Kind: "feedback", Feedback: &Feedback{
 			ID: "0199a1b2c3d6a7b8c9d0e1f2a3b6", LessonID: "0199a1b2c3d4e5f6a7b8c9d0e1f4",
 			At: at.Add(5 * time.Minute), Action: FeedbackForget, Reason: "this repo moved to Bazel",
+		}},
+		{V: WireVersion, Kind: "feedback", Feedback: &Feedback{
+			ID: "0199a1b2c3d7b8c9d0e1f2a3b4c7", LessonID: "0199a1b2c3d4e5f6a7b8c9d0e1f3",
+			At: at.Add(6 * time.Minute), Action: FeedbackForgetHard, Reason: "it quotes a private hostname",
 		}},
 	}
 	var buf bytes.Buffer

@@ -670,7 +670,10 @@ Samples live in `~/.helix/metrics/` (0600, local only, never transmitted) and
   bytes, plus step subjects, never command output; 0600 in 0700, rotated at
   8 MiB × 4; local only (`docs/harness.md` §10). Beside it, `lessons.json`
   (written by `metabolism export`, read only with `/lessons on`) and
-  `forgotten.json` (`/lessons forget`), both 0600 (§12).
+  `forgotten.json` (`/lessons forget`), both 0600 (§12). `/lessons forget
+  --hard` rewrites `lessons.json` without the lesson; the engine's `metabolism
+  forget` rewrites `episodes.ndjson` and its generations without forgotten
+  records.
 - **No telemetry:** nothing leaves the machine without a provider + key you
   entered (`helix replay`, run by the Metabolism engine, sends past requests to
   that same provider again); the pricing catalog is embedded data + a local override

@@ -222,6 +222,18 @@ func (r *Recorder) Forgotten() map[string]string {
 // records the forget for the engine, which eliminates the lesson at the next
 // ingest. It returns whether the engine will hear of it.
 func (r *Recorder) Forget(lessonID, reason string) (recorded bool, err error) {
+	return r.forget(lessonID, reason, false)
+}
+
+// ForgetHard is Forget, and also deletes the lesson's text from the delivery
+// file at once. The engine deletes it from its journal, with an audit record
+// that keeps a hash of each deleted record and never its content, at the
+// next ingest (Metabolism D-028).
+func (r *Recorder) ForgetHard(lessonID, reason string) (recorded bool, err error) {
+	return r.forget(lessonID, reason, true)
+}
+
+func (r *Recorder) forget(lessonID, reason string, hard bool) (recorded bool, err error) {
 	if r == nil {
 		return false, errors.New("metabolism is not available in this session")
 	}
@@ -234,32 +246,72 @@ func (r *Recorder) Forget(lessonID, reason string) (recorded bool, err error) {
 	if err := writePrivateJSON(filepath.Join(r.dir, ForgottenFileName), forgotten); err != nil {
 		return false, err
 	}
+	action := FeedbackForget
+	if hard {
+		action = FeedbackForgetHard
+		if err := r.dropFromDelivery(lessonID); err != nil {
+			return false, err
+		}
+	}
 	if !r.Enabled() {
 		return false, nil
 	}
 	now := r.now()
 	r.write(Record{V: WireVersion, Kind: "feedback", Feedback: &Feedback{
-		ID: NewID(now), LessonID: lessonID, At: now.UTC(), Action: FeedbackForget, Reason: reason,
+		ID: NewID(now), LessonID: lessonID, At: now.UTC(), Action: action, Reason: reason,
 	}})
 	return true, nil
+}
+
+// dropFromDelivery rewrites the delivery file without the lesson, atomically
+// and 0600, in the format the engine writes it.
+func (r *Recorder) dropFromDelivery(lessonID string) error {
+	d, err := ReadDelivery(r.LessonsPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	kept := d.Lessons[:0]
+	for _, l := range d.Lessons {
+		if l.ID != lessonID {
+			kept = append(kept, l)
+		}
+	}
+	if len(kept) == len(d.Lessons) {
+		return nil
+	}
+	d.Lessons = kept
+	data, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writePrivateFile(r.LessonsPath(), append(data, '\n'))
 }
 
 // writePrivateJSON replaces path atomically with v, 0600 in a 0700
 // directory.
 func writePrivateJSON(path string, v map[string]string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".forgotten-*.json")
+	return writePrivateFile(path, append(data, '\n'))
+}
+
+// writePrivateFile replaces path atomically with data, 0600 in a 0700
+// directory.
+func writePrivateFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".metabolism-*.json")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
 	}

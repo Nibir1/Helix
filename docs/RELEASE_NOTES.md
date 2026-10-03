@@ -42,7 +42,8 @@
 - **`/lessons`**: with recording on, delivers the lessons the engine tested
   into planner turns as fenced data, on a coin flip each turn records, so the
   engine can tell whether a lesson helps. `/lessons forget` stops one at
-  once. Off by default. harness.md §12.
+  once; `/lessons forget --hard` deletes it, here at once and in the
+  engine's journal, with an audit record, at the next ingest. Off by default. harness.md §12.
 
 ## Helix v1.5.0: Voice & an Agent that can work
 

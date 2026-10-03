@@ -163,6 +163,43 @@ func TestForget(t *testing.T) {
 	}
 }
 
+// A hard forget also takes the lesson's text out of the delivery file at
+// once, and tells the engine to delete it (Metabolism D-028).
+func TestForgetHard(t *testing.T) {
+	r, _, _, _ := newRecorder(t, true)
+	golden, err := os.ReadFile(filepath.Join("testdata", "lessons_v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.LessonsPath(), golden, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := r.Delivery()
+	if err != nil || len(before.Lessons) < 2 {
+		t.Fatalf("setup: %v %+v", err, before)
+	}
+	gone := before.Lessons[0]
+	recorded, err := r.ForgetHard(gone.ID, "it quotes a private hostname")
+	if err != nil || !recorded {
+		t.Fatalf("forget --hard: %v %v", recorded, err)
+	}
+	after, err := r.Delivery()
+	if err != nil || len(after.Lessons) != len(before.Lessons)-1 {
+		t.Fatalf("delivery after: %v %+v", err, after)
+	}
+	data, _ := os.ReadFile(r.LessonsPath())
+	if bytes.Contains(data, []byte(gone.Text)) {
+		t.Fatal("the delivery file still holds the lesson's text")
+	}
+	if fi, err := os.Stat(r.LessonsPath()); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("delivery file: %v %v", err, fi)
+	}
+	recs := readRecords(t, r.Path())
+	if fb := recs[len(recs)-1].Feedback; fb == nil || fb.LessonID != gone.ID || fb.Action != FeedbackForgetHard {
+		t.Fatalf("feedback record %+v", recs[len(recs)-1])
+	}
+}
+
 func TestMissingDeliveryIsEmpty(t *testing.T) {
 	r, _, _, _ := newRecorder(t, true)
 	d, err := r.Delivery()

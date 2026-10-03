@@ -53,8 +53,10 @@ type Record struct {
 	Feedback *Feedback `json:"feedback,omitempty"`
 }
 
-// Feedback mirrors the engine's ndjson.Feedback. The only action is
-// FeedbackForget: /lessons forget eliminated the lesson, with a reason.
+// Feedback mirrors the engine's ndjson.Feedback. FeedbackForget: /lessons
+// forget eliminated the lesson, with a reason. FeedbackForgetHard: /lessons
+// forget --hard deleted it, and the engine deletes it from its journal with
+// an audit record (Metabolism D-028).
 type Feedback struct {
 	ID       string    `json:"id"`
 	LessonID string    `json:"lesson_id"`
@@ -63,8 +65,11 @@ type Feedback struct {
 	Reason   string    `json:"reason"`
 }
 
-// FeedbackForget is the action /lessons forget records.
-const FeedbackForget = "forget"
+// The actions /lessons forget records.
+const (
+	FeedbackForget     = "forget"
+	FeedbackForgetHard = "forget-hard"
+)
 
 // Episode mirrors the engine's types.Episode.
 type Episode struct {
