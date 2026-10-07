@@ -18,6 +18,13 @@
 
 ### Fixes
 
+- **Typed requests that mention a path reach the planner again.** The
+  input classifier scores the whole line, so "run go test ./internal/..." or
+  "summarise CLAUDE.md" scored as a shell command at full confidence and
+  went straight to the shell: "command not found: run". A line now skips
+  the planner only if its first word is a builtin, a known command, an
+  assignment or a path, or is found on `PATH`. Found by Metabolism's
+  automated days, which lost 10 of 100 turns to it.
 - **The native planner path no longer wastes a round trip on every plan.**
   With DeepSeek-V4.1-Flash (thinking on by default), every planning first
   sent a native tool-calling request that the provider refused ("Thinking

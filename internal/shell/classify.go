@@ -47,6 +47,12 @@ type Classification struct {
 	Confidence float64
 	// RootCommand is the detected executable when Kind == KindShellCommand.
 	RootCommand string
+	// KnownRoot reports whether the first token is itself shell evidence: a
+	// builtin, a known command, a variable assignment or a path (./build.sh).
+	// When it is not, a shell verdict rests on the other tokens alone, and
+	// "summarise CLAUDE.md" or "run go test ./..." score as shell from their
+	// paths. The caller must then confirm the root exists before running it.
+	KnownRoot bool
 	// Reason is a short human explanation (debug/UX transparency).
 	Reason string
 }
@@ -221,6 +227,7 @@ func Classify(raw string) Classification {
 			Kind:        KindShellCommand,
 			Confidence:  shellScore / total,
 			RootCommand: tokens[0],
+			KnownRoot:   isBuiltin || isCmd || isNLProne || looksLikeAssignment(tokens[0]) || isPathToken(tokens[0]),
 			Reason:      strings.Join(reasons, "; "),
 		}
 	}

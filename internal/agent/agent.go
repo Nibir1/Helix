@@ -991,12 +991,32 @@ func extractFencedShellBlocks(text string) []string {
 // Cost, stated honestly: a spoken "git status" now pays one planner round trip.
 // The deterministic fast path below still runs for voice, so common local
 // workflows do not need the model either.
+//
+// A root the classifier does not know must also exist as an executable. The
+// classifier scores the whole line, so a typed request whose first word is
+// English and whose other words hold a path ("run go test ./internal/...",
+// "summarise CLAUDE.md") scored as shell at confidence 1.00 and went straight
+// to zsh: "command not found: run". Metabolism's automated days lost 10 of 100
+// turns to it (2026-10-07). An unknown root that is not on PATH goes to the
+// planner instead; one that is (a user's own tool) still runs as typed.
 func (a *Agent) directShellAllowed(c shell.Classification) bool {
 	if c.Kind != shell.KindShellCommand || c.Confidence < shell.HighConfidence {
 		return false
 	}
-	return !a.voiceActive()
+	if a.voiceActive() {
+		return false
+	}
+	if !c.KnownRoot {
+		if _, err := lookPath(c.RootCommand); err != nil {
+			return false
+		}
+	}
+	return true
 }
+
+// lookPath finds an executable on PATH; a variable so tests need not depend
+// on what this machine has installed.
+var lookPath = exec.LookPath
 
 func (a *Agent) runDirectShellCommand(command string) error {
 	a.render.PrintDebug("shell.classify: direct shell execution (AI bypass)")
