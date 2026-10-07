@@ -124,6 +124,11 @@ func RunModelWithTimeout(prompt string, config ModelConfig, timeout time.Duratio
 	return runModelKind(KindChat, prompt, config, timeout)
 }
 
+// RunCriticModel runs the firewall critic's review, counted as a critic call.
+func RunCriticModel(prompt string, config ModelConfig) (string, error) {
+	return runModelKind(KindCritic, prompt, config, DefaultChatTimeout)
+}
+
 // runModelKind is RunModelWithTimeout plus the accounting label. The label is
 // an explicit parameter rather than inferred state because the planner reaches
 // this path through RunPlannerWithRetry, and a session whose /cost report

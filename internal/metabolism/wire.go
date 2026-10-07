@@ -36,8 +36,11 @@ import (
 // could misparse, and teach `metabolism ingest` the new version first.
 //
 // Version 2 (Phase 3) adds an episode's withheld lessons and the feedback
-// record. A v1 file is still read by the engine.
-const WireVersion = 2
+// record. Version 3 (Metabolism D-031) adds what the turn decided: model
+// calls per kind, a record per planner round, the firewall critic's verdict,
+// why the chat fallback ran, and each step's round. Every v3 field is
+// optional. v1 and v2 files are still read by the engine.
+const WireVersion = 3
 
 // HostName is how Helix identifies itself in every episode.
 const HostName = "helix"
@@ -88,7 +91,54 @@ type Episode struct {
 	Usage    Usage             `json:"usage"`
 	End      string            `json:"end"`
 	Attrs    map[string]string `json:"attrs,omitempty"`
+
+	// What the turn decided (wire v3). Plans has one record per planner
+	// round; Critic is set when the firewall critic reviewed a plan;
+	// Fallback says why the chat fallback answered instead of a plan.
+	Plans    []Plan  `json:"plans,omitempty"`
+	Critic   *Critic `json:"critic,omitempty"`
+	Fallback string  `json:"fallback,omitempty"`
 }
+
+// Plan is one planner round of a turn (wire v3, mirrors types.PlanRecord).
+type Plan struct {
+	Round int `json:"round"`
+	// Prompt is the planner prompt that produced it: full, compact or
+	// minimal (the smaller ones are tried only after an empty answer).
+	Prompt string `json:"prompt"`
+	// Calls is how many model calls the planning cost, retries included.
+	Calls int `json:"calls"`
+	// Result: planned, error (no plan), parse-error, canary or quarantined.
+	Result string `json:"result"`
+	// Intent and FirstTool are the plan's own labels; Answered is true when
+	// every step is a reply to the user, so the round acted on nothing.
+	Intent    string `json:"intent,omitempty"`
+	FirstTool string `json:"first_tool,omitempty"`
+	Answered  bool   `json:"answered,omitempty"`
+	Steps     int    `json:"steps,omitempty"`
+}
+
+// Critic is the firewall critic's review of a plan (wire v3).
+type Critic struct {
+	Verdict string `json:"verdict"` // yes | no
+	Calls   int    `json:"calls"`
+}
+
+// Why the chat fallback answered instead of a plan (wire v3).
+const (
+	FallbackPlannerError = "planner-error"
+	FallbackParseError   = "parse-error"
+	FallbackQuarantine   = "critic-quarantine"
+)
+
+// Plan results (wire v3).
+const (
+	PlanPlanned     = "planned"
+	PlanError       = "error"
+	PlanParseError  = "parse-error"
+	PlanCanary      = "canary"
+	PlanQuarantined = "quarantined"
+)
 
 // Scope mirrors types.Scope.
 type Scope struct {
@@ -111,6 +161,8 @@ type Step struct {
 	OK       bool          `json:"ok"`
 	Err      string        `json:"err,omitempty"`
 	Duration time.Duration `json:"duration,omitempty"`
+	// Round is the planner round that planned the step, from 1 (wire v3).
+	Round int `json:"round,omitempty"`
 }
 
 // Usage mirrors types.Usage.
@@ -118,6 +170,9 @@ type Usage struct {
 	ModelCalls  int `json:"model_calls"`
 	InputChars  int `json:"input_chars"`
 	OutputChars int `json:"output_chars"`
+	// ByKind splits ModelCalls by what each call was for: planner, critic,
+	// chat, tool, vision (wire v3).
+	ByKind map[string]int `json:"by_kind,omitempty"`
 }
 
 // Outcome mirrors types.Outcome.

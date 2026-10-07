@@ -92,7 +92,7 @@ func TestFinishWritesEpisodeAndOutcomes(t *testing.T) {
 	if recs[0].Kind != "episode" || ep == nil || ep.ID != turn.ID() {
 		t.Fatalf("first record: %+v", recs[0])
 	}
-	if ep.Usage != (Usage{ModelCalls: 3, InputChars: 8000, OutputChars: 600}) {
+	if u := ep.Usage; u.ModelCalls != 3 || u.InputChars != 8000 || u.OutputChars != 600 || u.ByKind != nil {
 		t.Errorf("usage delta = %+v", ep.Usage)
 	}
 	if ep.Request.Provenance != ProvUserVoice || ep.End != EndFailed || ep.Host != HostName {
@@ -321,7 +321,7 @@ func TestWireGolden(t *testing.T) {
 func TestWireGoldenV2(t *testing.T) {
 	at := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
 	recs := []Record{
-		{V: WireVersion, Kind: "episode", Episode: &Episode{
+		{V: 2, Kind: "episode", Episode: &Episode{
 			ID: "0199a1b2c3d4e5f6a7b8c9d0e1f5", Host: HostName,
 			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
 			StartedAt: at, EndedAt: at.Add(6 * time.Second),
@@ -336,15 +336,15 @@ func TestWireGoldenV2(t *testing.T) {
 			End:   EndDone,
 			Attrs: map[string]string{"machine": "m-0a1b2c3d"},
 		}},
-		{V: WireVersion, Kind: "outcome", Outcome: &Outcome{
+		{V: 2, Kind: "outcome", Outcome: &Outcome{
 			ID: "0199a1b2c3d5f6a7b8c9d0e1f2a5", EpisodeID: "0199a1b2c3d4e5f6a7b8c9d0e1f5",
 			At: at.Add(6 * time.Second), Kind: OutcomeSuccess, Source: SourceHost,
 		}},
-		{V: WireVersion, Kind: "feedback", Feedback: &Feedback{
+		{V: 2, Kind: "feedback", Feedback: &Feedback{
 			ID: "0199a1b2c3d6a7b8c9d0e1f2a3b6", LessonID: "0199a1b2c3d4e5f6a7b8c9d0e1f4",
 			At: at.Add(5 * time.Minute), Action: FeedbackForget, Reason: "this repo moved to Bazel",
 		}},
-		{V: WireVersion, Kind: "feedback", Feedback: &Feedback{
+		{V: 2, Kind: "feedback", Feedback: &Feedback{
 			ID: "0199a1b2c3d7b8c9d0e1f2a3b4c7", LessonID: "0199a1b2c3d4e5f6a7b8c9d0e1f3",
 			At: at.Add(6 * time.Minute), Action: FeedbackForgetHard, Reason: "it quotes a private hostname",
 		}},
@@ -363,5 +363,67 @@ func TestWireGoldenV2(t *testing.T) {
 	}
 	if !bytes.Equal(buf.Bytes(), want) {
 		t.Fatalf("wire v2 changed.\n got: %s\nwant: %s", buf.String(), want)
+	}
+}
+
+// TestWireGoldenV3 pins version 3 (Metabolism D-031): calls per kind, a
+// record per planner round, the critic's verdict, the fallback's cause and
+// each step's round. The engine keeps a byte-identical copy
+// (adapters/ndjson/testdata/helix_wire_v3.ndjson).
+func TestWireGoldenV3(t *testing.T) {
+	at := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	recs := []Record{
+		{V: WireVersion, Kind: "episode", Episode: &Episode{
+			ID: "01a10f00c3d4e5f6a7b8c9d0e1f5", Host: HostName,
+			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
+			StartedAt: at, EndedAt: at.Add(9 * time.Second),
+			Request: Request{Text: "where is the planner prompt built?", Provenance: ProvUserTyped},
+			Steps: []Step{
+				{Tool: "file", Action: "grep", Subject: "BuildPlannerPrompt in internal/ai", OK: true, Duration: 30 * time.Millisecond, Round: 1},
+				{Tool: "response", OK: true, Round: 2},
+			},
+			Usage: Usage{ModelCalls: 3, InputChars: 21000, OutputChars: 900,
+				ByKind: map[string]int{"planner": 3}},
+			End:   EndDone,
+			Attrs: map[string]string{"machine": "m-0a1b2c3d"},
+			Plans: []Plan{
+				{Round: 1, Prompt: "full", Calls: 2, Result: PlanPlanned, Intent: "multi_step", FirstTool: "file", Steps: 1},
+				{Round: 2, Prompt: "full", Calls: 1, Result: PlanPlanned, Intent: "chat", FirstTool: "response", Answered: true, Steps: 1},
+			},
+		}},
+		{V: WireVersion, Kind: "episode", Episode: &Episode{
+			ID: "01a10f01c3d4e5f6a7b8c9d0e1f6", Host: HostName,
+			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
+			StartedAt: at.Add(time.Minute), EndedAt: at.Add(time.Minute + 7*time.Second),
+			Request: Request{Text: "fetch the release notes and summarise them", Provenance: ProvUserTyped},
+			Usage: Usage{ModelCalls: 3, InputChars: 15000, OutputChars: 1200,
+				ByKind: map[string]int{"chat": 1, "critic": 1, "planner": 1}},
+			End:      EndDone,
+			Attrs:    map[string]string{"machine": "m-0a1b2c3d"},
+			Plans:    []Plan{{Round: 1, Prompt: "full", Calls: 1, Result: PlanQuarantined, Intent: "shell", FirstTool: "shell", Steps: 1}},
+			Critic:   &Critic{Verdict: "no", Calls: 1},
+			Fallback: FallbackQuarantine,
+		}},
+	}
+	var buf bytes.Buffer
+	for _, r := range recs {
+		line, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf.Write(append(line, '\n'))
+	}
+	path := filepath.Join("testdata", "wire_v3.ndjson")
+	if os.Getenv("HELIX_WRITE_GOLDEN") == "1" {
+		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("wire v3 changed.\n got: %s\nwant: %s", buf.String(), want)
 	}
 }

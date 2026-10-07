@@ -20,10 +20,11 @@ import (
 // network and the recorder's package must not (TestNoNetworkImports there).
 func MeterUsage() metabolism.UsageTotals {
 	rep := ai.Usage()
-	t := metabolism.UsageTotals{Calls: rep.Calls}
+	t := metabolism.UsageTotals{Calls: rep.Calls, ByKind: map[string]int{}}
 	for _, row := range rep.Rows {
 		t.PromptChars += row.PromptChars
 		t.ResponseChars += row.ResponseChars
+		t.ByKind[string(row.Kind)] += row.Calls
 	}
 	return t
 }
@@ -34,6 +35,7 @@ func (a *Agent) beginEpisode() {
 	a.turnPlanned = false
 	a.turnEnd = ""
 	a.lastObs = nil
+	a.planRound = 0
 	cwd, _ := os.Getwd()
 	a.episode = a.Metabolism.Begin(cwd)
 }
@@ -71,6 +73,7 @@ func (a *Agent) recordSteps(obs []StepObservation) {
 			Subject: subject,
 			OK:      ok,
 			Err:     errText,
+			Round:   a.planRound,
 		})
 	}
 }
@@ -156,4 +159,30 @@ func (a *Agent) derivedRunEnd() string {
 		return metabolism.EndFailed
 	}
 	return metabolism.EndDone
+}
+
+// modelCalls is how many model calls the session has made, for measuring
+// what one planning or review cost.
+func modelCalls() int { return ai.Usage().Calls }
+
+// recordPlan adds one planner round to the episode (wire v3, Metabolism
+// D-031): which prompt planned it, what it cost, how it ended, and the
+// plan's own routing labels. It only observes.
+func (a *Agent) recordPlan(prompt string, calls int, result string, plan *ai.Plan) {
+	p := metabolism.Plan{Round: a.planRound, Prompt: prompt, Calls: calls, Result: result}
+	if plan != nil {
+		p.Intent = string(plan.Intent)
+		p.Steps = len(plan.Steps)
+		answered := len(plan.Steps) > 0
+		for i, s := range plan.Steps {
+			if i == 0 {
+				p.FirstTool = s.Tool
+			}
+			if s.Tool != "response" {
+				answered = false
+			}
+		}
+		p.Answered = answered
+	}
+	a.episode.AddPlan(p)
 }

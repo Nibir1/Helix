@@ -32,6 +32,8 @@ type UsageTotals struct {
 	Calls         int
 	PromptChars   int64
 	ResponseChars int64
+	// ByKind is Calls split by what each call was for (wire v3).
+	ByKind map[string]int
 }
 
 // Options configures a Recorder. Usage and Declines are seams so this package
@@ -164,6 +166,33 @@ type Turn struct {
 	steps     []Step
 	exposure  []string // lessons delivered into the turn (SetLessons)
 	withheld  []string // lessons the coin held back
+	plans     []Plan   // one per planner round (wire v3)
+	critic    *Critic
+	fallback  string
+}
+
+// AddPlan records one planner round.
+func (t *Turn) AddPlan(p Plan) {
+	if t == nil {
+		return
+	}
+	t.plans = append(t.plans, p)
+}
+
+// SetCritic records the firewall critic's review.
+func (t *Turn) SetCritic(c Critic) {
+	if t == nil {
+		return
+	}
+	t.critic = &c
+}
+
+// SetFallback records why the chat fallback answered.
+func (t *Turn) SetFallback(cause string) {
+	if t == nil {
+		return
+	}
+	t.fallback = cause
 }
 
 // ID is the episode ID this turn will be written under ("" for a nil turn).
@@ -234,9 +263,13 @@ func (r *Recorder) Finish(t *Turn, text, provenance, end string) {
 			ModelCalls:  nonNeg(u.Calls - t.usage0.Calls),
 			InputChars:  nonNeg(int(u.PromptChars - t.usage0.PromptChars)),
 			OutputChars: nonNeg(int(u.ResponseChars - t.usage0.ResponseChars)),
+			ByKind:      kindDelta(u.ByKind, t.usage0.ByKind),
 		},
-		End:   end,
-		Attrs: map[string]string{"machine": MachineKey()},
+		End:      end,
+		Attrs:    map[string]string{"machine": MachineKey()},
+		Plans:    t.plans,
+		Critic:   t.critic,
+		Fallback: t.fallback,
 	}
 	r.write(Record{V: WireVersion, Kind: "episode", Episode: &ep})
 
@@ -262,6 +295,20 @@ func (r *Recorder) Finish(t *Turn, text, provenance, end string) {
 		similar(prev.text, ep.Request.Text) {
 		r.outcome(prev.id, OutcomeRepeated, SourceDerived, "asked again", now)
 	}
+}
+
+// kindDelta is the calls per kind made during a turn (nil when none).
+func kindDelta(now, before map[string]int) map[string]int {
+	var out map[string]int
+	for k, n := range now {
+		if d := n - before[k]; d > 0 {
+			if out == nil {
+				out = map[string]int{}
+			}
+			out[k] = d
+		}
+	}
+	return out
 }
 
 // Outcome records a late signal about an earlier episode, such as an undo.

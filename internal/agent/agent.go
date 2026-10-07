@@ -79,6 +79,9 @@ type Agent struct {
 	Session      *session.RingStore
 	Undo         *session.UndoJournal
 	lastResponse string
+	// planRound counts the turn's planner rounds, for the recording's plan
+	// records and step rounds (wire v3).
+	planRound int
 
 	// turnUnreliable marks the current turn's user text as untrusted (a
 	// transcript below the voice confidence gate), so session memory can record
@@ -440,6 +443,9 @@ func retrievalBudget(obs []StepObservation) int {
 // re-run the full pipeline per iteration without duplicating any safety layer.
 func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary string, turn turnContext) ([]StepObservation, bool) {
 	a.turnPlanned = true
+	a.planRound++
+	calls0 := modelCalls()
+	prompt := "full"
 	plannerPrompt := ai.BuildPlannerPromptFor(ai.PlannerPromptInput{
 		UserInput: userInput,
 		Env:       envDesc,
@@ -460,6 +466,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	if err != nil && strings.Contains(err.Error(), "empty output") {
 		a.render.PrintDebug("planner returned empty output; retrying with compact prompt")
 		rawPlanOutput, err = runPlanner(ai.BuildCompactPlannerPrompt(userInput, envDesc))
+		prompt = "compact"
 	}
 
 	// FIX (git-reliability): FINAL RESORT — minimal prompt with git-specific
@@ -468,9 +475,11 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	if err != nil && strings.Contains(err.Error(), "empty output") {
 		a.render.PrintDebug("compact prompt also returned empty; retrying with minimal prompt")
 		rawPlanOutput, err = runPlanner(ai.BuildMinimalPlannerPrompt(userInput, envDesc))
+		prompt = "minimal"
 	}
 
 	think.Stop()
+	planCalls := modelCalls() - calls0
 
 	if err != nil {
 		// Ctrl+C aborts planning gracefully.
@@ -480,6 +489,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 		}
 
 		a.render.PrintError(fmt.Sprintf("Planner model error: %v", err))
+		a.recordPlan(prompt, planCalls, metabolism.PlanError, nil)
 
 		// If the planner deadline expired, do not start another long AI call.
 		// That previously caused the second hang: planner timeout followed by
@@ -489,6 +499,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 			return nil, false
 		}
 
+		a.episode.SetFallback(metabolism.FallbackPlannerError)
 		a.chatFallback(userInput, think)
 		return nil, false
 	}
@@ -499,24 +510,39 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	// retrieved data into its plan. Abort with an injection alert.
 	if canaryEchoed(canary, rawPlanOutput) {
 		a.render.PrintError("INJECTION ALERT: retrieved-content canary echoed in plan; execution aborted.")
+		a.recordPlan(prompt, planCalls, metabolism.PlanCanary, nil)
 		return nil, false
 	}
 
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
 	if err != nil {
 		a.render.PrintWarning(fmt.Sprintf("Planner parse error: %v", err))
+		a.recordPlan(prompt, planCalls, metabolism.PlanParseError, nil)
+		a.episode.SetFallback(metabolism.FallbackParseError)
 
 		a.chatFallback(userInput, think)
 		return nil, false
 	}
 
 	// FIREWALL 2: risk-gated critic pass.
-	if RequiresCriticReview(userInput, plan) && !a.criticAllows(userInput, plan) {
-		a.render.PrintWarning("Instruction Firewall: plan quarantined by critic; falling back to chat.")
+	if RequiresCriticReview(userInput, plan) {
+		criticCalls0 := modelCalls()
+		allowed := a.criticAllows(userInput, plan)
+		verdict := "yes"
+		if !allowed {
+			verdict = "no"
+		}
+		a.episode.SetCritic(metabolism.Critic{Verdict: verdict, Calls: modelCalls() - criticCalls0})
+		if !allowed {
+			a.render.PrintWarning("Instruction Firewall: plan quarantined by critic; falling back to chat.")
+			a.recordPlan(prompt, planCalls, metabolism.PlanQuarantined, plan)
+			a.episode.SetFallback(metabolism.FallbackQuarantine)
 
-		a.chatFallback(userInput, think)
-		return nil, false
+			a.chatFallback(userInput, think)
+			return nil, false
+		}
 	}
+	a.recordPlan(prompt, planCalls, metabolism.PlanPlanned, plan)
 
 	// FIREWALL 3: provenance escalation.
 	escalated := escalatedCommands(userInput, ragContext, plan)
@@ -846,6 +872,10 @@ func (a *Agent) chatFallback(userInput string, think thinkerShim) {
 	// that with streaming the model's prose has already been shown before the
 	// prompt appears — an improvement for an execution decision, since the
 	// user now sees the reasoning behind the script they are approving.
+	// The fallback answered: the turn has a reply, so it is not recorded as
+	// failed (it was, every time, before Metabolism D-031).
+	a.lastResponse = strings.TrimSpace(resp)
+
 	if a.promoteFallbackScript(resp) {
 		return
 	}

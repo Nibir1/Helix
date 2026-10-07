@@ -121,7 +121,7 @@ func planWebFetchURLs(p *ai.Plan) []string {
 
 // criticRun is the model entry point for the critic pass; swappable in tests.
 var criticRun = func(prompt string, cfg ai.ModelConfig) (string, error) {
-	return ai.RunModelWithConfig(prompt, cfg)
+	return ai.RunCriticModel(prompt, cfg)
 }
 
 // parseCriticVerdict extracts the verdict from a strict-JSON critic reply.

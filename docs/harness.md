@@ -996,4 +996,10 @@ forget` deletes episodes too, by ID or by any text they contain, and purges
 them from the episode file and its rotated generations.
 
 **Records.** Recording wire version 2 adds the episode's `withheld` list and
-the `feedback` record, whose action is `forget` or `forget-hard`. The engine still reads version 1 files.
+the `feedback` record, whose action is `forget` or `forget-hard`. Version 3
+adds what the turn decided, for Metabolism's Phase 5 measurement: model
+calls per kind (planner, critic, chat, tool, vision), a record per planner
+round (which prompt, how many calls, how it ended, the plan's intent and
+first tool, whether it only answered), the firewall critic's verdict, why
+the chat fallback ran, and each step's round. The engine still reads
+version 1 and 2 files.

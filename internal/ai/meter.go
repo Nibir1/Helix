@@ -29,6 +29,10 @@ const (
 	KindPlanner CallKind = "planner"
 	KindTool    CallKind = "tool"
 	KindVision  CallKind = "vision"
+	// KindCritic is the firewall critic's yes/no review. It was counted as
+	// chat, so neither /cost nor the Metabolism recording could tell a
+	// critic call from a chat answer (Metabolism D-031).
+	KindCritic CallKind = "critic"
 )
 
 // UsageRow is the accounting for one (kind, provider, model) triple.

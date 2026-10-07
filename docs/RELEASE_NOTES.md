@@ -18,6 +18,11 @@
 
 ### Fixes
 
+- **A chat fallback that answered is not a failure.** When planning failed
+  and the chat fallback answered, the recorded turn was always `failed`. It
+  is now `done` when the fallback replied. The firewall critic's calls are
+  counted as their own kind in `/cost`, not as chat.
+
 - **No means the step did not happen.** A step whose confirmation was refused
   is reported as declined, not OK; the plan stops there, and the agentic loop
   ends instead of replanning around the refusal.
@@ -38,6 +43,11 @@
   of a long file, which ended in rereading until the budget ran out.
 
 ### New
+
+- **Decision records (recording wire v3)**: each recorded turn now says
+  where its model calls went and what the planner decided per round, so the
+  Metabolism engine can measure which decisions might be compiled into
+  cheaper habits (its D-031).
 
 - **`/metabolism`**: opt-in, local-only recording of planner turns for the
   Metabolism engine (`~/.helix/metabolism/`, masked and bounded, wiped by

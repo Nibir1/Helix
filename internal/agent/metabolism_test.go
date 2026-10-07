@@ -247,3 +247,47 @@ func (unattendedPrompter) AskYesNo(string) bool                     { return fal
 func (unattendedPrompter) AskLine(string) string                    { return "" }
 func (unattendedPrompter) AskTypedConfirmation(string, string) bool { return false }
 func (unattendedPrompter) Unattended() bool                         { return true }
+
+// Each planner round leaves a plan record, and each step the round it was
+// planned in (wire v3, Metabolism D-031): the decisions Phase 5 measures.
+func TestPlannerRoundsAreRecorded(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("ship on Friday"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stubPlannerSequence(t, readNotes, answerNotes)
+	ag, _ := newTestAgent(t)
+	rec := withRecorder(t, ag)
+
+	ag.beginEpisode()
+	if _, ok := ag.planFirewallExecute("what do my notes say?", "env", "", "", turnContext{}); !ok {
+		t.Fatal("round 1 did not plan")
+	}
+	if _, ok := ag.planFirewallExecute("what do my notes say?", "env", "", "", turnContext{Report: "read"}); !ok {
+		t.Fatal("round 2 did not plan")
+	}
+	ag.finishEpisode(input.InputEvent{Text: "what do my notes say?"})
+
+	eps := episodes(records(t, rec))
+	if len(eps) != 1 {
+		t.Fatalf("%d episodes", len(eps))
+	}
+	ep := eps[0]
+	if len(ep.Plans) != 2 {
+		t.Fatalf("plans %+v", ep.Plans)
+	}
+	p1, p2 := ep.Plans[0], ep.Plans[1]
+	if p1.Round != 1 || p1.Prompt != "full" || p1.Result != metabolism.PlanPlanned || p1.FirstTool != "file" || p1.Answered {
+		t.Errorf("round 1: %+v", p1)
+	}
+	if p2.Round != 2 || p2.FirstTool != "response" || !p2.Answered || p2.Intent != "chat" {
+		t.Errorf("round 2: %+v", p2)
+	}
+	if len(ep.Steps) != 2 || ep.Steps[0].Round != 1 || ep.Steps[1].Round != 2 {
+		t.Errorf("steps %+v", ep.Steps)
+	}
+	if ep.Critic != nil || ep.Fallback != "" {
+		t.Errorf("no critic or fallback ran: %+v %q", ep.Critic, ep.Fallback)
+	}
+}
