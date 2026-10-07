@@ -44,6 +44,22 @@ import (
 	"helix/internal/hooks"
 )
 
+// fileSecret says why a file step touches secret material, or "" when it does
+// not: the path of any action, and a glob's pattern too (**/*.pem). A grep
+// pattern is a regular expression, not a path, and is not checked.
+func fileSecret(action string, args map[string]string) string {
+	candidates := []string{args["path"]}
+	if action == "glob" {
+		candidates = append(candidates, args["pattern"])
+	}
+	for _, c := range candidates {
+		if what, ok := commands.SecretPath(c); ok {
+			return "reads secret material: " + what + " (" + strings.TrimSpace(c) + ")"
+		}
+	}
+	return ""
+}
+
 // fileMutates reports whether an action changes the filesystem. One predicate,
 // consulted by the tier, the announcement and the dry-run check, so the three
 // cannot disagree about what counts as a write.
@@ -65,6 +81,10 @@ func (a *Agent) handleFileStep(step ai.PlanStep) (string, error) {
 	if fileMutates(action) {
 		risk = commands.ShellRiskMedium
 	}
+	secret := fileSecret(action, step.Args)
+	if secret != "" {
+		risk = commands.ShellRiskMedium
+	}
 
 	// The Voice Risk Policy caps voice-originated plans at medium. Nothing here
 	// is high, so the cap never fires today — it is called anyway because the
@@ -76,6 +96,9 @@ func (a *Agent) handleFileStep(step ai.PlanStep) (string, error) {
 	var reasons []string
 	if fileMutates(action) {
 		reasons = append(reasons, fileChangeReason(action, step.Args))
+	}
+	if secret != "" {
+		reasons = append(reasons, secret)
 	}
 	var voiceBlocked bool
 	risk, reasons, voiceBlocked = voiceCapRisk(risk, reasons, a.voiceActive())
@@ -98,6 +121,16 @@ func (a *Agent) handleFileStep(step ai.PlanStep) (string, error) {
 		}
 	case commands.ShellRiskMedium:
 		switch {
+		case secret != "":
+			// Secret material asks in every posture (safety/secrets.go).
+			a.render.PrintWarning("This reads secret material: " + subject)
+			for _, r := range reasons {
+				a.render.PrintWarning("   • " + r)
+			}
+			if !commands.AskForConfirmation("Read it anyway?") {
+				a.render.PrintWarning("File step skipped")
+				return "", nil
+			}
 		case step.Trusted:
 			a.render.PrintDebug("File change auto-confirmed (trusted local source)")
 		case mode == PermissionAuto:

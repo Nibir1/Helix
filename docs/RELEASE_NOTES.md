@@ -2,6 +2,13 @@
 
 ### Security
 
+- **Reading secret material asks, in every posture.** Reading a private key,
+  a cloud credential, a `.env` file or a password store was Low risk and ran
+  without a prompt; its content then went to the model provider with the next
+  planner round. Such reads, and any shell command naming such a file, now
+  ask even under `/permissions auto` and for trusted sources. Replays never
+  read them, and `helix -c` refuses them. Found by the Metabolism engine's
+  poisoning suite. See SECURITY.md §1.
 - **Planner steps ask again.** From v1.0.0 every step the planner proposed was
   marked trusted, so a Medium-risk `file write`, `file edit` or redirecting
   shell command ran without asking under the default `ask` posture, the daemon

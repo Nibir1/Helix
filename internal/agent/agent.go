@@ -1191,7 +1191,20 @@ func (a *Agent) handleShellStepWithEscalation(
 			return nil
 		}
 	case commands.ShellRiskMedium:
+		// Secret material asks in every posture: a trusted source or
+		// /permissions auto is exactly what an injected "print the key"
+		// would otherwise ride through (safety/secrets.go).
+		secret := len(commands.SecretsInCommand(validCmd)) > 0
 		switch {
+		case secret:
+			a.render.PrintWarning("This command reads or sends secret material:")
+			for _, r := range reasons {
+				a.render.PrintWarning(fmt.Sprintf("   • %s", r))
+			}
+			if !commands.AskForConfirmation("Run it anyway?") {
+				a.render.PrintWarning("Command skipped")
+				return nil
+			}
 		case step.Trusted:
 			a.render.PrintDebug("Medium risk command auto-confirmed (trusted local source)")
 		case mode == PermissionAuto:

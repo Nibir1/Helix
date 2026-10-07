@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 
 	"helix/internal/ai"
@@ -132,7 +133,15 @@ func (a *Agent) ReplayRounds(request string, lessons []LearnedLesson, maxRounds 
 				continue
 			}
 			o := StepObservation{Index: i, Tool: st.Tool, Action: st.Action, OK: true, Subject: stepSubject(st)}
-			out, err := a.runFileAction(strings.TrimSpace(st.Action), st.Args)
+			// A replay cannot ask, and what it reads goes to the model
+			// provider in the next round: it never reads secret material.
+			var out string
+			var err error
+			if why := fileSecret(strings.TrimSpace(st.Action), st.Args); why != "" {
+				err = fmt.Errorf("not read in a replay: %s", why)
+			} else {
+				out, err = a.runFileAction(strings.TrimSpace(st.Action), st.Args)
+			}
 			rs := &res.Steps[first+i]
 			rs.Ran = true
 			if err != nil {

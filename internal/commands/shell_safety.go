@@ -4,6 +4,7 @@ package commands
 
 import (
 	"helix/internal/commands/safety"
+	"os"
 )
 
 // ShellRiskLevel is re-exported so existing code (like agent) can keep using
@@ -20,6 +21,19 @@ const (
 // It now delegates to the modular safety subsystem.
 func ValidateAndCleanCommand(raw string) (string, error) {
 	return safety.ValidateAndCleanShellCommand(raw)
+}
+
+// SecretsInCommand returns why a command touches secret material, if it does:
+// such a command asks first in every posture (safety/secrets.go).
+func SecretsInCommand(cmd string) []string {
+	h, _ := os.UserHomeDir()
+	return safety.SecretsInCommand(cmd, h)
+}
+
+// SecretPath reports whether a path names secret material, and what kind.
+func SecretPath(p string) (string, bool) {
+	h, _ := os.UserHomeDir()
+	return safety.SecretPath(p, h)
 }
 
 // AnalyzeShellRisk returns a coarse-grained risk classification plus human-readable reasons.

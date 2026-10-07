@@ -2,9 +2,17 @@
 package safety
 
 import (
+	"os"
 	"regexp"
 	"strings"
 )
+
+// homeDir is the user's home, so secret paths written absolutely are
+// recognised too.
+var homeDir = func() string {
+	h, _ := os.UserHomeDir()
+	return h
+}()
 
 type ShellRiskLevel int
 
@@ -161,6 +169,10 @@ func AnalyzeShellRisk(cmd string) (ShellRiskLevel, []string) {
 	if redirectToFileRe.MatchString(lc) {
 		med = append(med, "writes or appends to files using redirection")
 	}
+
+	// Secret material (secrets.go): reading or sending it asks first. The
+	// original spelling is checked, not lc, so a path keeps its case.
+	med = append(med, SecretsInCommand(cmd, homeDir)...)
 
 	if len(med) > 0 {
 		return ShellRiskMedium, med

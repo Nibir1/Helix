@@ -178,6 +178,11 @@ func validateNonInteractiveScript(raw string) error {
 			continue
 		}
 
+		// Secret material asks in every posture, and a non-interactive run
+		// cannot ask, so it is refused whatever HELIX_AUTOCONFIRM says.
+		if secrets := commands.SecretsInCommand(line); len(secrets) > 0 {
+			return fmt.Errorf("command touches secret material and needs interactive confirmation: %s", strings.Join(secrets, "; "))
+		}
 		risk, reasons := commands.AnalyzeShellRisk(line)
 		switch risk {
 		case commands.ShellRiskHigh:
