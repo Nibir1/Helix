@@ -19,10 +19,25 @@ package ai
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
+	"sync"
 
 	"helix/internal/providers"
 )
+
+// nativeRefused holds the provider/model pairs that refused the native
+// planner request with a 400 this session; they are not asked again.
+var nativeRefused sync.Map
+
+// nativeKey names the provider and model the next call would use.
+func nativeKey() string {
+	p, model, _ := resolveProvider()
+	if p == nil {
+		return ""
+	}
+	return p.Name() + "/" + model
+}
 
 // PlannerToolName is the function the planner is asked to call. It is
 // deliberately not named after a shell action: the model is emitting a PLAN
@@ -56,7 +71,12 @@ func plannerToolDefinition() providers.ToolDefinition {
 						"properties": map[string]any{
 							"tool": map[string]any{
 								"type": "string",
-								"enum": []string{"response", "shell", "git", "package", "recon", "web", "vision"},
+								// All nine tools the planner prompt documents and
+								// validatePlan accepts. file and todo were missing,
+								// so on a provider whose native calling works the
+								// planner could not plan a file read or a task list
+								// (found by Metabolism's decision records, D-031).
+								"enum": []string{"response", "shell", "git", "package", "recon", "web", "vision", "file", "todo"},
 							},
 							"message": map[string]any{
 								"type":        "string",
@@ -68,7 +88,7 @@ func plannerToolDefinition() providers.ToolDefinition {
 							},
 							"action": map[string]any{
 								"type":        "string",
-								"description": "Sub-action for git, package, recon, web, and vision tools (web: search|fetch; vision: look).",
+								"description": "Sub-action for git, package, recon, web, vision, file and todo tools (web: search|fetch; vision: look; file: read|list|glob|grep|edit|write; todo: add|state|clear).",
 							},
 							"args": map[string]any{
 								"type":                 "object",
@@ -101,6 +121,10 @@ func runPlannerNative(prompt string) (string, bool) {
 	if !ToolCallingAvailable() {
 		return "", false
 	}
+	key := nativeKey()
+	if _, refused := nativeRefused.Load(key); refused {
+		return "", false
+	}
 
 	res, err := RunToolCall(
 		prompt,
@@ -112,6 +136,14 @@ func runPlannerNative(prompt string) (string, bool) {
 		plannerTimeout(true),
 	)
 	if err != nil {
+		// A 400 means this provider and model refuse the request itself, not
+		// that it failed this time: DeepSeek's thinking mode answers every
+		// required tool choice with "Thinking mode does not support this
+		// tool_choice", so every planning paid a refused round trip before
+		// the prompt path did the work. Remember it for the session.
+		if code, ok := providers.StatusCode(err); ok && code == http.StatusBadRequest {
+			nativeRefused.Store(key, struct{}{})
+		}
 		return "", false
 	}
 

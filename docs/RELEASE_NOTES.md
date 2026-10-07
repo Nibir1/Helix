@@ -18,6 +18,17 @@
 
 ### Fixes
 
+- **The native planner path no longer wastes a round trip on every plan.**
+  With DeepSeek-V4.1-Flash (thinking on by default), every planning first
+  sent a native tool-calling request that the provider refused ("Thinking
+  mode does not support this tool_choice"), then planned through the prompt
+  path: one refused request per planning, about half of all recorded model
+  calls. A 400 now switches the native path off for that provider and model
+  for the session. The native schema also lacked the `file` and `todo`
+  tools, so on a provider where native calling works, plans could not read
+  a file or keep a task list; both are in it now. Found by the Metabolism
+  engine's decision records.
+
 - **A chat fallback that answered is not a failure.** When planning failed
   and the chat fallback answered, the recorded turn was always `failed`. It
   is now `done` when the fallback replied. The firewall critic's calls are

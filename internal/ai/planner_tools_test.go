@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"sync"
 	"testing"
 
 	"helix/internal/providers"
@@ -50,9 +52,12 @@ func TestPlannerToolSchemaMatchesPromptContract(t *testing.T) {
 
 	// The closed enums are the load-bearing part: they stop a model inventing
 	// a tool the executor has never heard of, at the API level.
+	// Exactly the tools the planner prompt documents and validatePlan
+	// accepts: the native schema used to stop at seven, without file and
+	// todo, and this test asserted the shorter list.
 	wantTools := map[string]bool{
 		"response": true, "shell": true, "git": true, "package": true, "recon": true,
-		"web": true, "vision": true,
+		"web": true, "vision": true, "file": true, "todo": true,
 	}
 	got := schema.Properties.Steps.Items.Properties.Tool.Enum
 	if len(got) != len(wantTools) {
@@ -243,5 +248,47 @@ func TestToolCallingAvailableTracksActiveProvider(t *testing.T) {
 	}
 	if PlannerTransport() != "prompt-enforced JSON" {
 		t.Fatalf("transport reporting wrong: %q", PlannerTransport())
+	}
+}
+
+// A provider that refuses the native request (a 400, as DeepSeek's thinking
+// mode does for a required tool choice) is asked once, not on every
+// planning: each refusal was a wasted round trip.
+func TestRunPlannerNativeRemembersARefusal(t *testing.T) {
+	t.Cleanup(func() { nativeRefused = sync.Map{} })
+	refusing := &toolFake{name: "openai", err: &providers.StatusError{Code: http.StatusBadRequest,
+		Snippet: "Thinking mode does not support this tool_choice"}}
+	withProvider(t, refusing, "gpt-4o")
+	if _, ok := runPlannerNative("plan something"); ok {
+		t.Fatal("a refused request cannot succeed")
+	}
+	refusing.sawTools = false
+	if _, ok := runPlannerNative("plan something else"); ok || refusing.sawTools {
+		t.Fatal("the refused provider was asked again")
+	}
+
+	// A transient failure is not remembered.
+	flaky := &toolFake{name: "openai", err: errors.New("HTTP 500: boom")}
+	withProvider(t, flaky, "gpt-4o-mini")
+	_, _ = runPlannerNative("plan")
+	flaky.sawTools = false
+	_, _ = runPlannerNative("plan")
+	if !flaky.sawTools {
+		t.Fatal("a 500 must not stop the native path for the session")
+	}
+}
+
+// file and todo plans come through the native path like any other.
+func TestNativePlanCanUseFileAndTodo(t *testing.T) {
+	t.Cleanup(func() { nativeRefused = sync.Map{} })
+	fake := &toolFake{name: "openai", calls: []providers.ToolCall{{Name: PlannerToolName,
+		Arguments: `{"intent":"multi_step","steps":[{"tool":"file","action":"read","args":{"path":"go.mod"}},{"tool":"todo","action":"add","args":{"text":"x"}}]}`}}}
+	withProvider(t, fake, "gpt-4o")
+	raw, ok := runPlannerNative("read go.mod")
+	if !ok {
+		t.Fatal("native path failed")
+	}
+	if _, err := ParsePlanFromModelOutput(raw); err != nil {
+		t.Fatalf("a native file/todo plan does not validate: %v", err)
 	}
 }
