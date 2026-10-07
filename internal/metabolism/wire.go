@@ -116,6 +116,11 @@ type Plan struct {
 	FirstTool string `json:"first_tool,omitempty"`
 	Answered  bool   `json:"answered,omitempty"`
 	Steps     int    `json:"steps,omitempty"`
+	// InputChars and OutputChars are what the planning sent and received,
+	// retries included: a habit that changes the prompt saves tokens, not
+	// calls, and this is where they show.
+	InputChars  int `json:"input_chars,omitempty"`
+	OutputChars int `json:"output_chars,omitempty"`
 }
 
 // Critic is the firewall critic's review of a plan (wire v3).

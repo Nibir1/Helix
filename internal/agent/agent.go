@@ -444,7 +444,7 @@ func retrievalBudget(obs []StepObservation) int {
 func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary string, turn turnContext) ([]StepObservation, bool) {
 	a.turnPlanned = true
 	a.planRound++
-	calls0 := modelCalls()
+	spend0 := spendNow()
 	prompt := "full"
 	plannerPrompt := ai.BuildPlannerPromptFor(ai.PlannerPromptInput{
 		UserInput: userInput,
@@ -479,7 +479,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	}
 
 	think.Stop()
-	planCalls := modelCalls() - calls0
+	planSpend := spend0.since()
 
 	if err != nil {
 		// Ctrl+C aborts planning gracefully.
@@ -489,7 +489,7 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 		}
 
 		a.render.PrintError(fmt.Sprintf("Planner model error: %v", err))
-		a.recordPlan(prompt, planCalls, metabolism.PlanError, nil)
+		a.recordPlan(prompt, planSpend, metabolism.PlanError, nil)
 
 		// If the planner deadline expired, do not start another long AI call.
 		// That previously caused the second hang: planner timeout followed by
@@ -510,14 +510,14 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 	// retrieved data into its plan. Abort with an injection alert.
 	if canaryEchoed(canary, rawPlanOutput) {
 		a.render.PrintError("INJECTION ALERT: retrieved-content canary echoed in plan; execution aborted.")
-		a.recordPlan(prompt, planCalls, metabolism.PlanCanary, nil)
+		a.recordPlan(prompt, planSpend, metabolism.PlanCanary, nil)
 		return nil, false
 	}
 
 	plan, err := ai.ParsePlanFromModelOutput(rawPlanOutput)
 	if err != nil {
 		a.render.PrintWarning(fmt.Sprintf("Planner parse error: %v", err))
-		a.recordPlan(prompt, planCalls, metabolism.PlanParseError, nil)
+		a.recordPlan(prompt, planSpend, metabolism.PlanParseError, nil)
 		a.episode.SetFallback(metabolism.FallbackParseError)
 
 		a.chatFallback(userInput, think)
@@ -535,14 +535,14 @@ func (a *Agent) planFirewallExecute(userInput, envDesc, ragContext, canary strin
 		a.episode.SetCritic(metabolism.Critic{Verdict: verdict, Calls: modelCalls() - criticCalls0})
 		if !allowed {
 			a.render.PrintWarning("Instruction Firewall: plan quarantined by critic; falling back to chat.")
-			a.recordPlan(prompt, planCalls, metabolism.PlanQuarantined, plan)
+			a.recordPlan(prompt, planSpend, metabolism.PlanQuarantined, plan)
 			a.episode.SetFallback(metabolism.FallbackQuarantine)
 
 			a.chatFallback(userInput, think)
 			return nil, false
 		}
 	}
-	a.recordPlan(prompt, planCalls, metabolism.PlanPlanned, plan)
+	a.recordPlan(prompt, planSpend, metabolism.PlanPlanned, plan)
 
 	// FIREWALL 3: provenance escalation.
 	escalated := escalatedCommands(userInput, ragContext, plan)

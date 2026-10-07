@@ -387,8 +387,10 @@ func TestWireGoldenV3(t *testing.T) {
 			End:   EndDone,
 			Attrs: map[string]string{"machine": "m-0a1b2c3d"},
 			Plans: []Plan{
-				{Round: 1, Prompt: "full", Calls: 2, Result: PlanPlanned, Intent: "multi_step", FirstTool: "file", Steps: 1},
-				{Round: 2, Prompt: "full", Calls: 1, Result: PlanPlanned, Intent: "chat", FirstTool: "response", Answered: true, Steps: 1},
+				{Round: 1, Prompt: "full", Calls: 2, Result: PlanPlanned, Intent: "multi_step", FirstTool: "file", Steps: 1,
+					InputChars: 14000, OutputChars: 300},
+				{Round: 2, Prompt: "full", Calls: 1, Result: PlanPlanned, Intent: "chat", FirstTool: "response", Answered: true, Steps: 1,
+					InputChars: 7000, OutputChars: 600},
 			},
 		}},
 		{V: WireVersion, Kind: "episode", Episode: &Episode{

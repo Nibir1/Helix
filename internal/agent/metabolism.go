@@ -165,11 +165,29 @@ func (a *Agent) derivedRunEnd() string {
 // what one planning or review cost.
 func modelCalls() int { return ai.Usage().Calls }
 
+// modelSpend is the session's model calls and characters sent and received.
+type modelSpend struct {
+	calls   int
+	in, out int64
+}
+
+func spendNow() modelSpend {
+	u := MeterUsage()
+	return modelSpend{calls: u.Calls, in: u.PromptChars, out: u.ResponseChars}
+}
+
+// since is what was spent between s and now.
+func (s modelSpend) since() modelSpend {
+	n := spendNow()
+	return modelSpend{calls: n.calls - s.calls, in: n.in - s.in, out: n.out - s.out}
+}
+
 // recordPlan adds one planner round to the episode (wire v3, Metabolism
 // D-031): which prompt planned it, what it cost, how it ended, and the
 // plan's own routing labels. It only observes.
-func (a *Agent) recordPlan(prompt string, calls int, result string, plan *ai.Plan) {
-	p := metabolism.Plan{Round: a.planRound, Prompt: prompt, Calls: calls, Result: result}
+func (a *Agent) recordPlan(prompt string, spent modelSpend, result string, plan *ai.Plan) {
+	p := metabolism.Plan{Round: a.planRound, Prompt: prompt, Calls: spent.calls, Result: result,
+		InputChars: int(spent.in), OutputChars: int(spent.out)}
 	if plan != nil {
 		p.Intent = string(plan.Intent)
 		p.Steps = len(plan.Steps)
