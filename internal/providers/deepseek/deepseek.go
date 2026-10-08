@@ -25,5 +25,9 @@ func New(apiKey string, client *providers.HTTPClient) *openaicompatible.Provider
 		BaseURL:      "https://api.deepseek.com/v1",
 		APIKey:       apiKey,
 		DefaultModel: DefaultModel,
+		// DeepSeek reports usage on the stream, with reasoning and
+		// prompt-cache hits, and switches thinking off per request.
+		ReportsUsage:   true,
+		ThinkingSwitch: true,
 	}, client)
 }

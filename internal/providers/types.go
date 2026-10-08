@@ -93,6 +93,30 @@ type ChatRequest struct {
 
 	Tools      []ToolDefinition `json:"-"`
 	ToolChoice string           `json:"-"`
+
+	// DisableThinking asks a provider with a switchable reasoning mode to
+	// answer without reasoning first. Providers without the switch ignore it
+	// (ThinkingSwitch reports which do).
+	DisableThinking bool `json:"-"`
+}
+
+// TokenUsage is what a provider reported a call cost, in tokens. Only
+// providers that report usage on the streaming path fill it (ReportsUsage);
+// everywhere else the meter's character estimates are all there is.
+type TokenUsage struct {
+	Prompt int // prompt tokens, cached ones included
+	// CacheHit is the part of Prompt served from the provider's prompt
+	// cache, billed at a fraction of the price.
+	CacheHit   int
+	Completion int // completion tokens, reasoning included
+	// Reasoning is the part of Completion spent thinking before answering.
+	Reasoning int
+}
+
+// Add sums two usages.
+func (u TokenUsage) Add(o TokenUsage) TokenUsage {
+	return TokenUsage{Prompt: u.Prompt + o.Prompt, CacheHit: u.CacheHit + o.CacheHit,
+		Completion: u.Completion + o.Completion, Reasoning: u.Reasoning + o.Reasoning}
 }
 
 // StreamChunk is one streamed token/event from a provider.
@@ -105,6 +129,10 @@ type StreamChunk struct {
 	// arguments in fragments; adapters accumulate them and deliver complete
 	// calls on the terminating chunk, so consumers never see partial JSON.
 	ToolCalls []ToolCall
+
+	// Usage is the provider's own token count, on the terminating chunk,
+	// when it reports one.
+	Usage *TokenUsage
 }
 
 // ModelInfo describes one model exposed by a provider.
@@ -140,6 +168,18 @@ type AIProvider interface {
 	Capabilities() Capabilities
 }
 
+// ThinkingSwitcher is implemented by providers whose reasoning mode can be
+// switched off per request (ChatRequest.DisableThinking).
+type ThinkingSwitcher interface {
+	ThinkingSwitch() bool
+}
+
+// CanSwitchThinking reports whether p honours DisableThinking.
+func CanSwitchThinking(p AIProvider) bool {
+	t, ok := p.(ThinkingSwitcher)
+	return ok && t.ThinkingSwitch()
+}
+
 // EmbeddingProvider is implemented by providers that support embeddings.
 type EmbeddingProvider interface {
 	Embed(ctx context.Context, texts []string, model string) ([][]float32, error)
@@ -150,6 +190,7 @@ type EmbeddingProvider interface {
 type ChatResult struct {
 	Text      string
 	ToolCalls []ToolCall
+	Usage     *TokenUsage // reported usage, when the provider gives it
 }
 
 // CollectChat consumes a streaming chat response and returns the full text.
@@ -189,6 +230,9 @@ func CollectChatResult(ctx context.Context, p AIProvider, req ChatRequest) (Chat
 			res.Text += chunk.Content
 			if len(chunk.ToolCalls) > 0 {
 				res.ToolCalls = append(res.ToolCalls, chunk.ToolCalls...)
+			}
+			if chunk.Usage != nil {
+				res.Usage = chunk.Usage
 			}
 
 			if chunk.Done {

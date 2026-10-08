@@ -213,6 +213,7 @@ func New() (*Daemon, error) {
 	}); merr == nil {
 		ag.Metabolism = rec
 		ag.DeliverLessons = cfg.UserPrefs.MetabolismLessons
+		ag.FlipThinking = cfg.UserPrefs.MetabolismThinkingFlip
 	} else {
 		jrn.Record("lifecycle", "", "", "metabolism recording unavailable: "+merr.Error())
 	}

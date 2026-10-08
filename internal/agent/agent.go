@@ -159,6 +159,12 @@ type Agent struct {
 	// It takes effect only on recorded turns (lessons.go).
 	DeliverLessons bool
 
+	// FlipThinking is the planning-mode measurement (Metabolism D-031): on a
+	// recorded turn with a provider whose reasoning can be switched off, a
+	// coin decides whether the planner thinks. Only on recorded turns, for
+	// the same reason as lessons: an unmeasured arm teaches nothing.
+	FlipThinking bool
+
 	// Per-turn recording state, reset by HandleInputEvent. episode is nil
 	// whenever recording is off. turnPlanned says the turn reached the
 	// planner: direct shell commands, the fast path and undo are the user's

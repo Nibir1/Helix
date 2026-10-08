@@ -823,11 +823,24 @@ Outside one, it is keyed by a short hash of the hostname. No home directory
 appears in a key.
 
 **The wire format is a contract.** Helix does not import the engine. The
-records are NDJSON (`internal/metabolism/wire.go`, version 2 since §12),
-pinned by `internal/metabolism/testdata/wire_v2.ndjson`, with
-`wire_v1.ndjson` still pinned because the engine reads older files. The
-engine's ingest tests decode the same files. A change that fails those tests
-is a format change: bump `WireVersion` and update both copies.
+records are NDJSON (`internal/metabolism/wire.go`, version 4), pinned by
+`internal/metabolism/testdata/wire_v4.ndjson`, with `wire_v1.ndjson` to
+`wire_v3.ndjson` still pinned because the engine reads older files. Version
+2 (§12) adds lesson delivery; version 3 adds decision records (calls per
+kind, a record per planner round); version 4 adds the provider's own token
+counts per turn and per round, where the provider reports them (DeepSeek:
+prompt, cache hits, completion, reasoning), and the turn's planning-mode arm.
+The engine's ingest tests decode the same files. A change that fails those
+tests is a format change: bump `WireVersion` and update both copies.
+
+**Planning-mode measurement.** With `metabolism_thinking_flip` in the config
+(set only by `metabolism auto -thinking-flip`, for the length of a run, and
+restored after), each recorded turn flips a coin: on "off", the planner asks
+the provider to answer without reasoning first (DeepSeek's
+`thinking: disabled`); the episode says which arm it was in. Only recorded
+turns with a provider that has the switch are flipped. Nothing about what a
+plan may do changes; every step still goes through validation, risk tiers
+and confirmation.
 
 **Rotation.** 8 MiB per file, four older generations kept, so tens of
 thousands of turns fit before the oldest is dropped. Ingest reads rotated

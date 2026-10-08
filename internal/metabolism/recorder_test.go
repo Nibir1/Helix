@@ -373,7 +373,7 @@ func TestWireGoldenV2(t *testing.T) {
 func TestWireGoldenV3(t *testing.T) {
 	at := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	recs := []Record{
-		{V: WireVersion, Kind: "episode", Episode: &Episode{
+		{V: 3, Kind: "episode", Episode: &Episode{
 			ID: "01a10f00c3d4e5f6a7b8c9d0e1f5", Host: HostName,
 			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
 			StartedAt: at, EndedAt: at.Add(9 * time.Second),
@@ -393,7 +393,7 @@ func TestWireGoldenV3(t *testing.T) {
 					InputChars: 7000, OutputChars: 600},
 			},
 		}},
-		{V: WireVersion, Kind: "episode", Episode: &Episode{
+		{V: 3, Kind: "episode", Episode: &Episode{
 			ID: "01a10f01c3d4e5f6a7b8c9d0e1f6", Host: HostName,
 			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
 			StartedAt: at.Add(time.Minute), EndedAt: at.Add(time.Minute + 7*time.Second),
@@ -427,5 +427,83 @@ func TestWireGoldenV3(t *testing.T) {
 	}
 	if !bytes.Equal(buf.Bytes(), want) {
 		t.Fatalf("wire v3 changed.\n got: %s\nwant: %s", buf.String(), want)
+	}
+}
+
+// TestWireGoldenV4 pins version 4 (Metabolism D-031, planning mode): the
+// provider's reported tokens per turn and per planner round, and the turn's
+// arm of the thinking coin flip. The engine keeps a byte-identical copy
+// (adapters/ndjson/testdata/helix_wire_v4.ndjson).
+func TestWireGoldenV4(t *testing.T) {
+	at := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	recs := []Record{
+		{V: WireVersion, Kind: "episode", Episode: &Episode{
+			ID: "01a1140000d4e5f6a7b8c9d0e1f7", Host: HostName,
+			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
+			StartedAt: at, EndedAt: at.Add(8 * time.Second),
+			Request: Request{Text: "run the safety tests", Provenance: ProvUserTyped},
+			Steps:   []Step{{Tool: "shell", Subject: "go test ./internal/commands/safety/...", OK: true, Duration: 2 * time.Second, Round: 1}},
+			Usage: Usage{ModelCalls: 1, InputChars: 17000, OutputChars: 400,
+				ByKind: map[string]int{"planner": 1},
+				Tokens: &Tokens{Prompt: 4600, CacheHit: 3800, Completion: 900, Reasoning: 780, Calls: 1}},
+			End:   EndDone,
+			Attrs: map[string]string{"machine": "m-0a1b2c3d"},
+			Plans: []Plan{{Round: 1, Prompt: "full", Calls: 1, Result: PlanPlanned, Intent: "shell", FirstTool: "shell", Steps: 1,
+				InputChars: 17000, OutputChars: 400,
+				Tokens: &Tokens{Prompt: 4600, CacheHit: 3800, Completion: 900, Reasoning: 780, Calls: 1}}},
+			Thinking: ThinkingOn,
+		}},
+		{V: WireVersion, Kind: "episode", Episode: &Episode{
+			ID: "01a1140100d4e5f6a7b8c9d0e1f8", Host: HostName,
+			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
+			StartedAt: at.Add(time.Minute), EndedAt: at.Add(time.Minute + 3*time.Second),
+			Request: Request{Text: "run the safety tests again", Provenance: ProvUserTyped},
+			Steps:   []Step{{Tool: "shell", Subject: "go test ./internal/commands/safety/...", OK: true, Duration: 2 * time.Second, Round: 1}},
+			Usage: Usage{ModelCalls: 1, InputChars: 17000, OutputChars: 380,
+				ByKind: map[string]int{"planner": 1},
+				Tokens: &Tokens{Prompt: 4600, CacheHit: 4500, Completion: 110, Calls: 1}},
+			End:   EndDone,
+			Attrs: map[string]string{"machine": "m-0a1b2c3d"},
+			Plans: []Plan{{Round: 1, Prompt: "full", Calls: 1, Result: PlanPlanned, Intent: "shell", FirstTool: "shell", Steps: 1,
+				InputChars: 17000, OutputChars: 380,
+				Tokens: &Tokens{Prompt: 4600, CacheHit: 4500, Completion: 110, Calls: 1}}},
+			Thinking: ThinkingOff,
+		}},
+	}
+	var buf bytes.Buffer
+	for _, r := range recs {
+		line, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf.Write(append(line, '\n'))
+	}
+	path := filepath.Join("testdata", "wire_v4.ndjson")
+	if os.Getenv("HELIX_WRITE_GOLDEN") == "1" {
+		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("wire v4 changed.\n got: %s\nwant: %s", buf.String(), want)
+	}
+}
+
+// A turn's reported tokens are the difference across it, and a turn whose
+// calls reported nothing carries no tokens at all rather than zeros.
+func TestTokensDelta(t *testing.T) {
+	before := Tokens{Prompt: 100, CacheHit: 50, Completion: 20, Reasoning: 10, Calls: 2}
+	now := Tokens{Prompt: 400, CacheHit: 250, Completion: 70, Reasoning: 30, Calls: 3}
+	got := tokensDelta(now, before)
+	want := Tokens{Prompt: 300, CacheHit: 200, Completion: 50, Reasoning: 20, Calls: 1}
+	if got == nil || *got != want {
+		t.Fatalf("delta = %+v, want %+v", got, want)
+	}
+	if d := tokensDelta(before, before); d != nil {
+		t.Fatalf("no reported calls: want nil, got %+v", d)
 	}
 }

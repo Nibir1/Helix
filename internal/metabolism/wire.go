@@ -38,9 +38,12 @@ import (
 // Version 2 (Phase 3) adds an episode's withheld lessons and the feedback
 // record. Version 3 (Metabolism D-031) adds what the turn decided: model
 // calls per kind, a record per planner round, the firewall critic's verdict,
-// why the chat fallback ran, and each step's round. Every v3 field is
-// optional. v1 and v2 files are still read by the engine.
-const WireVersion = 3
+// why the chat fallback ran, and each step's round. Version 4 (D-031,
+// planning mode) adds the provider's reported token counts per turn and per
+// planner round, and which arm of the thinking coin flip the turn was in.
+// Every v3 and v4 field is optional. Older files are still read by the
+// engine.
+const WireVersion = 4
 
 // HostName is how Helix identifies itself in every episode.
 const HostName = "helix"
@@ -98,7 +101,44 @@ type Episode struct {
 	Plans    []Plan  `json:"plans,omitempty"`
 	Critic   *Critic `json:"critic,omitempty"`
 	Fallback string  `json:"fallback,omitempty"`
+
+	// Thinking is the turn's arm of the planning-mode coin flip: "on" or
+	// "off" (wire v4). Empty when no coin was flipped.
+	Thinking string `json:"thinking,omitempty"`
 }
+
+// The arms of the thinking coin flip (wire v4).
+const (
+	ThinkingOn  = "on"
+	ThinkingOff = "off"
+)
+
+// Tokens is what the provider reported model calls cost (wire v4, mirrors
+// types.Tokens). Calls is how many calls came with a report: the rest are
+// not in these counts.
+type Tokens struct {
+	Prompt     int `json:"prompt"`
+	CacheHit   int `json:"cache_hit,omitempty"`
+	Completion int `json:"completion"`
+	Reasoning  int `json:"reasoning,omitempty"`
+	Calls      int `json:"calls"`
+}
+
+// tokensDelta is what was reported between two totals (nil when nothing).
+func tokensDelta(now, before Tokens) *Tokens {
+	d := Tokens{
+		Prompt: now.Prompt - before.Prompt, CacheHit: now.CacheHit - before.CacheHit,
+		Completion: now.Completion - before.Completion, Reasoning: now.Reasoning - before.Reasoning,
+		Calls: now.Calls - before.Calls,
+	}
+	if d.Calls <= 0 {
+		return nil
+	}
+	return &d
+}
+
+// TokensSince is the exported tokensDelta, for per-round plan records.
+func TokensSince(now, before Tokens) *Tokens { return tokensDelta(now, before) }
 
 // Plan is one planner round of a turn (wire v3, mirrors types.PlanRecord).
 type Plan struct {
@@ -121,6 +161,8 @@ type Plan struct {
 	// calls, and this is where they show.
 	InputChars  int `json:"input_chars,omitempty"`
 	OutputChars int `json:"output_chars,omitempty"`
+	// Tokens is what the provider reported the planning cost (wire v4).
+	Tokens *Tokens `json:"tokens,omitempty"`
 }
 
 // Critic is the firewall critic's review of a plan (wire v3).
@@ -178,6 +220,8 @@ type Usage struct {
 	// ByKind splits ModelCalls by what each call was for: planner, critic,
 	// chat, tool, vision (wire v3).
 	ByKind map[string]int `json:"by_kind,omitempty"`
+	// Tokens is the provider's reported token count for the turn (wire v4).
+	Tokens *Tokens `json:"tokens,omitempty"`
 }
 
 // Outcome mirrors types.Outcome.

@@ -2,17 +2,20 @@
 // Purpose: per-session accounting of model traffic so /cost and /context can
 // answer "what has this session actually spent?".
 //
-// Honesty note: no provider in the registry returns a usage block on the
-// streaming path Helix uses (providers.CollectChat assembles text only), so
-// token counts here are ESTIMATED from character length, never reported. Every
-// surface that prints them must say so. The call counts, byte counts, latency,
-// and failure counts are exact.
+// Honesty note: most providers return no usage block on the streaming path
+// Helix uses, so the Est* token counts here are ESTIMATED from character
+// length, never reported. Every surface that prints them must say so. The
+// call counts, byte counts, latency, and failure counts are exact. Providers
+// that do report usage (DeepSeek) fill the Reported* fields as well, kept
+// apart from the estimates.
 package ai
 
 import (
 	"strings"
 	"sync"
 	"time"
+
+	"helix/internal/providers"
 )
 
 // charsPerToken is the estimator's divisor. 4 chars/token is the widely used
@@ -51,6 +54,11 @@ type UsageRow struct {
 	// package note above.
 	EstPromptTokens   int64
 	EstResponseTokens int64
+
+	// Reported is the provider's own token count, summed over the
+	// ReportedCalls that came with one.
+	Reported      providers.TokenUsage
+	ReportedCalls int
 
 	Latency time.Duration
 	First   time.Time
@@ -116,6 +124,15 @@ func EstimateTokens(text string) int64 {
 func RecordCall(
 	kind CallKind, provider, model, prompt, response string, elapsed time.Duration, err error,
 ) {
+	recordCall(kind, provider, model, prompt, response, elapsed, err, nil)
+}
+
+// recordCall is RecordCall with the provider's reported usage, when it gave
+// one.
+func recordCall(
+	kind CallKind, provider, model, prompt, response string, elapsed time.Duration, err error,
+	usage *providers.TokenUsage,
+) {
 	if provider == "" {
 		provider = "unknown"
 	}
@@ -143,6 +160,10 @@ func RecordCall(
 	row.ResponseChars += int64(len([]rune(response)))
 	row.EstPromptTokens += EstimateTokens(prompt)
 	row.EstResponseTokens += EstimateTokens(response)
+	if usage != nil {
+		row.Reported = row.Reported.Add(*usage)
+		row.ReportedCalls++
+	}
 	row.Latency += elapsed
 	row.Last = now
 }

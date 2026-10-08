@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"os"
 
 	"helix/internal/ai"
@@ -25,6 +26,11 @@ func MeterUsage() metabolism.UsageTotals {
 		t.PromptChars += row.PromptChars
 		t.ResponseChars += row.ResponseChars
 		t.ByKind[string(row.Kind)] += row.Calls
+		t.Tokens.Prompt += row.Reported.Prompt
+		t.Tokens.CacheHit += row.Reported.CacheHit
+		t.Tokens.Completion += row.Reported.Completion
+		t.Tokens.Reasoning += row.Reported.Reasoning
+		t.Tokens.Calls += row.ReportedCalls
 	}
 	return t
 }
@@ -38,10 +44,37 @@ func (a *Agent) beginEpisode() {
 	a.planRound = 0
 	cwd, _ := os.Getwd()
 	a.episode = a.Metabolism.Begin(cwd)
+	a.flipThinking(coinFlip)
+}
+
+// thinkingSwitchable asks whether the active provider can plan without
+// reasoning; a variable so tests need no provider.
+var thinkingSwitchable = ai.ThinkingSwitchable
+
+// coinFlip is a fair coin; a variable so tests can fix the arm.
+var coinFlip = func() bool { return rand.IntN(2) == 0 }
+
+// flipThinking puts the turn in one arm of the planning-mode measurement:
+// thinking off when the coin says so, and the arm on the episode either way.
+// Nothing happens unless the flip is on, the turn is recorded and the
+// provider can switch its reasoning off.
+func (a *Agent) flipThinking(coin func() bool) {
+	ai.SetPlannerThinkingOff(false)
+	if !a.FlipThinking || a.episode == nil || !thinkingSwitchable() {
+		return
+	}
+	if coin() {
+		ai.SetPlannerThinkingOff(true)
+		a.episode.SetThinking(metabolism.ThinkingOff)
+		a.render.PrintDebug("planning mode: thinking off for this turn (coin flip)")
+		return
+	}
+	a.episode.SetThinking(metabolism.ThinkingOn)
 }
 
 // finishEpisode writes the turn, if it was planner experience.
 func (a *Agent) finishEpisode(ev input.InputEvent) {
+	ai.SetPlannerThinkingOff(false)
 	turn := a.episode
 	a.episode = nil
 	if turn == nil || a.turnWasControl || !a.turnPlanned {
@@ -169,17 +202,20 @@ func modelCalls() int { return ai.Usage().Calls }
 type modelSpend struct {
 	calls   int
 	in, out int64
+	tokens  metabolism.Tokens // cumulative reported tokens
+	spent   *metabolism.Tokens
 }
 
 func spendNow() modelSpend {
 	u := MeterUsage()
-	return modelSpend{calls: u.Calls, in: u.PromptChars, out: u.ResponseChars}
+	return modelSpend{calls: u.Calls, in: u.PromptChars, out: u.ResponseChars, tokens: u.Tokens}
 }
 
 // since is what was spent between s and now.
 func (s modelSpend) since() modelSpend {
 	n := spendNow()
-	return modelSpend{calls: n.calls - s.calls, in: n.in - s.in, out: n.out - s.out}
+	return modelSpend{calls: n.calls - s.calls, in: n.in - s.in, out: n.out - s.out,
+		spent: metabolism.TokensSince(n.tokens, s.tokens)}
 }
 
 // recordPlan adds one planner round to the episode (wire v3, Metabolism
@@ -187,7 +223,7 @@ func (s modelSpend) since() modelSpend {
 // plan's own routing labels. It only observes.
 func (a *Agent) recordPlan(prompt string, spent modelSpend, result string, plan *ai.Plan) {
 	p := metabolism.Plan{Round: a.planRound, Prompt: prompt, Calls: spent.calls, Result: result,
-		InputChars: int(spent.in), OutputChars: int(spent.out)}
+		InputChars: int(spent.in), OutputChars: int(spent.out), Tokens: spent.spent}
 	if plan != nil {
 		p.Intent = string(plan.Intent)
 		p.Steps = len(plan.Steps)

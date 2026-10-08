@@ -81,6 +81,12 @@ type UserPrefs struct {
 	// into planner turns (/lessons). Off unless the user turns it on, and
 	// effective only while recording is on.
 	MetabolismLessons bool `json:"metabolism_lessons,omitempty"`
+
+	// MetabolismThinkingFlip is the planning-mode measurement: on recorded
+	// turns, a coin decides whether the planner reasons before planning.
+	// Set by `metabolism auto -thinking-flip` for the length of a run; no
+	// command turns it on.
+	MetabolismThinkingFlip bool `json:"metabolism_thinking_flip,omitempty"`
 }
 
 // SpeechSTTConfig selects the speech-to-text provider chain (BlackBox §7).

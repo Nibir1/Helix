@@ -34,6 +34,9 @@ type UsageTotals struct {
 	ResponseChars int64
 	// ByKind is Calls split by what each call was for (wire v3).
 	ByKind map[string]int
+	// Tokens is what providers reported, over the calls that reported
+	// (wire v4).
+	Tokens Tokens
 }
 
 // Options configures a Recorder. Usage and Declines are seams so this package
@@ -169,6 +172,15 @@ type Turn struct {
 	plans     []Plan   // one per planner round (wire v3)
 	critic    *Critic
 	fallback  string
+	thinking  string // the planning-mode coin's arm (wire v4)
+}
+
+// SetThinking records the turn's arm of the thinking coin flip.
+func (t *Turn) SetThinking(arm string) {
+	if t == nil {
+		return
+	}
+	t.thinking = arm
 }
 
 // AddPlan records one planner round.
@@ -264,12 +276,14 @@ func (r *Recorder) Finish(t *Turn, text, provenance, end string) {
 			InputChars:  nonNeg(int(u.PromptChars - t.usage0.PromptChars)),
 			OutputChars: nonNeg(int(u.ResponseChars - t.usage0.ResponseChars)),
 			ByKind:      kindDelta(u.ByKind, t.usage0.ByKind),
+			Tokens:      tokensDelta(u.Tokens, t.usage0.Tokens),
 		},
 		End:      end,
 		Attrs:    map[string]string{"machine": MachineKey()},
 		Plans:    t.plans,
 		Critic:   t.critic,
 		Fallback: t.fallback,
+		Thinking: t.thinking,
 	}
 	r.write(Record{V: WireVersion, Kind: "episode", Episode: &ep})
 

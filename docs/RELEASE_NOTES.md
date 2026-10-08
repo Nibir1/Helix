@@ -66,6 +66,13 @@
   where its model calls went and what the planner decided per round, so the
   Metabolism engine can measure which decisions might be compiled into
   cheaper habits (its D-031).
+- **Reported token counts (recording wire v4)**: DeepSeek calls now ask for
+  the provider's usage report, so `/cost`'s meter and the recording carry
+  real token counts (prompt, cache hits, completion, reasoning) beside the
+  character estimates. The recording also says which arm of the
+  planning-mode coin flip a turn was in, when `metabolism auto
+  -thinking-flip` runs one: half the turns plan with DeepSeek's thinking
+  off, so the engine can measure whether the planner needs it.
 
 - **`/metabolism`**: opt-in, local-only recording of planner turns for the
   Metabolism engine (`~/.helix/metabolism/`, masked and bounded, wiped by

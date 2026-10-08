@@ -23,6 +23,14 @@ type Config struct {
 	APIKey       string
 	DefaultModel string
 	Local        bool
+
+	// ReportsUsage asks the stream for a usage frame
+	// (stream_options.include_usage), so calls carry reported token counts
+	// instead of estimates. Only for servers known to accept the option.
+	ReportsUsage bool
+	// ThinkingSwitch: the server takes {"thinking":{"type":"disabled"}} to
+	// answer without reasoning first (DeepSeek).
+	ThinkingSwitch bool
 }
 
 // Provider is an OpenAI-compatible provider.
@@ -76,6 +84,11 @@ func (p *Provider) IsLocal() bool {
 
 func (p *Provider) DefaultModel() string {
 	return p.cfg.DefaultModel
+}
+
+// ThinkingSwitch reports whether ChatRequest.DisableThinking has an effect.
+func (p *Provider) ThinkingSwitch() bool {
+	return p.cfg.ThinkingSwitch
 }
 
 // Capabilities answers at the PROVIDER level when no model is compiled in,
@@ -176,6 +189,14 @@ func (p *Provider) buildBody(
 
 	if len(req.Stop) > 0 {
 		body["stop"] = req.Stop
+	}
+
+	if p.cfg.ReportsUsage {
+		body["stream_options"] = map[string]any{"include_usage": true}
+	}
+	if req.DisableThinking && p.cfg.ThinkingSwitch {
+		// https://api-docs.deepseek.com/guides/thinking_mode
+		body["thinking"] = map[string]any{"type": "disabled"}
 	}
 
 	// Native tool calling (P8.7). Only sent when the caller supplied tools, so

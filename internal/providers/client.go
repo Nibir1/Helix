@@ -175,10 +175,17 @@ func (c *HTTPClient) DoStream(
 
 	ch := make(chan StreamChunk, 100)
 
+	// A request that asked for usage gets it after the finish frame, so the
+	// parser must read on to [DONE] instead of stopping at the finish.
+	wantUsage := false
+	if m, ok := body.(map[string]interface{}); ok {
+		_, wantUsage = m["stream_options"]
+	}
+
 	go func() {
 		defer close(ch)
 		defer func() { _ = resp.Body.Close() }()
-		parseOpenAIStream(ctx, resp.Body, ch)
+		parseOpenAIStream(ctx, resp.Body, ch, wantUsage)
 	}()
 
 	return ch, nil
@@ -406,7 +413,11 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) {
+// parseOpenAIStream reads OpenAI-style SSE into chunks. With wantUsage the
+// stream was asked for a usage frame (stream_options.include_usage), which
+// comes after the finish frame: the parser then reads on to [DONE] and puts
+// the usage on the terminating chunk.
+func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk, wantUsage bool) {
 	scanner := bufio.NewScanner(r)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 4*1024*1024)
@@ -429,6 +440,11 @@ func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) 
 	// string, all keyed by index. They are accumulated here and emitted whole
 	// on the terminating frame, so consumers never see partial JSON (P8.7).
 	toolAcc := NewToolCallAccumulator()
+	var usage *TokenUsage
+	finished := false
+	done := func() {
+		send(StreamChunk{Done: true, ToolCalls: toolAcc.Assemble(), Usage: usage})
+	}
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
@@ -443,7 +459,7 @@ func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) 
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
 		if data == "[DONE]" {
-			send(StreamChunk{Done: true, ToolCalls: toolAcc.Assemble()})
+			done()
 			return
 		}
 
@@ -464,13 +480,18 @@ func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) 
 				} `json:"delta"`
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
+			Usage *wireUsage `json:"usage"`
 		}
 
 		if err := json.Unmarshal([]byte(data), &parsed); err != nil {
 			continue
 		}
 
-		if len(parsed.Choices) == 0 {
+		if parsed.Usage != nil {
+			usage = parsed.Usage.tokens()
+		}
+
+		if len(parsed.Choices) == 0 || finished {
 			continue
 		}
 
@@ -488,14 +509,48 @@ func parseOpenAIStream(ctx context.Context, r io.Reader, ch chan<- StreamChunk) 
 		// tool instead of answering; treating it like "stop" (and shipping the
 		// accumulated calls) ends the stream correctly either way.
 		if fr := parsed.Choices[0].FinishReason; fr == "stop" || fr == "tool_calls" {
-			send(StreamChunk{Done: true, ToolCalls: toolAcc.Assemble()})
-			return
+			if !wantUsage {
+				done()
+				return
+			}
+			finished = true
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		send(StreamChunk{Error: fmt.Errorf("stream read error: %w", err)})
+		return
 	}
+	if finished {
+		// The stream ended after the finish frame without [DONE]: still a
+		// complete answer.
+		done()
+	}
+}
+
+// wireUsage is the usage frame of an OpenAI-compatible stream. DeepSeek
+// reports cache hits as prompt_cache_hit_tokens; OpenAI as
+// prompt_tokens_details.cached_tokens. Reasoning tokens are in
+// completion_tokens_details on both.
+type wireUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	PromptCacheHit      int `json:"prompt_cache_hit_tokens"`
+	PromptTokensDetails struct {
+		Cached int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CompletionTokensDetails struct {
+		Reasoning int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+}
+
+func (w *wireUsage) tokens() *TokenUsage {
+	hit := w.PromptCacheHit
+	if hit == 0 {
+		hit = w.PromptTokensDetails.Cached
+	}
+	return &TokenUsage{Prompt: w.PromptTokens, CacheHit: hit,
+		Completion: w.CompletionTokens, Reasoning: w.CompletionTokensDetails.Reasoning}
 }
 
 func apiErrorSnippet(data []byte) string {

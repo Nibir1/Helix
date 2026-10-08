@@ -36,6 +36,7 @@ func initMetabolism() {
 	if agentCore != nil {
 		agentCore.Metabolism = rec
 		agentCore.DeliverLessons = cfg.UserPrefs.MetabolismLessons
+		agentCore.FlipThinking = cfg.UserPrefs.MetabolismThinkingFlip
 	}
 	if rec.Enabled() {
 		uiOK("metabolism", "recording planner turns locally · /metabolism off stops it")

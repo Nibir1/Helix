@@ -168,15 +168,17 @@ func runModelKind(
 	temp := float64(config.Temperature)
 
 	req := providers.ChatRequest{
-		Model:       model,
-		Messages:    []providers.ChatMessage{{Role: "user", Content: prompt}},
-		Temperature: &temp,
-		MaxTokens:   config.MaxTokens,
+		Model:           model,
+		Messages:        []providers.ChatMessage{{Role: "user", Content: prompt}},
+		Temperature:     &temp,
+		MaxTokens:       config.MaxTokens,
+		DisableThinking: kind == KindPlanner && PlannerThinkingOff(),
 	}
 
 	started := time.Now()
-	out, err := providers.CollectChat(ctx, provider, req)
-	RecordCall(kind, provider.Name(), model, prompt, out, time.Since(started), err)
+	res, err := providers.CollectChatResult(ctx, provider, req)
+	out := res.Text
+	recordCall(kind, provider.Name(), model, prompt, out, time.Since(started), err, res.Usage)
 	noteCallResult(err, probing)
 	if err != nil {
 		return "", err
@@ -331,11 +333,13 @@ func RunToolCall(
 		MaxTokens:   config.MaxTokens,
 		Tools:       tools,
 		ToolChoice:  choice,
+		// Native tool calling is a planner path too.
+		DisableThinking: PlannerThinkingOff(),
 	})
 	// Tool-call arguments are the response here: billing only the assistant
 	// prose would under-report a planner turn to near zero.
-	RecordCall(KindTool, provider.Name(), model, prompt,
-		res.Text+toolCallText(res.ToolCalls), time.Since(started), err)
+	recordCall(KindTool, provider.Name(), model, prompt,
+		res.Text+toolCallText(res.ToolCalls), time.Since(started), err, res.Usage)
 	noteCallResult(err, probing)
 	if err != nil {
 		return res, err
