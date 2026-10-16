@@ -184,7 +184,9 @@ ran. `echo key >~/.ssh/authorized_keys` ran. Separately, the hard block against
 redirecting onto a raw disk device had a mis-escaped pattern and had never
 matched anything, so `cat /dev/zero > /dev/sda` reached the tiers at all rather
 than being refused before them. Both are fixed and pinned by behaviour tests;
-the detail is in `SECURITY.md` §1. Worth keeping in mind when reading any row
+the detail is in `SECURITY.md` §1. A third failure sat one level up: until
+2026-10-01 every planner step was marked trusted, which skipped the Medium
+question entirely whatever the tier said. That is fixed and pinned the same way. Worth keeping in mind when reading any row
 above: this table describes what a posture does with a tier, and says nothing
 about whether the tier is right.
 
