@@ -437,7 +437,7 @@ func TestWireGoldenV3(t *testing.T) {
 func TestWireGoldenV4(t *testing.T) {
 	at := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 	recs := []Record{
-		{V: WireVersion, Kind: "episode", Episode: &Episode{
+		{V: 4, Kind: "episode", Episode: &Episode{
 			ID: "01a1140000d4e5f6a7b8c9d0e1f7", Host: HostName,
 			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
 			StartedAt: at, EndedAt: at.Add(8 * time.Second),
@@ -453,7 +453,7 @@ func TestWireGoldenV4(t *testing.T) {
 				Tokens: &Tokens{Prompt: 4600, CacheHit: 3800, Completion: 900, Reasoning: 780, Calls: 1}}},
 			Thinking: ThinkingOn,
 		}},
-		{V: WireVersion, Kind: "episode", Episode: &Episode{
+		{V: 4, Kind: "episode", Episode: &Episode{
 			ID: "01a1140100d4e5f6a7b8c9d0e1f8", Host: HostName,
 			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
 			StartedAt: at.Add(time.Minute), EndedAt: at.Add(time.Minute + 3*time.Second),
@@ -505,5 +505,50 @@ func TestTokensDelta(t *testing.T) {
 	}
 	if d := tokensDelta(before, before); d != nil {
 		t.Fatalf("no reported calls: want nil, got %+v", d)
+	}
+}
+
+// TestWireGoldenV5 pins version 5 (Metabolism D-038): what a turn consumed
+// from outside the user's own repositories. The engine keeps a
+// byte-identical copy (adapters/ndjson/testdata/helix_wire_v5.ndjson).
+func TestWireGoldenV5(t *testing.T) {
+	at := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	recs := []Record{
+		{V: WireVersion, Kind: "episode", Episode: &Episode{
+			ID: "01a1340000d4e5f6a7b8c9d0e1f9", Host: HostName,
+			Scope:     Scope{Level: ScopeProject, Key: "helix-1a2b3c4d"},
+			StartedAt: at, EndedAt: at.Add(6 * time.Second),
+			Request: Request{Text: "what does the release checklist on the wiki say?", Provenance: ProvUserTyped},
+			Steps: []Step{
+				{Tool: "web", Subject: "https://example.org/wiki/release", OK: true, Round: 1},
+				{Tool: "file", Action: "read", Subject: "read /tmp/notes.txt", OK: true, Round: 1},
+				{Tool: "response", OK: true, Round: 2},
+			},
+			Usage:    Usage{ModelCalls: 2, InputChars: 9000, OutputChars: 700, ByKind: map[string]int{"planner": 2}},
+			End:      EndDone,
+			Attrs:    map[string]string{"machine": "m-0a1b2c3d"},
+			Consumed: []string{ProvRetrievedWeb, ProvFileContent},
+		}},
+	}
+	var buf bytes.Buffer
+	for _, r := range recs {
+		line, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf.Write(append(line, '\n'))
+	}
+	path := filepath.Join("testdata", "wire_v5.ndjson")
+	if os.Getenv("HELIX_WRITE_GOLDEN") == "1" {
+		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("wire v5 changed.\n got: %s\nwant: %s", buf.String(), want)
 	}
 }

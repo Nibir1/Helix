@@ -823,13 +823,17 @@ Outside one, it is keyed by a short hash of the hostname. No home directory
 appears in a key.
 
 **The wire format is a contract.** Helix does not import the engine. The
-records are NDJSON (`internal/metabolism/wire.go`, version 4), pinned by
-`internal/metabolism/testdata/wire_v4.ndjson`, with `wire_v1.ndjson` to
-`wire_v3.ndjson` still pinned because the engine reads older files. Version
+records are NDJSON (`internal/metabolism/wire.go`, version 5), pinned by
+`internal/metabolism/testdata/wire_v5.ndjson`, with `wire_v1.ndjson` to
+`wire_v4.ndjson` still pinned because the engine reads older files. Version
 2 (§12) adds lesson delivery; version 3 adds decision records (calls per
 kind, a record per planner round); version 4 adds the provider's own token
 counts per turn and per round, where the provider reports them (DeepSeek:
-prompt, cache hits, completion, reasoning), and the turn's planning-mode arm.
+prompt, cache hits, completion, reasoning), and the turn's planning-mode arm;
+version 5 adds what the turn consumed from outside the user's own work: a web
+retrieval, or a file read or search outside any git working tree or inside
+its `vendor`, `node_modules` or `third_party` directories. Metabolism then
+treats lessons learned from that turn as untrusted (its D-038).
 The engine's ingest tests decode the same files. A change that fails those
 tests is a format change: bump `WireVersion` and update both copies.
 

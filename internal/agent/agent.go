@@ -590,6 +590,11 @@ type StepObservation struct {
 	// the report the planner reads.
 	Subject string
 
+	// Path is a file step's target as an absolute path, for the Metabolism
+	// record only: whether the turn read content from outside the user's
+	// repositories (Metabolism's taint rule, its D-038).
+	Path string
+
 	// Output is a bounded tail of what the command printed (P8.6), captured
 	// only on agentic turns. Exit status alone cannot distinguish "compile
 	// error on line 42" from "network unreachable"; this is what lets the
@@ -674,7 +679,7 @@ func (a *Agent) executePlanSteps(plan *ai.Plan, escalated map[string]bool) []Ste
 // must not run, because this one failed in a way later steps may depend on.
 func (a *Agent) runStep(i int, step ai.PlanStep, escalated map[string]bool) (StepObservation, bool) {
 	o := StepObservation{Index: i, Tool: step.Tool, Action: step.Action, Command: step.Command, OK: true,
-		Subject: stepSubject(step)}
+		Subject: stepSubject(step), Path: a.stepPath(step)}
 	switch step.Tool {
 	case "response":
 		a.handleResponseStep(step)

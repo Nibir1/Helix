@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"helix/internal/ai"
 	"helix/internal/input"
@@ -108,7 +110,32 @@ func (a *Agent) recordSteps(obs []StepObservation) {
 			Err:     errText,
 			Round:   a.planRound,
 		})
+		if prov := metabolism.ConsumedBy(o.Tool, o.Action, o.Path, ok); prov != "" {
+			a.episode.AddConsumed(prov)
+		}
 	}
+}
+
+// stepPath is a file step's target, absolute ("" for other steps). A
+// relative path is resolved against the sandbox's working directory, as the
+// file tools resolve it.
+func (a *Agent) stepPath(step ai.PlanStep) string {
+	if step.Tool != "file" {
+		return ""
+	}
+	p := step.Args["path"]
+	if p == "" {
+		p = "."
+	}
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[2:])
+		}
+	}
+	if !filepath.IsAbs(p) && a.sandbox != nil {
+		p = filepath.Join(a.sandbox.GetCurrentDirectory(), p)
+	}
+	return filepath.Clean(p)
 }
 
 // stepSubject names what a step acted on, for the record. Shell and git

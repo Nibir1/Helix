@@ -66,6 +66,12 @@
   where its model calls went and what the planner decided per round, so the
   Metabolism engine can measure which decisions might be compiled into
   cheaper habits (its D-031).
+- **What a turn read, for Metabolism's trust rule (recording wire v5)**:
+  each recorded turn notes whether it brought in web content, or file
+  content from outside your git repositories (or from their `vendor`,
+  `node_modules` or `third_party` directories). Metabolism treats lessons
+  learned from such turns as untrusted, so a planted page or file cannot
+  turn into a trusted lesson.
 - **Reported token counts (recording wire v4)**: DeepSeek calls now ask for
   the provider's usage report, so `/cost`'s meter and the recording carry
   real token counts (prompt, cache hits, completion, reasoning) beside the

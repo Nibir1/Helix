@@ -41,9 +41,10 @@ import (
 // why the chat fallback ran, and each step's round. Version 4 (D-031,
 // planning mode) adds the provider's reported token counts per turn and per
 // planner round, and which arm of the thinking coin flip the turn was in.
-// Every v3 and v4 field is optional. Older files are still read by the
-// engine.
-const WireVersion = 4
+// Version 5 (Metabolism D-038) adds what the turn consumed: the provenance
+// of content brought in from outside the user's own repositories (taint.go).
+// Every v3 to v5 field is optional. Older files are still read by the engine.
+const WireVersion = 5
 
 // HostName is how Helix identifies itself in every episode.
 const HostName = "helix"
@@ -105,6 +106,11 @@ type Episode struct {
 	// Thinking is the turn's arm of the planning-mode coin flip: "on" or
 	// "off" (wire v4). Empty when no coin was flipped.
 	Thinking string `json:"thinking,omitempty"`
+
+	// Consumed lists the provenance of content the turn's steps brought in
+	// from outside the user's own repositories: retrieved-web, file-content
+	// (wire v5, taint.go). Empty when the turn read only the user's own.
+	Consumed []string `json:"consumed,omitempty"`
 }
 
 // The arms of the thinking coin flip (wire v4).

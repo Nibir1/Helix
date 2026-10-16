@@ -172,7 +172,22 @@ type Turn struct {
 	plans     []Plan   // one per planner round (wire v3)
 	critic    *Critic
 	fallback  string
-	thinking  string // the planning-mode coin's arm (wire v4)
+	thinking  string   // the planning-mode coin's arm (wire v4)
+	consumed  []string // provenance of outside content the turn read (wire v5)
+}
+
+// AddConsumed records that the turn brought in content of this provenance,
+// once.
+func (t *Turn) AddConsumed(prov string) {
+	if t == nil || prov == "" {
+		return
+	}
+	for _, p := range t.consumed {
+		if p == prov {
+			return
+		}
+	}
+	t.consumed = append(t.consumed, prov)
 }
 
 // SetThinking records the turn's arm of the thinking coin flip.
@@ -284,6 +299,7 @@ func (r *Recorder) Finish(t *Turn, text, provenance, end string) {
 		Critic:   t.critic,
 		Fallback: t.fallback,
 		Thinking: t.thinking,
+		Consumed: t.consumed,
 	}
 	r.write(Record{V: WireVersion, Kind: "episode", Episode: &ep})
 
